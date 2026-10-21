@@ -1,0 +1,37 @@
+{
+ "id": "horse",
+ "name": "Wild horses",
+ "tier": "shared",
+ "model": "horse",
+ "behaviour": "graze",
+ "habitats": [
+  "meadow"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  3,
+  7
+ ],
+ "perKm2": 3,
+ "size": 1.05,
+ "colors": [
+  "#6b4a30",
+  "#3c2b20",
+  "#a07850",
+  "#d9cbb3"
+ ],
+ "speed": 1.3,
+ "run": 13,
+ "flee": 45,
+ "sound": "whinny"
+}

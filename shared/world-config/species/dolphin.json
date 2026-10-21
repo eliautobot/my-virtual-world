@@ -1,0 +1,15 @@
+{
+ "id": "dolphin",
+ "name": "Bottlenose dolphins",
+ "tier": "ambient",
+ "model": "dolphin",
+ "behaviour": "pod",
+ "habitats": ["sea"],
+ "hours": [5.5, 20.5],
+ "weather": ["clear", "partly", "overcast", "rain"],
+ "group": [3, 7],
+ "perKm2": 30,
+ "size": 1.25,
+ "colors": ["#6f7a86", "#5f6a76", "#7d8794"],
+ "speed": 4.2
+}

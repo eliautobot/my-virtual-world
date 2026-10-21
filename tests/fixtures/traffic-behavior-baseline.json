@@ -1,0 +1,52 @@
+{
+  "kinds": {
+    "start": "const KINDS =",
+    "end": "const PSUM =",
+    "sha256": "9b8f53bb6bac5ff89d03b6b99f068b45f5c2ae7a8814a2cf26cc1f6ad17ffa18"
+  },
+  "lanes": {
+    "start": "const LANES =",
+    "end": "const _m =",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "pickKind": {
+    "start": "function pickKind()",
+    "end": "function density(",
+    "sha256": "9b5bdb0471a98e9fe14119037d0bc8582b424e34383172fdb86f98d150d24aed"
+  },
+  "density": {
+    "start": "function density(",
+    "end": "export class Traffic",
+    "sha256": "87bd4a4cf3d6af1db3af09d6f51db676686c88d2729ae2c92f816ab591754708"
+  },
+  "lane": {
+    "start": "  lane(",
+    "end": "  car(",
+    "sha256": "7123a4d621be4e591ea35b96061fa8976cd95a4bf5c1ed3867322106e88e8f1a"
+  },
+  "car": {
+    "start": "  car(",
+    "end": "  fill(",
+    "sha256": "db889aa4d79d6052449e48807a6b7cae0f7b163c82a44d3892e90084796bbccf"
+  },
+  "fill": {
+    "start": "  fill(",
+    "end": "  count(",
+    "sha256": "0197621ebcd35a6100254c0e9bf51520a6b46be661fdd0cbfd3b58588f59cb4f"
+  },
+  "count": {
+    "start": "  count(",
+    "end": "  step(",
+    "sha256": "be085220031ce43b5ad52c07471f067cc4ca9491f7f051ff0210d669762ef731"
+  },
+  "step": {
+    "start": "  step(",
+    "end": "  update(",
+    "sha256": "f3822a229da26b8556f8bdd5843a21f5dc22fabc4107f8d72d15c1fea690ea28"
+  },
+  "clockedSimulation": {
+    "start": "    const net = this.app.net;",
+    "end": "    const cnt =",
+    "sha256": "7b5e94ed2581a72e3b00772ae4bba6ff00d913bb5f25fe4567dfdabedca0a347"
+  }
+}

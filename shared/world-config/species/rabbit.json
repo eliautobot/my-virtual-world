@@ -1,0 +1,34 @@
+{
+ "id": "rabbit",
+ "name": "Rabbits",
+ "tier": "ambient",
+ "model": "rabbit",
+ "behaviour": "graze",
+ "habitats": [
+  "meadow",
+  "field"
+ ],
+ "hours": [
+  5,
+  21
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast"
+ ],
+ "group": [
+  1,
+  4
+ ],
+ "perKm2": 30,
+ "size": 0.25,
+ "colors": [
+  "#9a8a74",
+  "#8a7a66",
+  "#b0a08a"
+ ],
+ "speed": 0.8,
+ "run": 7,
+ "flee": 14
+}

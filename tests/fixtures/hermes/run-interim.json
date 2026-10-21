@@ -1,0 +1,249 @@
+{
+ "frames": [
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  },
+  {
+   "type": "session.info",
+   "session_id": "d6a32078",
+   "payload": {
+    "model": "stub-1",
+    "provider": "custom",
+    "reasoning_effort": "",
+    "running": true,
+    "title": "",
+    "stored_session_id": "20261017_034129_498571",
+    "usage": {
+     "model": "stub-1",
+     "input": 0,
+     "output": 0,
+     "reasoning": 0,
+     "prompt": 0,
+     "completion": 0,
+     "total": 0,
+     "calls": 0,
+     "compressions": 0,
+     "active_subagents": 0
+    }
+   }
+  },
+  {
+   "type": "message.start",
+   "session_id": "d6a32078",
+   "payload": {}
+  },
+  {
+   "type": "session.title",
+   "session_id": "d6a32078",
+   "payload": {
+    "session_id": "20261017_034129_498571",
+    "title": "Let me check. [[tool:terminal {\"command\":\"echo…"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": "(¬‿¬) computing..."
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "tool.generating",
+   "session_id": "d6a32078",
+   "payload": {
+    "name": "terminal"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "tool.start",
+   "session_id": "d6a32078",
+   "payload": {
+    "tool_id": "call_1792222889284",
+    "name": "terminal",
+    "context": "echo a",
+    "args": {
+     "command": "echo a"
+    }
+   }
+  },
+  {
+   "type": "tool.complete",
+   "session_id": "d6a32078",
+   "payload": {
+    "tool_id": "call_1792222889284",
+    "name": "terminal",
+    "args": {
+     "command": "echo a"
+    },
+    "duration_s": 0.1096036434173584,
+    "result": {
+     "output": "a",
+     "exit_code": 0,
+     "error": null
+    }
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": "(°ロ°) synthesizing..."
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": "\n\nThe tool ans"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": "wered: {\"out"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": "put\": \"a\", \""
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": "exit_code\": "
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": "0, \"error\": "
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": "null}"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "reasoning.available",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": "The tool answered: {\"output\": \"a\", \"exit_code\": 0, \"error\": null}"
+   }
+  },
+  {
+   "type": "message.complete",
+   "session_id": "d6a32078",
+   "payload": {
+    "text": "The tool answered: {\"output\": \"a\", \"exit_code\": 0, \"error\": null}",
+    "usage": {
+     "model": "stub-1",
+     "input": 28969,
+     "output": 25,
+     "reasoning": 0,
+     "prompt": 28969,
+     "completion": 25,
+     "total": 28994,
+     "calls": 2,
+     "context_used": 14520,
+     "context_max": 256000,
+     "context_percent": 6,
+     "context_source": "provider_usage",
+     "context_estimated": false,
+     "compressions": 0,
+     "avg_latency_s": 0.1,
+     "avg_tps": 153.2,
+     "active_subagents": 0
+    },
+    "status": "complete",
+    "persisted_turn": {
+     "row_ids": [
+      94,
+      95,
+      96,
+      97
+     ],
+     "complete": true,
+     "user_row_id": 94,
+     "final_assistant_row_id": 97
+    }
+   }
+  },
+  {
+   "type": "session.title",
+   "session_id": "d6a32078",
+   "payload": {
+    "session_id": "20261017_034129_498571",
+    "title": "Stub reply 424 to: Let me check"
+   }
+  },
+  {
+   "type": "session.info",
+   "session_id": "d6a32078",
+   "payload": {
+    "model": "stub-1",
+    "provider": "custom",
+    "reasoning_effort": "",
+    "running": false,
+    "title": "Stub reply 424 to: Let me check",
+    "stored_session_id": "20261017_034129_498571",
+    "usage": {
+     "model": "stub-1",
+     "input": 28969,
+     "output": 25,
+     "reasoning": 0,
+     "prompt": 28969,
+     "completion": 25,
+     "total": 28994,
+     "calls": 2,
+     "context_used": 14520,
+     "context_max": 256000,
+     "context_percent": 6,
+     "context_source": "provider_usage",
+     "context_estimated": false,
+     "compressions": 0,
+     "avg_latency_s": 0.1,
+     "avg_tps": 153.2,
+     "active_subagents": 0
+    }
+   }
+  }
+ ]
+}

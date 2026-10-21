@@ -1,0 +1,39 @@
+{
+ "id": "songbird",
+ "name": "Songbirds",
+ "tier": "ambient",
+ "model": "bird",
+ "behaviour": "flock",
+ "habitats": [
+  "forest",
+  "meadow",
+  "field"
+ ],
+ "hours": [
+  5.5,
+  20.5
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast"
+ ],
+ "group": [
+  4,
+  9
+ ],
+ "perKm2": 22,
+ "size": 0.16,
+ "colors": [
+  "#6b4f3a",
+  "#8a6a4a",
+  "#5c5a52",
+  "#9a7b55"
+ ],
+ "height": [
+  5,
+  20
+ ],
+ "speed": 8,
+ "sound": "chirp"
+}

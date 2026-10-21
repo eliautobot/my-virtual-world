@@ -1,0 +1,33 @@
+{
+ "id": "firefly",
+ "name": "Fireflies",
+ "tier": "ambient",
+ "model": "firefly",
+ "behaviour": "glow",
+ "habitats": [
+  "meadow",
+  "forest"
+ ],
+ "hours": [
+  21,
+  3.5
+ ],
+ "weather": [
+  "clear",
+  "partly"
+ ],
+ "group": [
+  12,
+  28
+ ],
+ "perKm2": 50,
+ "size": 0.05,
+ "colors": [
+  "#d6ff6a"
+ ],
+ "height": [
+  0.3,
+  2.6
+ ],
+ "speed": 0.5
+}

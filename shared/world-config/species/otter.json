@@ -1,0 +1,15 @@
+{
+ "id": "otter",
+ "name": "River otters",
+ "tier": "ambient",
+ "model": "otter",
+ "behaviour": "swim",
+ "habitats": ["river"],
+ "hours": [5.5, 20],
+ "weather": ["clear", "partly", "overcast", "rain"],
+ "group": [1, 3],
+ "perKm2": 300,
+ "size": 0.95,
+ "colors": ["#5b4129", "#6a4b2f", "#4e3824"],
+ "speed": 0.9
+}

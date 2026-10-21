@@ -1,0 +1,32 @@
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* Menus with pictures and the menu editor (ui/food-menu.js); the pictures: one sheet, assets/food/thumbs.webp. */
+.fd-th { display: inline-block; flex: none; background-image: url(/assets/food/thumbs.webp); background-repeat: no-repeat; border-radius: 10px; background-color: var(--btn); }
+.fm-dlg { width: min(860px, calc(100vw - 20px)); max-height: calc(100dvh - var(--topbar-height, 56px) - 20px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; overflow: hidden; }
+.fm-body { overflow-y: auto; min-height: 0; display: grid; gap: 8px; align-content: start; padding-right: 4px; }
+.fm-kind { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fm-cus { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
+.fm-cu { display: grid; gap: 2px; text-align: left; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--btn); color: inherit; font: inherit; cursor: pointer; }
+.fm-cu small { color: var(--dim); font-size: 12px; } .fm-cu:hover { border-color: var(--accent); } .fm-cu.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.fm-course { font-size: 12px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; margin-top: 4px; }
+.fm-line { display: flex; align-items: center; gap: 10px; padding: 4px 6px; border-radius: 10px; }
+.fm-line:hover { background: var(--btn); }
+.fm-name { display: grid; flex: 1; min-width: 0; } .fm-name b { overflow-wrap: anywhere; } .fm-name small { color: var(--dim); font-size: 12px; }
+.fm-price { width: 84px; text-align: right; flex: none; }
+.fm-cats { display: flex; flex-wrap: wrap; gap: 4px; }
+.fm-cats .chip { cursor: pointer; border: 1px solid var(--line); background: var(--btn); color: inherit; font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 999px; }
+.fm-cats .chip.on { border-color: var(--accent); color: var(--accent); }
+.fm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; margin-top: 6px; }
+.fm-tile { display: grid; justify-items: center; gap: 2px; padding: 6px 4px; border-radius: 10px; border: 1px solid var(--line); background: var(--btn); color: inherit; font: inherit; cursor: pointer; text-align: center; }
+.fm-tile span { font-size: 12px; line-height: 1.2; overflow-wrap: anywhere; } .fm-tile small { font-size: 11px; color: var(--dim); }
+.fm-tile:hover { border-color: var(--accent); } .fm-tile.on { border-color: var(--good); } .fm-tile.on small { color: var(--good); }
+.fm-sp { flex: 1; }
+.fm-dlg .lib-btns { flex-wrap: wrap; }
+@media (max-width: 760px) { .fm-dlg { max-height: calc(100dvh - 14px); } .fm-grid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); } }
+/* a menu to order from, and a building card's dishes */
+.fm-order .ec-item { display: flex; align-items: center; gap: 10px; }
+.fm-order .ec-item .lib-main { flex: 1; min-width: 0; }
+.fm-order .lib-list { max-height: min(60dvh, 560px); overflow-y: auto; }
+.fm-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
+.fm-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 2px; border-radius: 999px; border: 1px solid var(--line); background: var(--btn); font-size: 12px; }
+.fm-chip .fd-th { border-radius: 999px; }
+.fm-kindline { font-weight: 600; }

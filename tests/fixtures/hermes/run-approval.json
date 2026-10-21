@@ -1,0 +1,338 @@
+{
+ "frames": [
+  {
+   "type": "session.info",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "model": "stub-1",
+    "provider": "custom",
+    "reasoning_effort": "",
+    "running": true,
+    "title": "",
+    "stored_session_id": "20261017_034124_5a7646",
+    "usage": {
+     "model": "stub-1",
+     "input": 0,
+     "output": 0,
+     "reasoning": 0,
+     "prompt": 0,
+     "completion": 0,
+     "total": 0,
+     "calls": 0,
+     "compressions": 0,
+     "active_subagents": 0
+    }
+   }
+  },
+  {
+   "type": "message.start",
+   "session_id": "eb9fc64e",
+   "payload": {}
+  },
+  {
+   "type": "session.title",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "session_id": "20261017_034124_5a7646",
+    "title": "[[tool:terminal {\"command\":\"rm -rf…"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "٩(๑❛ᴗ❛๑)۶ reasoning..."
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "tool.generating",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "name": "terminal"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "tool.start",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "tool_id": "call_1792222884277",
+    "name": "terminal",
+    "context": "rm -rf /tmp/lab",
+    "args": {
+     "command": "rm -rf /tmp/lab"
+    }
+   }
+  },
+  {
+   "request": {
+    "id": "srq-d043933743c8",
+    "method": "approval",
+    "params": {
+     "session_id": "eb9fc64e",
+     "command": "rm -rf /tmp/lab",
+     "pattern_key": "delete in root path",
+     "pattern_keys": [
+      "delete in root path"
+     ],
+     "description": "delete in root path",
+     "allow_permanent": true,
+     "allow_session": true,
+     "request_id": "ddedf23ced214935b78b902cae10dca8",
+     "choices": [
+      "once",
+      "session",
+      "always",
+      "deny"
+     ]
+    }
+   }
+  },
+  {
+   "type": "tool.complete",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "tool_id": "call_1792222884277",
+    "name": "terminal",
+    "args": {
+     "command": "rm -rf /tmp/lab"
+    },
+    "duration_s": 0.17891621589660645,
+    "result": {
+     "output": "",
+     "exit_code": -1,
+     "error": "BLOCKED: Command denied by user. The user has NOT consented to this action. Do NOT retry this command, do NOT rephrase it, and do NOT attempt the same outcome via a different command. Stop the current workflow and wait for the user to respond before taking any further destructive or irreversible action.",
+     "status": "blocked",
+     "user_summary": "You denied this command — it did not run."
+    }
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "( ˘⌣˘)♡ analyzing..."
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "\n\nThe tool ans"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "wered: {\"out"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "put\": \"\", \"e"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "xit_code\": -"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "1, \"error\": "
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "\"BLOCKED: Co"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "mmand denied"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": " by user. Th"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "e user has N"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "OT consented"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": " to this act"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "ion. Do NOT "
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "retry this c"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "ommand, do N"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "OT rephrase"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "reasoning.available",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "The tool answered: {\"output\": \"\", \"exit_code\": -1, \"error\": \"BLOCKED: Command denied by user. The user has NOT consented to this action. Do NOT retry this command, do NOT rephrase"
+   }
+  },
+  {
+   "type": "message.complete",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "text": "The tool answered: {\"output\": \"\", \"exit_code\": -1, \"error\": \"BLOCKED: Command denied by user. The user has NOT consented to this action. Do NOT retry this command, do NOT rephrase",
+    "usage": {
+     "model": "stub-1",
+     "input": 29083,
+     "output": 52,
+     "reasoning": 0,
+     "prompt": 29083,
+     "completion": 52,
+     "total": 29135,
+     "calls": 2,
+     "context_used": 14630,
+     "context_max": 256000,
+     "context_percent": 6,
+     "context_source": "provider_usage",
+     "context_estimated": false,
+     "compressions": 0,
+     "avg_latency_s": 0.2,
+     "avg_tps": 133.7,
+     "active_subagents": 0
+    },
+    "status": "complete",
+    "persisted_turn": {
+     "row_ids": [
+      86,
+      87,
+      88,
+      89
+     ],
+     "complete": true,
+     "user_row_id": 86,
+     "final_assistant_row_id": 89
+    }
+   }
+  },
+  {
+   "type": "session.title",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "session_id": "20261017_034124_5a7646",
+    "title": "Stub reply 420 to: (empty)"
+   }
+  },
+  {
+   "type": "session.info",
+   "session_id": "eb9fc64e",
+   "payload": {
+    "model": "stub-1",
+    "provider": "custom",
+    "reasoning_effort": "",
+    "running": false,
+    "title": "Stub reply 420 to: (empty)",
+    "stored_session_id": "20261017_034124_5a7646",
+    "usage": {
+     "model": "stub-1",
+     "input": 29083,
+     "output": 52,
+     "reasoning": 0,
+     "prompt": 29083,
+     "completion": 52,
+     "total": 29135,
+     "calls": 2,
+     "context_used": 14630,
+     "context_max": 256000,
+     "context_percent": 6,
+     "context_source": "provider_usage",
+     "context_estimated": false,
+     "compressions": 0,
+     "avg_latency_s": 0.2,
+     "avg_tps": 133.7,
+     "active_subagents": 0
+    }
+   }
+  },
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  }
+ ]
+}

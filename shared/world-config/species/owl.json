@@ -1,0 +1,35 @@
+{
+ "id": "owl",
+ "name": "Owls",
+ "tier": "ambient",
+ "model": "bird",
+ "behaviour": "soar",
+ "habitats": [
+  "forest"
+ ],
+ "hours": [
+  20.5,
+  5
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast"
+ ],
+ "group": [
+  1,
+  1
+ ],
+ "perKm2": 3,
+ "size": 0.4,
+ "colors": [
+  "#7a6a55",
+  "#8f7d64"
+ ],
+ "height": [
+  6,
+  18
+ ],
+ "speed": 7,
+ "sound": "hoot"
+}

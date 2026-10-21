@@ -1,0 +1,746 @@
+{
+  "kind": "m14",
+  "scale": 1.7520969245107176,
+  "bones": 65,
+  "names": [
+    "mixamorig:Hips",
+    "mixamorig:LeftUpLeg",
+    "mixamorig:LeftLeg",
+    "mixamorig:LeftFoot",
+    "mixamorig:LeftToeBase",
+    "mixamorig:LeftToe_End",
+    "mixamorig:RightUpLeg",
+    "mixamorig:RightLeg",
+    "mixamorig:RightFoot",
+    "mixamorig:RightToeBase",
+    "mixamorig:RightToe_End",
+    "mixamorig:Spine",
+    "mixamorig:Spine1",
+    "mixamorig:Spine2",
+    "mixamorig:LeftShoulder",
+    "mixamorig:LeftArm",
+    "mixamorig:LeftForeArm",
+    "mixamorig:LeftHand",
+    "mixamorig:LeftHandIndex1",
+    "mixamorig:LeftHandIndex2",
+    "mixamorig:LeftHandIndex3",
+    "mixamorig:LeftHandIndex4",
+    "mixamorig:LeftHandMiddle1",
+    "mixamorig:LeftHandMiddle2",
+    "mixamorig:LeftHandMiddle3",
+    "mixamorig:LeftHandMiddle4",
+    "mixamorig:LeftHandPinky1",
+    "mixamorig:LeftHandPinky2",
+    "mixamorig:LeftHandPinky3",
+    "mixamorig:LeftHandPinky4",
+    "mixamorig:LeftHandRing1",
+    "mixamorig:LeftHandRing2",
+    "mixamorig:LeftHandRing3",
+    "mixamorig:LeftHandRing4",
+    "mixamorig:LeftHandThumb1",
+    "mixamorig:LeftHandThumb2",
+    "mixamorig:LeftHandThumb3",
+    "mixamorig:LeftHandThumb4",
+    "mixamorig:Neck",
+    "mixamorig:Head",
+    "mixamorig:HeadTop_End",
+    "mixamorig:RightShoulder",
+    "mixamorig:RightArm",
+    "mixamorig:RightForeArm",
+    "mixamorig:RightHand",
+    "mixamorig:RightHandIndex1",
+    "mixamorig:RightHandIndex2",
+    "mixamorig:RightHandIndex3",
+    "mixamorig:RightHandIndex4",
+    "mixamorig:RightHandMiddle1",
+    "mixamorig:RightHandMiddle2",
+    "mixamorig:RightHandMiddle3",
+    "mixamorig:RightHandMiddle4",
+    "mixamorig:RightHandPinky1",
+    "mixamorig:RightHandPinky2",
+    "mixamorig:RightHandPinky3",
+    "mixamorig:RightHandPinky4",
+    "mixamorig:RightHandRing1",
+    "mixamorig:RightHandRing2",
+    "mixamorig:RightHandRing3",
+    "mixamorig:RightHandRing4",
+    "mixamorig:RightHandThumb1",
+    "mixamorig:RightHandThumb2",
+    "mixamorig:RightHandThumb3",
+    "mixamorig:RightHandThumb4"
+  ],
+  "textured": true,
+  "land": {
+    "waist": 1.057890844764603,
+    "neck": 1.458984060060665,
+    "neckY": 1.458984060060665
+  },
+  "lods": [
+    {
+      "verts": 17746,
+      "tris": 29988,
+      "pos": {
+        "off": 0,
+        "len": 212952,
+        "type": "float32",
+        "shape": [
+          17746,
+          3
+        ]
+      },
+      "nrm": {
+        "off": 212952,
+        "len": 212952,
+        "type": "float32",
+        "shape": [
+          17746,
+          3
+        ]
+      },
+      "j": {
+        "off": 425904,
+        "len": 70984,
+        "type": "uint8",
+        "shape": [
+          17746,
+          4
+        ]
+      },
+      "w": {
+        "off": 496888,
+        "len": 70984,
+        "type": "uint8",
+        "shape": [
+          17746,
+          4
+        ]
+      },
+      "mask": {
+        "off": 567872,
+        "len": 70984,
+        "type": "uint8",
+        "shape": [
+          17746,
+          4
+        ]
+      },
+      "limb": {
+        "off": 638856,
+        "len": 141968,
+        "type": "float32",
+        "shape": [
+          17746,
+          2
+        ]
+      },
+      "info": {
+        "off": 780824,
+        "len": 212952,
+        "type": "float32",
+        "shape": [
+          17746,
+          3
+        ]
+      },
+      "cov": {
+        "off": 993776,
+        "len": 35492,
+        "type": "uint8",
+        "shape": [
+          17746,
+          2
+        ]
+      },
+      "idx": {
+        "off": 1029272,
+        "len": 179928,
+        "type": "uint16",
+        "shape": [
+          29988,
+          3
+        ]
+      },
+      "uv": {
+        "off": 1209200,
+        "len": 141968,
+        "type": "float32",
+        "shape": [
+          17746,
+          2
+        ]
+      }
+    },
+    {
+      "verts": 6514,
+      "tris": 9280,
+      "pos": {
+        "off": 1351168,
+        "len": 78168,
+        "type": "float32",
+        "shape": [
+          6514,
+          3
+        ]
+      },
+      "nrm": {
+        "off": 1429336,
+        "len": 78168,
+        "type": "float32",
+        "shape": [
+          6514,
+          3
+        ]
+      },
+      "j": {
+        "off": 1507504,
+        "len": 26056,
+        "type": "uint8",
+        "shape": [
+          6514,
+          4
+        ]
+      },
+      "w": {
+        "off": 1533560,
+        "len": 26056,
+        "type": "uint8",
+        "shape": [
+          6514,
+          4
+        ]
+      },
+      "mask": {
+        "off": 1559616,
+        "len": 26056,
+        "type": "uint8",
+        "shape": [
+          6514,
+          4
+        ]
+      },
+      "limb": {
+        "off": 1585672,
+        "len": 52112,
+        "type": "float32",
+        "shape": [
+          6514,
+          2
+        ]
+      },
+      "info": {
+        "off": 1637784,
+        "len": 78168,
+        "type": "float32",
+        "shape": [
+          6514,
+          3
+        ]
+      },
+      "cov": {
+        "off": 1715952,
+        "len": 13028,
+        "type": "uint8",
+        "shape": [
+          6514,
+          2
+        ]
+      },
+      "idx": {
+        "off": 1728984,
+        "len": 55680,
+        "type": "uint16",
+        "shape": [
+          9280,
+          3
+        ]
+      },
+      "uv": {
+        "off": 1784664,
+        "len": 52112,
+        "type": "float32",
+        "shape": [
+          6514,
+          2
+        ]
+      }
+    },
+    {
+      "verts": 2227,
+      "tris": 2658,
+      "pos": {
+        "off": 1836776,
+        "len": 26724,
+        "type": "float32",
+        "shape": [
+          2227,
+          3
+        ]
+      },
+      "nrm": {
+        "off": 1863504,
+        "len": 26724,
+        "type": "float32",
+        "shape": [
+          2227,
+          3
+        ]
+      },
+      "j": {
+        "off": 1890232,
+        "len": 8908,
+        "type": "uint8",
+        "shape": [
+          2227,
+          4
+        ]
+      },
+      "w": {
+        "off": 1899144,
+        "len": 8908,
+        "type": "uint8",
+        "shape": [
+          2227,
+          4
+        ]
+      },
+      "mask": {
+        "off": 1908056,
+        "len": 8908,
+        "type": "uint8",
+        "shape": [
+          2227,
+          4
+        ]
+      },
+      "limb": {
+        "off": 1916968,
+        "len": 17816,
+        "type": "float32",
+        "shape": [
+          2227,
+          2
+        ]
+      },
+      "info": {
+        "off": 1934784,
+        "len": 26724,
+        "type": "float32",
+        "shape": [
+          2227,
+          3
+        ]
+      },
+      "cov": {
+        "off": 1961512,
+        "len": 4454,
+        "type": "uint8",
+        "shape": [
+          2227,
+          2
+        ]
+      },
+      "idx": {
+        "off": 1965968,
+        "len": 15948,
+        "type": "uint16",
+        "shape": [
+          2658,
+          3
+        ]
+      },
+      "uv": {
+        "off": 1981920,
+        "len": 17816,
+        "type": "float32",
+        "shape": [
+          2227,
+          2
+        ]
+      }
+    }
+  ],
+  "clips": [
+    {
+      "name": "idle",
+      "off": 0,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "walk",
+      "off": 144,
+      "len": 56,
+      "dur": 2.3333,
+      "stride": 2.8471
+    },
+    {
+      "name": "run",
+      "off": 200,
+      "len": 30,
+      "dur": 1.25,
+      "stride": 5.5194
+    },
+    {
+      "name": "sit",
+      "off": 230,
+      "len": 86,
+      "dur": 7.1667,
+      "stride": 0.0
+    },
+    {
+      "name": "lie",
+      "off": 316,
+      "len": 32,
+      "dur": 4.0,
+      "stride": 0.0
+    },
+    {
+      "name": "jump",
+      "off": 348,
+      "len": 26,
+      "dur": 2.2083,
+      "stride": 0.0
+    },
+    {
+      "name": "dance_01",
+      "off": 374,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "dance_02",
+      "off": 518,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "dance_03",
+      "off": 662,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "dance_04",
+      "off": 806,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "dance_05",
+      "off": 950,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "dance_06",
+      "off": 1094,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "cheer",
+      "off": 1238,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "clap",
+      "off": 1382,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "bow",
+      "off": 1526,
+      "len": 72,
+      "dur": 6.0,
+      "stride": 0.0
+    },
+    {
+      "name": "agree",
+      "off": 1598,
+      "len": 48,
+      "dur": 4.0,
+      "stride": 0.0
+    },
+    {
+      "name": "greet_02",
+      "off": 1646,
+      "len": 67,
+      "dur": 5.5833,
+      "stride": 0.0
+    },
+    {
+      "name": "wave_goodbye_01",
+      "off": 1713,
+      "len": 79,
+      "dur": 6.5833,
+      "stride": 0.0
+    },
+    {
+      "name": "make_a_call_01",
+      "off": 1792,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "play_mobile_game",
+      "off": 1936,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "look_around",
+      "off": 2080,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "wait",
+      "off": 2224,
+      "len": 72,
+      "dur": 6.0,
+      "stride": 0.0
+    },
+    {
+      "name": "fold_arms",
+      "off": 2296,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "laugh_01",
+      "off": 2440,
+      "len": 67,
+      "dur": 5.5833,
+      "stride": 0.0
+    },
+    {
+      "name": "warm_up",
+      "off": 2507,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "scratch",
+      "off": 2651,
+      "len": 144,
+      "dur": 12.0,
+      "stride": 0.0
+    },
+    {
+      "name": "sit_work",
+      "off": 2795,
+      "len": 80,
+      "dur": 6.6667,
+      "stride": 0.0
+    },
+    {
+      "name": "sit_idle",
+      "off": 2875,
+      "len": 80,
+      "dur": 6.6667,
+      "stride": 0.0
+    },
+    {
+      "name": "sit_talk",
+      "off": 2955,
+      "len": 80,
+      "dur": 6.6667,
+      "stride": 0.0
+    },
+    {
+      "name": "call_stand",
+      "off": 3035,
+      "len": 80,
+      "dur": 6.6667,
+      "stride": 0.0
+    },
+    {
+      "name": "wave_stand",
+      "off": 3115,
+      "len": 26,
+      "dur": 2.1667,
+      "stride": 0.0
+    },
+    {
+      "name": "wave_sit",
+      "off": 3141,
+      "len": 26,
+      "dur": 2.1667,
+      "stride": 0.0
+    },
+    {
+      "name": "wait_02",
+      "off": 3167,
+      "len": 80,
+      "dur": 6.6667,
+      "stride": 0.0
+    },
+    {
+      "name": "clap_02",
+      "off": 3247,
+      "len": 30,
+      "dur": 2.5,
+      "stride": 0.0
+    },
+    {
+      "name": "jump_02",
+      "off": 3277,
+      "len": 30,
+      "dur": 2.4667,
+      "stride": 0.0
+    },
+    {
+      "name": "idle_male",
+      "off": 3307,
+      "len": 80,
+      "dur": 6.6667,
+      "stride": 0.0
+    },
+    {
+      "name": "greet_male",
+      "off": 3387,
+      "len": 40,
+      "dur": 3.3333,
+      "stride": 0.0
+    },
+    {
+      "name": "stand_work",
+      "off": 3427,
+      "len": 80,
+      "dur": 6.6667,
+      "stride": 0.0
+    },
+    {
+      "name": "play_arcade",
+      "off": 3507,
+      "len": 80,
+      "dur": 6.6667,
+      "stride": 0.0
+    }
+  ],
+  "anim": {
+    "w": 4096,
+    "h": 171,
+    "frames": 3587,
+    "data": {
+      "off": 1999736,
+      "len": 5603328,
+      "type": "uint16",
+      "shape": [
+        700416,
+        4
+      ]
+    }
+  },
+  "rigAdapter": {
+    "version": 3,
+    "bindPose": "T",
+    "animationReference": "original-A",
+    "clipContract": "current-lab-39",
+    "headWeights": "rigid face/skull + smooth neck",
+    "labOnly": true,
+    "rigFitCorrection": "2026-10-01-head-neck-knee",
+    "existingLidsPreserved": 3
+  },
+  "baseColor": "m14_color.jpg",
+  "normalMap": "m14_normal.png",
+  "lids": {
+    "version": 3,
+    "method": "connected-sclera-iris-hull-smooth-polar-dome-swept-collision-lift",
+    "cx": 0.04254680146352964,
+    "cy": 1.6057808696651232,
+    "cz": 0.11105485055048483,
+    "rx": 0.019713444097069058,
+    "ry": 0.013124084719066639,
+    "off": 0.0009999999735090467,
+    "eyes": {
+      "1": {
+        "cx": 0.042712539855625835,
+        "cy": 1.6054030799591499,
+        "cz": 0.11082021086176713,
+        "rx": 0.020337266227063153,
+        "ry": 0.013503217694792772,
+        "angle": 0.2305741878429961,
+        "ang": 0.2305741878429961,
+        "sign": 1,
+        "colorRegion": "one-pixel-expanded connected-sclera convex hull including iris, excluding external upper lash",
+        "colorPixels": 4802,
+        "outlinePixels": 4802,
+        "whitePixels": 1692,
+        "darkPixels": 2930,
+        "coverage": 0.9997917534360683,
+        "confidence": 0.9997917534360683,
+        "bounds": {
+          "min": [
+            0.024862626599272103,
+            1.5928124578048786
+          ],
+          "max": [
+            0.06086262564559777,
+            1.6183124571293592
+          ]
+        },
+        "outlineZ": {
+          "min": 0.09959602307708913,
+          "max": 0.11416889415436146,
+          "median": 0.11082021086176713
+        }
+      },
+      "-1": {
+        "cx": -0.04238106307143345,
+        "cy": 1.6061586593710964,
+        "cz": 0.11128949023920255,
+        "rx": 0.019089621967074963,
+        "ry": 0.012744951743340506,
+        "angle": -0.2350124837627554,
+        "ang": -0.2350124837627554,
+        "sign": -1,
+        "colorRegion": "one-pixel-expanded connected-sclera convex hull including iris, excluding external upper lash",
+        "colorPixels": 4706,
+        "outlinePixels": 4706,
+        "whitePixels": 1613,
+        "darkPixels": 2867,
+        "coverage": 0.9997875053123672,
+        "confidence": 0.9997875053123672,
+        "bounds": {
+          "min": [
+            -0.060637371135751406,
+            1.5935624577850105
+          ],
+          "max": [
+            -0.025012372079491613,
+            1.6183124571293592
+          ]
+        },
+        "outlineZ": {
+          "min": 0.10140386697095273,
+          "max": 0.11339188474990695,
+          "median": 0.11128949023920255
+        }
+      }
+    },
+    "verts": 394,
+    "tris": 728
+  },
+  "lodLids": [
+    1,
+    2
+  ],
+  "lidVersion": 3
+}

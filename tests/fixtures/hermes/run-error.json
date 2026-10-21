@@ -1,0 +1,567 @@
+{
+ "frames": [
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  },
+  {
+   "type": "session.info",
+   "session_id": "a8db60c1",
+   "payload": {
+    "model": "stub-1",
+    "provider": "custom",
+    "reasoning_effort": "",
+    "running": true,
+    "title": "",
+    "stored_session_id": "20261017_034141_419741",
+    "usage": {
+     "model": "stub-1",
+     "input": 0,
+     "output": 0,
+     "reasoning": 0,
+     "prompt": 0,
+     "completion": 0,
+     "total": 0,
+     "calls": 0,
+     "compressions": 0,
+     "active_subagents": 0
+    }
+   }
+  },
+  {
+   "type": "message.start",
+   "session_id": "a8db60c1",
+   "payload": {}
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "( ˘⌣˘)♡ cogitating..."
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 3s (attempt 1/3)"
+   }
+  },
+  {
+   "type": "session.reclaimed",
+   "payload": {
+    "session_id": "a82f22e0",
+    "stored_session_id": "20261017_034117_1d47b1",
+    "reason": "ws_orphan_reap"
+   }
+  },
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  },
+  {
+   "type": "session.reclaimed",
+   "payload": {
+    "session_id": "042181a2",
+    "stored_session_id": "20261017_034121_ecbc80",
+    "reason": "ws_orphan_reap"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 5s (attempt 2/3)"
+   }
+  },
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  },
+  {
+   "type": "session.reclaimed",
+   "payload": {
+    "session_id": "eb9fc64e",
+    "stored_session_id": "20261017_034124_5a7646",
+    "reason": "ws_orphan_reap"
+   }
+  },
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 17s (cycle 1/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 17s (cycle 1/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "session.reclaimed",
+   "payload": {
+    "session_id": "c22810bb",
+    "stored_session_id": "20261017_034126_66d1b3",
+    "reason": "ws_orphan_reap"
+   }
+  },
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  },
+  {
+   "type": "session.reclaimed",
+   "payload": {
+    "session_id": "d6a32078",
+    "stored_session_id": "20261017_034129_498571",
+    "reason": "ws_orphan_reap"
+   }
+  },
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 2s (attempt 1/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 5s (attempt 2/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 33s (cycle 2/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 33s (cycle 2/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 2s (attempt 1/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 5s (attempt 2/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 71s (cycle 3/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 71s (cycle 3/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 3s (attempt 1/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 5s (attempt 2/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 71s (cycle 4/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 71s (cycle 4/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 2s (attempt 1/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 5s (attempt 2/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 70s (cycle 5/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 70s (cycle 5/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 3s (attempt 1/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 4s (attempt 2/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Automatic recovery gave up after 5 cycles — the provider is still unavailable."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 2.6s (attempt 1/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 4.6s (attempt 2/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 2.3s (attempt 1/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 4.6s (attempt 2/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 2.5s (attempt 1/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 4.8s (attempt 2/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 2.9s (attempt 1/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 5.1s (attempt 2/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 2.0s (attempt 1/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 5.5s (attempt 2/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 2.9s (attempt 1/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Retrying in 4.5s (attempt 2/3)..."
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "❌ API failed after 3 retries — HTTP 500: stub error 500"
+   }
+  },
+  {
+   "type": "message.complete",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "custom returned a server error on all 3 attempts — it looks temporarily unavailable. Wait a minute and send /retry, or switch models with /model. To avoid this in future, add a backup provider with `hermes fallback add`.\n\nProvider said: HTTP 500: stub error 500",
+    "usage": {
+     "model": "stub-1",
+     "input": 0,
+     "output": 0,
+     "reasoning": 0,
+     "prompt": 0,
+     "completion": 0,
+     "total": 0,
+     "calls": 0,
+     "compressions": 0,
+     "active_subagents": 0
+    },
+    "status": "error",
+    "persisted_turn": {
+     "row_ids": [
+      98,
+      99
+     ],
+     "complete": false,
+     "user_row_id": 98
+    },
+    "error": "HTTP 500: stub error 500",
+    "recoverable": true,
+    "error_surface": {
+     "layer": "provider",
+     "code": "server_error",
+     "retryable": true,
+     "provider": "custom",
+     "model": "stub-1",
+     "provider_label": "custom"
+    }
+   }
+  },
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  },
+  {
+   "type": "session.info",
+   "session_id": "a8db60c1",
+   "payload": {
+    "model": "stub-1",
+    "provider": "custom",
+    "reasoning_effort": "",
+    "running": false,
+    "title": "",
+    "stored_session_id": "20261017_034141_419741",
+    "usage": {
+     "model": "stub-1",
+     "input": 0,
+     "output": 0,
+     "reasoning": 0,
+     "prompt": 0,
+     "completion": 0,
+     "total": 0,
+     "calls": 0,
+     "compressions": 0,
+     "active_subagents": 0
+    }
+   }
+  }
+ ]
+}

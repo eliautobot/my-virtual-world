@@ -1,0 +1,37 @@
+{
+ "id": "cow",
+ "name": "Cows",
+ "tier": "shared",
+ "model": "cow",
+ "behaviour": "graze",
+ "habitats": [
+  "field"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "storm",
+  "fog"
+ ],
+ "group": [
+  3,
+  8
+ ],
+ "perKm2": 14,
+ "size": 1.0,
+ "colors": [
+  "#3a2e26",
+  "#f1ece2",
+  "#8a5a3a",
+  "#2b2b2b"
+ ],
+ "speed": 0.7,
+ "run": 0,
+ "flee": 0
+}

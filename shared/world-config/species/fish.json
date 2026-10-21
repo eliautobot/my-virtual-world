@@ -1,0 +1,30 @@
+{
+ "id": "fish",
+ "name": "Jumping fish",
+ "tier": "ambient",
+ "model": "fish",
+ "behaviour": "jump",
+ "habitats": [
+  "lake"
+ ],
+ "hours": [
+  17,
+  21.5
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast"
+ ],
+ "group": [
+  1,
+  3
+ ],
+ "perKm2": 80,
+ "size": 0.28,
+ "colors": [
+  "#9aa6ad",
+  "#b7c0c4"
+ ],
+ "speed": 2
+}

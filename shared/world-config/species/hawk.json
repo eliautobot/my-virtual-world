@@ -1,0 +1,34 @@
+{
+ "id": "hawk",
+ "name": "Hawks",
+ "tier": "ambient",
+ "model": "bird",
+ "behaviour": "soar",
+ "habitats": [
+  "rock",
+  "forest"
+ ],
+ "hours": [
+  8,
+  18
+ ],
+ "weather": [
+  "clear",
+  "partly"
+ ],
+ "group": [
+  1,
+  1
+ ],
+ "perKm2": 1.5,
+ "size": 0.62,
+ "colors": [
+  "#6b4a2d",
+  "#7d5a38"
+ ],
+ "height": [
+  60,
+  130
+ ],
+ "speed": 12
+}

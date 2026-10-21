@@ -1,0 +1,37 @@
+{
+ "id": "butterfly",
+ "name": "Butterflies",
+ "tier": "ambient",
+ "model": "butterfly",
+ "behaviour": "flutter",
+ "habitats": [
+  "meadow",
+  "field"
+ ],
+ "hours": [
+  8,
+  18.5
+ ],
+ "weather": [
+  "clear",
+  "partly"
+ ],
+ "group": [
+  3,
+  7
+ ],
+ "perKm2": 30,
+ "size": 0.07,
+ "colors": [
+  "#f2b134",
+  "#e86a3a",
+  "#f4f1e8",
+  "#7aa7e8",
+  "#c86ad6"
+ ],
+ "height": [
+  0.4,
+  2.2
+ ],
+ "speed": 1.4
+}

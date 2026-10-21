@@ -1,0 +1,17 @@
+{
+ "id": "gull-beach",
+ "name": "Gulls on the beach",
+ "tier": "ambient",
+ "model": "seagull",
+ "behaviour": "flock",
+ "habitats": ["beach"],
+ "hours": [5.5, 20],
+ "weather": ["clear", "partly", "overcast"],
+ "group": [3, 8],
+ "perKm2": 60,
+ "size": 0.42,
+ "colors": ["#f4f4f2", "#ececea"],
+ "height": [1.5, 7],
+ "speed": 7,
+ "sound": "gull"
+}

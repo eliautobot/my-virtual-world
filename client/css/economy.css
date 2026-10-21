@@ -1,0 +1,154 @@
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* The economy's screens (ui/economy.js, ui/econ-city.js, ui/econ-charts.js, ui/econ-admin.js). Chart colours are roles:
+   --ec-1 … --ec-4 the categorical slots (validated for colour-blind separation and contrast on each theme's surface;
+   the dark steps for the dark and high-contrast themes, the light steps for the light theme), --ec-seq1..3 an ordinal
+   blue ramp, --ec-pos/--ec-neg the diverging pair. Text never wears these colours. */
+:root {
+  --ec-1: #3987e5; --ec-2: #d95926; --ec-3: #199e70; --ec-4: #c98500;
+  --ec-seq1: #184f95; --ec-seq2: #3987e5; --ec-seq3: #86b6ef;
+  --ec-pos: #3987e5; --ec-neg: #e66767; --ec-mid: #383835;
+  --ec-surface: #1e1e1e; --ec-grid: rgba(255, 255, 255, 0.09);
+}
+:root[data-theme="light"] {
+  --ec-1: #2a78d6; --ec-2: #eb6834; --ec-3: #1baf7a; --ec-4: #eda100;
+  --ec-seq1: #86b6ef; --ec-seq2: #3987e5; --ec-seq3: #1c5cab;
+  --ec-pos: #2a78d6; --ec-neg: #e34948; --ec-mid: #f0efec;
+  --ec-surface: #ffffff; --ec-grid: rgba(0, 0, 0, 0.08);
+}
+:root[data-theme="contrast"] { --ec-surface: #000000; --ec-grid: rgba(255, 255, 255, 0.3); }
+
+/* the top bar */
+#topbar .ec-chip { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#topbar .ec-chip b { font-weight: 700; }
+.ec-float { position: fixed; z-index: 30; transform: translateX(-50%); font-weight: 800; font-size: 14px; pointer-events: none; text-shadow: 0 1px 3px var(--shadow-c4, rgba(0,0,0,.6));
+  animation: ec-float 1.6s ease-out forwards; }
+.ec-float.up { color: var(--good); } .ec-float.down { color: var(--bad); }
+@keyframes ec-float { 0% { opacity: 0; translate: 0 6px; } 15% { opacity: 1; } 100% { opacity: 0; translate: 0 34px; } }
+@media (max-width: 760px) { #topbar .ec-chip { padding: 0 6px; gap: 4px; } #topbar .ec-chip .vc-ico { width: 16px; height: 16px; } }   /* the symbol stays: it says the figure is VC */
+
+/* dialogs */
+.ecdlg { width: min(560px, calc(100vw - 20px)); }
+/* The window fits the screen that is actually there (dvh: a phone's browser bars included) and below the top bar: its title
+   and tabs stay put and the body scrolls (2026-10-06: cut off at the top and the bottom on a phone). */
+/* One size for every tab (2026-10-06: it resized as the tabs changed): a fixed height, the tab's content scrolling inside */
+.ec-city { width: min(1000px, calc(100vw - 20px)); height: min(780px, calc(100dvh - var(--topbar-height, 56px) - 20px)); max-height: none; overflow: hidden;
+  grid-template-rows: auto auto minmax(0, 1fr) auto; margin-top: var(--topbar-height, 56px); }
+.ec-city .ec-body { overflow-y: auto; min-height: 0; padding-right: 2px; align-content: start; }   /* short tabs sit at the top */
+.ec-city .ec-err:empty { display: none; }
+@media (max-width: 760px) { .ec-city { margin-top: 0; height: calc(100dvh - var(--topbar-height, 44px) - 14px); } }
+.ec-city .ec-body, .ecdlg .wl-body { display: grid; gap: 10px; min-width: 0; }
+.ec-bal { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--btn); }
+.ec-bal > div:first-child { display: grid; gap: 2px; } .ec-bal span { color: var(--dim); font-size: 12px; } .ec-bal b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.ec-bal small { color: var(--dim); font-size: 12px; } .ec-bal small.bad { color: var(--bad); }
+.ec-bal-acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.ec-filter, .ec-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.ec-line { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.ec-line > b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ec-line .lib-main { min-width: 0; } .ec-line .lib-main b { overflow-wrap: anywhere; }
+.ec-form { display: grid; gap: 8px; }
+.ec-form label { display: grid; gap: 4px; font-size: 13px; }
+.ec-form label.check { display: flex; gap: 8px; align-items: center; } .ec-form label.check input { flex: none; margin: 0; }
+.ec-form .input { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--btn); color: inherit; font: inherit; min-width: 0; }
+.ec-form .row { display: flex; gap: 6px; align-items: center; } .ec-form .row .input { flex: 1; }
+.ec-pick { position: relative; display: block; } .ec-pick .input { width: 100%; box-sizing: border-box; }
+.ec-res { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 2; display: grid; gap: 2px; padding: 6px; max-height: 220px; overflow-y: auto; }
+.ec-hit { text-align: left; background: none; border: 0; color: inherit; font: inherit; padding: 7px 8px; border-radius: 8px; cursor: pointer; } .ec-hit:hover, .ec-hit:focus-visible { background: var(--btn); }
+.ec-hit small { color: var(--dim); }
+.ec-agent .ec-lim { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 12px; }
+.ec-agent .ec-lim label { display: grid; gap: 3px; } .ec-agent .ec-lim .input { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--btn); color: inherit; font: inherit; }
+.ec-agent .ec-scopes { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.ec-agent .ec-mv { width: 80px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--btn); color: inherit; font: inherit; }
+.ec-item { grid-template-columns: 1fr auto; align-items: center; }
+.ec-qty { display: flex; align-items: center; gap: 8px; } .ec-qty b { min-width: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.ec-price { width: 86px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--btn); color: inherit; font: inherit; text-align: right; }
+.ec-total { margin-right: auto; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; align-self: center; }
+.ec-brow { text-align: left; background: none; color: inherit; font: inherit; cursor: pointer; grid-template-columns: 1fr auto; align-items: center; }
+.ec-brow:hover { background: var(--btn); }
+
+/* tiles, two columns, tables */
+.ec-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.ec-tile { display: grid; gap: 2px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--btn); min-width: 0; }
+.ec-tl { font-size: 12px; color: var(--dim); } .ec-tv { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ec-td { font-size: 12px; color: var(--dim); } .ec-td.good { color: var(--good); } .ec-td.bad { color: var(--bad); }
+.ec-spark { display: block; margin-top: 2px; }
+.ec-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 760px) { .ec-two { grid-template-columns: 1fr; } .ec-tiles { grid-template-columns: 1fr 1fr; } }
+.ec-table { display: grid; gap: 2px; max-height: min(55vh, 520px); overflow-y: auto; }
+.ec-tr { display: grid; grid-template-columns: 2.2fr 1.4fr .5fr 1fr 1fr; gap: 8px; align-items: center; padding: 7px 9px; border-radius: 8px; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
+.ec-mkt .ec-tr { grid-template-columns: 1.8fr 1fr 1fr 1.2fr 1fr; }
+button.ec-tr { cursor: pointer; } button.ec-tr:hover { background: var(--btn); }
+.ec-tr > span:nth-child(n+3) { text-align: right; font-variant-numeric: tabular-nums; }
+.ec-tr small { color: var(--dim); } .ec-tr .bad { color: var(--bad); } .ec-tr .good { color: var(--good); }
+.ec-th { font-size: 12px; color: var(--dim); position: sticky; top: 0; background: var(--panel-strong); }
+@media (max-width: 760px) { .ec-tr { grid-template-columns: 1.8fr .5fr 1fr 1fr; } .ec-tr > span:nth-child(2) { display: none; } .ec-mkt .ec-tr { grid-template-columns: 1.6fr 1fr 1fr 1fr; } .ec-mkt .ec-tr > span:nth-child(2) { display: inline; } .ec-mkt .ec-tr > span:nth-child(5) { display: none; } }
+
+/* charts */
+.ec-chart { position: relative; }
+.ec-chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.ec-chart .ec-grid { stroke: var(--ec-grid); stroke-width: 1; shape-rendering: crispEdges; }
+.ec-chart .ec-ax { fill: var(--dim); font-size: 10px; }
+.ec-chart .ec-end { fill: var(--text); font-size: 11px; font-weight: 600; }
+.ec-chart .ec-cross { stroke: var(--dim); stroke-width: 1; }
+.ec-chart .hidden { display: none; }
+.ec-tip { position: absolute; top: 4px; z-index: 2; display: grid; gap: 3px; padding: 7px 9px; border-radius: 9px; background: var(--panel-strong); border: 1px solid var(--line-2); font-size: 12px; pointer-events: none; min-width: 120px; box-shadow: var(--shadow); }
+.ec-tip span { display: flex; align-items: center; gap: 6px; } .ec-tip em { margin-left: auto; font-style: normal; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ec-tip i, .ec-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: 0 0 auto; }
+.ec-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--dim); } .ec-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ec-empty { padding: 18px 0; text-align: center; }
+.ec-bars { display: grid; gap: 6px; }
+.ec-bar { display: grid; grid-template-columns: minmax(120px, 1.4fr) minmax(40px, 2fr) auto; gap: 8px; align-items: center; font-size: 13px; }
+.ec-bl { line-height: 1.2; overflow-wrap: anywhere; }   /* a long line name wraps rather than being cut off */
+.ec-bt { height: 10px; border-radius: 4px; background: var(--ec-grid); overflow: hidden; } .ec-bt i { display: block; height: 100%; border-radius: 0 4px 4px 0; }
+.ec-bar b { font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+.ec-demand { display: grid; gap: 8px; }
+.ec-dem { display: grid; grid-template-columns: 120px 1fr 52px; gap: 8px; align-items: center; font-size: 13px; }
+.ec-dt { position: relative; height: 12px; border-radius: 4px; background: var(--ec-grid); }
+.ec-dt i { position: absolute; top: 0; bottom: 0; } .ec-dt i.pos { background: var(--ec-pos); border-radius: 0 4px 4px 0; } .ec-dt i.neg { background: var(--ec-neg); border-radius: 4px 0 0 4px; }
+.ec-dt s { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--dim); }
+.ec-dem b { font-variant-numeric: tabular-nums; text-align: right; }
+.ec-stack { display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; margin: 6px 0; }
+.ec-stack i { display: block; height: 100%; min-width: 2px; }
+.ec-taxes input[type="range"] { flex: 1; accent-color: var(--ec-1); } .ec-pct { min-width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* the selection panel */
+.ec-card { display: grid; gap: 6px; }
+.ec-cardh { display: flex; align-items: baseline; gap: 4px; min-width: 0; } .ec-cardh b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ec-card .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ec-card .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13px; } .ec-card .kv b { text-align: right; } .ec-card .kv small { color: var(--dim); font-weight: 400; }
+
+/* Settings → Economy */
+.econadm details { border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; } .econadm details > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.econadm .ea-stmt { display: grid; gap: 3px; margin-top: 8px; max-height: 260px; overflow-y: auto; font-size: 12px; } .econadm .ea-stmt .dim { color: var(--dim); }
+
+/* working a shift (ui/work.js): a panel at the foot of the screen, the world still in view */
+#workpanel { position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%); width: min(560px, calc(100vw - 16px)); z-index: 6; display: grid; gap: 8px; padding: 12px 14px; }
+#workpanel .wk-head { display: flex; align-items: center; gap: 8px; } #workpanel .wk-head b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } #workpanel .wk-head .dim { color: var(--dim); font-size: 12px; margin-right: auto; white-space: nowrap; }
+#workpanel .wk-order { display: flex; align-items: baseline; gap: 8px; font-size: 15px; } #workpanel .wk-n { color: var(--dim); font-variant-numeric: tabular-nums; } #workpanel .wk-order .dim { color: var(--dim); }
+#workpanel .wk-steps { display: flex; gap: 4px; } #workpanel .wk-steps i { flex: 1; height: 4px; border-radius: 2px; background: var(--ec-grid); } #workpanel .wk-steps i.done { background: var(--ec-1); } #workpanel .wk-steps i.now { background: var(--dim); }
+#workpanel .wk-label { display: grid; gap: 2px; font-weight: 600; } #workpanel .wk-label .dim { color: var(--dim); font-weight: 400; font-size: 12px; }
+#workpanel .wk-play { display: grid; gap: 8px; min-height: 58px; align-content: center; }
+#workpanel .wk-track { position: relative; height: 22px; border-radius: 6px; background: var(--ec-grid); overflow: hidden; }
+#workpanel .wk-band { position: absolute; top: 0; bottom: 0; background: var(--good); opacity: .55; }
+#workpanel .wk-needle { position: absolute; top: -2px; bottom: -2px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--strong); box-shadow: 0 0 0 2px var(--ec-surface); }
+#workpanel .wk-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--ec-1); opacity: .9; }
+#workpanel .wk-go { min-height: 44px; font-size: 15px; touch-action: none; user-select: none; } #workpanel kbd { font-size: 11px; opacity: .7; margin-left: 6px; }
+#workpanel .wk-opts, #workpanel .wk-seq { display: flex; flex-wrap: wrap; gap: 6px; } #workpanel .wk-opt, #workpanel .wk-it { min-height: 42px; flex: 1 1 auto; }
+#workpanel .wk-it { position: relative; font-size: 18px; } #workpanel .wk-it small { position: absolute; top: 2px; right: 6px; font-size: 11px; color: var(--dim); }
+#workpanel .wk-it.lit { outline: 2px solid var(--ec-1); background: var(--btn-on-a, var(--btn)); }
+#workpanel .wk-memo { padding: 10px 12px; border-radius: 10px; border: 1px dashed var(--line-3); font-size: 15px; }
+#workpanel .wk-res { display: grid; gap: 3px; padding: 6px 0; } #workpanel .wk-res b { font-size: 20px; letter-spacing: 2px; color: var(--gold); } #workpanel .wk-res em { color: var(--dim); font-size: 13px; }
+#workpanel .wk-sum { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; } #workpanel .wk-sum div { display: grid; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--btn); } #workpanel .wk-sum span { font-size: 12px; color: var(--dim); } #workpanel .wk-sum b { font-size: 17px; }
+@media (max-width: 760px) { #workpanel { bottom: calc(6px + env(safe-area-inset-bottom)); } }
+.ec-shift .lib-acts .btn.off { opacity: .55; } .ec-shift.closed { opacity: .75; }
+
+/* property for Virtual Coin: the lot card's and the flat window's parts */
+.lc-econ .lc-sale { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--btn); }
+.lc-econ .lc-sale .dim, .flat-econ .dim { color: var(--dim); font-size: 12px; }
+.lc-econ .row, .flat-econ .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.flat-econ p { margin: 4px 0; } .flat-econ .bad { color: var(--bad); }
+
+/* the Virtual Coin's symbol (its logo, client/img/vc-*.png) beside text */
+.vc-ico { width: 1.15em; height: 1.15em; vertical-align: -0.2em; display: inline-block; flex: none; user-select: none; }
+.vc-ico.lg { width: 1.35em; height: 1.35em; vertical-align: -0.28em; }
+#topbar .ec-chip .ec-coin { display: inline-flex; } #topbar .ec-chip .vc-ico { width: 18px; height: 18px; vertical-align: 0; }
+.toast-ico { width: 1.2em; height: 1.2em; vertical-align: -0.25em; margin-right: 6px; }

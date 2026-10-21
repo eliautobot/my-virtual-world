@@ -1,0 +1,15 @@
+{
+ "id": "crab",
+ "name": "Shore crabs",
+ "tier": "ambient",
+ "model": "crab",
+ "behaviour": "scuttle",
+ "habitats": ["beach"],
+ "hours": [0, 24],
+ "weather": ["clear", "partly", "overcast", "rain", "fog"],
+ "group": [3, 8],
+ "perKm2": 140,
+ "size": 0.3,
+ "colors": ["#c8552c", "#d9763a", "#b8462a", "#c9a46a"],
+ "speed": 1.5
+}

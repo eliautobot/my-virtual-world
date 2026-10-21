@@ -1,0 +1,398 @@
+{
+ "frames": [
+  {
+   "type": "session.info",
+   "session_id": "a82f22e0",
+   "payload": {
+    "model": "stub-1",
+    "provider": "custom",
+    "reasoning_effort": "",
+    "running": true,
+    "title": "",
+    "stored_session_id": "20261017_034117_1d47b1",
+    "usage": {
+     "model": "stub-1",
+     "input": 0,
+     "output": 0,
+     "reasoning": 0,
+     "prompt": 0,
+     "completion": 0,
+     "total": 0,
+     "calls": 0,
+     "compressions": 0,
+     "active_subagents": 0
+    }
+   }
+  },
+  {
+   "type": "message.start",
+   "session_id": "a82f22e0",
+   "payload": {}
+  },
+  {
+   "type": "session.title",
+   "session_id": "a82f22e0",
+   "payload": {
+    "session_id": "20261017_034117_1d47b1",
+    "title": "hello there [[think]] [[long:1]]"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "٩(๑❛ᴗ❛๑)۶ analyzing..."
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "reasoning.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "Let "
+   }
+  },
+  {
+   "type": "reasoning.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "me "
+   }
+  },
+  {
+   "type": "reasoning.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "think "
+   }
+  },
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  },
+  {
+   "type": "reasoning.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "about "
+   }
+  },
+  {
+   "type": "reasoning.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "this "
+   }
+  },
+  {
+   "type": "reasoning.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "step "
+   }
+  },
+  {
+   "type": "reasoning.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "by "
+   }
+  },
+  {
+   "type": "reasoning.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "step."
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "Stub reply 4"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "14 to: hello"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": " there\n\nPara"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "graph 1: The"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": " quick brown"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": " fox jumps o"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "ver the lazy"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": " dog. The qu"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "ick brown fo"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "x jumps over"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": " the lazy do"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "g. The quick"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": " brown fox j"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "umps over th"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "e lazy dog. "
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "The quick br"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "own fox jump"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "s over the l"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "azy dog. The"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": " quick brown"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": " fox jumps o"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "ver the lazy"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": " dog. The qu"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "ick brown fo"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "x jumps over"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": " the lazy do"
+   }
+  },
+  {
+   "type": "message.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "g."
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "reasoning.available",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "Stub reply 414 to: hello there\n\nParagraph 1: The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog."
+   }
+  },
+  {
+   "type": "message.complete",
+   "session_id": "a82f22e0",
+   "payload": {
+    "text": "Stub reply 414 to: hello there\n\nParagraph 1: The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.",
+    "usage": {
+     "model": "stub-1",
+     "input": 14443,
+     "output": 79,
+     "reasoning": 0,
+     "prompt": 14443,
+     "completion": 79,
+     "total": 14522,
+     "calls": 1,
+     "context_used": 14443,
+     "context_max": 256000,
+     "context_percent": 6,
+     "context_source": "provider_usage",
+     "context_estimated": false,
+     "compressions": 0,
+     "avg_latency_s": 1,
+     "avg_tps": 78.3,
+     "active_subagents": 0
+    },
+    "status": "complete",
+    "persisted_turn": {
+     "row_ids": [
+      80,
+      81
+     ],
+     "complete": true,
+     "user_row_id": 80,
+     "final_assistant_row_id": 81
+    },
+    "reasoning": "Let me think about this step by step."
+   }
+  },
+  {
+   "type": "session.title",
+   "session_id": "a82f22e0",
+   "payload": {
+    "session_id": "20261017_034117_1d47b1",
+    "title": "Stub reply 415 to: hello there"
+   }
+  },
+  {
+   "type": "session.info",
+   "session_id": "a82f22e0",
+   "payload": {
+    "model": "stub-1",
+    "provider": "custom",
+    "reasoning_effort": "",
+    "running": false,
+    "title": "hello there [[think]] [[long:1]]",
+    "stored_session_id": "20261017_034117_1d47b1",
+    "usage": {
+     "model": "stub-1",
+     "input": 14443,
+     "output": 79,
+     "reasoning": 0,
+     "prompt": 14443,
+     "completion": 79,
+     "total": 14522,
+     "calls": 1,
+     "context_used": 14443,
+     "context_max": 256000,
+     "context_percent": 6,
+     "context_source": "provider_usage",
+     "context_estimated": false,
+     "compressions": 0,
+     "avg_latency_s": 1,
+     "avg_tps": 78.3,
+     "active_subagents": 0
+    }
+   }
+  },
+  {
+   "type": "sessions.changed",
+   "payload": {}
+  }
+ ]
+}

@@ -1,0 +1,37 @@
+{
+ "id": "sheep",
+ "name": "Sheep",
+ "tier": "shared",
+ "model": "sheep",
+ "behaviour": "graze",
+ "habitats": [
+  "field",
+  "meadow"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "storm",
+  "fog"
+ ],
+ "group": [
+  4,
+  12
+ ],
+ "perKm2": 12,
+ "size": 0.75,
+ "colors": [
+  "#ece8de",
+  "#dcd6c8",
+  "#f3f0e8"
+ ],
+ "speed": 0.6,
+ "run": 4,
+ "flee": 10
+}

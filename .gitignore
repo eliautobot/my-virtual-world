@@ -1,44 +1,17 @@
-# Environment and secrets
+# Runtime data, logs and backups never go into the repository.
+/data/
+/backups/
+*.log
+*.tmp
+*.bak
+# Written by a release build (tools/deploy/release-info.mjs, the Dockerfile)
+/release.json
+# Dependencies
+node_modules/
+# Local configuration
 .env
 .env.*
 !.env.example
-
-# Runtime data
-.local-data/
-.tmp-data/
-data/
-backups/
-memory/
-virtual-world/
-
-# Dependencies and caches
-node_modules/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Local scratch and review artifacts
-.tmp-*
-tmp-*
-.docker-disabled/
-*.bak
-*.bak2
-*.bak3
-*.tmp
-*.log
-
-# Generated media and screenshots
-/*.png
-/*.jpg
-/*.jpeg
-/*.gif
-/*.webp
-/*.mp4
-/*.mov
-
-# OS/editor
-.DS_Store
-.vscode/
-.idea/
+# Program notes of the rebuild (plan, progress, evidence). They hold installation-specific and personal details, so
+# they are kept in their own repository inside docs/parity and are never part of the product.
+/docs/parity/

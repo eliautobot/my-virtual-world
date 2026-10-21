@@ -1,0 +1,331 @@
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* Themes (PLAN WP1.9, DECISIONS C39, C117): every colour of the interface is a design token here, and a theme is one set
+   of values for those tokens. Three themes ship: Dark (the default — exactly the values the shell was built with, so the
+   dark look does not change), Light and High contrast.
+
+   A theme is chosen in Settings → Display (C117: a row there, not a tab of its own and not a top-bar button), saved with
+   the account (guests: in this browser), and applied by setting data-theme on <html>: js/core/theme.js. index.html sets it
+   before the first paint from the browser's own copy, so there is no flash of the wrong theme; a signed-in account's
+   choice replaces the browser's a moment later.
+
+   Only the interface is themed. The 3D world (buildings, terrain, residents, sky, the day/night cycle) is drawn on the
+   canvas and keeps its own colours.
+
+   Names: --text/--dim/--accent are the older set the shell was written with; --vw-* are the shell's own aliases; the rest
+   are the surfaces, washes and status colours that used to be literal values in app.css.
+
+   Transparency (Settings → Display, under Theme; 2026-10-08): the backgrounds of windows, panels and buttons — --bg,
+   --bg2, --panel-strong, --btn, --btn-hover, --thead — are each theme's base value (--bg-0 …) with a share of its
+   opacity kept, --ui-a (100 %: as the theme draws them; at most 60 % see-through). js/core/theme.js sets --ui-a on
+   <html> (index.html before the first paint). High contrast stays solid. */
+:root {
+  /* type (theme-independent): the shell's font since the baseline. Lost in v2.0.0-alpha.5 when the tokens moved here,
+     which left the browser's default serif; restored 2026-09-29. */
+  font-family: Inter, "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  /* the parts the browser draws itself (scrollbars, native controls) follow the theme (C113) */
+  color-scheme: dark;
+  --scroll-thumb: rgba(255, 255, 255, 0.18);
+  scrollbar-color: var(--scroll-thumb) transparent;   /* inherited by every scrolling area (Settings, docks, lists) */
+
+  /* layout (theme-independent) */
+  --r: 12px;
+  --topbar-height: 56px;
+  --dock-lw: 320px;
+  --dock-rw: 330px;
+  /* the big windows — the Agent Studio, the Map, Settings — one size and place (2026-10-08): under the top bar */
+  --win-w: min(1260px, calc(100vw - 24px));
+  --win-h: min(840px, calc(100dvh - var(--topbar-height, 56px) - 20px));
+
+  /* base */
+  --page: #111111;
+  --bg-0: rgba(24, 24, 24, 0.86);
+  --bg2-0: rgba(33, 33, 33, 0.95);
+  --panel-strong-0: rgba(30, 30, 30, 0.95);
+  --line: rgba(255, 255, 255, 0.1);
+  --line-2: rgba(255, 255, 255, 0.12);
+  --line-3: rgba(255, 255, 255, 0.14);
+  --text: #ececec;
+  --dim: #a6a6a6;
+  --muted: #5e5e5e;
+  --muted-2: #737373;
+  --accent: #f0f0f0;
+  --accent2: #d4d4d4;
+  --strong: #ffffff;
+  --on-primary: #141414;
+  --on-bright: #111111;
+  --gold: #ffcc4d;
+  --bad: #ff6b6b;
+  --good: #5ee08f;
+  --good-alt: #7ad37a;
+  --primary: #e6e6e6;
+  --primary-hover: #ffffff;
+  --avatar: #d9d9d9;
+
+  /* surfaces and washes over the world */
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-c: rgba(0, 0, 0, 0.35);
+  --shadow-c2: rgba(0, 0, 0, 0.34);
+  --shadow-c3: rgba(0, 0, 0, 0.36);
+  --shadow-c4: rgba(0, 0, 0, 0.6);
+  --shadow-c5: rgba(0, 0, 0, 0.3);
+  --btn-0: rgba(255, 255, 255, 0.06);
+  --btn-hover-0: rgba(255, 255, 255, 0.12);
+  --btn-on-a: rgba(255, 255, 255, 0.24);
+  --btn-on-b: rgba(255, 255, 255, 0.14);
+  --bar: rgba(255, 255, 255, 0.08);
+  --lbl-shadow: rgba(255, 255, 255, 0.18);
+  --ghost: rgba(255, 255, 255, 0.05);
+  --card: rgba(255, 255, 255, 0.1);
+  --card-on: rgba(255, 255, 255, 0.16);
+  --wash: rgba(255, 255, 255, 0.04);
+  --hover-1: rgba(255, 255, 255, 0.07);
+  --hover-2: rgba(255, 255, 255, 0.09);
+  --press: rgba(255, 255, 255, 0.1);
+  --on-1: rgba(255, 255, 255, 0.16);
+  --on-2: rgba(255, 255, 255, 0.18);
+  --on-3: rgba(255, 255, 255, 0.34);
+  --hl: rgba(255, 255, 255, 0.16);
+  --hl-line: rgba(255, 255, 255, 0.55);
+  --focus: rgba(255, 255, 255, 0.7);
+  --sel: rgba(255, 255, 255, 0.3);
+  --curtain: #000000;
+  --text-shadow: rgba(0, 0, 0, 0.65);
+  --field: rgba(0, 0, 0, 0.25);
+  --pill: rgba(0, 0, 0, 0.22);
+  --scrim: rgba(0, 0, 0, 0.55);
+  --scrim-2: rgba(0, 0, 0, 0.3);
+  --joy-bg: rgba(22, 22, 22, 0.4);
+  --joy-knob: rgba(255, 255, 255, 0.38);
+  --pbtn-on: rgba(255, 255, 255, 0.34);
+
+  /* labels and bubbles that float over the world */
+  --label: rgba(22, 22, 22, 0.8);
+  --label-2: rgba(22, 22, 22, 0.62);
+  --label-3: rgba(22, 22, 22, 0.9);
+  --label-4: rgba(22, 22, 22, 0.84);
+  --bubble: #1a1a1a;
+  --bubble-line: rgba(0, 0, 0, 0.3);
+  --sel-tag-bg: rgba(242, 242, 242, 0.96);
+  --sel-tag-line: #ffffff;
+  --sel-tag-fg: #111111;
+
+  /* status colours (soft fills and their lines) */
+  --good-soft: rgba(94, 224, 143, 0.18);
+  --good-line: rgba(94, 224, 143, 0.6);
+  --gold-soft: rgba(255, 204, 77, 0.16);
+  --gold-line: rgba(255, 204, 77, 0.55);
+  --bad-soft: rgba(255, 107, 107, 0.14);
+  --bad-line: rgba(255, 107, 107, 0.45);
+  --bad-line-2: rgba(255, 107, 107, 0.6);
+
+  /* art: the loading card, the customizer preview, table headers */
+  --loading-a: #2b2b2b;
+  --loading-b: #0f0f0f;
+  --preview-a: #3d3d3d;
+  --preview-b: #171717;
+  --thead-0: #1d1d1d;
+
+  /* the shell's own names (WP1.7) */
+  --vw-bg: var(--page);
+  --vw-panel: var(--bg);
+  --vw-panel-strong: var(--panel-strong);
+  --vw-border: var(--line-2);
+  --vw-border-strong: var(--on-3);
+  --vw-accent: #f5f5f5;
+}
+
+/* Light: the same layout on light surfaces. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --scroll-thumb: rgba(0, 0, 0, 0.28);
+  --page: #eef0f3;
+  --bg-0: rgba(255, 255, 255, 0.93);
+  --bg2-0: rgba(252, 252, 253, 0.98);
+  --panel-strong-0: rgba(255, 255, 255, 0.98);
+  --line: rgba(0, 0, 0, 0.14);
+  --line-2: rgba(0, 0, 0, 0.16);
+  --line-3: rgba(0, 0, 0, 0.2);
+  --text: #17181a;
+  --dim: #5c6066;
+  --muted: #6b7075;
+  --muted-2: #8a8f95;
+  --accent: #1a1c1f;
+  --accent2: #3c4046;
+  --strong: #000000;
+  --on-primary: #ffffff;
+  --on-bright: #ffffff;
+  --gold: #8a6414;
+  --bad: #b3271b;
+  --good: #1e7d4f;
+  --good-alt: #1e7d4f;
+  --primary: #22262b;
+  --primary-hover: #000000;
+  --avatar: #23262a;
+
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  --shadow-c: rgba(0, 0, 0, 0.18);
+  --shadow-c2: rgba(0, 0, 0, 0.16);
+  --shadow-c3: rgba(0, 0, 0, 0.18);
+  --shadow-c4: rgba(0, 0, 0, 0.35);
+  --shadow-c5: rgba(0, 0, 0, 0.18);
+  --btn-0: rgba(0, 0, 0, 0.05);
+  --btn-hover-0: rgba(0, 0, 0, 0.09);
+  --btn-on-a: rgba(0, 0, 0, 0.16);
+  --btn-on-b: rgba(0, 0, 0, 0.1);
+  --bar: rgba(0, 0, 0, 0.1);
+  --lbl-shadow: rgba(0, 0, 0, 0.14);
+  --ghost: rgba(0, 0, 0, 0.04);
+  --card: rgba(0, 0, 0, 0.06);
+  --card-on: rgba(0, 0, 0, 0.12);
+  --wash: rgba(0, 0, 0, 0.035);
+  --hover-1: rgba(0, 0, 0, 0.06);
+  --hover-2: rgba(0, 0, 0, 0.08);
+  --press: rgba(0, 0, 0, 0.1);
+  --on-1: rgba(0, 0, 0, 0.1);
+  --on-2: rgba(0, 0, 0, 0.14);
+  --on-3: rgba(0, 0, 0, 0.3);
+  --hl: rgba(0, 0, 0, 0.1);
+  --hl-line: rgba(0, 0, 0, 0.4);
+  --focus: rgba(0, 0, 0, 0.65);
+  --sel: rgba(0, 0, 0, 0.18);
+  --curtain: #0b0b0b;
+  --text-shadow: rgba(0, 0, 0, 0.5);
+  --field: rgba(0, 0, 0, 0.04);
+  --pill: rgba(0, 0, 0, 0.05);
+  --scrim: rgba(0, 0, 0, 0.35);
+  --scrim-2: rgba(0, 0, 0, 0.2);
+  --joy-bg: rgba(255, 255, 255, 0.7);
+  --joy-knob: rgba(0, 0, 0, 0.3);
+  --pbtn-on: rgba(0, 0, 0, 0.25);
+
+  --label: rgba(255, 255, 255, 0.95);
+  --label-2: rgba(255, 255, 255, 0.85);
+  --label-3: rgba(255, 255, 255, 0.97);
+  --label-4: rgba(255, 255, 255, 0.9);
+  --bubble: #ffffff;
+  --bubble-line: rgba(0, 0, 0, 0.16);
+  --sel-tag-bg: rgba(20, 20, 20, 0.94);
+  --sel-tag-line: #000000;
+  --sel-tag-fg: #ffffff;
+
+  --good-soft: rgba(30, 125, 79, 0.14);
+  --good-line: rgba(30, 125, 79, 0.5);
+  --gold-soft: rgba(138, 100, 20, 0.14);
+  --gold-line: rgba(138, 100, 20, 0.5);
+  --bad-soft: rgba(179, 39, 27, 0.12);
+  --bad-line: rgba(179, 39, 27, 0.45);
+  --bad-line-2: rgba(179, 39, 27, 0.6);
+
+  --loading-a: #dfe2e7;
+  --loading-b: #f6f7f9;
+  --preview-a: #dcdfe4;
+  --preview-b: #f4f5f7;
+  --thead-0: #f7f8f9;
+
+  --vw-accent: #101214;
+}
+
+/* High contrast: solid surfaces, white text on black, bright borders and focus rings (for low vision and bright rooms).
+   Surfaces stop being translucent, and every wash is stronger so the selected states stay obvious. */
+:root[data-theme="contrast"] {
+  color-scheme: dark;
+  --scroll-thumb: rgba(255, 255, 255, 0.7);
+  --page: #000000;
+  --bg-0: #000000;
+  --bg2-0: #000000;
+  --panel-strong-0: #000000;
+  --line: #ffffff;
+  --line-2: #ffffff;
+  --line-3: #ffffff;
+  --text: #ffffff;
+  --dim: #f0f0f0;
+  --muted: #d0d0d0;
+  --muted-2: #e0e0e0;
+  --accent: #ffffff;
+  --accent2: #ffd400;
+  --strong: #ffffff;
+  --on-primary: #000000;
+  --on-bright: #000000;
+  --gold: #ffd400;
+  --bad: #ff8a80;
+  --good: #6cff9e;
+  --good-alt: #6cff9e;
+  --primary: #ffffff;
+  --primary-hover: #ffffff;
+  --avatar: #ffffff;
+
+  --shadow: 0 0 0 1px #ffffff;
+  --shadow-c: rgba(255, 255, 255, 0.6);
+  --shadow-c2: rgba(255, 255, 255, 0.6);
+  --shadow-c3: rgba(255, 255, 255, 0.6);
+  --shadow-c4: rgba(0, 0, 0, 0.9);
+  --shadow-c5: rgba(0, 0, 0, 0.8);
+  --btn-0: #000000;
+  --btn-hover-0: #262626;
+  --btn-on-a: #4d4d4d;
+  --btn-on-b: #333333;
+  --bar: #ffffff;
+  --lbl-shadow: #000000;
+  --ghost: #0a0a0a;
+  --card: #1a1a1a;
+  --card-on: #404040;
+  --wash: #0d0d0d;
+  --hover-1: #262626;
+  --hover-2: #333333;
+  --press: #404040;
+  --on-1: #4d4d4d;
+  --on-2: #595959;
+  --on-3: #ffffff;
+  --hl: #4d4d4d;
+  --hl-line: #ffffff;
+  --focus: #ffd400;
+  --sel: #595959;
+  --curtain: #000000;
+  --text-shadow: rgba(0, 0, 0, 0.9);
+  --field: #000000;
+  --pill: #000000;
+  --scrim: rgba(0, 0, 0, 0.85);
+  --scrim-2: rgba(0, 0, 0, 0.8);
+  --joy-bg: #000000;
+  --joy-knob: #ffffff;
+  --pbtn-on: #ffffff;
+
+  --label: #000000;
+  --label-2: #000000;
+  --label-3: #000000;
+  --label-4: #000000;
+  --bubble: #000000;
+  --bubble-line: #ffffff;
+  --sel-tag-bg: #ffffff;
+  --sel-tag-line: #ffffff;
+  --sel-tag-fg: #000000;
+
+  --good-soft: #003a1c;
+  --good-line: #6cff9e;
+  --gold-soft: #3a2f00;
+  --gold-line: #ffd400;
+  --bad-soft: #3a0d0a;
+  --bad-line: #ff8a80;
+  --bad-line-2: #ff8a80;
+
+  --loading-a: #000000;
+  --loading-b: #000000;
+  --preview-a: #1a1a1a;
+  --preview-b: #000000;
+  --thead-0: #000000;
+
+  --vw-accent: #ffffff;
+}
+
+/* Transparency: the surfaces from each theme's base values, --ui-a of their opacity kept (see the top of this file). */
+:root {
+  --ui-a: 100%;
+  --bg: color-mix(in srgb, var(--bg-0) var(--ui-a), transparent);
+  --bg2: color-mix(in srgb, var(--bg2-0) var(--ui-a), transparent);
+  --panel-strong: color-mix(in srgb, var(--panel-strong-0) var(--ui-a), transparent);
+  --btn: color-mix(in srgb, var(--btn-0) var(--ui-a), transparent);
+  --btn-hover: color-mix(in srgb, var(--btn-hover-0) var(--ui-a), transparent);
+  --thead: color-mix(in srgb, var(--thead-0) var(--ui-a), transparent);
+}
+/* (High contrast is for low vision and bright rooms: its surfaces stay solid whatever the slider says) */
+:root[data-theme="contrast"] { --ui-a: 100% !important; }

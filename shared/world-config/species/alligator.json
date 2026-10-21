@@ -1,0 +1,15 @@
+{
+ "id": "alligator",
+ "name": "Alligator",
+ "tier": "ambient",
+ "model": "alligator",
+ "behaviour": "swim",
+ "habitats": ["lake"],
+ "hours": [7, 20],
+ "weather": ["clear", "partly"],
+ "group": [1, 1],
+ "perKm2": 14,
+ "size": 2.9,
+ "colors": ["#56604a", "#4c5a42", "#5f644a"],
+ "speed": 0.35
+}

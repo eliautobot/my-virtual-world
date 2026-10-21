@@ -1,0 +1,29 @@
+{
+ "id": "swan",
+ "name": "Swans",
+ "tier": "ambient",
+ "model": "duck",
+ "behaviour": "swim",
+ "habitats": [
+  "lake"
+ ],
+ "hours": [
+  5,
+  21
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast"
+ ],
+ "group": [
+  1,
+  3
+ ],
+ "perKm2": 15,
+ "size": 0.75,
+ "colors": [
+  "#f4f4f2"
+ ],
+ "speed": 0.35
+}

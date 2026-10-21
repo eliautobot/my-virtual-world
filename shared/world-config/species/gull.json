@@ -1,0 +1,38 @@
+{
+ "id": "gull",
+ "name": "Gulls",
+ "tier": "ambient",
+ "model": "seagull",
+ "behaviour": "circle",
+ "habitats": [
+  "beach",
+  "shore",
+  "reef"
+ ],
+ "hours": [
+  5.5,
+  20
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain"
+ ],
+ "group": [
+  2,
+  6
+ ],
+ "perKm2": 60,
+ "size": 0.42,
+ "colors": [
+  "#f4f4f2",
+  "#ececea"
+ ],
+ "height": [
+  7,
+  26
+ ],
+ "speed": 10,
+ "sound": "gull"
+}

@@ -1,0 +1,15 @@
+{
+ "id": "reef-fish",
+ "name": "Reef fish",
+ "tier": "ambient",
+ "model": "reeffish",
+ "behaviour": "school",
+ "habitats": ["reef"],
+ "hours": [5.5, 20.5],
+ "weather": ["clear", "partly", "overcast", "rain"],
+ "group": [6, 14],
+ "perKm2": 170,
+ "size": 0.32,
+ "colors": ["#ff8a2a", "#ffd23c", "#3fb6ff", "#ff5c8a", "#9a6cff", "#28d1b0"],
+ "speed": 1.2
+}

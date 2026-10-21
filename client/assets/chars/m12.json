@@ -1,0 +1,659 @@
+{
+ "kind": "m12",
+ "scale": 1.7520969245107176,
+ "bones": 65,
+ "names": [
+  "mixamorig:Hips",
+  "mixamorig:LeftUpLeg",
+  "mixamorig:LeftLeg",
+  "mixamorig:LeftFoot",
+  "mixamorig:LeftToeBase",
+  "mixamorig:LeftToe_End",
+  "mixamorig:RightUpLeg",
+  "mixamorig:RightLeg",
+  "mixamorig:RightFoot",
+  "mixamorig:RightToeBase",
+  "mixamorig:RightToe_End",
+  "mixamorig:Spine",
+  "mixamorig:Spine1",
+  "mixamorig:Spine2",
+  "mixamorig:LeftShoulder",
+  "mixamorig:LeftArm",
+  "mixamorig:LeftForeArm",
+  "mixamorig:LeftHand",
+  "mixamorig:LeftHandIndex1",
+  "mixamorig:LeftHandIndex2",
+  "mixamorig:LeftHandIndex3",
+  "mixamorig:LeftHandIndex4",
+  "mixamorig:LeftHandMiddle1",
+  "mixamorig:LeftHandMiddle2",
+  "mixamorig:LeftHandMiddle3",
+  "mixamorig:LeftHandMiddle4",
+  "mixamorig:LeftHandPinky1",
+  "mixamorig:LeftHandPinky2",
+  "mixamorig:LeftHandPinky3",
+  "mixamorig:LeftHandPinky4",
+  "mixamorig:LeftHandRing1",
+  "mixamorig:LeftHandRing2",
+  "mixamorig:LeftHandRing3",
+  "mixamorig:LeftHandRing4",
+  "mixamorig:LeftHandThumb1",
+  "mixamorig:LeftHandThumb2",
+  "mixamorig:LeftHandThumb3",
+  "mixamorig:LeftHandThumb4",
+  "mixamorig:Neck",
+  "mixamorig:Head",
+  "mixamorig:HeadTop_End",
+  "mixamorig:RightShoulder",
+  "mixamorig:RightArm",
+  "mixamorig:RightForeArm",
+  "mixamorig:RightHand",
+  "mixamorig:RightHandIndex1",
+  "mixamorig:RightHandIndex2",
+  "mixamorig:RightHandIndex3",
+  "mixamorig:RightHandIndex4",
+  "mixamorig:RightHandMiddle1",
+  "mixamorig:RightHandMiddle2",
+  "mixamorig:RightHandMiddle3",
+  "mixamorig:RightHandMiddle4",
+  "mixamorig:RightHandPinky1",
+  "mixamorig:RightHandPinky2",
+  "mixamorig:RightHandPinky3",
+  "mixamorig:RightHandPinky4",
+  "mixamorig:RightHandRing1",
+  "mixamorig:RightHandRing2",
+  "mixamorig:RightHandRing3",
+  "mixamorig:RightHandRing4",
+  "mixamorig:RightHandThumb1",
+  "mixamorig:RightHandThumb2",
+  "mixamorig:RightHandThumb3",
+  "mixamorig:RightHandThumb4"
+ ],
+ "textured": true,
+ "land": {
+  "waist": 1.044562119926093,
+  "neckY": 1.459046025485452,
+  "neck": 1.459046025485452
+ },
+ "lods": [
+  {
+   "verts": 24910,
+   "tris": 40000,
+   "pos": {
+    "off": 0,
+    "len": 298920,
+    "type": "float32",
+    "shape": [
+     24910,
+     3
+    ]
+   },
+   "nrm": {
+    "off": 298920,
+    "len": 298920,
+    "type": "float32",
+    "shape": [
+     24910,
+     3
+    ]
+   },
+   "j": {
+    "off": 597840,
+    "len": 99640,
+    "type": "uint8",
+    "shape": [
+     24910,
+     4
+    ]
+   },
+   "w": {
+    "off": 697480,
+    "len": 99640,
+    "type": "uint8",
+    "shape": [
+     24910,
+     4
+    ]
+   },
+   "mask": {
+    "off": 797120,
+    "len": 99640,
+    "type": "uint8",
+    "shape": [
+     24910,
+     4
+    ]
+   },
+   "limb": {
+    "off": 896760,
+    "len": 199280,
+    "type": "float32",
+    "shape": [
+     24910,
+     2
+    ]
+   },
+   "info": {
+    "off": 1096040,
+    "len": 298920,
+    "type": "float32",
+    "shape": [
+     24910,
+     3
+    ]
+   },
+   "cov": {
+    "off": 1394960,
+    "len": 49820,
+    "type": "uint8",
+    "shape": [
+     24910,
+     2
+    ]
+   },
+   "idx": {
+    "off": 1444780,
+    "len": 240000,
+    "type": "uint16",
+    "shape": [
+     40000,
+     3
+    ]
+   },
+   "uv": {
+    "off": 1684780,
+    "len": 199280,
+    "type": "float32",
+    "shape": [
+     24910,
+     2
+    ]
+   }
+  },
+  {
+   "verts": 6840,
+   "tris": 9000,
+   "pos": {
+    "off": 1884060,
+    "len": 82080,
+    "type": "float32",
+    "shape": [
+     6840,
+     3
+    ]
+   },
+   "nrm": {
+    "off": 1966140,
+    "len": 82080,
+    "type": "float32",
+    "shape": [
+     6840,
+     3
+    ]
+   },
+   "j": {
+    "off": 2048220,
+    "len": 27360,
+    "type": "uint8",
+    "shape": [
+     6840,
+     4
+    ]
+   },
+   "w": {
+    "off": 2075580,
+    "len": 27360,
+    "type": "uint8",
+    "shape": [
+     6840,
+     4
+    ]
+   },
+   "mask": {
+    "off": 2102940,
+    "len": 27360,
+    "type": "uint8",
+    "shape": [
+     6840,
+     4
+    ]
+   },
+   "limb": {
+    "off": 2130300,
+    "len": 54720,
+    "type": "float32",
+    "shape": [
+     6840,
+     2
+    ]
+   },
+   "info": {
+    "off": 2185020,
+    "len": 82080,
+    "type": "float32",
+    "shape": [
+     6840,
+     3
+    ]
+   },
+   "cov": {
+    "off": 2267100,
+    "len": 13680,
+    "type": "uint8",
+    "shape": [
+     6840,
+     2
+    ]
+   },
+   "idx": {
+    "off": 2280780,
+    "len": 54000,
+    "type": "uint16",
+    "shape": [
+     9000,
+     3
+    ]
+   },
+   "uv": {
+    "off": 2334780,
+    "len": 54720,
+    "type": "float32",
+    "shape": [
+     6840,
+     2
+    ]
+   }
+  },
+  {
+   "verts": 2667,
+   "tris": 2500,
+   "pos": {
+    "off": 2389500,
+    "len": 32004,
+    "type": "float32",
+    "shape": [
+     2667,
+     3
+    ]
+   },
+   "nrm": {
+    "off": 2421504,
+    "len": 32004,
+    "type": "float32",
+    "shape": [
+     2667,
+     3
+    ]
+   },
+   "j": {
+    "off": 2453508,
+    "len": 10668,
+    "type": "uint8",
+    "shape": [
+     2667,
+     4
+    ]
+   },
+   "w": {
+    "off": 2464176,
+    "len": 10668,
+    "type": "uint8",
+    "shape": [
+     2667,
+     4
+    ]
+   },
+   "mask": {
+    "off": 2474844,
+    "len": 10668,
+    "type": "uint8",
+    "shape": [
+     2667,
+     4
+    ]
+   },
+   "limb": {
+    "off": 2485512,
+    "len": 21336,
+    "type": "float32",
+    "shape": [
+     2667,
+     2
+    ]
+   },
+   "info": {
+    "off": 2506848,
+    "len": 32004,
+    "type": "float32",
+    "shape": [
+     2667,
+     3
+    ]
+   },
+   "cov": {
+    "off": 2538852,
+    "len": 5334,
+    "type": "uint8",
+    "shape": [
+     2667,
+     2
+    ]
+   },
+   "idx": {
+    "off": 2544188,
+    "len": 15000,
+    "type": "uint16",
+    "shape": [
+     2500,
+     3
+    ]
+   },
+   "uv": {
+    "off": 2559188,
+    "len": 21336,
+    "type": "float32",
+    "shape": [
+     2667,
+     2
+    ]
+   }
+  }
+ ],
+ "clips": [
+  {
+   "name": "idle",
+   "off": 0,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "walk",
+   "off": 144,
+   "len": 56,
+   "dur": 2.3333,
+   "stride": 2.8087
+  },
+  {
+   "name": "run",
+   "off": 200,
+   "len": 30,
+   "dur": 1.25,
+   "stride": 5.445
+  },
+  {
+   "name": "sit",
+   "off": 230,
+   "len": 86,
+   "dur": 7.1667,
+   "stride": 0.0
+  },
+  {
+   "name": "lie",
+   "off": 316,
+   "len": 32,
+   "dur": 4.0,
+   "stride": 0.0
+  },
+  {
+   "name": "jump",
+   "off": 348,
+   "len": 26,
+   "dur": 2.2083,
+   "stride": 0.0
+  },
+  {
+   "name": "dance_01",
+   "off": 374,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "dance_02",
+   "off": 518,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "dance_03",
+   "off": 662,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "dance_04",
+   "off": 806,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "dance_05",
+   "off": 950,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "dance_06",
+   "off": 1094,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "cheer",
+   "off": 1238,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "clap",
+   "off": 1382,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "bow",
+   "off": 1526,
+   "len": 72,
+   "dur": 6.0,
+   "stride": 0.0
+  },
+  {
+   "name": "agree",
+   "off": 1598,
+   "len": 48,
+   "dur": 4.0,
+   "stride": 0.0
+  },
+  {
+   "name": "greet_02",
+   "off": 1646,
+   "len": 67,
+   "dur": 5.5833,
+   "stride": 0.0
+  },
+  {
+   "name": "wave_goodbye_01",
+   "off": 1713,
+   "len": 79,
+   "dur": 6.5833,
+   "stride": 0.0
+  },
+  {
+   "name": "make_a_call_01",
+   "off": 1792,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "play_mobile_game",
+   "off": 1936,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "look_around",
+   "off": 2080,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "wait",
+   "off": 2224,
+   "len": 72,
+   "dur": 6.0,
+   "stride": 0.0
+  },
+  {
+   "name": "fold_arms",
+   "off": 2296,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "laugh_01",
+   "off": 2440,
+   "len": 67,
+   "dur": 5.5833,
+   "stride": 0.0
+  },
+  {
+   "name": "warm_up",
+   "off": 2507,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "scratch",
+   "off": 2651,
+   "len": 144,
+   "dur": 12.0,
+   "stride": 0.0
+  },
+  {
+   "name": "sit_work",
+   "off": 2795,
+   "len": 80,
+   "dur": 6.6667,
+   "stride": 0.0
+  },
+  {
+   "name": "sit_idle",
+   "off": 2875,
+   "len": 80,
+   "dur": 6.6667,
+   "stride": 0.0
+  },
+  {
+   "name": "sit_talk",
+   "off": 2955,
+   "len": 80,
+   "dur": 6.6667,
+   "stride": 0.0
+  },
+  {
+   "name": "call_stand",
+   "off": 3035,
+   "len": 80,
+   "dur": 6.6667,
+   "stride": 0.0
+  },
+  {
+   "name": "wave_stand",
+   "off": 3115,
+   "len": 26,
+   "dur": 2.1667,
+   "stride": 0.0
+  },
+  {
+   "name": "wave_sit",
+   "off": 3141,
+   "len": 26,
+   "dur": 2.1667,
+   "stride": 0.0
+  },
+  {
+   "name": "wait_02",
+   "off": 3167,
+   "len": 80,
+   "dur": 6.6667,
+   "stride": 0.0
+  },
+  {
+   "name": "clap_02",
+   "off": 3247,
+   "len": 30,
+   "dur": 2.5,
+   "stride": 0.0
+  },
+  {
+   "name": "jump_02",
+   "off": 3277,
+   "len": 30,
+   "dur": 2.4667,
+   "stride": 0.0
+  },
+  {
+   "name": "idle_male",
+   "off": 3307,
+   "len": 80,
+   "dur": 6.6667,
+   "stride": 0.0
+  },
+  {
+   "name": "stand_work",
+   "off": 3387,
+   "len": 80,
+   "dur": 6.6667,
+   "stride": 0.0
+  },
+  {
+   "name": "play_arcade",
+   "off": 3467,
+   "len": 80,
+   "dur": 6.6667,
+   "stride": 0.0
+  },
+  {
+   "name": "greet_male",
+   "off": 3547,
+   "len": 40,
+   "dur": 3.3333,
+   "stride": 0.0
+  }
+ ],
+ "anim": {
+  "w": 4096,
+  "h": 171,
+  "frames": 3587,
+  "data": {
+   "off": 2580524,
+   "len": 5603328,
+   "type": "uint16",
+   "shape": [
+    700416,
+    4
+   ]
+  }
+ },
+ "baseColor": "m12_color.jpg",
+ "normalMap": "m12_normal.jpg",
+ "seatLift": {
+  "sit": 0.0454,
+  "sit_idle": 0.0428,
+  "sit_talk": 0.0405,
+  "wave_sit": 0.0432
+ }
+}

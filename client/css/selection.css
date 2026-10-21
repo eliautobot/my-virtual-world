@@ -1,0 +1,250 @@
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* The selection (2026-10-07): a card that comes in as things are selected (ui.js placeSel and selCard) — on a
+   computer a wide widget across the top under the top bar (2026-10-08), on a phone a compact one in the same place —
+   or the Info panel's Selection section (the preference "What you select shows"); and a person's feeds — what they did
+   and their money lately, in one panel with two tabs, newest at the top (ui/sel-feeds.js).
+   --kc is the colour of what is selected (an agent, a resident, a kind of building).
+   Its parts (ui.js showAgent, showBuilding) are written in the order they stack — the Info panel, a phone, a narrow
+   widget — and the widget places them side by side: a person's who (.title, their Studio, the buttons), how they are
+   (.sel-info: what they said, their needs, job, home, routine) and what they do (.sel-feed); a building's name, people
+   and buttons, its floors (.sel-place) and what other modules add (.sel-slot: its business, your agents who live there). */
+
+.dsec.away { display: none !important; }
+
+/* ---- the widget: across the top, between the side panels (or their edge buttons), following them as they open; it comes
+   down from under the top bar and folds back up (ui.js setSelOpen), its handle staying just under the top bar. No header:
+   its kind is a badge beside the name. --sel-gap: from the top bar to its top — none (2026-10-08: no gap, no coloured
+   edge — as little in the way as it can be): it hangs from the top bar, its top corners square. */
+.selcard { --sel-gap: 0px; position: fixed; z-index: 3;   /* (under the top bar's own menus and search results) */
+  top: calc(var(--topbar-height, 56px) + var(--sel-gap)); left: calc(var(--dock-lt, 35px) + 8px); right: calc(var(--dock-rt, 35px) + 8px);
+  width: auto; max-width: 1240px; margin-inline: auto; max-height: min(340px, 46dvh); display: flex; flex-direction: column; container: sel / inline-size;
+  pointer-events: none;   /* (only the card and the handle take the pointer) */
+  transform: translate3d(0, calc(-100% - var(--sel-gap) + 9px), 0);   /* folded: up under the top bar, the handle just below it */
+  transition: transform .34s cubic-bezier(.4, 0, .2, 1), left .18s ease, right .18s ease; will-change: transform; }
+.selcard.open { transform: none; transition: transform .46s cubic-bezier(.16, 1, .3, 1), left .18s ease, right .18s ease; }
+body.play .selcard { --sel-gap: 62px; }   /* (under play mode's bar at the top right: there it floats, all its corners round) */
+.selcard .insp { --kc: #38bdf8; display: flex; flex-direction: column; min-height: 0; max-height: inherit; overflow: hidden; position: relative; inset: auto; pointer-events: auto;
+  background: var(--panel-strong); border: 1px solid color-mix(in srgb, var(--kc) 30%, var(--line-2)); border-top: 0; border-radius: 0 0 18px 18px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .34), 0 2px 8px rgba(0, 0, 0, .18), 0 0 0 1px rgba(255, 255, 255, .02) inset;
+  transition: border-color .4s, opacity .26s ease .06s, visibility 0s; }
+body.play .selcard .insp { border-top: 1px solid color-mix(in srgb, var(--kc) 30%, var(--line-2)); border-radius: 18px; }
+.selcard:not(.open) .insp { opacity: 0; visibility: hidden; transition: border-color .4s, opacity .2s ease, visibility 0s .34s; }
+.selcard .insp::after { content: ''; position: absolute; inset: 0 0 auto 0; height: 160px; pointer-events: none;
+  background: radial-gradient(560px 150px at 10% -40%, color-mix(in srgb, var(--kc) 15%, transparent), transparent 70%); }
+.selcard .insp .body { position: relative; z-index: 1; padding: 14px 16px 18px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+:is(.insp, .selcard)[data-kind="agent"] { --kc: #a78bfa; }
+:is(.insp, .selcard)[data-kind="resident"] { --kc: #38bdf8; }
+:is(.insp, .selcard)[data-kind="apartment"] { --kc: #f87171; }
+:is(.insp, .selcard):is([data-kind="office"], [data-kind="hq"]) { --kc: #94a3b8; }
+:is(.insp, .selcard)[data-kind="cafe"] { --kc: #e0a96d; }
+:is(.insp, .selcard)[data-kind="restaurant"] { --kc: #fb923c; }
+:is(.insp, .selcard)[data-kind="shop"] { --kc: #f472b6; }
+:is(.insp, .selcard)[data-kind="gym"] { --kc: #4ade80; }
+:is(.insp, .selcard)[data-kind="park"] { --kc: #22c55e; }
+.selcard .insp .title .big { background: color-mix(in srgb, var(--kc) 16%, var(--hover-1)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--kc) 30%, transparent); }
+/* the kind, beside the name */
+.insp .title .name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.insp .title .name > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insp .title .kind { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap;
+  color: color-mix(in srgb, var(--kc) 80%, var(--text)); background: color-mix(in srgb, var(--kc) 13%, transparent); border: 1px solid color-mix(in srgb, var(--kc) 35%, transparent); }
+.insp .title .tags:empty { display: none; }
+.insp .title .tags { margin-top: 5px; }
+
+/* the handle at its lower middle (open / fold), and beside it Auto / Manual */
+.sel-grip { position: absolute; left: 0; right: 0; top: 100%; margin-top: -9px; height: 18px; z-index: 2;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; column-gap: 6px; pointer-events: none; }
+.selcard { --kc: #38bdf8; }
+.sel-handle, .sel-mode { pointer-events: auto; font: inherit; cursor: pointer; background: var(--panel-strong); box-shadow: 0 4px 14px var(--shadow-c5);
+  transition: color .15s, border-color .15s, background .15s, transform .15s; }
+.sel-handle { grid-column: 2; height: 18px; min-width: 66px; max-width: 280px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border-radius: 999px; border: 1px solid color-mix(in srgb, var(--kc) 40%, var(--line-3)); color: var(--dim); font-size: 11px; }
+.sel-handle:hover, .sel-handle:focus-visible { color: var(--text); border-color: color-mix(in srgb, var(--kc) 70%, var(--line-3)); }
+.sel-handle:active { transform: scale(.96); }
+.sel-bar { flex: none; width: 26px; height: 4px; border-radius: 4px; background: currentColor; opacity: .75; }
+.sel-handle.peek .sel-bar { width: 14px; }
+.sel-peek { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 600; }
+.sel-peek:empty { display: none; }
+.sel-mode { grid-column: 3; justify-self: start; height: 16px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--dim);
+  font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.sel-mode:hover, .sel-mode:focus-visible { color: var(--text); border-color: var(--line-3); }
+.sel-mode[aria-pressed="false"] { color: color-mix(in srgb, var(--gold) 85%, var(--text)); border-color: color-mix(in srgb, var(--gold) 40%, var(--line-2)); }
+
+/* nothing selected (opened by hand, or Manual): what it shows, and the account's agents to pick */
+.sel-empty { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.sel-empty-ic { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 19px;
+  background: color-mix(in srgb, var(--kc) 14%, var(--hover-1)); color: color-mix(in srgb, var(--kc) 80%, var(--text)); }
+.sel-empty-t { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 2px; }
+.sel-empty-t span { color: var(--dim); font-size: 12.5px; }
+.sel-empty-agents { display: flex; gap: 6px; flex-wrap: wrap; }
+.sel-empty-agents .btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* wide enough: the parts side by side (three columns; two when both side panels leave less room). Beside the name, on
+   its line: a person's Agent Studio, a building's people (2026-10-08: the less height it takes, the better). */
+@container sel (min-width: 640px) {
+  .selcard .insp .body { display: grid; column-gap: 20px; align-items: start; padding: 12px 16px 18px; }
+  .selcard .sel-person { grid-template-columns: fit-content(260px) minmax(0, 1fr) minmax(0, 1.1fr); grid-template-rows: auto auto 1fr;
+    grid-template-areas: "title entry feed" "btns btns feed" "info info feed"; }
+  .selcard .sel-person > .title { grid-area: title; } .selcard .sel-person > .st-entry { grid-area: entry; margin: 0; align-self: center; justify-self: start; max-width: 100%; }
+  .selcard .sel-person > .sel-btns { grid-area: btns; margin: 10px 0 0; } .selcard .sel-person > .sel-info { grid-area: info; margin-top: 4px; }
+  .selcard .sel-person > .sel-feed { grid-area: feed; margin: 0; }
+  /* the Agent Studio, compact: what it holds is its tooltip, its brain the line under its name */
+  .selcard .st-entry-btn { width: auto; max-width: 100%; padding: 5px 10px 5px 6px; gap: 8px; border-radius: 11px; }
+  .selcard .st-entry-ic { width: 28px; height: 28px; font-size: 14px; border-radius: 8px; }
+  .selcard .st-entry-btn b { font-size: 13px; line-height: 1.2; white-space: nowrap; } .selcard .st-entry-btn small { font-size: 10.5px; }
+  .selcard .st-entry-go { font-size: 18px; }
+  /* the feeds: three entries, then they scroll — what they do now and two before it; three lines of thoughts or money */
+  .selcard .sel-person .feed-scroll { gap: 4px; }
+  .selcard .sel-person .sf-pane { height: 116px; display: flex; flex-direction: column; }
+  .selcard .sel-person .sf-pane .feed-scroll { height: auto; flex: none; max-height: 98px; min-height: 0; }
+  .selcard .sel-person .sf-pane[data-pane="act"] .feed-scroll { max-height: 116px; }
+  .selcard .sel-person .sel-feed .act { height: 48px; box-sizing: border-box; padding: 6px 28px 6px 9px; }
+  .selcard .sel-person .fi { height: 30px; box-sizing: border-box; flex: none; }
+  .selcard .sel-person .mf-head { height: 18px; min-height: 0; padding: 0 4px; align-items: center; flex-wrap: nowrap; overflow: hidden; line-height: 18px; }
+  .selcard .sel-person .mf-bal { flex: none; white-space: nowrap; } .selcard .sel-person .mf-bal b { font-size: 13px; }
+  .selcard .sel-person .mf-rent { flex: 1 1 auto; min-width: 0; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* the feed's lines on one line each: icon, what, when, the amount */
+  .selcard .sel-person .fi { grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; padding: 4px 9px 4px 5px; border-radius: 10px 10px 10px 4px; }
+  .selcard .sel-person .fi-ic { width: 20px; height: 20px; font-size: 11px; border-radius: 6px; }
+  .selcard .sel-person .fi-t { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .selcard .sel-person .fi-t b { display: block; -webkit-line-clamp: unset; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .selcard .sel-person .fi-t small { margin: 0; flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; }
+  .selcard .sel-info .needs { margin: 8px 0 4px; } .selcard .sel-info .said { margin: 0 0 8px; } .selcard .sel-info .task { margin: 0 0 6px; }
+  /* a building: its name and its people on one line, its buttons under them, its floors (three rows, then they scroll) */
+  .selcard .sel-place-card { grid-template-columns: fit-content(260px) minmax(150px, .8fr) minmax(0, 1fr);
+    grid-template-areas: "title occ place" "btns btns place" "slot slot slot"; }
+  .selcard .sel-place-card > .title { grid-area: title; } .selcard .sel-place-card > .act { grid-area: occ; margin: 0; align-self: center; min-width: 0; }
+  .selcard .sel-place-card > .act :is(.lb, .pl) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .selcard .sel-place-card > .act > div:last-child { min-width: 0; }
+  .selcard .sel-place-card > .bld-btns { grid-area: btns; margin-top: 10px; } .selcard .sel-place-card > .sel-place { grid-area: place; }
+  .selcard .sel-place-card > .sel-slot { grid-area: slot; }
+  .selcard .sel-place .floors { grid-auto-rows: 34px; max-height: calc(3 * 34px + 2 * 4px); }
+  .selcard .sel-place .floors .btn { height: 100%; }
+  .selcard .sel-slot:empty, .selcard .sel-place:empty { display: none; }
+  .selcard .sel-place-card:has(> .sel-place:empty) { grid-template-areas: "title occ slot" "btns btns slot"; }
+  .selcard .sel-place-card:has(> .sel-place:empty):has(> .sel-slot:empty) { grid-template-columns: fit-content(260px) minmax(150px, 1fr); grid-template-areas: "title occ" "btns btns"; }
+}
+@container sel (min-width: 980px) {
+  .selcard .sel-person { grid-template-columns: fit-content(240px) auto minmax(0, 1.15fr) minmax(0, 1.15fr); grid-template-rows: auto 1fr;
+    grid-template-areas: "title entry info feed" "btns btns info feed"; }
+  .selcard .sel-person > .sel-info { margin-top: 0; padding-left: 20px; border-left: 1px solid var(--line); min-height: 100%; }
+  .selcard .sel-person .sel-info .needs { margin-top: 0; }
+  .selcard .sel-place-card { grid-template-columns: fit-content(260px) minmax(170px, .8fr) minmax(0, 1.1fr) minmax(0, 1fr); grid-template-rows: auto 1fr;
+    grid-template-areas: "title occ place slot" "btns btns place slot"; }
+  .selcard .sel-place-card > .sel-place, .selcard .sel-place-card > .sel-slot { padding-left: 20px; border-left: 1px solid var(--line); min-height: 100%; }
+  .selcard .sel-place-card:has(> .sel-slot:empty) { grid-template-columns: fit-content(260px) minmax(150px, .7fr) minmax(0, 1.5fr); grid-template-areas: "title occ place" "btns btns place"; }
+  .selcard .sel-place-card:has(> .sel-place:empty) { grid-template-columns: fit-content(260px) minmax(150px, .7fr) minmax(0, 1.5fr); grid-template-areas: "title occ slot" "btns btns slot"; }
+}
+/* narrower three columns (a side panel open): the needs' words without their icons, so they fit */
+@container sel (min-width: 980px) and (max-width: 1179px) { .selcard .nd-l .mvi { display: none; } }
+@container sel (min-width: 640px) and (max-width: 819px) { .selcard .nd-l .mvi { display: none; } }
+/* the favourite star beside a building's name */
+.insp .title .fbtn { margin-left: auto; align-self: flex-start; }
+
+/* ---- the person card's parts (both places) */
+.insp .sel-btns { margin: 8px 0 2px; flex-wrap: wrap; }
+.insp .needs { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 12px 0 2px; }
+.insp .nd { display: grid; gap: 4px; min-width: 0; }
+.insp .nd-l { font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+.insp .nd .bar { height: 5px; }
+
+/* ---- the feeds: one panel, two tabs (Activity, Money); newest at the top — the three newest clear, then each older one
+   fainter; scrolled down to read back, all of them clear. One height for both tabs, so switching never jumps. */
+.sel-feed { margin: 10px 0 6px; border: 1px solid var(--line); border-radius: 15px; padding: 6px; background: color-mix(in srgb, var(--kc, #38bdf8) 3%, transparent); }
+.sf-tabs { display: flex; gap: 4px; padding: 0 0 6px; }
+.sf-tab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 8px; border-radius: 10px; border: 1px solid transparent;
+  background: none; color: var(--dim); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .2s, color .2s, border-color .2s; }
+.sf-tab:hover { background: var(--hover-1); color: var(--text); }
+.sf-tab.on { background: color-mix(in srgb, var(--kc, #38bdf8) 15%, var(--btn)); border-color: color-mix(in srgb, var(--kc, #38bdf8) 40%, transparent); color: var(--text); }
+.sf-tab[data-ft="money"].on { background: color-mix(in srgb, #4ade80 14%, var(--btn)); border-color: color-mix(in srgb, #4ade80 40%, transparent); }   /* (money is green, like the VC)*/
+.sf-tab .sf-bal { font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
+.sf-tab .sf-bal:empty { display: none; }
+.selcard .sf-tab .sf-bal { display: none; }   /* (in the widget the balance is the Money pane's first line: three tabs fit) */
+.sf-pane { animation: sf-in .28s cubic-bezier(.16, 1, .3, 1); }
+@keyframes sf-in { from { opacity: 0; transform: translateY(4px); } }
+.feed-scroll { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; scrollbar-width: none; overscroll-behavior: contain; height: 196px; }
+.sf-pane[data-pane="money"] .feed-scroll { height: 164px; }   /* (its savings line takes the rest) */
+.feed-scroll::-webkit-scrollbar { display: none; }
+.feed-items { display: flex; flex-direction: column; gap: 4px; }
+.feed-items:empty { display: none; }
+.feed-items > * { transition: opacity .35s ease; }
+.sf-pane[data-pane="act"] .feed-items > :nth-child(3) { opacity: .55; }   /* (the line going on now, above the list, is the newest of the three) */
+.sf-pane[data-pane="act"] .feed-items > :nth-child(4) { opacity: .3; }
+.sf-pane[data-pane="act"] .feed-items > :nth-child(n+5) { opacity: .14; }
+.sf-pane[data-pane="money"] .feed-items > :nth-child(4) { opacity: .55; }
+.sf-pane[data-pane="money"] .feed-items > :nth-child(5) { opacity: .3; }
+.sf-pane[data-pane="money"] .feed-items > :nth-child(n+6) { opacity: .14; }
+.sel-feed .sf-pane .feed-scroll.down .feed-items > * { opacity: 1; }   /* (outranks the fading rules above) */
+/* under the tenth line: the whole feed, in the agent's Studio */
+.fi-more { flex: none; margin: 4px 0 2px; padding: 8px; border-radius: 11px; border: 1px dashed color-mix(in srgb, var(--kc, #38bdf8) 50%, var(--line-3)); background: none;
+  color: color-mix(in srgb, var(--kc, #38bdf8) 80%, var(--text)); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; transition: background .15s; }
+.fi-more:hover { background: color-mix(in srgb, var(--kc, #38bdf8) 12%, transparent); }
+.feed-items > .fi-more { opacity: 1 !important; }   /* (never faded: it is a way on, not an old line) */
+.fi { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 6px 9px 6px 6px; border-radius: 13px 13px 13px 5px;
+  background: var(--btn); border: 1px solid var(--line); font-size: 12px; }
+.fi.new { animation: fi-in .55s cubic-bezier(.16, 1, .3, 1); }
+@keyframes fi-in { from { opacity: 0; transform: translateY(-10px) scale(.97); } }   /* (a new line arrives at the top) */
+.fi-ic { width: 26px; height: 26px; border-radius: 9px; display: grid; place-items: center; font-size: 14px;
+  background: color-mix(in srgb, var(--kc, #38bdf8) 15%, transparent); color: color-mix(in srgb, var(--kc, #38bdf8) 80%, var(--text)); }
+.fi-t { min-width: 0; }
+.fi-t b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; line-height: 1.3; }
+.fi-t small { display: block; color: var(--dim); font-size: 10.5px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fi-amt { font-variant-numeric: tabular-nums; font-size: 12.5px; white-space: nowrap; }
+.fi-amt.in { color: var(--good); }
+.fi-note { font-size: 11.5px; color: var(--dim); padding: 6px; text-align: center; }
+.fi.thought.bad .fi-ic { background: var(--bad-soft); color: var(--bad); }   /* (a thought that could not happen) */
+/* what they are doing now: the latest line, lit, with a live dot */
+.sel-feed .act { position: relative; margin: 0; padding: 9px 30px 9px 10px; border-radius: 14px 14px 14px 5px;
+  background: color-mix(in srgb, var(--kc, #38bdf8) 13%, var(--btn)); border: 1px solid color-mix(in srgb, var(--kc, #38bdf8) 40%, transparent); flex: none; }
+.sel-feed .act::after { content: ''; position: absolute; right: 12px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: var(--good);
+  animation: fi-live 2s ease-in-out infinite; }
+@keyframes fi-live { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 55%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; } }
+.sf-pane[data-pane="money"] .fi-ic { background: color-mix(in srgb, #4ade80 16%, transparent); color: color-mix(in srgb, #4ade80 80%, var(--text)); }
+.mf-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; padding: 2px 4px 6px; font-size: 12px; min-height: 26px; }
+.mf-bal b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.mf-rent { color: var(--dim); font-size: 11.5px; }
+
+/* ---- a phone (2026-10-07): between the two docks' edge buttons (never over them), just under the top bar, under a
+   third of the screen — one-line feed entries, the kind and name compact, the Studio a slim bar; the rest (needs, job,
+   home) a scroll away inside it; folded and opened by the same handle */
+@media (max-width: 760px) {
+  .selcard { --sel-gap: 0px; left: calc(var(--dock-lt, 50px) + 4px); right: calc(var(--dock-rt, 50px) + 4px); max-height: 31dvh; }
+  .drawer-open .selcard { display: none; }
+  .selcard .insp { border-radius: 0 0 14px 14px; }
+  .selcard .insp .body { padding: 8px 8px 14px; }
+  .selcard .insp .title .kind { font-size: 8.5px; padding: 1px 6px; letter-spacing: .1em; }
+  .sel-handle { min-width: 58px; }
+  .selcard .insp .title { gap: 7px; }
+  .selcard .insp .title .big { width: 28px; height: 28px; font-size: 16px; border-radius: 8px; }
+  .selcard .insp .title .name { font-size: 13.5px; line-height: 1.2; } .selcard .insp .title .role { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .selcard .insp .title .tags { display: none !important; }
+  .selcard .st-entry { margin: 5px 0 0; gap: 0; }
+  .selcard .st-entry-btn { padding: 4px 8px; gap: 7px; border-radius: 9px; }
+  .selcard .st-entry-ic { width: 20px; height: 20px; font-size: 11px; border-radius: 6px; }
+  .selcard .st-entry-btn small, .selcard .st-entry-chips, .selcard .st-entry-go { display: none; }
+  .selcard .st-entry-btn b { font-size: 12px; }
+  .selcard .sel-feed { margin: 5px 0 3px; padding: 3px; border-radius: 10px; }
+  .selcard .sf-tabs { padding-bottom: 3px; gap: 3px; } .selcard .sf-tab { padding: 2px 6px; font-size: 11px; border-radius: 7px; }
+  .selcard .feed-scroll { height: 70px; gap: 2px; } .selcard .sf-pane[data-pane="money"] .feed-scroll { height: 52px; }
+  .selcard .feed-items { gap: 2px; }
+  .selcard .mf-head { padding: 0 4px 2px; min-height: 18px; font-size: 11px; } .selcard .mf-bal b { font-size: 12.5px; }
+  /* one line each: icon, what, when */
+  .selcard .sel-feed .act { padding: 3px 22px 3px 6px; gap: 6px; border-radius: 9px; } .selcard .sel-feed .act .ic { font-size: 13px; }
+  .selcard .sel-feed .act .lb { font-size: 12px; } .selcard .sel-feed .act .pl { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .selcard .sel-feed .act::after { right: 8px; width: 6px; height: 6px; margin-top: -3px; }
+  .selcard .fi { grid-template-columns: 16px minmax(0, 1fr) auto; gap: 6px; padding: 2px 6px 2px 4px; border-radius: 8px; font-size: 11px; }
+  .selcard .fi-ic { width: 16px; height: 16px; font-size: 10px; border-radius: 5px; }
+  .selcard .fi-t { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .selcard .fi-t b { display: block; -webkit-line-clamp: unset; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; min-width: 0; }
+  .selcard .fi-t small { margin: 0; flex: none; font-size: 9.5px; }
+  .selcard .fi-t small { max-width: 34%; overflow: hidden; text-overflow: ellipsis; }
+  .selcard .fi-amt { font-size: 11px; }
+  .selcard .fi-more { margin: 2px 0 0; padding: 4px; font-size: 11px; border-radius: 8px; }
+  .selcard .sel-btns { margin: 5px 0 0; gap: 4px; flex-wrap: nowrap; }
+  .selcard .sel-btns .btn { padding: 3px 6px; font-size: 11px; flex: 1; min-width: 0; border-radius: 8px; }
+  .selcard .insp .needs { margin: 6px 0 0; gap: 5px; } .selcard .insp .nd-l { font-size: 9px; }
+  .selcard .kv { margin-top: 5px; grid-template-columns: 58px 1fr; font-size: 11px; gap: 2px 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .selcard, .selcard.open, .selcard .insp, .selcard:not(.open) .insp { transition: none; }
+  .fi.new, .sel-feed .act::after { animation: none; }
+}

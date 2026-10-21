@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "about": "How the property map estimates land value (shared/land-value.js): a score 0-100 from where a lot is. Each factor gives up to its weight, fading to nothing at its reach (metres). An installation may change any of these.",
+  "base": 24,
+  "factors": {
+    "downtown": {
+      "weight": 35,
+      "reach": 750,
+      "label": "Close to downtown"
+    },
+    "water": {
+      "weight": 25,
+      "reach": 220,
+      "label": "Near the water"
+    },
+    "park": {
+      "weight": 15,
+      "reach": 150,
+      "label": "Next to a park"
+    },
+    "station": {
+      "weight": 10,
+      "reach": 300,
+      "label": "Near a subway station"
+    },
+    "view": {
+      "weight": 10,
+      "reach": 90,
+      "label": "Views from higher ground"
+    }
+  },
+  "tiers": [
+    {
+      "below": 35,
+      "name": "Modest"
+    },
+    {
+      "below": 50,
+      "name": "Fair"
+    },
+    {
+      "below": 65,
+      "name": "Good"
+    },
+    {
+      "below": 80,
+      "name": "Prime"
+    },
+    {
+      "below": 101,
+      "name": "Premium"
+    }
+  ]
+}

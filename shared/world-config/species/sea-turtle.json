@@ -1,0 +1,15 @@
+{
+ "id": "sea-turtle",
+ "name": "Sea turtle",
+ "tier": "ambient",
+ "model": "turtle",
+ "behaviour": "cruise",
+ "habitats": ["reef"],
+ "hours": [6, 19.5],
+ "weather": ["clear", "partly", "overcast"],
+ "group": [1, 2],
+ "perKm2": 16,
+ "size": 1.0,
+ "colors": ["#6f7a4a", "#5d6b45", "#7a6a48"],
+ "speed": 0.55
+}

@@ -1,0 +1,284 @@
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* The agents' PC (client/js/ui/pc-app.js): a desktop with a taskbar, and its apps — Files, Board, Calendar, Browser,
+   Teams, Activity, Terminal, Settings. The same screen shows in the Agent Studio, in its own window and on the agent's
+   desk in the world; it follows the theme inside its windows, and has its own wallpaper. */
+.pc { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; color: var(--text); font-size: 13.5px; container: pc / inline-size;
+  background: radial-gradient(120% 90% at 15% 0%, color-mix(in srgb, var(--primary) 34%, #0b1020) 0%, #0b1020 55%),
+    linear-gradient(160deg, color-mix(in srgb, var(--accent, var(--primary)) 30%, transparent), transparent 60%);
+  background-blend-mode: screen; border-radius: 10px; isolation: isolate; user-select: none; }
+.pc button { font: inherit; color: inherit; }
+.pc input, .pc textarea, .pc select { font: inherit; color: var(--text); background: var(--field, var(--card)); border: 1px solid var(--line-2, var(--line)); border-radius: 7px; padding: 6px 8px; min-width: 0; }
+.pc textarea { resize: vertical; user-select: text; }
+.pc input:focus-visible, .pc textarea:focus-visible, .pc select:focus-visible, .pc button:focus-visible { outline: 2px solid var(--focus, var(--primary)); outline-offset: 1px; }
+.pc .dim { color: var(--dim); }
+.pc .bad { color: var(--bad); }
+.pc .good { color: var(--good); }
+
+/* the desktop */
+.pc-desk { position: relative; flex: 1; min-height: 0; display: flex; gap: 14px; padding: 14px; overflow: auto; align-items: flex-start; }
+.pc-icons { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; align-content: start; max-width: 520px; }
+.pc-icon { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 8px; border: 1px solid transparent; border-radius: 12px; background: none;
+  color: #eef2ff; cursor: pointer; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+.pc-icon:hover { background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .12); }
+.pc-icon .pc-ig { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; font-size: 24px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, .06)); box-shadow: 0 6px 16px -8px rgba(0, 0, 0, .8), inset 0 0 0 1px rgba(255, 255, 255, .14); }
+.pc-icon span:last-child { font-size: 12.5px; }
+.pc-widgets { flex: none; width: 270px; margin-left: auto; display: flex; flex-direction: column; gap: 10px; }
+.pc-widget { padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--panel-strong, var(--card)) 82%, transparent); backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 10px 30px -18px rgba(0, 0, 0, .8); }
+.pc-widget h4 { margin: 0 0 6px; font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+.pc-widget .pc-wrow { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; overflow: hidden; }
+.pc-widget .pc-wrow > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-meter { height: 7px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 6px 0 4px; }
+.pc-meter > i { display: block; height: 100%; background: var(--good); border-radius: 4px; }
+.pc-meter.warn > i { background: var(--gold); }
+.pc-meter.full > i { background: var(--bad); }
+
+/* a window: one app at a time, the size of the desktop */
+.pc-win { position: absolute; inset: 8px; display: flex; flex-direction: column; min-height: 0; border-radius: 11px; overflow: hidden; background: var(--panel-strong-0, var(--panel-strong, #1b1d24));
+  border: 1px solid var(--line-2, var(--line)); box-shadow: 0 24px 60px -20px rgba(0, 0, 0, .85); animation: pc-open .14s ease-out; }
+.pc-win[hidden] { display: none; }
+.pc-desk.app-open > .pc-icons, .pc-desk.app-open > .pc-widgets { visibility: hidden; }   /* (behind an open app: not drawn) */   /* (an app put away: its window stays, out of sight) */
+@keyframes pc-open { from { opacity: 0; transform: scale(.985); } to { opacity: 1; transform: none; } }
+.pc-tb { display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 12px; border-bottom: 1px solid var(--line); flex: none; background: color-mix(in srgb, var(--card) 70%, transparent); }
+.pc-tb .pc-ti { font-size: 16px; }
+.pc-tb b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+.pc-x { width: 30px; height: 28px; border: 0; border-radius: 7px; background: none; cursor: pointer; display: grid; place-items: center; font-size: 15px; color: var(--dim); }
+.pc-x:hover { background: var(--hover-2, rgba(255, 255, 255, .08)); color: var(--text); }
+.pc-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.pc-pad { padding: 12px 14px; overflow: auto; flex: 1; min-height: 0; user-select: text; }
+
+/* the taskbar */
+.pc-bar { display: flex; align-items: center; gap: 6px; padding: 5px 8px; flex: none; background: rgba(8, 11, 22, .72); backdrop-filter: blur(10px); border-top: 1px solid rgba(255, 255, 255, .08); color: #e8ecf8; }
+.pc-me { display: flex; align-items: center; gap: 7px; padding: 4px 9px 4px 5px; border: 0; border-radius: 9px; background: rgba(255, 255, 255, .07); cursor: pointer; max-width: 200px; }
+.pc-me:hover { background: rgba(255, 255, 255, .13); }
+.pc-me .pc-av { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: rgba(255, 255, 255, .12); font-size: 15px; flex: none; }
+.pc-me b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.pc-apps { display: flex; gap: 3px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.pc-tab { display: flex; align-items: center; gap: 6px; padding: 5px 9px; border: 0; border-radius: 8px; background: none; cursor: pointer; white-space: nowrap; color: #cbd3ea; font-size: 12.5px; position: relative; }
+.pc-tab:hover { background: rgba(255, 255, 255, .08); }
+.pc-tab.on { background: rgba(255, 255, 255, .14); color: #fff; }
+.pc-tab.on::after { content: ''; position: absolute; left: 30%; right: 30%; bottom: 1px; height: 2px; border-radius: 2px; background: var(--primary); }
+.pc-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #cbd3ea; max-width: 300px; min-width: 0; padding: 0 4px; }
+.pc-status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-status .pc-dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; flex: none; }
+.pc-status.working .pc-dot { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent); animation: pc-pulse 1.6s ease-in-out infinite; }
+@keyframes pc-pulse { 50% { opacity: .45; } }
+.pc-clock { font-variant-numeric: tabular-nums; font-size: 12.5px; padding: 0 6px; color: #e8ecf8; }
+.pc-menu { position: absolute; left: 8px; bottom: 46px; z-index: 5; min-width: 220px; max-height: 60%; overflow: auto; padding: 6px; border-radius: 12px; background: var(--panel-strong, var(--card));
+  border: 1px solid var(--line-2, var(--line)); box-shadow: 0 18px 50px -14px rgba(0, 0, 0, .8); background: var(--panel-strong-0, var(--panel-strong, #1b1d24)); }
+.pc-menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px; border: 0; border-radius: 8px; background: none; cursor: pointer; text-align: left; }
+.pc-menu button:hover, .pc-menu button.on { background: var(--hover-2, rgba(255, 255, 255, .08)); }
+.pc-menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 4px; }
+
+/* common pieces */
+.pc-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 8px; border: 1px solid var(--line-2, var(--line)); background: var(--btn, var(--card)); cursor: pointer; white-space: nowrap; }
+.pc-btn:hover { background: var(--btn-hover, var(--hover-2)); }
+.pc-btn.primary { background: var(--primary); border-color: transparent; color: var(--on-primary, #fff); }
+.pc-btn.primary:hover { background: var(--primary-hover, var(--primary)); }
+.pc-btn.danger { color: var(--bad); }
+.pc-btn:disabled { opacity: .5; cursor: default; }
+.pc-tools { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; flex: none; }
+.pc-tools .pc-grow { flex: 1; min-width: 0; }
+.pc-empty { padding: 28px 14px; text-align: center; color: var(--dim); }
+.pc-err { margin: 8px 10px; padding: 8px 10px; border-radius: 8px; background: var(--bad-soft, rgba(255, 80, 80, .12)); color: var(--bad); }
+.pc-note { margin: 8px 10px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft, rgba(255, 200, 0, .12)); }
+.pc-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 10px; font-size: 11.5px; background: var(--pill, var(--card)); border: 1px solid var(--line); white-space: nowrap; }
+.pc-chip.good { color: var(--good); border-color: var(--good-line, var(--line)); }
+.pc-chip.bad { color: var(--bad); border-color: var(--bad-line, var(--line)); }
+.pc-chip.gold { color: var(--gold); border-color: var(--gold-line, var(--line)); }
+.pc-form { display: grid; gap: 8px; }
+.pc-form label { display: grid; gap: 4px; font-size: 12.5px; color: var(--dim); }
+.pc-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pc-split { display: flex; flex: 1; min-height: 0; }
+
+/* Files */
+.pc-side { width: 180px; flex: none; border-right: 1px solid var(--line); overflow: auto; padding: 6px; display: flex; flex-direction: column; gap: 1px; }
+.pc-side button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 7px; background: none; cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-side button:hover { background: var(--hover-1, rgba(255, 255, 255, .05)); }
+.pc-side button.on { background: var(--sel, var(--hover-2)); }
+.pc-side .pc-sh { margin: 8px 8px 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); }
+.pc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.pc-places { display: none; max-width: 150px; }
+.pc-crumbs { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.pc-crumbs button { border: 0; background: none; padding: 3px 6px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.pc-crumbs button:hover { background: var(--hover-2); }
+.pc-crumbs i { color: var(--dim); font-style: normal; }
+.pc-list { flex: 1; min-height: 0; overflow: auto; }
+.pc-list.drop { outline: 2px dashed var(--primary); outline-offset: -6px; }
+.pc-file { display: grid; grid-template-columns: 26px minmax(0, 1fr) 80px 120px 34px; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.pc-file:hover { background: var(--hover-1, rgba(255, 255, 255, .04)); }
+.pc-file .pc-fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-file .pc-fs, .pc-file .pc-fm { color: var(--dim); font-size: 12px; text-align: right; white-space: nowrap; }
+.pc-file .pc-fi { font-size: 17px; text-align: center; }
+.pc-more { width: 30px; height: 26px; border: 0; background: none; border-radius: 6px; cursor: pointer; color: var(--dim); }
+.pc-more:hover { background: var(--hover-2); color: var(--text); }
+.pc-pop { position: fixed; z-index: 45; min-width: 190px; padding: 5px; border-radius: 10px; background: var(--panel-strong-0, var(--panel-strong, #1b1d24)); border: 1px solid var(--line-2, var(--line));
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, .8); color: var(--text); font-size: 13px; }
+.pc-pop button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px; border: 0; border-radius: 7px; background: none; cursor: pointer; text-align: left; color: inherit; font: inherit; }
+.pc-pop button:hover { background: var(--hover-2, rgba(255, 255, 255, .08)); }
+.pc-pop hr { border: 0; border-top: 1px solid var(--line); margin: 4px; }
+.pc-up { padding: 6px 10px; font-size: 12px; border-bottom: 1px solid var(--line); }
+.pc-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pc-view textarea.pc-text { flex: 1; min-height: 0; resize: none; border: 0; border-radius: 0; padding: 12px 14px; font: 13px/1.55 var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); background: var(--field, var(--card)); }
+.pc-view .pc-md { flex: 1; min-height: 0; overflow: auto; padding: 12px 18px; line-height: 1.55; user-select: text; }
+.pc-view .pc-media { flex: 1; min-height: 0; display: grid; place-items: center; overflow: auto; padding: 12px; background: repeating-conic-gradient(rgba(127, 127, 127, .08) 0 25%, transparent 0 50%) 0 0 / 18px 18px; }
+.pc-view .pc-media img, .pc-view .pc-media video { max-width: 100%; max-height: 100%; border-radius: 6px; }
+.pc-versions { border-top: 1px solid var(--line); max-height: 40%; overflow: auto; flex: none; }
+.pc-versions div { display: flex; gap: 8px; align-items: center; padding: 5px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.pc-versions div > span { flex: 1; }
+
+/* Board */
+.pc-board { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)); gap: 10px; padding: 10px; overflow: auto; flex: 1; min-height: 0; align-items: start; }
+.pc-col { display: flex; flex-direction: column; gap: 7px; min-height: 120px; padding: 8px; border-radius: 10px; background: color-mix(in srgb, var(--card) 70%, transparent); border: 1px solid var(--line); }
+.pc-col.over { outline: 2px solid var(--primary); outline-offset: -2px; }
+.pc-col h5 { margin: 0 2px 2px; display: flex; justify-content: space-between; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+.pc-card { padding: 8px 10px; border-radius: 9px; background: var(--panel-strong, var(--card)); border: 1px solid var(--line-2, var(--line)); cursor: pointer; display: grid; gap: 5px;
+  box-shadow: 0 4px 12px -8px rgba(0, 0, 0, .6); }
+.pc-card:hover { border-color: var(--primary); }
+.pc-card.dragging { opacity: .45; }
+.pc-card b { font-weight: 600; line-height: 1.3; }
+.pc-card .pc-cm { display: flex; flex-wrap: wrap; gap: 5px; font-size: 11.5px; color: var(--dim); align-items: center; }
+.pc-add { display: flex; gap: 5px; }
+.pc-add input { flex: 1; }
+.pc-drawer { width: 360px; flex: none; border-left: 1px solid var(--line); overflow: auto; padding: 12px 14px; display: grid; gap: 10px; align-content: start; background: var(--panel-strong-0, var(--panel-strong, #1b1d24)); }
+.pc-drawer h3 { margin: 0; font-size: 15px; }
+.pc-notes { white-space: pre-wrap; font-size: 12.5px; padding: 8px 10px; border-radius: 8px; background: var(--field, var(--card)); border: 1px solid var(--line); max-height: 220px; overflow: auto; user-select: text; }
+.pc-moves { display: flex; flex-wrap: wrap; gap: 5px; }
+
+/* Calendar */
+.pc-week { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: 46px repeat(7, minmax(90px, 1fr)); position: relative; }
+.pc-wh { position: sticky; top: 0; z-index: 2; background: var(--panel-strong, var(--card)); border-bottom: 1px solid var(--line); padding: 6px 4px; text-align: center; font-size: 12px; }
+.pc-wh.today { color: var(--primary); font-weight: 700; }
+.pc-hours { grid-column: 1; }
+.pc-hours div { height: 44px; font-size: 10.5px; color: var(--dim); text-align: right; padding-right: 6px; transform: translateY(-6px); }
+.pc-day { position: relative; border-left: 1px solid var(--line); background: repeating-linear-gradient(to bottom, transparent 0 43px, var(--line) 43px 44px); }
+.pc-ev { position: absolute; left: 3px; right: 3px; border-radius: 6px; padding: 3px 6px; font-size: 11.5px; overflow: hidden; cursor: pointer; color: #fff;
+  background: color-mix(in srgb, var(--ev, var(--primary)) 85%, black); border-left: 3px solid var(--ev, var(--primary)); line-height: 1.25; }
+.pc-ev:hover { filter: brightness(1.12); }
+.pc-allday { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-bottom: 1px solid var(--line); }
+.pc-agenda { flex: 1; overflow: auto; padding: 6px 12px; }
+.pc-agenda h5 { margin: 12px 0 5px; font-size: 12px; color: var(--dim); text-transform: uppercase; }
+.pc-agenda .pc-ae { display: flex; gap: 10px; padding: 7px 9px; border-radius: 8px; border-left: 3px solid var(--ev, var(--primary)); background: var(--card); margin-bottom: 5px; cursor: pointer; }
+.pc-agenda .pc-ae span:first-child { color: var(--dim); min-width: 92px; font-variant-numeric: tabular-nums; }
+
+/* Browser, Terminal, Activity */
+.pc-shot { flex: 1; min-height: 0; overflow: auto; display: grid; place-items: start center; background: #111; }
+.pc-shot img { max-width: 100%; display: block; }
+.pc-addr { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 5px 10px; border-radius: 16px; background: var(--field, var(--card)); border: 1px solid var(--line); overflow: hidden; }
+.pc-addr span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.pc-hist a { display: block; padding: 7px 12px; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; }
+.pc-hist a:hover { background: var(--hover-1); }
+.pc-hist small { display: block; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-term { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #0a0e17; color: #d7e0f5; font: 12.5px/1.5 var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+.pc-term pre { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 10px 12px; white-space: pre-wrap; word-break: break-word; user-select: text; }
+.pc-term pre .pc-cmd { color: #7dd3fc; }
+.pc-term pre .pc-errl { color: #fca5a5; }
+.pc-term form { display: flex; gap: 6px; padding: 6px 8px; border-top: 1px solid #1e293b; }
+.pc-term input { flex: 1; background: #111827; border-color: #1f2937; color: #e5e7eb; font: inherit; }
+.pc-feed { flex: 1; overflow: auto; }
+.pc-feed div { display: flex; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.pc-feed div > span:first-child { color: var(--dim); min-width: 46px; font-variant-numeric: tabular-nums; }
+.pc-feed .pc-new { animation: pc-new 1.2s ease-out; }
+@keyframes pc-new { from { background: color-mix(in srgb, var(--primary) 22%, transparent); } }
+
+/* where it is shown */
+.st-content:has(> .st-pc) { overflow: hidden; display: flex; flex-direction: column; padding: 6px; }
+.st-pc { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.st-pc > .pc { flex: 1; min-height: 420px; }
+.st-pc .pc-full { align-self: flex-end; }
+.pc-window { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; background: var(--scrim, rgba(0, 0, 0, .45)); }
+.pc-window > .pc { width: min(1180px, 96vw); height: min(760px, 92vh); box-shadow: 0 30px 90px -20px rgba(0, 0, 0, .9); }
+
+/* a narrow PC (a phone, or a narrow panel): one column, icons only in the taskbar — by the PC's own width */
+@container pc (max-width: 760px) {
+  .pc-desk { flex-direction: column; align-items: stretch; }
+  .pc-widgets { width: auto; margin-left: 0; }
+  .pc-icons { grid-template-columns: repeat(4, 1fr); max-width: none; }
+  .pc-side { display: none; }
+  .pc-places { display: block; }
+  .pc-crumbs { display: none; }
+  .pc-file { grid-template-columns: 24px minmax(0, 1fr) 64px 30px; }
+  .pc-file .pc-fm { display: none; }
+  .pc-board { grid-template-columns: repeat(4, 82%); scroll-snap-type: x mandatory; }
+  .pc-col { scroll-snap-align: start; }
+  .pc-drawer { position: absolute; inset: 0; width: auto; z-index: 3; border: 0; }
+  .pc-tab .pc-tl { display: none; }
+  .pc-status { max-width: 120px; }
+  .pc-me b { display: none; }
+}
+@media (max-width: 760px) {
+  .pc-window > .pc { width: 100vw; height: 100dvh; border-radius: 0; }
+  .pc-window .pc-win { inset: 0; border-radius: 0; border: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .pc-win, .pc-status.working .pc-dot, .pc-feed .pc-new { animation: none; } }
+
+/* the PC used on its screen in the world (client/js/ui/pc-onscreen.js): put exactly on the monitor or the laptop — or, on a
+   narrow screen, filling it — once the camera has glided there */
+.pc-onscreen { position: fixed; inset: 0; z-index: 35; pointer-events: none; opacity: 0; transition: opacity .25s ease-out; }
+.pc-onscreen.on { opacity: 1; }
+.pc-onscreen-pc { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: auto; }
+.pc-onscreen-pc > .pc { width: 100%; height: 100%; border-radius: 3px; }
+.pc-onscreen.full .pc-onscreen-pc { inset: 0; width: auto !important; height: auto !important; transform: none !important; }
+.pc-onscreen.full .pc-onscreen-pc > .pc { border-radius: 0; }
+.pc-leave { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); pointer-events: auto; padding: 7px 14px; border-radius: 18px; border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(8, 11, 22, .78); color: #eef2ff; font: 600 13px system-ui, sans-serif; cursor: pointer; backdrop-filter: blur(8px); }
+.pc-leave:hover { background: rgba(30, 36, 60, .9); }
+.pc-onscreen.full .pc-leave { display: none; }   /* (filling the screen: the PC's own ✕ in its taskbar leaves) */
+
+/* an Agent Providers' agent's own browser in the Browser app (client/js/ui/provider-browser.js: the chat side panel's
+   browser, .cw-bw-*), and its switch to the built-in reader */
+.pc-seg { gap: 4px; }
+.pc-seg [data-b] { border: 1px solid var(--line); background: transparent; color: var(--dim); border-radius: 9px; padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.pc-seg [data-b].on { background: var(--btn); color: var(--text); border-color: var(--line-3, var(--line)); }
+.pc-bwhost, .pc-bwbox { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pc-bwbox > .pc-main { flex: 1; }
+.pbw { --cw-acc: var(--accent, var(--primary)); padding: 8px; overflow: auto; }
+.pbw-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.pbw .cw-bw-view { flex: 1 1 auto; max-height: 100%; }
+
+/* an agent's own screen, live (client/js/ui/provider-screen.js: Hermes' Bot Desktop through noVNC) — in the Browser app
+   and the chat side panel's Screen tab; a person in control: its frame in the accent colour */
+.psc { display: flex; flex-direction: column; gap: 6px; padding: 8px; min-height: 0; flex: 1; }
+.psc-bar { display: flex; align-items: center; gap: 6px; flex: none; min-height: 28px; font-size: 12.5px; color: var(--dim); flex-wrap: wrap; }
+.psc-bar b { color: var(--text); }
+.psc-sp { flex: 1; }
+.psc-bar [hidden] { display: none; }
+.psc-bar .cw-ic { width: auto; padding: 3px 8px; font-size: 12px; border-radius: 8px; }
+/* (the screen's own shape — 16:10 — as wide as there is room; shorter where the space is: the picture then fits inside) */
+.psc-view { position: relative; flex: 0 1 auto; width: 100%; aspect-ratio: 16 / 10; min-height: 120px; border-radius: 10px; overflow: hidden; background: #111318; border: 1px solid var(--line); }
+.psc-view.mine { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 55%, transparent); }
+.psc-cv { position: absolute; inset: 0; }
+.psc-cv > div { background: transparent !important; }
+.psc-wait { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; color: #c9cede; font-size: 13px; line-height: 1.45; }
+.psc-wait[hidden] { display: none; }
+.psc-note { flex: none; font-size: 11.5px; color: var(--dim); }
+.psc-note code { font-size: 11px; word-break: break-all; }
+.psc-note:empty { display: none; }
+
+/* following the agent (pc-app.js follow): the taskbar's switch, what it touched marked, a file as it writes it, the page
+   it reads, its own terminal */
+.pc-follow { flex: none; border: 1px solid rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .06); color: #e5e9f5; border-radius: 8px; padding: 3px 9px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.pc-follow.on { background: color-mix(in srgb, var(--primary) 40%, transparent); border-color: color-mix(in srgb, var(--primary) 70%, transparent); }
+.pc-mark { outline: 2px solid var(--primary); outline-offset: -2px; background: color-mix(in srgb, var(--primary) 18%, transparent) !important; }
+.pc-livebar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 12px; color: var(--dim); border-bottom: 1px solid var(--line); flex: none; }
+.pc-livebar b { color: var(--text); }
+.pc-dot.on { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent); animation: pc-pulse 1.6s ease-in-out infinite; }
+.pc-live { flex: 1; min-height: 0; overflow: auto; padding: 6px 0; font: 12.5px/1.55 ui-monospace, "SF Mono", Menlo, Consolas, monospace; user-select: text; }
+.pc-ln { display: flex; gap: 10px; padding: 0 12px 0 0; white-space: pre-wrap; word-break: break-word; }
+.pc-ln i { flex: none; width: 38px; text-align: right; color: var(--dim); font-style: normal; opacity: .7; user-select: none; }
+.pc-ln.hl { background: color-mix(in srgb, var(--primary) 18%, transparent); box-shadow: inset 3px 0 0 var(--primary); }
+/* (a diff it reviews or makes on its own computer: what it adds, what it takes out, where) */
+.pc-ln.dadd { background: color-mix(in srgb, var(--good, #22c55e) 14%, transparent); color: color-mix(in srgb, var(--good, #22c55e) 70%, var(--text)); }
+.pc-ln.ddel { background: color-mix(in srgb, var(--bad, #ef4444) 14%, transparent); color: color-mix(in srgb, var(--bad, #ef4444) 70%, var(--text)); }
+.pc-ln.dat { color: color-mix(in srgb, var(--primary) 70%, var(--text)); }
+.pc-ln.dh { color: var(--dim); }
+.pc-ln.dadd i, .pc-ln.ddel i, .pc-ln.dat i, .pc-ln.dh i { width: 6px; }
+.pc-reading { flex: none; max-height: 70%; overflow: auto; border-bottom: 1px solid var(--line); }
+.pc-reading h3 { margin: 10px 14px 4px; font-size: 15px; }
+.pc-reading .pc-md { padding: 0 14px 10px; }
+.pc-reading > a { display: block; padding: 7px 14px; border-top: 1px solid var(--line); color: inherit; text-decoration: none; }
+.pc-reading > a small { display: block; color: var(--dim); }
+.pc-agentlog { max-height: 45%; margin: 0 0 8px; padding: 0 0 8px; border-bottom: 1px dashed var(--line); overflow: auto; }
+.pc-agentlog[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .pc-dot.on { animation: none; } }

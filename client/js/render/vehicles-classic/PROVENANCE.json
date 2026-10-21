@@ -1,0 +1,104 @@
+{
+  "source": "My Virtual World Classic vehicle geometry",
+  "sourceCommit": "799c921",
+  "models": [
+    {
+      "file": "traffic-vehicle-models.mjs",
+      "hostSHA256": "375edbb21da50dcbec1ee59ec7b825a0289000d81bd0313127bd0b37ea6aa707",
+      "servedSHA256": "b4f437262eb45f0e01efd8f274e432de37cf989ffa81b125aa06c990aeec4e88",
+      "vendoredSHA256": "a23eeef26f00b0140aac95c4e66546e261efe0b3ac94a502c386d50af77479ab",
+      "changes": "generated import-version tokens removed only"
+    },
+    {
+      "file": "sedan-proportions.mjs",
+      "hostSHA256": "d6d48bb24e32fce38e6a6ae3539064e1c7f35b05d8af61749eda5c43d4091a56",
+      "servedSHA256": "d6d48bb24e32fce38e6a6ae3539064e1c7f35b05d8af61749eda5c43d4091a56",
+      "vendoredSHA256": "ab4fa6f9bb775bcbdf2bed05a725987f9ffd18923b8e6c92fdd7ec1cb9599b01",
+      "changes": "generated import-version tokens removed only"
+    },
+    {
+      "file": "fleet-vehicle-proportions.mjs",
+      "hostSHA256": "46cb4db31f75413a65f748a37e3743137372c5504ed4305e108162f1c90dc51e",
+      "servedSHA256": "46cb4db31f75413a65f748a37e3743137372c5504ed4305e108162f1c90dc51e",
+      "vendoredSHA256": "db56539fc964a85622cfa8a11086f587fe655c3a311747cfcf05a887bfe94504",
+      "changes": "generated import-version tokens removed only"
+    },
+    {
+      "file": "classic-sedan-renderer.mjs",
+      "hostSHA256": "844b6130d6d8d5981e7edb429dcd561d253e3a295aea577f67ad93b33629b69f",
+      "servedSHA256": "cac7d894680000276e5424c05088c993857b7909a76b04924b457e11b368547d",
+      "vendoredSHA256": "5e772f37d4bd312e12c52c15dc1c02bfb65bb9388990682c8804fbf2157d73e0",
+      "changes": "generated import-version tokens removed only; the driver on the left as in the US (2026-10-06): steering wheel, column and instruments mirrored to -z"
+    },
+    {
+      "file": "fleet-vehicle-renderer.mjs",
+      "hostSHA256": "8d4069ca6346fa08ff0f9f0e5ffc2c8a8956ed90a47669fb046a242c9df8ca3e",
+      "servedSHA256": "31ae75c4549e8382852f942a832b9b8ad88e4753f1bb21055a5474aadb2b2c3d",
+      "vendoredSHA256": "713812dcaba16bd61788734c611d9a02decbd41bfcdb863e11f34f0abc968b74",
+      "changes": "generated import-version tokens removed only"
+    },
+    {
+      "file": "fleet-taxi-renderer.mjs",
+      "hostSHA256": "82779f458f73db80ce3ce689c68b6acc455a84dbbc3e2c9e9a22582dbd4e0bbd",
+      "servedSHA256": "e86e78d8708af768147e7f6356949d829b6b441c8ffb4e75b3baa26d6f8084f8",
+      "vendoredSHA256": "52b9e4e933f60825de8eb6cfc7996bf55b2e030ccd5751487e5a66a739efda84",
+      "changes": "generated import-version tokens removed only; the driver on the left as in the US (2026-10-06): steering wheel, column and instruments mirrored to -z"
+    },
+    {
+      "file": "vehicle-mesh-tools.mjs",
+      "hostSHA256": "afab210032f32db527077de2a6aad0d3ec9747e44fe35c7f9c8b474af777106b",
+      "servedSHA256": "afab210032f32db527077de2a6aad0d3ec9747e44fe35c7f9c8b474af777106b",
+      "vendoredSHA256": "5dae040e801b188ed78de593834c2c889292cc57d4f8ab2728ee3771b1e53b3a",
+      "changes": "generated import-version tokens removed only"
+    },
+    {
+      "file": "fleet-police-renderer.mjs",
+      "hostSHA256": "03262d424f7c96d68699fe0016d5d49cf5d326576c2ac7c1b8213b790b355d72",
+      "servedSHA256": "bee11bf9949f5bbb815f59ffff8bed7a44667e14f501927e2f24ae1c7fe028f3",
+      "vendoredSHA256": "e7889614fe18578baa76b3ea24c3221256c29a8a0d39f81e429d6024e584072b",
+      "changes": "generated import-version tokens removed only; the driver on the left as in the US (2026-10-06): steering wheel, column and instruments mirrored to -z"
+    },
+    {
+      "file": "vehicle-lettering.mjs",
+      "hostSHA256": "99942a7b6a7c1abf13a8a148c8091fdf7b58f334accecd5daf9b8a4d05912736",
+      "servedSHA256": "99942a7b6a7c1abf13a8a148c8091fdf7b58f334accecd5daf9b8a4d05912736",
+      "vendoredSHA256": "1dd60b7013e541be13c94aa27a5541ec29bac15edd8923d56d6b0c937bc24f4c",
+      "changes": "generated import-version tokens removed only"
+    },
+    {
+      "file": "fleet-suv-renderer.mjs",
+      "hostSHA256": "1200b8d2b3fc3b3cea39e4cfbbb8fcb3aa996573cf85620659f991938d50d558",
+      "servedSHA256": "f605c25bc69749e94bfc41926e82eea9985fd1a3f5aae36c1bf3328c440f4879",
+      "vendoredSHA256": "1d58e91987e7fee64bb8e6e91a630c51362c07a2ab93796b2e0cf269fe15a0be",
+      "changes": "generated import-version tokens removed only; the driver on the left as in the US (2026-10-06): steering wheel, column and instruments mirrored to -z"
+    },
+    {
+      "file": "fleet-van-renderer.mjs",
+      "hostSHA256": "f4dbf18e9766dcfcdfd576c678f95a5c32ba0a78c5c1aeeb6d4abedd9238752b",
+      "servedSHA256": "6d589db2c93135b0eefe37981f1b7e74e8e2aaa06b144bfc3a9279f9dcd51c07",
+      "vendoredSHA256": "e725dd673f3bb84a9eaff23788631d076e936dc2f59ad28acecefbbc99d219bf",
+      "changes": "generated import-version tokens removed only; the driver on the left as in the US (2026-10-06): steering wheel, column and instruments mirrored to -z"
+    },
+    {
+      "file": "fleet-truck-renderer.mjs",
+      "hostSHA256": "257d67584532743a44cd4e8c7f5fd29235817707aac511d7896f61a4d8fea58b",
+      "servedSHA256": "cb2fbb8ef48fd933bfebdad2e3bc69e25cc0fae29345a42b63f94ada533c7b52",
+      "vendoredSHA256": "b0d5d4c8c62d98b5af966090abf2d746b49ef1fab2c18e62cabef5ddfb6e903b",
+      "changes": "generated import-version tokens removed only; the driver on the left as in the US (2026-10-06): steering wheel, column and instruments mirrored to -z"
+    },
+    {
+      "file": "fleet-ambulance-renderer.mjs",
+      "hostSHA256": "a671200ab9c57967eea7ca64c9faa0b42ecb70ffc1bda67dd4e0d22c39e39108",
+      "servedSHA256": "087fb70a5ba4d010196b856e1f2c4adb932f56050b85f9206ff2b99894bb0087",
+      "vendoredSHA256": "be03cc04e83b86c9dd825dcf8a9ad16bc1ab3f96068521ab2727db031ee8ffd0",
+      "changes": "generated import-version tokens removed only; the driver on the left as in the US (2026-10-06): steering wheel, column and instruments mirrored to -z"
+    },
+    {
+      "file": "fleet-bus-renderer.mjs",
+      "hostSHA256": "5fe0a7666bfd33be9c61c93c074209b4b29c3ea3f4e65d1456d3ff5f54e79991",
+      "servedSHA256": "b95d6e04230694e5340ef015cc9855a818884cc1bd0faa6a390db35b11829014",
+      "vendoredSHA256": "c2785d97d489acc685962f3057b6ac48f1816b0aa73475305c344f6e99f31b56",
+      "changes": "generated import-version tokens removed only; US layout (2026-10-06): the driver's cab on the left (-z), the doors, door steps, fare machine and route board on the right (+z)"
+    }
+  ]
+}

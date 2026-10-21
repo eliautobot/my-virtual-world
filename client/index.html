@@ -1,0 +1,74 @@
+<!doctype html>
+<!-- My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>My Virtual World</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/img/brand/favicon-32.png?v=4">
+<link rel="icon" type="image/png" sizes="64x64" href="/img/brand/favicon-64.png?v=4">
+<link rel="apple-touch-icon" href="/img/brand/favicon-180.png?v=4">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="preload" as="image" href="/img/brand/mvw-base.webp">
+<link rel="preload" as="image" href="/img/brand/mvw-glow.webp">
+<link rel="stylesheet" href="/css/theme.css">
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/economy.css">
+<link rel="stylesheet" href="/css/food.css">
+<link rel="stylesheet" href="/css/studio.css">
+<link rel="stylesheet" href="/css/phone.css">
+<link rel="stylesheet" href="/css/pc.css">
+<link rel="stylesheet" href="/css/selection.css">
+<link rel="stylesheet" href="/css/chat.css">
+<link rel="stylesheet" href="/css/agent-providers.css">
+<script>
+  /* The theme before the first paint (WP1.9, C39): the browser's own copy, so the page never flashes the wrong look.
+     A signed-in account's choice replaces it a moment later (js/core/theme.js). */
+  (function () {
+    try {
+      var t = localStorage.getItem('mw.theme'), el = document.documentElement;
+      if (t === 'light' || t === 'contrast') el.dataset.theme = t;
+      /* and its transparency (0–60 %; High contrast stays solid): js/core/theme.js applyTransparency */
+      var a = parseInt(localStorage.getItem('mvw.transparency'), 10);
+      if (a > 0 && a <= 60) { el.style.setProperty('--ui-a', (100 - a) + '%'); if (t !== 'contrast') el.classList.add('see-through'); }
+    } catch (e) { /* private mode: the default look */ }
+  })();
+</script>
+<script type="importmap">
+{ "imports": {
+  "three": "/vendor/three/build/three.module.js",
+  "three/addons/": "/vendor/three/examples/jsm/",
+  "@dimforge/rapier3d-compat": "/vendor/rapier/rapier.mjs"
+} }
+</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="labels"></div>
+<div id="ui"></div>
+<div id="loading">
+  <div class="ld-col">
+    <div class="ld-logo">
+      <img class="ld-halo" src="/img/brand/mvw-halo.webp" alt="" draggable="false">
+      <img class="ld-base" src="/img/brand/mvw-base.webp" alt="My Virtual World" draggable="false">
+      <img class="ld-glow" src="/img/brand/mvw-glow.webp" alt="" draggable="false">
+      <img class="ld-hot" src="/img/brand/mvw-glow.webp" alt="" draggable="false">
+      <div class="ld-flow"><i></i><i></i></div>
+      <div class="ld-embers"></div>
+    </div>
+    <img class="ld-word" src="/img/brand/mvw-word.webp" alt="" draggable="false">
+    <div class="ld-fig"></div>
+    <div class="ld-text"></div>
+    <div class="ld-bar"></div>
+    <div class="ld-tip" aria-hidden="true"></div>
+  </div>
+  <canvas class="ld-canvas"></canvas>
+  <div class="ld-sr" id="load-msg" role="status" aria-live="polite">Starting…</div>
+</div>
+<script src="/js/loading.js"></script>
+<noscript>This world needs JavaScript and WebGL2.</noscript>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

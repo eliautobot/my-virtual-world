@@ -1,60 +1,27 @@
 {
   "name": "my-virtual-world",
-  "version": "1.0.64",
-  "description": "A self-hosted 3D AI virtual world for agent harnesses like OpenClaw and Hermes.",
-  "homepage": "https://myvirtualworld.ai/",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/eliautobot/my-virtual-world.git"
-  },
-  "bugs": {
-    "url": "https://github.com/eliautobot/my-virtual-world/issues"
-  },
-  "keywords": [
-    "ai-agents",
-    "virtual-world",
-    "threejs",
-    "self-hosted",
-    "openclaw"
-  ],
-  "license": "SEE LICENSE IN LICENSE",
+  "version": "2.0.0",
+  "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=22"
-  },
+  "description": "My Virtual World: a self-hosted 3D city where people and AI agents live, work and trade. Source-available under the PolyForm Noncommercial License 1.0.0.",
   "scripts": {
-    "start": "python3 src/server/server.py",
-    "dev": "VW_PORT=${VW_PORT:-8590} VW_DATA_DIR=${VW_DATA_DIR:-.local-data} python3 src/server/server.py",
-    "dev:realtime": "node scripts/dev-with-realtime.mjs",
-    "realtime": "node src/realtime/server.mjs",
-    "test": "npm run verify:smoke && npm run verify:chat-ui && npm run verify:chat-sessions && npm run verify:connection-help && npm run verify:sms && npm run verify:preview && npm run verify:providers && npm run verify:openclaw-gateway",
-    "verify:chat-events": "node tests/test_chat_event_architecture.js",
-    "verify:openclaw-gateway": "python3 -B tests/test_openclaw_gateway_client.py",
-    "verify:chat-ui": "node scripts/verify-chat-ui.mjs",
-    "verify:chat-sessions": "python3 -B scripts/verify-chat-sessions.py",
-    "verify:connection-help": "node tests/test_connection_help.mjs",
-    "verify:sms": "node tests/test_browser_window_controller.mjs && python3 -B tests/test_sms_backend.py",
-    "verify:preview": "node tests/test_agent_preview_hub.mjs && python3 -B tests/test_agent_preview_backend.py",
-    "verify:providers": "python3 -B tests/test_provider_sdk_backend.py && python3 -B tests/test_provider_endpoint_resolution.py && python3 -B tests/test_presence_lifecycle.py",
-    "verify:endurance": "python3 scripts/verify-live-agent-endurance.py",
-    "verify:lived-session": "python3 scripts/verify-live-agent-lived-session.py",
-    "verify:spatial": "python3 scripts/verify-live-agent-spatial-perception.py",
-    "verify:asset:dumbbell-rack": "node scripts/verify-dumbbell-rack-asset.mjs",
-    "verify:asset:gym-bench": "node scripts/verify-gym-bench-asset.mjs",
-    "verify:smoke": "node scripts/verify-smoke.mjs",
-    "verify:starter-furniture": "node tests/test_starter_furniture.mjs && python3 -B tests/test_starter_furniture_migration.py",
-    "verify:realtime": "node scripts/verify-realtime-smoke.mjs"
+    "start": "node server/index.mjs",
+    "test": "node --test \"tests/**/*.test.mjs\"",
+    "smoke": "node tools/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=24.7"
   },
   "dependencies": {
-    "@colyseus/core": "^0.17.44",
-    "@colyseus/schema": "^4.0.26",
-    "@colyseus/sdk": "^0.17.43",
-    "@colyseus/ws-transport": "^0.17.13",
-    "@dimforge/rapier3d-compat": "^0.19.3",
-    "express": "^5.2.1",
-    "marked": "^16.4.2",
-    "pdfjs-dist": "^6.2.108",
-    "three": "^0.183.2",
-    "yuka": "^0.7.8"
-  }
+    "@dimforge/rapier3d-compat": "0.19.3",
+    "@novnc/novnc": "1.7.0",
+    "@openclaw/gateway-client": "2026.10.4",
+    "qrcode-generator": "^2.0.4",
+    "three": "^0.186.1",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
+  },
+  "license": "PolyForm-Noncommercial-1.0.0"
 }

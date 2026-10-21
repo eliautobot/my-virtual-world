@@ -1,0 +1,274 @@
+{
+  "about": "Reviewed exceptions for tools/neutrality-scan.mjs (CHECKLIST X9). Each entry names the files, the text it allows and why. Write the match as the distinctive part of the flagged text, not all of it, so this file does not flag itself. The scan reports an entry that no longer matches anything, so this list stays accurate.",
+  "skip": [],
+  "allow": [
+    {
+      "files": [
+        ".env.example",
+        "compose.yaml",
+        "docs/INSTALL.md"
+      ],
+      "rule": "ip-address",
+      "match": "10.87.7",
+      "reason": "The default subnet, address range and fixed address of the optional reverse proxy's network in compose.yaml (changeable with MVW_PROXY_SUBNET, MVW_PROXY_RANGE and MVW_PROXY_IP), its gateway, and the install guide's example of another subnet: private ranges that Docker's default address pools do not use."
+    },
+    {
+      "files": [
+        "tests/permissions.test.mjs"
+      ],
+      "rule": "loopback-port",
+      "match": ":9999",
+      "reason": "A made-up port: the test checks that a page on another port of the same host cannot make changes."
+    },
+    {
+      "files": [
+        "tools/deploy/deploy.env.example"
+      ],
+      "rule": "loopback-port",
+      "match": ":8571",
+      "reason": "The example staging copy's port in a documented example configuration file; owners pick their own."
+    },
+    {
+      "files": [
+        "server/providers/manifest.js",
+        "tests/unit/connections.test.mjs"
+      ],
+      "rule": "loopback-port",
+      "match": ":18789",
+      "reason": "The OpenClaw Gateway's documented default address, offered as the pre-filled value of a connection's URL field (the user can change it); the test uses the same value as a sample setting."
+    },
+    {
+      "files": [
+        "server/providers/manifest.js"
+      ],
+      "rule": "loopback-port",
+      "match": ":9119",
+      "reason": "Hermes' documented default backend address (`hermes serve` / `hermes dashboard` listen on port 9119 of the machine they run on), offered as the pre-filled value of a Hermes connection's address field (the user can change it)."
+    },
+    {
+      "files": [
+        "tests/unit/models-adapter.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "10.1.2",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and multicast addresses the test checks a custom model provider may not reach (server/providers/models.js privateAddress); generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/unit/models-adapter.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "100.64.5",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and multicast addresses the test checks a custom model provider may not reach (server/providers/models.js privateAddress); generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/unit/models-adapter.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "169.254.169",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and multicast addresses the test checks a custom model provider may not reach (server/providers/models.js privateAddress); generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/unit/models-adapter.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "172.20.0",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and multicast addresses the test checks a custom model provider may not reach (server/providers/models.js privateAddress); generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/unit/models-adapter.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "192.168.1",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and multicast addresses the test checks a custom model provider may not reach (server/providers/models.js privateAddress); generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/unit/models-adapter.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "224.0.0",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and multicast addresses the test checks a custom model provider may not reach (server/providers/models.js privateAddress); generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/unit/models-adapter.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "100.128.0",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and multicast addresses the test checks a custom model provider may not reach (server/providers/models.js privateAddress); generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "docs/features/agent-providers.md"
+      ],
+      "rule": "loopback-port",
+      "match": ":18789",
+      "reason": "OpenClaw's own documented default gateway address (its gateway listens on port 18789 of the machine it runs on): the default of the OpenClaw provider's address field, which owners change for their own gateway."
+    },
+    {
+      "files": [
+        "docs/features/agent-providers.md"
+      ],
+      "rule": "loopback-port",
+      "match": ":9119",
+      "reason": "Hermes' own documented default backend address (`hermes serve` listens on port 9119 of its machine): the default of the Hermes provider's address field, which owners change for their own Hermes."
+    },
+    {
+      "files": [
+        "server/providers/manifest.js"
+      ],
+      "rule": "private-host",
+      "match": "host.docker.internal",
+      "reason": "Docker's documented name for the machine a container runs on: where Agent Providers' Find also looks for a Hermes backend when this server runs in a container. Not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/pc-browser.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "10.1.2",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and local addresses the test checks the agents' PC browser may never reach (server/pc/browser.js blockedIp / webUrl): generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/pc-browser.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "192.168.0",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and local addresses the test checks the agents' PC browser may never reach (server/pc/browser.js blockedIp / webUrl): generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/pc-browser.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "172.16.5",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and local addresses the test checks the agents' PC browser may never reach (server/pc/browser.js blockedIp / webUrl): generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/pc-browser.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "169.254.169",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and local addresses the test checks the agents' PC browser may never reach (server/pc/browser.js blockedIp / webUrl): generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/pc-browser.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "100.64.0",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and local addresses the test checks the agents' PC browser may never reach (server/pc/browser.js blockedIp / webUrl): generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/pc-browser.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "10.0.0",
+      "reason": "Example private, carrier-NAT, link-local (cloud metadata) and local addresses the test checks the agents' PC browser may never reach (server/pc/browser.js blockedIp / webUrl): generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/pc-browser.test.mjs"
+      ],
+      "rule": "private-host",
+      "match": "printer.local",
+      "reason": "A made-up local-network name (mDNS .local) the test checks the agents' PC browser refuses: no installation's host."
+    },
+    {
+      "files": [
+        "tests/pc-os.test.mjs"
+      ],
+      "rule": "home-folder",
+      "match": "notes.md",
+      "reason": "A path inside an agent's PC, not on any machine: the PC's own virtual tree names an agent's home /home (~); the test checks paths never leave it."
+    },
+    {
+      "files": [
+        "server/providers/manifest.js"
+      ],
+      "rule": "loopback-port",
+      "match": ":9222",
+      "reason": "Chrome's documented DevTools port (--remote-debugging-port=9222), the example address in the Browser service connection's hint: owners enter their own browser's address."
+    },
+    {
+      "files": [
+        "tests/pc-egress.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "10.0.0",
+      "reason": "Example private, link-local (cloud metadata) and local addresses the test checks the built-in browser's egress proxy refuses (server/pc/egress-proxy.js): generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/pc-egress.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "192.168.1",
+      "reason": "Example private, link-local (cloud metadata) and local addresses the test checks the built-in browser's egress proxy refuses (server/pc/egress-proxy.js): generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/pc-egress.test.mjs"
+      ],
+      "rule": "ip-address",
+      "match": "169.254.169",
+      "reason": "Example private, link-local (cloud metadata) and local addresses the test checks the built-in browser's egress proxy refuses (server/pc/egress-proxy.js): generic ranges, not an address of any installation."
+    },
+    {
+      "files": [
+        "tests/pc-egress.test.mjs"
+      ],
+      "rule": "loopback-port",
+      "match": ":443",
+      "reason": "This machine by name on the HTTPS port, as a page would ask for it: the test checks the built-in browser's egress proxy refuses this machine by name. No installation's port."
+    },
+    {
+      "files": [
+        "docs/guides/openclaw.md"
+      ],
+      "rule": "loopback-port",
+      "match": ":18789",
+      "reason": "The OpenClaw Gateway's documented default address, in the guide to connecting it."
+    },
+    {
+      "files": [
+        "docs/guides/hermes.md"
+      ],
+      "rule": "loopback-port",
+      "match": ":9119",
+      "reason": "The Hermes backend's documented default address, in the guide to connecting it."
+    },
+    {
+      "files": [
+        "docs/guides/ai-models.md"
+      ],
+      "rule": "loopback-port",
+      "match": ":11434",
+      "reason": "Ollama's documented default address, in the guide to local models."
+    },
+    {
+      "files": [
+        "docs/guides/ai-models.md"
+      ],
+      "rule": "loopback-port",
+      "match": ":1234",
+      "reason": "LM Studio's documented default address, in the guide to local models."
+    },
+    {
+      "files": [
+        "docs/guides/ai-models.md",
+        "docs/guides/hermes.md"
+      ],
+      "rule": "private-host",
+      "match": "host.docker.internal",
+      "reason": "Docker's documented name for the machine a container runs on, which compose.yaml maps (extra_hosts), in the guides to reaching OpenClaw, Hermes and local models from the Docker install."
+    }
+  ]
+}

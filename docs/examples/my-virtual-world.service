@@ -1,0 +1,63 @@
+# My Virtual World: example systemd unit for a native install (docs/INSTALL.md).
+#   sudo cp docs/examples/my-virtual-world.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now my-virtual-world
+# The code lives in /opt/my-virtual-world, owned by root, so the service cannot change it. At the first start systemd
+# creates the data folder and the key's folder under /var/lib/my-virtual-world for the service. The server listens on
+# this machine only; a reverse proxy on the same machine gives it HTTPS for other machines. Every setting: .env.example.
+
+[Unit]
+Description=My Virtual World
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=my-virtual-world
+Group=my-virtual-world
+WorkingDirectory=/opt/my-virtual-world
+# Change the path if `command -v node` shows another one.
+ExecStart=/usr/bin/node server/index.mjs
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8570
+Environment=MVW_DATA=/var/lib/my-virtual-world/data
+Environment=MVW_KEY_FILE=/var/lib/my-virtual-world/keys/secret.key
+Environment=MVW_TRUSTED_PROXIES=127.0.0.1,::1
+# More settings with `sudo systemctl edit my-virtual-world`, for example:
+#   [Service]
+#   Environment=MVW_PUBLIC_URL=https://world.example.org
+StateDirectory=my-virtual-world my-virtual-world/data my-virtual-world/keys
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Sandboxing: the service can write only its state folder.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# No MemoryDenyWriteExecute: Node's JIT compiler needs writable code memory.
+
+[Install]
+WantedBy=multi-user.target

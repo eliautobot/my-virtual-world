@@ -1,0 +1,37 @@
+{
+ "id": "crow",
+ "name": "Crows",
+ "tier": "ambient",
+ "model": "bird",
+ "behaviour": "flock",
+ "habitats": [
+  "field",
+  "meadow"
+ ],
+ "hours": [
+  6,
+  19.5
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain"
+ ],
+ "group": [
+  2,
+  5
+ ],
+ "perKm2": 8,
+ "size": 0.32,
+ "colors": [
+  "#1d1e22",
+  "#26272c"
+ ],
+ "height": [
+  8,
+  28
+ ],
+ "speed": 9,
+ "sound": "caw"
+}

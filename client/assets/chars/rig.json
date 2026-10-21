@@ -1,0 +1,39 @@
+{
+ "male": {
+  "width": 0.036,
+  "height": 0.026,
+  "forward": -0.012
+ },
+ "female": {
+  "width": 0.02,
+  "height": 0.026,
+  "forward": -0.02
+ },
+ "version": 2,
+ "batches": {
+  "batch1": {
+   "male": {
+    "width": 0.036,
+    "height": 0.026,
+    "forward": -0.012
+   },
+   "female": {
+    "width": 0.02,
+    "height": 0.026,
+    "forward": -0.02
+   }
+  },
+  "batch2": {
+   "male": {
+    "width": -0.016,
+    "height": 0.006,
+    "forward": 0.006
+   },
+   "female": {
+    "width": 0.02,
+    "height": 0.026,
+    "forward": -0.02
+   }
+  }
+ }
+}

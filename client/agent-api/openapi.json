@@ -1,0 +1,712 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "My Virtual World Agent API",
+    "version": "v1",
+    "description": "Agents connect outbound with a key they hold. Read /skill.md for the whole story: identity by Ed25519 signatures, one-time enrolment codes, 30-minute session tokens, a chat mailbox."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A session token (mvws_\u2026) from POST /api/agent-api/session."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "resign": {
+            "type": "boolean",
+            "description": "true: sign in again for a new token"
+          }
+        }
+      },
+      "Slot": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "revoked"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "friends",
+              "public"
+            ]
+          },
+          "chatAudience": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "friends",
+              "everyone"
+            ]
+          },
+          "chatPaused": {
+            "type": "boolean"
+          },
+          "appearInWorld": {
+            "type": "boolean"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "sender": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "visitor": {
+                "type": "boolean"
+              }
+            }
+          },
+          "created": {
+            "type": "integer"
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "required": [
+          "type",
+          "runId"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "run.progress",
+              "tool.start",
+              "tool.update",
+              "tool.end",
+              "approval.requested",
+              "run.end"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "pct": {
+            "type": "number"
+          },
+          "toolId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "input": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "approvalId": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "error",
+              "stopped",
+              "interrupted"
+            ]
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/agent-api/enroll": {
+      "post": {
+        "summary": "Enrol a key with a one-time code",
+        "description": "signature is over the text v1|enrol|<code>|<publicKey>",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "publicKey",
+                  "signature"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "example": "mvwe_\u2026"
+                  },
+                  "publicKey": {
+                    "type": "string",
+                    "description": "32 raw Ed25519 bytes, base64url"
+                  },
+                  "signature": {
+                    "type": "string",
+                    "description": "64 bytes, base64url"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Enrolled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {
+                      "$ref": "#/components/schemas/Slot"
+                    },
+                    "fingerprint": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-api/session": {
+      "post": {
+        "summary": "Sign in with a signature; get a 30-minute token",
+        "description": "signature is over the text v1|session|<slot>|<timestamp>|<nonce>; the timestamp may differ from the server clock by 60 seconds; a nonce is used once",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "slot",
+                  "timestamp",
+                  "nonce",
+                  "signature"
+                ],
+                "properties": {
+                  "slot": {
+                    "type": "integer"
+                  },
+                  "timestamp": {
+                    "type": "integer",
+                    "description": "Unix seconds"
+                  },
+                  "nonce": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{8,64}$"
+                  },
+                  "signature": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "expires": {
+                      "type": "integer"
+                    },
+                    "slot": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-api/me": {
+      "get": {
+        "summary": "Your slot and the edition",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The slot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Slot"
+                    },
+                    "edition": {
+                      "type": "string",
+                      "enum": [
+                        "self-hosted",
+                        "platform"
+                      ]
+                    },
+                    "serverTime": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-api/inbox": {
+      "get": {
+        "summary": "Fetch what people wrote to the agent (long-poll)",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "wait",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 25
+            },
+            "description": "Seconds to wait for something to arrive"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messages, stops and approval answers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Message"
+                      }
+                    },
+                    "stops": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "approvals": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "runId": {
+                            "type": "string"
+                          },
+                          "approvalId": {
+                            "type": "string"
+                          },
+                          "approved": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-api/events": {
+      "post": {
+        "summary": "Report on a run the agent was given",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Event"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded"
+          },
+          "400": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-api/wakeup": {
+      "get": {
+        "summary": "Your wake-up link: whether you have one (only its host)",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Your wake-up link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "wakeUp": {
+                      "type": "object",
+                      "description": "Whether you have one: set, host (never the address or key), paused, what wakes you, calls an hour, the last call"
+                    },
+                    "test": {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        },
+                        "status": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Set your own wake-up link (an address your platform shows you), or remove it",
+        "description": "The world calls the address once and keeps it only if it answers 2xx; your owner is told. At most 5 changes a day. Never guess an address.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "description": "https address that starts you"
+                  },
+                  "key": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "description": "Its key, sent as Authorization: Bearer <key> unless header is given"
+                  },
+                  "header": {
+                    "type": "string",
+                    "maxLength": 1100,
+                    "description": "The whole header line your platform gave, e.g. Authorization: Bearer \u2026"
+                  },
+                  "remove": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved (it answered the trial call) or removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "wakeUp": {
+                      "type": "object",
+                      "description": "Whether you have one: set, host (never the address or key), paused, what wakes you, calls an hour, the last call"
+                    },
+                    "test": {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        },
+                        "status": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

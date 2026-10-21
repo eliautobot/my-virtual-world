@@ -1,0 +1,68 @@
+# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# My Virtual World with Docker Compose. Install guide: docs/INSTALL.md.
+#   docker compose up -d                    the app at http://localhost:8570, reachable from this machine only
+#   docker compose --profile proxy up -d    plus a reverse proxy with HTTPS for MVW_DOMAIN, reachable from anywhere
+# Settings: environment variables, or a .env file next to this file (.env.example describes every setting).
+
+services:
+  app:
+    build: .
+    image: ${MVW_IMAGE:-my-virtual-world:2}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "127.0.0.1:${MVW_PORT:-8570}:8570"
+    environment:
+      # The proxy below reaches the app from this address, so the app believes its X-Forwarded-* headers.
+      MVW_TRUSTED_PROXIES: ${MVW_TRUSTED_PROXIES:-${MVW_PROXY_IP:-10.87.70.10}}
+      MVW_PUBLIC_URL: ${MVW_PUBLIC_URL:-}
+      MVW_COOKIE_NAME: ${MVW_COOKIE_NAME:-}
+      MVW_POPULATION: ${MVW_POPULATION:-}
+      MVW_STARTER_MAP: ${MVW_STARTER_MAP:-}
+      MVW_HOUSING: ${MVW_HOUSING:-}
+      MVW_SEED: ${MVW_SEED:-}
+      MVW_HQ_NAME: ${MVW_HQ_NAME:-}
+      MVW_WS_PER_ADDRESS: ${MVW_WS_PER_ADDRESS:-}
+      MVW_WS_MAX: ${MVW_WS_MAX:-}
+    volumes:
+      - data:/data
+      - keys:/keys
+    # this machine, as the app sees it: an OpenClaw gateway or a Hermes backend running here is at host.docker.internal
+    # (docs/guides/openclaw.md, docs/guides/hermes.md)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - world
+
+  # The optional reverse proxy (Caddy): HTTPS with an automatic certificate for MVW_DOMAIN.
+  proxy:
+    image: caddy:2
+    profiles: [proxy]
+    restart: unless-stopped
+    command: caddy reverse-proxy --from ${MVW_DOMAIN:-localhost} --to app:8570
+    ports:
+      - "${MVW_HTTP_PORT:-80}:80"
+      - "${MVW_HTTPS_PORT:-443}:443"
+    volumes:
+      - proxy-data:/data
+      - proxy-config:/config
+    networks:
+      world:
+        ipv4_address: ${MVW_PROXY_IP:-10.87.70.10}
+    depends_on:
+      - app
+
+networks:
+  world:
+    ipam:
+      config:
+        # Docker gives containers addresses from MVW_PROXY_RANGE only, so the proxy's fixed address (outside it) stays free.
+        - subnet: ${MVW_PROXY_SUBNET:-10.87.70.0/28}
+          ip_range: ${MVW_PROXY_RANGE:-10.87.70.0/29}
+
+volumes:
+  data:
+  keys:
+  proxy-data:
+  proxy-config:

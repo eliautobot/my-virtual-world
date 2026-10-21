@@ -1,0 +1,33 @@
+{
+ "id": "duck",
+ "name": "Ducks",
+ "tier": "ambient",
+ "model": "duck",
+ "behaviour": "swim",
+ "habitats": [
+  "lake"
+ ],
+ "hours": [
+  5,
+  21
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain"
+ ],
+ "group": [
+  3,
+  8
+ ],
+ "perKm2": 60,
+ "size": 0.36,
+ "colors": [
+  "#6e5a3c",
+  "#3d5c3a",
+  "#7a6548"
+ ],
+ "speed": 0.5,
+ "sound": "quack"
+}
