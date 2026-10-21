@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Hermes' sub-menu in Agent Providers (docs/features/agent-providers.md §9): its backend, its agents (profiles), models,
-// tools, skills, automations, MCP servers, sessions and every setting it has — what Hermes' own dashboard and Desktop
+// tools, skills, automations, MCP servers, sessions and every setting it has - what Hermes' own dashboard and Desktop
 // settings offer, through its backend. Every call goes through the server (POST /api/agent-providers/call: the
-// connection's managers only, a fixed list of calls, no secret's value ever comes back); every change is shown first —
-// what it changes, from what to what — and waits for the person's OK. The Settings page is drawn from Hermes' own
+// connection's managers only, a fixed list of calls, no secret's value ever comes back); every change is shown first -
+// what it changes, from what to what - and waits for the person's OK. The Settings page is drawn from Hermes' own
 // description of its settings (/api/config/schema), so a newer Hermes' settings show by themselves.
 import { esc } from '../../core/util.js';
 
@@ -278,7 +278,7 @@ async function settings(el, ctx) {
     const base = Object.fromEntries(Object.keys(changes).map(p => [p, at(S.cfg, p) ?? null]));
     const ok = await act(ctx, b, async () => {
       try { await ctx.call('config.patch', { profile: P.name, changes, base }); }
-      catch (e) { if (/changed elsewhere/i.test(e.message)) throw new Error('Hermes\' settings were changed elsewhere meanwhile: they are read again — check your changes and save again.'); throw e; }
+      catch (e) { if (/changed elsewhere/i.test(e.message)) throw new Error('Hermes\' settings were changed elsewhere meanwhile: they are read again - check your changes and save again.'); throw e; }
     }, 'Saved to Hermes');
     S.cfg = (await ctx.call('config.get', { profile: P.name }).catch(() => ({ config: S.cfg }))).config || S.cfg;
     return ok;
@@ -312,7 +312,7 @@ function fieldHtml(path, f, S) {
   const type = secret ? 'secret' : f.type === 'boolean' ? 'boolean' : f.type === 'number' ? 'number' : f.type === 'select' && Array.isArray(f.options) ? 'select' : f.type === 'list' ? 'list' : 'string';
   const head = `<span class="op-fl"><b>${esc(label)}</b> <code>${esc(path)}</code>${help ? `<small>${esc(help)}</small>` : ''}</span>`;
   let input;
-  if (type === 'secret') input = `<input class="input" type="password" autocomplete="new-password" placeholder="${cur && cur.set ? 'Set — type a new value to change it' : 'Not set'}">`;
+  if (type === 'secret') input = `<input class="input" type="password" autocomplete="new-password" placeholder="${cur && cur.set ? 'Set - type a new value to change it' : 'Not set'}">`;
   else if (type === 'boolean') input = `<label class="check"><input type="checkbox"${cur === true ? ' checked' : ''}> ${cur === undefined || cur === null ? '(default)' : ''}</label>`;
   else if (type === 'select') input = `<select class="input">${cur === undefined || cur === null ? '<option value="" selected>(default)</option>' : ''}${f.options.map(o => { const v = typeof o === 'object' ? o.value : o; return `<option value="${esc(String(v))}"${String(cur) === String(v) ? ' selected' : ''}>${esc(String(typeof o === 'object' ? o.label || v : v))}</option>`; }).join('')}</select>`;
   else if (type === 'number') input = `<input class="input" type="number" value="${cur === undefined || cur === null ? '' : esc(String(cur))}" placeholder="(default)">`;

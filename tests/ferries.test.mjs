@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.15 ferries: the shared timetable (boats at the docks when sailings leave and arrive), the rules for a line (docks
 // off a growth coast with a road near the shore, deep water all the way, never over land), residents' routes that take
 // the ferry (and never drive across the water), the wait and crossing in a resident's plan; over the API with undo and

@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The agents' PC over HTTP (docs/features/agent-pc.md): what the PC window asks. Every route acts as the signed-in person
-// ({ human: their account }), so the engine (./os.js) gives them their own account's PC and nothing else — another
+// ({ human: their account }), so the engine (./os.js) gives them their own account's PC and nothing else - another
 // account's agent, team, file or task is "not found", as one that isn't there. Each route goes through the server's
 // pipeline first (session, capability agents.pc, Origin, CSRF, JSON).
 // Where a request points: profile=<agent> (that agent's view: ~, /teams/<team>) or space=<id> (a team's space, from
 // the Teams app), with path=. Files are served for viewing only when they can't run anything on this site (pictures,
-// PDFs, recordings, plain text — sandboxed); everything else is a download.
+// PDFs, recordings, plain text - sandboxed); everything else is a download.
 import { PcError } from './os.js';
 
 const INLINE = /^(image\/(png|jpeg|gif|webp|avif)|application\/pdf|audio\/[\w.+-]+|video\/[\w.+-]+)$/;
@@ -59,7 +59,7 @@ export function addPcRoutes(router, pc, d) {
     const who = me(P);
     const agents = pc.agentsOf(who.human).map(a => ({ id: a.id, key: a.key, name: a.name, emoji: a.emoji, role: a.role, screen: pc.screenOf(a.id), body: d.body ? d.body(a) : null,
       zone: d.work ? d.work().zoneOf?.(a.id) || null : null, ...(d.own ? { own: d.own.of(P, a) } : {}) }));
-    // (realBrowser: the built-in agents browse in a real browser here — the built-in Chrome; else the reader)
+    // (realBrowser: the built-in agents browse in a real browser here - the built-in Chrome; else the reader)
     const realBrowser = !!(d.browser && d.browser()?.chrome?.available());
     return { agents, teams: pc.teamsOf(who), goneTeams: pc.goneTeams(who), usage: pc.usage(who.human), limits: pc.limits(), realBrowser };
   });
@@ -132,7 +132,7 @@ export function addPcRoutes(router, pc, d) {
   R('GET', '/api/pc/profile', ({ P, url }) => { const a = ownAgent(P, url.searchParams.get('agent')); return { agent: a.id, ...work().status(a.id) }; });
   R('POST', '/api/pc/profile', ({ P, body }) => { const a = ownAgent(P, body.agent); if (typeof body.autoWork !== 'boolean') throw new PcError(400, 'nothing', 'Send autoWork: true or false'); return { agent: a.id, ...work().setAutoWork(a.id, body.autoWork) }; });
   // the command line as one of the person's own agents (its PC's Terminal, and connected agents' "pc" tool over MCP):
-  // the agent's own view — its home and its teams — never the owner's whole PC. session: which shell (its folder and
+  // the agent's own view - its home and its teams - never the owner's whole PC. session: which shell (its folder and
   // the versions it read carry on), kept 15 minutes
   const shells = new Map();
   R('POST', '/api/pc/shell', async ({ P, body }) => {
@@ -158,8 +158,8 @@ export function addPcRoutes(router, pc, d) {
   });
 
   // ------------------------------------------------------------------ its real browser, live (§5): watched and taken over
-  // an agent's real browser (the built-in Chrome, or its owner's browser service): its tab, the page live — a picture
-  // each time it paints, while someone watches — and its owner's clicks, scrolling, keys and typing on it. The same
+  // an agent's real browser (the built-in Chrome, or its owner's browser service): its tab, the page live - a picture
+  // each time it paints, while someone watches - and its owner's clicks, scrolling, keys and typing on it. The same
   // shapes as the Agent Providers' browser (client/js/ui/provider-browser.js shows both). Its owner only (ownAgent).
   const browser = () => { const b = d.browser ? d.browser() : null; if (!b) throw new PcError(503, 'starting', 'The PC is still starting'); return b; };
   const PICK = ['action', 'tab', 'url', 'fx', 'fy', 'double', 'dx', 'dy', 'key', 'text'];
@@ -191,7 +191,7 @@ export function addPcRoutes(router, pc, d) {
     catch (e) { if (Number.isInteger(e.status) && e.code) throw new PcError(e.status, e.code, e.message); throw e; }
   };
   // a page watches these agents' screens (their PC window, their live screens in the world): their work that started
-  // elsewhere is followed meanwhile (./screen-watch.js) — a lease, said again while it watches
+  // elsewhere is followed meanwhile (./screen-watch.js) - a lease, said again while it watches
   R('POST', '/api/pc/watch', async ({ P, body }) => { me(P); return d.watch ? d.watch(P, Array.isArray(body.agents) ? body.agents.map(num).filter(x => x != null) : []) : { watching: [] }; });
   const READS = ['list', 'read', 'docs', 'doc'];
   R('GET', '/api/pc/own', async ({ P, url }) => {
@@ -199,7 +199,7 @@ export function addPcRoutes(router, pc, d) {
     if (!READS.includes(op)) throw new PcError(400, 'bad_request', 'Which call?');
     return ownCall(P, a, op, { path: str(sp.get('path')), name: str(sp.get('name'), 200), offset: num(sp.get('from')) || 0 });
   });
-  // a file of it as itself: to show (pictures, recordings, PDFs — sandboxed) or to download
+  // a file of it as itself: to show (pictures, recordings, PDFs - sandboxed) or to download
   R('GET', '/api/pc/own/file', async ({ P, url }) => {
     const sp = url.searchParams, a = own(P, sp.get('agent'));
     const f = await ownCall(P, a, 'read', { path: str(sp.get('path')) });

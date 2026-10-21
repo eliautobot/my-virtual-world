@@ -1,4 +1,4 @@
-/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
 /* The AI apps' consent page (connect.html, js/connect.js): one card, dark like the world's dialogs, the brand's orange. */
 :root { color-scheme: dark; --bg: #0d0d10; --card: #17171c; --line: #2c2c34; --text: #ecebf0; --dim: #a19fab; --accent: #ff8a3d; --accent2: #e8556d; --bad: #ff6b6b; --good: #5fd38d; }
 * { box-sizing: border-box; }

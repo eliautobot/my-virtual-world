@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The economy's integrity rules (docs/features/ECONOMY.md §1, §2.4; the reviewer's review of 2026-10-05): no way to make money
 // out of nothing (businesses closed and reopened, agents connected, ads on your own sign), no buying from yourself, no
 // trust from passing coins back and forth, debts paid before owners, missed days settled in order or skipped in the

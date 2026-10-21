@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Starting and stopping the server as a whole process: a bad configuration stops the start with every problem listed,
 // before anything is created; the world files and the accounts database must belong to the same world; a copy of the
 // world files gets a new accounts database with their id; SIGTERM closes live streams with "going away", saves the

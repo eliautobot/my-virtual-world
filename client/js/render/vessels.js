@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Boats in the city's style (the design review 2026-10-03: "animals need to be more detailed ... also for other assets like
-// boats/ferries"): hulls lofted from cross-sections — fine at the bow, flared, a transom at the stern, painted in bands
-// (antifouling, boot top, topsides, sheer stripe) — with their fittings: a sailing dinghy (open cockpit, mast, boom,
+// boats/ferries"): hulls lofted from cross-sections - fine at the bow, flared, a transom at the stern, painted in bands
+// (antifouling, boot top, topsides, sheer stripe) - with their fittings: a sailing dinghy (open cockpit, mast, boom,
 // mainsail and jib in curved cloth), a motor launch (cabin with a raked windscreen, rails, an outboard) and the island
 // ferry (two passenger decks with window bands that light at night, a wheelhouse, funnel, mast with radar, lifeboats,
 // railings and lifebuoys). Bow along +z, the waterline at y = 0. Geometry from FB (render/furniture.js), so the

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 export const RECOVERY_ROUTE=Symbol.for('vw.traffic.existingRecoveryRoute');
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const finite = (x, fallback = 0) => Number.isFinite(Number(x)) ? Number(x) : fallback;

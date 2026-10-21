@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent's own tools over MCP (server/connector/body-tools.js; 2026-10-12): an AI app its owner connects as
-// their connected agent IS that agent — now (the facts), inbox and reply (with the world's checks on what a visitor is
-// shown), focused questions, look, act — through the agent's own door, and it counts as online; anyone else connecting
+// their connected agent IS that agent - now (the facts), inbox and reply (with the world's checks on what a visitor is
+// shown), focused questions, look, act - through the agent's own door, and it counts as online; anyone else connecting
 // it (a person it is shared with to manage), or a connection its owner has disconnected, gets nothing of the body.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -93,7 +93,7 @@ test('the owner\'s AI app is its connected agent over MCP: facts, messages and a
     const pres = (await ann.get(`/api/presence/${rec.id}`)).json;
     assert.notEqual(pres.state, 'offline', JSON.stringify(pres));
 
-    // Bob writes to Juno; the app reads its inbox and answers through reply — and a link is held back
+    // Bob writes to Juno; the app reads its inbox and answers through reply - and a link is held back
     const sess = (await bob.post('/api/chat-sessions/create', { agent: rec.id, label: 'Hi' })).json.session;
     const run = await bob.post('/api/providers/runs', { agent: rec.id, session: sess.id, input: 'Hi Juno, what are you up to?' });
     assert.equal(run.status, 200, run.text);

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A client for the My Virtual World Agent API v1 (see /skill.md). Node 20 or newer, no dependencies.
 //
 //   import { MvwAgent, loadOrCreateIdentity } from './mvw-agent.mjs';
@@ -86,7 +86,7 @@ export class MvwAgent {
   /**
    * The loop: fetch messages, run the handler for each, report progress and the answer. The handler gets
    * ({ runId, text, session, sender: { name, visitor } }, { progress(text, pct), signal, you }) and returns the answer text
-   * (you: the facts about the agent right now — the world's time, where it is, what it is doing — to answer from)
+   * (you: the facts about the agent right now - the world's time, where it is, what it is doing - to answer from)
    * (or throws, which reports the run as failed). A stop from the owner aborts `signal`. Stops when `signal` aborts.
    */
   async serve(handler, { signal = null, waitSec = 25, onError = e => console.error('[mvw-agent]', e.message) } = {}) {

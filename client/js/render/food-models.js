@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The food and drink pack (shared/food.js): a 3D model for every item, built from one kit of parts — plates, bowls,
-// boards, baskets and glasses; buns, patties, noodles, rice, slices, scoops — so a burger is a burger and a dessert is
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The food and drink pack (shared/food.js): a 3D model for every item, built from one kit of parts - plates, bowls,
+// boards, baskets and glasses; buns, patties, noodles, rice, slices, scoops - so a burger is a burger and a dessert is
 // the dessert that was ordered. Item frame: the middle of where it stands on the table at y 0, y up, +z toward whoever
 // eats it; everything fits a café table's place (within ~0.16 m of the middle). Vertex colours as the furniture's
 // (render/furniture.js FB): opaque parts in .geo, glass in .glass.
@@ -102,7 +102,7 @@ function ramekin(f, x, z, col, r = 0.028) { at(f, x, 0, z, 0, () => { f.col(WHIT
 /** Cutlery beside a plate (knife and fork, or chopsticks). */
 let BARE = false;   // (thumbnails: the food without knife, fork, spoon or chopsticks)
 // eaten by hand (render/char-props.js draws the piece being eaten in the hands): the dish's first piece is left off the
-// plate — a burger off its basket, one taco of three, one slice of a cut quesadilla (single-piece dishes say so too)
+// plate - a burger off its basket, one taco of three, one slice of a cut quesadilla (single-piece dishes say so too)
 let TAKE = 0;
 const taken = () => TAKE > 0 && TAKE-- > 0;
 function cutlery(f, r = 0.13, sticks = false) {

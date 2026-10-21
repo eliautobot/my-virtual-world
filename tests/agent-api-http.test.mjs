@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents that connect outbound, over HTTP on a real server (PLAN WP2.14; DECISIONS E22, E23, C122 to C130; CHECKLIST I8.14):
 // two accounts and two agents, the two doors never mixing (a browser session on the agent routes, an agent token on the account
 // routes), replays, revoke, re-enrolment, and the refusal limit. All requests come from 127.0.0.1, so the limit test runs last.

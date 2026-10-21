@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Subway stations as map objects (WP4.5, wp4-world-spec.md §9: residents use the subway between the city and the land
 // beyond it): the city's stations stand on its sidewalks (server/world/generate.js); beyond the city administrators
 // place more, each a kiosk beside a road, turned to face it and level on its own small pad. A station: { id, name, x,

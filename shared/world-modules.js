@@ -1,5 +1,5 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// World modules (docs/features/play-modules.md §Placing modules): the big play modules that take up world space — an
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// World modules (docs/features/play-modules.md §Placing modules): the big play modules that take up world space - an
 // airport; the fishing docks (a beach marina, a lake dock: shared/dock-layout.js, docs/features/fishing.md). Only administrators place them (Edit dock → World modules); the
 // small ones that go inside a building are interior modules, which players buy with Virtual Coin for their own places.
 // A world module is { id, kind, name, x, z, rot (radians: forward is (sin rot, cos rot)), y (its level ground) }, kept in
@@ -56,7 +56,7 @@ export function normalizeWorldModule(o) {
   const name = String(o.name || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40);
   return { kind: K.kind, name, x: cm(x), z: cm(z), rot: Math.round((((rot % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) * 1000) / 1000 };
 }
-/** A module's pad (world): { x, z, hw, hd, rot } — hw across the frame (s), hd along it (f). */
+/** A module's pad (world): { x, z, hw, hd, rot } - hw across the frame (s), hd along it (f). */
 export function padOf(m) {
   const P = WORLD_KINDS[m.kind].pad;
   return rectAt(m, P.sc - P.hs, -P.hf, P.sc + P.hs, P.hf);
@@ -120,20 +120,20 @@ export function accessRoadsOf(world, m) {
 }
 /**
  * The module's access road (2026-10-14: "the roadway connection at the entrance doesn't connect well, especially at an
- * angle" — it ran straight to the nearest road at whatever angle, askew to the entrance): it leaves square to the
- * module's edge where the entrance road ends (roadEndOf) — straight on to a road if one lies ahead; else out a little
+ * angle" - it ran straight to the nearest road at whatever angle, askew to the entrance): it leaves square to the
+ * module's edge where the entrance road ends (roadEndOf) - straight on to a road if one lies ahead; else out a little
  * way and one curve round to the nearest road, met square on; else (the road is behind it) out, along the module past
  * its nearer end, and on to the nearest road from there; else out and along beside it (a road climbing alongside the
- * one above it) — curves at each turn, every stretch well clear of the module (more than the road rules ask) and of the
+ * one above it) - curves at each turn, every stretch well clear of the module (more than the road rules ask) and of the
  * other roads until it meets its own. [{ x, z, r? }] in metres (r: the curve's radius there), or null when a road is
  * already there or none is within reach. roads: a RoadNetwork.
  *
  * o.heightAt (and o.level, the module's land's level): the road must lie well between the module's land and the road it
- * joins (2026-10-14: a marina by the sea 20 m below a road 11 m higher got a 20 m road — a wall; 2026-10-15, the product
+ * joins (2026-10-14: a marina by the sea 20 m below a road 11 m higher got a 20 m road - a wall; 2026-10-15, the product
  * owner: "a slope/elevation parameter needs to be in place so that placing the marina always looks good, and doesn't
  * cause drops, clipping, or roadway disconnections"): each route is profiled as the road will be (lieOf: held level at
  * its gate, eased into its grade, level across its junction) and the first that keeps its grade everywhere and stays
- * within CUT_MAX of the ground is taken — a square junction before a slanting one; when none does, the best, marked
+ * within CUT_MAX of the ground is taken - a square junction before a slanting one; when none does, the best, marked
  * .steep = { dh, len, need, cut } (the placing check refuses it: checkWorldModule).
  */
 export function accessRoadPath(m, roads, o = {}) {
@@ -208,7 +208,7 @@ export function accessRoadPath(m, roads, o = {}) {
     const p1 = toWorldAt(m, S.s + L, S.f), p2 = toWorldAt(m, S.s + L, S.f + side * D), ahead = slant ? toWorldAt(m, S.s + L, S.f + side * (D + 45)) : p2, near = roads.nearest(ahead.x, ahead.z, K.roadReach);
     const R = near && route([p1, p2, near]); if (R) cands.push(R);
   }
-  return pick() || [E, end(near0)];   // (none of those: straight to the nearest, as before — the road rules will say why not)
+  return pick() || [E, end(near0)];   // (none of those: straight to the nearest, as before - the road rules will say why not)
 }
 /** A module's own outdoor things as the world's decorations (a dock's benches, picnic tables, trees: dockDecor). */
 export const moduleDecor = m => (isDock(m.kind) ? dockDecor(m) : []);
@@ -249,8 +249,8 @@ export function worldModulePads(world) {
   for (const m of modulesOf(world)) {
     if (!WORLD_KINDS[m.kind] || !Number.isFinite(m.y)) continue;
     // a module's land carries its gate: where its access road meets it, at its level (shared/island-roads.js holds the
-    // road there level with the land — 2026-10-14, the product owner: the docks' roads "don't connect well")
-    // (y: its paving's top, 3.5 cm under the module's level — server/world/edit.js roadLevel reads it back as m.y)
+    // road there level with the land - 2026-10-14, the product owner: the docks' roads "don't connect well")
+    // (y: its paving's top, 3.5 cm under the module's level - server/world/edit.js roadLevel reads it back as m.y)
     const e = roadEndOf(m), gate = { x: Math.round(e.x * 100) / 100, z: Math.round(e.z * 100) / 100, y: Math.round((m.y - 0.035) * 1000) / 1000 };
     if (isDock(m.kind)) { const P = dockPads(m); P[1].gate = gate; out.push(...P); }   // its land, its ramp into the water, its dredged basin
     else out.push({ ...padOf(m), y: m.y, gate });
@@ -315,7 +315,7 @@ export function aircraftSolids(world, skip = null) {
 }
 /**
  * A module's own building (server/world/generate.js createBuilding), on the module's level, its length along f: an
- * airport's terminal (a two-floor glass hall, its front — local +z, the door — facing the car park, +s), a dock's store
+ * airport's terminal (a two-floor glass hall, its front - local +z, the door - facing the car park, +s), a dock's store
  * (a one-floor shop with a tackle counter, its door to the water, −s).
  */
 export function terminalSpec(m) {
@@ -373,8 +373,8 @@ export function checkWorldModule(world, m, env, { ignoreId = null, lotsUnder = n
     if (!near) return `No road within ${(K.roadReach / 1000).toFixed(1)} km; its car park must be joined to a road`;
     // its access road must be able to climb from its land to the road it joins (2026-10-14: a marina's 20 m wall of a road)
     const R = accessRoadPath(m, env.roads, { heightAt: env.heightAt, level });
-    if (R?.steep) return R.steep.grade > ACCESS_GRADE * 102 ? `The nearest road is ${R.steep.dh} m ${env.heightAt(R.at(-1).x, R.at(-1).z) > level ? 'above' : 'below'} its land: its road can't climb that cleanly (about ${R.steep.need} m of road needed; the best way here is ${R.steep.len} m) — place it where the shore is lower or the road further off`
-      : `Its road would cut ${R.steep.cut} m into the ground (or stand that high on a bank) on its way to the nearest road — place it where the land between is flatter`;
+    if (R?.steep) return R.steep.grade > ACCESS_GRADE * 102 ? `The nearest road is ${R.steep.dh} m ${env.heightAt(R.at(-1).x, R.at(-1).z) > level ? 'above' : 'below'} its land: its road can't climb that cleanly (about ${R.steep.need} m of road needed; the best way here is ${R.steep.len} m) - place it where the shore is lower or the road further off`
+      : `Its road would cut ${R.steep.cut} m into the ground (or stand that high on a bank) on its way to the nearest road - place it where the land between is flatter`;
   }
   return null;
 }

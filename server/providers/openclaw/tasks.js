@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A chat's background tasks on an OpenClaw gateway (docs/features/agent-providers.md §4, the side panel): the work its
-// agent started from that session — subagents, scheduled jobs, CLI and ACP runs — from OpenClaw's task ledger, as its
+// agent started from that session - subagents, scheduled jobs, CLI and ACP runs - from OpenClaw's task ledger, as its
 // Control UI shows them beside a chat: the running ones and the latest finished, each with what it is doing or waiting
-// for; one task's prompt, result and transcript; Stop. Or all of the agent's — as OpenClaw's Tasks page lists them for
+// for; one task's prompt, result and transcript; Stop. Or all of the agent's - as OpenClaw's Tasks page lists them for
 // one agent: its scheduled jobs and command runs belong to no chat (2026-10-16, a real gateway: 2,435 of 2,669 tasks were
 // jobs with no session). The gateway announces every change (`task` events); those of an agent with a chat open on a page
-// go to the provider bus as session.task — marked `here` when the task is that chat's — at most a few a second per task.
+// go to the provider bus as session.task - marked `here` when the task is that chat's - at most a few a second per task.
 import { historyOf } from './translate.js';
 
 const ACTIVE = ['queued', 'running'];
@@ -40,7 +40,7 @@ export class LinkTasks {
   need(sessionKey, scope) { if (scope !== 'agent' && !sessionKey) throw fail('bad_request', 'This chat has no tasks yet'); }
 
   /**
-   * The tasks: { active, recent } — running and queued; the latest finished, the most recent first. scope 'chat': the
+   * The tasks: { active, recent } - running and queued; the latest finished, the most recent first. scope 'chat': the
    * session's; 'agent': all of the agent's, each marked `here` when it is the session's.
    */
   async list({ agentKey, sessionKey, scope = 'chat' }) {
@@ -54,7 +54,7 @@ export class LinkTasks {
       .map(t => ({ ...t, here: belongs(t, agentKey, sessionKey) }));
     return { active: of(a), recent: of(r) };
   }
-  /** One of the session's tasks (scope 'agent': of the agent's), as the gateway has it now — with its prompt and result. */
+  /** One of the session's tasks (scope 'agent': of the agent's), as the gateway has it now - with its prompt and result. */
   async mine({ agentKey, sessionKey, taskId, scope = 'chat' }) {
     this.need(sessionKey, scope);
     if (typeof taskId !== 'string' || !taskId) throw fail('bad_request', 'Which task?');

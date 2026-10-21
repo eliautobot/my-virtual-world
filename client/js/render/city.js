@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // City ground (roads with markings + scramble crossings, blocks with curbs/sidewalks/lots, outskirts), street lights
 // (+ baked night light map), street trees, traffic + pedestrian signals (live, deterministic), subway kiosks,
 // street props and door walkways.
@@ -117,7 +117,7 @@ export class City {
       blk.box(q.x0, 0, q.z0, q.x1, GROUND_Y, q.z1, face => ({ aBR: br, aLot: face === 't' ? lot : -1 }), 'b');
     }
     // Outskirts at sidewalk height: an endless plain, or on an island (WP4.2) the apron the terrain takes over from, open
-    // where island roads leave the city (shared/city-edge.js — the same pieces the driving physics and walking use).
+    // where island roads leave the city (shared/city-edge.js - the same pieces the driving physics and walking use).
     const y = GROUND_Y, BR = [x0, z0, x1, z1], top = { aBR: BR, aLot: 2 }, curb = { aBR: BR, aLot: -1 };
     if (this.world.terrain) {
       // its own mesh: it changes when an administrator changes the roads (rebuildApron)

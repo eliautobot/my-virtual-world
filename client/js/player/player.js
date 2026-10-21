@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Play mode: walk the city as your own character. WASD / arrows (relative to the camera), Shift to run, Space to
 // jump, E to talk / sit / use things / take the elevator, Z/X/C emotes. Collides with buildings, street furniture,
 // subway kiosks, park hedges and furniture (the same nav grid the simulation uses); walks in and out through front
@@ -169,7 +169,7 @@ function goHome() {
   if (app.driving?.id) return app.toast('Leave the vehicle first', 'bad', 2500);
   if (!networked()) return app.toast('Sign in to have a home in the world', 'bad', 3000);
   closeElevator(); busy = true; E.fade.classList.add('on');
-  homeT = setTimeout(() => { homeT = 0; E.fade.classList.remove('on'); busy = false; app.toast('Could not reach the server — try again', 'bad', 3000); }, 5000);
+  homeT = setTimeout(() => { homeT = 0; E.fade.classList.remove('on'); busy = false; app.toast('Could not reach the server - try again', 'bad', 3000); }, 5000);
   setTimeout(() => app.net.send({ t: 'phome' }), 280);
 }
 /** Puts this page's player somewhere (admins: players.warp); used by tests and to help someone in person. */
@@ -331,13 +331,13 @@ function supportY(feet = P.y) {
   }
   return base + Math.max(0, top);
 }
-// Swimming (2026-10-05): deeper than SWIM_DEPTH the body floats — upright treading water when still (its neck
-// at the surface), prone doing the crawl when moving (its back at the surface) — or dives under; shallower it wades.
+// Swimming (2026-10-05): deeper than SWIM_DEPTH the body floats - upright treading water when still (its neck
+// at the surface), prone doing the crawl when moving (its back at the surface) - or dives under; shallower it wades.
 const SWIM_DEPTH = 1.15, SWIM_OUT = 1.0, FLOAT_UP = 1.32, FLOAT_PRONE = 0.93, DIVE = 1.6, DIVE_MIN = 2.0, BREATH = 30;
 const SWIM = 1.25, SWIM_RUN = 2.0;
 /** The water at the player's spot: { level, bed, kind } or null (indoors, dry, or the city). */
 // The bridges' piers (shared/island-roads.js bridgePiers, where render/island-roads.js draws them): walls to anyone
-// under the deck — swimmers and the camera.
+// under the deck - swimmers and the camera.
 let piersFor = null, piers = [];
 function bridgePiersNow() {
   const I = app.terrain?.ground?.island;
@@ -474,10 +474,10 @@ function enter() {
   cam.panEnabled = false; cam.keysEnabled = false; cam.eReserved = true; cam.minDist = 3;
   cam.goalDist = me && me.cam ? me.cam.dist : 13; cam.goalPitch = me && me.cam ? me.cam.pitch : 0.62;
   cam.fpEye = eyes; cam.onFP = onFirstPerson;
-  // look around: the mouse on a computer (captured now — entering Play is a click or a key), a finger on a touch screen
+  // look around: the mouse on a computer (captured now - entering Play is a click or a key), a finger on a touch screen
   cam.look = true;
   cam.lookPaused = () => !!(app.mapOpen || app.custOpen || document.querySelector('.modal-back, .auth-back') || cam.typing({ target: document.activeElement }));
-  cam.onLock = on => { if (!on && P.active && !isTouch() && !cam.lookPaused?.()) app.toast('Cursor free — click the world to look around again · Esc again leaves', '', 2600); };
+  cam.onLock = on => { if (!on && P.active && !isTouch() && !cam.lookPaused?.()) app.toast('Cursor free - click the world to look around again · Esc again leaves', '', 2600); };
   if (!isTouch()) cam.lockMouse();
   NET.at = 0; NET.beatAt = 0; NET.last = '';   // a fresh throttle for every play session
   if (me) { cam.target.set(P.x, P.y + 1.1, P.z); cam.goal.copy(cam.target); app.net.send({ t: 'pobserve', on: false }); }
@@ -757,7 +757,7 @@ function interact() {
 }
 /**
  * The world's outdoor decorations with seats near (x, z) (2026-10-14, the product owner: a dock's benches "aren't
- * functional" — benches, picnic tables placed on the land, a dock's own: shared/dock-layout.js dockDecor): entries like a
+ * functional" - benches, picnic tables placed on the land, a dock's own: shared/dock-layout.js dockDecor): entries like a
  * park's { t, x, z, yaw, y }, from an index by 16 m cell kept while the decorations stay the same.
  */
 const DECO_CELL = 16;
@@ -803,7 +803,7 @@ function standUp() {
 async function talk(i) {
   P.yaw = P.tyaw = Math.atan2(agents.rx[i] - P.x, agents.rz[i] - P.z);
   P.emote = { clip: CLIP.talk, t0: nowS(), dur: 3 };
-  // an AI agent: its owner's chat window, or a talk through the bar (ui/talk-bar.js — it greets when it only greets)
+  // an AI agent: its owner's chat window, or a talk through the bar (ui/talk-bar.js - it greets when it only greets)
   if (S.people[i]?.v && app.talk) { app.talk.to(i, { x: P.x, z: P.z }); return; }
   try {
     const r = await post('/api/talk', { i, x: P.x, z: P.z });

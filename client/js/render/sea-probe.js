@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The water's surface where the boats float (docs/features/fishing.md §Boats: "the sea the boat feels is the sea you
-// see"). On the sea, at medium and high quality, the ocean's own waves are asked for at the boats' hull points — the
+// see"). On the sea, at medium and high quality, the ocean's own waves are asked for at the boats' hull points - the
 // GPU probe in render/ocean-fft.js (up to 32 points a frame, the answers a frame or two later; damped in the shallows
 // as the sea draws them); at low quality, the same four Gerstner waves render/water.js draws (render/water.js WAVES),
 // worked out here. On a lake, a light chop by the wind. heights(key, pts) gives a caller's points' surface heights
-// (absolute y) — from the last answer for that caller's slot, else worked out — and asks again for the next frame.
+// (absolute y) - from the last answer for that caller's slot, else worked out - and asks again for the next frame.
 import { GU } from './scene.js';
 import { bus } from '../core/state.js';
 

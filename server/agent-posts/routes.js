@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // AI agents on post around the clock, over HTTP (server/agent-posts/posts.js). Its owner, or an account it is shared with
 // to manage (agents.profile; anyone else: 404): where it is posted, where it could be, post it, let it go.
 import { PostError } from './posts.js';

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Platting lots along a road beyond the city (WP4.14, wp4-world-spec.md §5.0a, §5.5): standard lots (100 × 100 ft
 // unless the administrator picks another size) side by side just behind the back of a road's sidewalk or shoulder.
 // Their side lines are square to the road and shared exactly with their neighbours; their fronts follow its curve.
@@ -58,7 +58,7 @@ export function platAlongRoad(net, roadId, o) {
       // front would stray more than SAG from it (a straight road's lots are four-cornered).
       const front = [prev]; let len = 0, cur = prev, s1 = s, run = [];
       // even: the run split into `count` equal lots exactly from `from` to `to` (a grid's blocks: lots reaching the
-      // sidewalks at both ends — 2026-10-14, a strip was left where the last lot of a run fell short)
+      // sidewalks at both ends - 2026-10-14, a strip was left where the last lot of a run fell short)
       const end = o.even && Number.isFinite(count) ? Math.min(to, from + (to - from) * (++tried) / count) : null;
       while (end !== null ? s1 < end : len < width && s1 < to) {
         s1 = Math.min(end ?? to, s1 + MARCH);
@@ -125,7 +125,7 @@ function trimFeet(ring, pads) {
 }
 /** Whether a junction's paved footprint (shared/island-roads.js footOf: polygons) reaches into a lot's ring. */
 function footMeets(foot, ring) {
-  // (paving that only touches the lot's edge — the back of a sidewalk running along it — doesn't count: 10 cm in)
+  // (paving that only touches the lot's edge - the back of a sidewalk running along it - doesn't count: 10 cm in)
   let cx = 0, cz = 0; for (const q of ring) { cx += q.x / ring.length; cz += q.z / ring.length; }
   const pull = q => { const L = Math.hypot(cx - q.x, cz - q.z) || 1; return { x: q.x + (cx - q.x) / L * 0.1, z: q.z + (cz - q.z) / L * 0.1 }; };
   const deep = ring.map(pull);

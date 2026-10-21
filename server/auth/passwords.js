@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Password hashing (Argon2id through node:crypto, PHC strings with the parameters and salt of each hash) and the
 // password policy (DECISIONS C58).
 import crypto from 'node:crypto';

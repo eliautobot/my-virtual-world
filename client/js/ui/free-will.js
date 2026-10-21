@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Free Will in the UI (docs/features/FREE-WILL.md §9).
 // - An agent's Free Will (the switch, spontaneity, its decision service, today's numbers and "Why it chose") is the
 //   Agent Studio's Free Will tab (ui/studio-mind.js); the words and the why-list rows it shows are here.
@@ -12,8 +12,8 @@ let app = null;
 export function init(a) { app = a; }
 
 export const STATUS = {
-  active: 'On — it decides for itself: free time, meals, mornings, the way to work, rest and how to work on tasks. Only sleep is left to its routine.',
-  switched_off: 'Off — it follows its routine.',
+  active: 'On - it decides for itself: free time, meals, mornings, the way to work, rest and how to work on tasks. Only sleep is left to its routine.',
+  switched_off: 'Off - it follows its routine.',
   starting: 'Starting…',
   off: 'Free Will is switched off for the whole world by an administrator.',
   no_service: 'No decision service is set up yet: an administrator chooses one in Settings → Free Will.',
@@ -36,7 +36,7 @@ const pct = p => `${Math.round(p * 100)}%`;
 
 export function spontWord(s) { return s <= 0.15 ? 'Predictable' : s <= 0.4 ? 'Steady' : s <= 0.65 ? 'Balanced' : s <= 0.85 ? 'Adventurous' : 'Impulsive'; }
 
-/** One line of "Why it chose": the choice, the options it had and how likely each was — or why its routine chose. */
+/** One line of "Why it chose": the choice, the options it had and how likely each was - or why its routine chose. */
 export function row(r) {
   const head = `<span class="tag fw-kind">${esc(CHOICE[r.choice] || 'Free time')}</span> <span class="fw-when">${esc(r.when || '')}</span>${r.place ? ` <span class="dim">· ${esc(r.place)}</span>` : ''}`;
   if (r.outcome === 'chosen') {
@@ -45,7 +45,7 @@ export function row(r) {
     return `<li class="fw-item chosen"><div>${head}</div><div class="fw-pick">✓ ${esc(r.label || label(r.chosen))}${r.reason === 'next_best' ? ' <small class="dim">(its first pick was no longer possible)</small>' : ''}</div>
       <div class="fw-opts">${opts.map(o => `<div class="fw-opt${o.id === r.chosen ? ' on' : ''}"><span class="fw-bar" style="width:${Math.max(3, Math.round(o.p * 100))}%"></span><span class="fw-ol">${esc(label(o.id))}</span><span class="fw-op">${pct(o.p)}</span></div>`).join('')}</div></li>`;
   }
-  return `<li class="fw-item routine"><div>${head}</div><div class="dim">Followed its routine — ${esc(why(r.reason))}${r.label ? ` (it had picked ${esc(r.label)})` : ''}</div></li>`;
+  return `<li class="fw-item routine"><div>${head}</div><div class="dim">Followed its routine - ${esc(why(r.reason))}${r.label ? ` (it had picked ${esc(r.label)})` : ''}</div></li>`;
 }
 
 // ------------------------------------------------------------------ Settings → Free Will (administrators)
@@ -73,14 +73,14 @@ export async function freeWillAdminTab(d, body) {
         ${O.paused.length ? `<span class="tag warn">${O.paused.length} service paused</span>` : ''}</p>
       <div class="row wrap"><button type="button" class="btn small${on ? '' : ' primary'} fw-a-switch">${on ? 'Switch Free Will off for everyone' : 'Switch Free Will on'}</button></div>
       <label>Decision service <span class="row"><select class="input fw-a-svc"><option value="">None</option>
-        ${O.services.map(x => `<option value="${x.id}"${def === x.id ? ' selected' : ''}${x.enabled && x.implemented ? '' : ' disabled'}>${esc(x.label)} (${esc(x.kind)})${x.status && x.status.ok === false ? ' — last test failed' : ''}</option>`).join('')}</select></span></label>
+        ${O.services.map(x => `<option value="${x.id}"${def === x.id ? ' selected' : ''}${x.enabled && x.implemented ? '' : ' disabled'}>${esc(x.label)} (${esc(x.kind)})${x.status && x.status.ok === false ? ' - last test failed' : ''}</option>`).join('')}</select></span></label>
       <p class="hint">${O.services.length ? 'Add or test decision services in Settings → Connections (an installation-wide connection, shared with the roles that may use it).' : 'No decision service yet: add one in Settings → Connections (for example OpenAI Decisions), shared with the roles that may use it.'}</p>
       <label>Most decisions a day, all agents <span class="row"><select class="input fw-a-lim">${lim.values.map(x => `<option${x === lim.value ? ' selected' : ''}>${x}</option>`).join('')}</select></span></label>
       <label>Most decisions a day, one agent <span class="row"><select class="input fw-a-alim">${alim.values.map(x => `<option${x === alim.value ? ' selected' : ''}>${x}</option>`).join('')}</select></span></label>
       <label>Keep the why-log <span class="row"><select class="input fw-a-keep">${(keep.choices || [1, 3, 7, 14, 30, 90]).map(x => `<option value="${x}"${x === keep.value ? ' selected' : ''}>${x} day${x === 1 ? '' : 's'}</option>`).join('')}</select></span></label>
       <div class="tier-head">Today (UTC)</div>
       <div class="kv"><span class="k">Asked</span><span>${O.today.requests} of ${O.today.limit}</span><span class="k">Cost</span><span>${usd(O.today.costMicro)}</span>
-        <span class="k">Speed</span><span>${O.latencyMs.p50 === null ? '—' : `${O.latencyMs.p50} ms typical, ${O.latencyMs.p95} ms slowest 5%`}</span>
+        <span class="k">Speed</span><span>${O.latencyMs.p50 === null ? '-' : `${O.latencyMs.p50} ms typical, ${O.latencyMs.p95} ms slowest 5%`}</span>
         <span class="k">Since start</span><span>${O.counts.chosen} chosen · ${O.counts.routine} by routine · ${O.counts.skippedRoutine} routine moments not asked</span></div>
       ${reasons.length ? `<p class="hint">Why the routine chose: ${reasons.map(([k, n]) => `${esc(why(k))} ${n}`).join(' · ')}</p>` : ''}
       <div class="row"><button type="button" class="btn small fw-a-refresh">Refresh</button></div></div>`;

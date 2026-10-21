@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Coasts and the island chain, in the Terrain section (WP4.15, wp4-world-spec.md §3.3–3.4): a small map of the island
-// with its coast in sectors coloured by class — click a stretch to change it (public shore → growth coast → protected
-// waterfront → open-ocean frontage) — and the expansion planner: pick a kind of island, see the free places for it out
+// with its coast in sectors coloured by class - click a stretch to change it (public shore → growth coast → protected
+// waterfront → open-ocean frontage) - and the expansion planner: pick a kind of island, see the free places for it out
 // at sea (and why the others aren't free), preview one on your own screen, then raise it for everyone. The advisory
 // measures beside it (spec §3.4): lots still unclaimed, residents. Administrators only; every change can be undone.
 import { S, bus } from '../core/state.js';
@@ -78,7 +78,7 @@ function onMap(e) {
   const sl = C.slots.find(s => Math.hypot(s.center.x - x, s.center.z - z) < s.radius);
   if (sl) {
     C.sel = sl.k; endPreview(); draw();
-    E.slot.textContent = sl.free ? `A place ${Math.round(Math.hypot(sl.center.x - S.world.terrain.center.x, sl.center.z - S.world.terrain.center.z) / 1609.34 * 10) / 10} miles out — free. Preview it, or raise the island.` : `Not here: ${sl.why}.`;
+    E.slot.textContent = sl.free ? `A place ${Math.round(Math.hypot(sl.center.x - S.world.terrain.center.x, sl.center.z - S.world.terrain.center.z) / 1609.34 * 10) / 10} miles out - free. Preview it, or raise the island.` : `Not here: ${sl.why}.`;
     return;
   }
   // the nearest stretch of coast within reach of the click: the main island's, or an island of the chain's

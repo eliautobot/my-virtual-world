@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Online players, friends, status and proximity chat (PLAN WP1.10, owner request 2026-09-28, DECISIONS C118).
 // - The Online players section of the info dock: your status (Online or Appear offline), who is online (friends first,
 //   then by name; click to fly there), friend requests to answer, requests you sent, and your friends who are offline.
@@ -195,7 +195,7 @@ function onKey(e) {
   if (e.key !== 'Enter' || e.ctrlKey || e.metaKey || e.altKey) return;
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
-  if (t?.closest?.('.psc-view')) return;   // (typing on an agent's own screen: its keys — provider-screen.js)
+  if (t?.closest?.('.psc-view')) return;   // (typing on an agent's own screen: its keys - provider-screen.js)
   if (document.querySelector('.modal-back, .auth-back')) return;
   if (!auth.can('players.chat') || !(app.remote && app.remote.me) || S.mode !== 'play') return;
   e.preventDefault(); e.stopPropagation();

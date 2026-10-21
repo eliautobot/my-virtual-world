@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat contract over the provider registry (PLAN WP2.2; DECISIONS C11, C14, C119, C120, A8, A9; CHECKLIST I11.4, I11.9, X11).
 // - Every call names an agent and checks that the account may use it (agents.canUse); otherwise the agent does not exist for it (404).
 // - A session belongs to one account and one agent (C119). Run, tool and approval events go ONLY to the account that started the run.
@@ -24,7 +24,7 @@ const EVENT_BUFFER = 500;
 const RUN_KEEP_MS = 5 * 60 * 1000;
 const INPUT_MAX = 100000;   // (a pasted document or log)
 const EFFORTS = ['off', 'low', 'medium', 'high'];
-// (a provider names its own thinking levels per model — OpenClaw: off, minimal, low, medium, high, xhigh…; the provider
+// (a provider names its own thinking levels per model - OpenClaw: off, minimal, low, medium, high, xhigh…; the provider
 // checks the level against the model, this only that it is a level's name)
 const EFFORT_NAME = /^[a-z][a-z0-9_-]{0,23}$/;
 const effortOk = (v, kind) => (kind && kind !== 'models' ? EFFORT_NAME.test(v) : EFFORTS.includes(v));
@@ -98,7 +98,7 @@ export class Chat {
     catch (e) {
       if (e.code === 'host_down' || e.code === 'timeout' || e.code === 'run_uncertain') throw new ChatError(502, e.code, e.message);
       if (e.code === 'unsupported') throw new ChatError(501, 'unsupported', 'This agent platform does not do that');
-      // (the adapter's own answers about the request — not the provider failing)
+      // (the adapter's own answers about the request - not the provider failing)
       if (Object.hasOwn(ADAPTER_STATUS, e.code)) throw new ChatError(ADAPTER_STATUS[e.code], e.code, e.message);
       throw new ChatError(502, e.code || 'provider_error', e.message);
     }
@@ -107,7 +107,7 @@ export class Chat {
   // ---------------------------------------------------------------- sessions (C119)
   listSessions(P, agentId) { const { a } = this.need(P, agentId); return this.syncProvider(P, a).then(() => ({ sessions: this.sessions.list(P.account.id, a.id) })); }
   /**
-   * A provider that keeps its own sessions (Agent Providers: OpenClaw — started here, in its Control UI or from its
+   * A provider that keeps its own sessions (Agent Providers: OpenClaw - started here, in its Control UI or from its
    * channels): whoever manages its connection sees them all in the chat window, each kept as a chat of theirs here (made
    * when first seen, its title the provider's while it has the default one). Anyone else sees only the chats they start.
    * Read again at most every SYNC_MS; a provider that can't answer leaves the list as it is.
@@ -129,7 +129,7 @@ export class Chat {
       const s = this.sessions.byKey(P.account.id, a.id, x.key);
       const title = String(x.title || '').slice(0, 60) || 'Chat';
       if (!s) this.sessions.adopt(P.account.id, a.id, x.key, title, Number(x.updatedAt) || this.now());
-      // (a provider whose own titles are the record — Hermes, which names its sessions and renames them as they go —: its
+      // (a provider whose own titles are the record - Hermes, which names its sessions and renames them as they go -: its
       // title; else only a chat still unnamed here takes it)
       else if (title !== 'Chat' && title !== s.label && (DEFAULT_LABEL.test(s.label) || m.capabilities?.titles)) this.sessions.rename(P.account.id, s.id, title);
     }
@@ -143,7 +143,7 @@ export class Chat {
     const { a, s } = this.need(P, agentId, sessionId);
     const c = this.linkOf(a), m = this.registry.manifest(c.kind);
     if (!m?.capabilities?.branch || !s || s.key === LAZY_KEY) throw new ChatError(400, 'bad_request', 'This chat can\'t be branched');
-    // (upto: up to one of its answers; none — the whole chat, as Desktop's chat menu branches it)
+    // (upto: up to one of its answers; none - the whole chat, as Desktop's chat menu branches it)
     if (upto !== undefined && upto !== null && !(Number.isInteger(upto) && upto > 0)) throw new ChatError(400, 'bad_request', 'Branch from which answer?');
     if ([...this.runs.values()].some(r => r.sessionId === s.id && !r.done && !r.uncertain)) throw new ChatError(409, 'busy', 'Stop the current turn before branching this chat.');
     const r = await this.call(c, 'branch', { agentKey: a.nativeId || a.key, sessionKey: s.key, ...(upto ? { count: upto } : {}) });
@@ -164,9 +164,9 @@ export class Chat {
   }
   /**
    * One of the provider's own calls for its chat view (Hermes: its slash commands as its Desktop runs them, its / and @
-   * suggestions, its side questions and background tasks — server/providers/hermes/native.js), on this chat's session:
+   * suggestions, its side questions and background tasks - server/providers/hermes/native.js), on this chat's session:
    * only one of that provider's calls, its arguments rebuilt, its answer too. Only for whoever manages the provider (a
-   * command changes how the agent works — its approvals, its thinking —, reads its machine's files, runs its tools). A new
+   * command changes how the agent works - its approvals, its thinking -, reads its machine's files, runs its tools). A new
    * chat's session is made on the provider first and is this chat's from then on. Resolves { result, session }.
    */
   async native(P, agentId, sessionId, method, params = {}, preview = null) {
@@ -181,18 +181,18 @@ export class Chat {
     const out = await this.call(c, 'native', { agentKey: a.nativeId || a.key, sessionKey: s ? s.key : null, method: call.method, params: call.params,
       ...(s && s.key === LAZY_KEY ? { model: s.model ?? null, effort: s.effort ?? null } : {}) }, { timeoutMs: call.timeoutMs + 15000 });
     const result = calls.result(call.method, out && out.result);
-    // (a new chat: its session on the provider is this chat's now — named, until the provider names it, after the command
+    // (a new chat: its session on the provider is this chat's now - named, until the provider names it, after the command
     // that began it, as Hermes Desktop's list shows such a chat)
     if (s && s.key === LAZY_KEY && out && typeof out.sessionKey === 'string' && out.sessionKey && out.sessionKey.length <= 300) {
       this.sessions.setKey(s.id, out.sessionKey);
       if (typeof preview === 'string' && preview.trim() && DEFAULT_LABEL.test(s.label || '')) { try { this.sessions.rename(P.account.id, s.id, preview.trim().slice(0, 60)); } catch { /* the session went */ } }
     }
-    // (a side task: its answer comes later, outside any turn — to this person)
+    // (a side task: its answer comes later, outside any turn - to this person)
     if (s && result.task_id) {
       this.sides.set(result.task_id, { accountId: P.account.id, agentId: a.id, sessionId: s.id, at: this.now() });
       for (const [k, v] of this.sides) if (this.sides.size > 500 || this.now() - v.at > 6 * 3600000) this.sides.delete(k); else break;
     }
-    // (renamed there — or named while compressing: its name here follows, as Hermes' titles do)
+    // (renamed there - or named while compressing: its name here follows, as Hermes' titles do)
     const title = call.method === 'session.title' ? result.title : call.method === 'session.compress' ? result.title : null;
     if (s && title && m.capabilities?.titles) { try { this.sessions.rename(P.account.id, s.id, title.slice(0, 120)); } catch { /* the session went */ } }
     return { result, ...(s ? { session: this.sessions.get(P.account.id, s.id) } : {}) };
@@ -204,7 +204,7 @@ export class Chat {
     if (side) { to.set(side.accountId, { agentId: side.agentId, sessionId: side.sessionId }); this.sides.delete(e.ev.id); }
     const w = this.watchers.get(`${e.connectionId}|${e.sessionKey}`), now = this.now();
     if (w) for (const [accountId, x] of w) if (x.until >= now && !to.has(accountId)) to.set(accountId, { agentId: x.agentId, sessionId: x.sessionId });
-    // (one that follows a turn — a review of it: to whoever's turn it was, still known for a while after its end)
+    // (one that follows a turn - a review of it: to whoever's turn it was, still known for a while after its end)
     for (const r of this.runs.values()) {
       if (to.has(r.accountId) || String(r.connectionId) !== String(e.connectionId)) continue;
       const s = this.sessions.get(r.accountId, r.sessionId);
@@ -247,20 +247,20 @@ export class Chat {
   async startRun(P, { agent, session, input, attachments = [], model, effort, regenerate = false, editFrom = null, tz = null, queue = null, rewind = null }, talk = null) {
     let text = String(input ?? '').trim();
     if (text.length > INPUT_MAX) throw new ChatError(413, 'too_long', 'That message is too long');
-    // (talk: a conversation with someone else's agent in the city — server/agent-talk/ found the agent and its session
+    // (talk: a conversation with someone else's agent in the city - server/agent-talk/ found the agent and its session
     // and checked who may talk with it; such a run is always a visitor's: its tools and what it asks its owner unseen)
     const { a, s } = talk ? { a: talk.a, s: talk.s } : this.need(P, agent, session);
     if (!s) throw new ChatError(400, 'bad_request', 'Which session?');
     const c = this.linkOf(a);
-    // (a provider that takes messages while its agent works — OpenClaw: into the running turn, or after it — gets them;
+    // (a provider that takes messages while its agent works - OpenClaw: into the running turn, or after it - gets them;
     // anything else answers one message at a time. Writing again or editing waits for the answer either way.)
     const busy = [...this.runs.values()].some(r => r.sessionId === s.id && !r.done && !r.uncertain);
     const m = this.registry.manifest(c.kind);
     if (busy && (!m || !m.capabilities?.queue || regenerate || (editFrom !== null && editFrom !== undefined) || (rewind !== null && rewind !== undefined))) throw new ChatError(409, 'busy', 'This session is still answering; stop it or wait');
-    // (rewind: the provider's own record, rewound to before one of the person's messages — its row there — and this message
+    // (rewind: the provider's own record, rewound to before one of the person's messages - its row there - and this message
     // sent from that point: an edit, a checkpoint restored, an answer written again, as Hermes Desktop does them)
     if (rewind !== null && rewind !== undefined && (!m?.capabilities?.rewind || !(Number.isInteger(rewind) && rewind >= 0) || talk || s.key === LAZY_KEY)) throw new ChatError(400, 'bad_request', 'That message can\'t be gone back to');
-    // (a message while it works: "later" — after this answer —, or "redirect" — into the turn under way, which stops at a
+    // (a message while it works: "later" - after this answer -, or "redirect" - into the turn under way, which stops at a
     // safe point and goes on with it: Hermes' session.redirect; a provider without one takes it as its own queue does)
     if (queue !== null && queue !== undefined && queue !== 'later' && queue !== 'redirect') throw new ChatError(400, 'bad_request', 'queue is "later", "redirect" or nothing');
     if (model !== undefined && model !== null && (typeof model !== 'string' || !model.trim() || model.length > 200 || /[\s\u0000-\u001f]/.test(model))) throw new ChatError(400, 'bad_model', 'That is not a model name');
@@ -286,9 +286,9 @@ export class Chat {
       if (!f) throw new ChatError(404, 'not_found', 'No such attachment');   // someone else's, or gone: not confirmed
       return { id: f.id, name: f.name, mime: f.mime, size: f.size, path: f.path };
     });
-    // (video and audio only where the provider takes any file — OpenClaw keeps it for the agent; a built-in brain can't watch it)
+    // (video and audio only where the provider takes any file - OpenClaw keeps it for the agent; a built-in brain can't watch it)
     const av = files.find(f => isAv(f.mime));
-    if (av && !this.registry.manifest(c.kind)?.capabilities?.files) throw new ChatError(415, 'unsupported_file', `${a.name} can't take videos or recordings — ${av.name}. Send images, PDFs, documents or text files.`);
+    if (av && !this.registry.manifest(c.kind)?.capabilities?.files) throw new ChatError(415, 'unsupported_file', `${a.name} can't take videos or recordings - ${av.name}. Send images, PDFs, documents or text files.`);
     if (regenerate && after) this.transcripts.truncateFrom(P.account.id, s.id, after.id);
     if (!regenerate && editFrom !== null && editFrom !== undefined) this.transcripts.truncateFrom(P.account.id, s.id, editFrom);
     const prefs = { model: model ?? s.model ?? null, effort: effort ?? s.effort ?? null };
@@ -304,10 +304,10 @@ export class Chat {
     try {
       // a kind the server answers for itself also gets who wrote, which agent, and the conversation so far (the mirror,
       // with each message's attachments where they are still stored)
-      // (a chat in a project: the project's name and its instructions go with every message — CHAT.md §12)
+      // (a chat in a project: the project's name and its instructions go with every message - CHAT.md §12)
       const proj = s.projectId && this.projects ? this.projects.get(P.account.id, s.projectId) : null;
       if (proj) this.projects.touch(proj.id);
-      // (its owner's chats with an agent whose brain is the Mind: the chat's Work or Life, and the writer's time zone — CHAT.md §13)
+      // (its owner's chats with an agent whose brain is the Mind: the chat's Work or Life, and the writer's time zone - CHAT.md §13)
       // (and whether it switched between them: its earlier answers may be from the other)
       const recent = this.inproc[c.kind] ? this.transcripts.read(P.account.id, a.id, s.id, 80) : [];
       const inproc = this.inproc[c.kind] ? { sender: { id: P.account.id, name: P.account.displayName || P.account.login }, agentId: a.id,
@@ -362,7 +362,7 @@ export class Chat {
       // a piece of the answer as it is written: sent on, and kept whole (a page that reconnects gets it with events());
       // never in the event buffer (an answer is thousands of pieces). Each piece says where it starts (at, tat), so a page
       // that also read the whole so far (the events route) never adds a piece twice. replace: the provider rewrote the
-      // answer so far — the piece is all of it, from 0.
+      // answer so far - the piece is all of it, from 0.
       if (e.replace && typeof e.text === 'string') {
         run.partial = e.text.slice(0, 100000);
         try { this.send(run.accountId, { t: 'chat', run: e.runId, agent: run.agentId, session: run.sessionId, seq: run.seq, delta: { text: run.partial, at: 0, replace: true } }); } catch { /* the page catches up with events() */ }
@@ -380,9 +380,9 @@ export class Chat {
       const media = e.media && this.media ? this.media.view(run.agentId, run.sessionId, e.media) : [];
       e = { ...e, media: media.length ? media : undefined };
       const role = e.status === 'ok' && (e.text || media.length) ? 'assistant' : 'system';
-      // (a message the provider took into the turn already running: its answer comes in that turn — nothing of its own)
+      // (a message the provider took into the turn already running: its answer comes in that turn - nothing of its own)
       if (e.steered && e.status === 'ok' && !e.text && !media.length) { this.sessions.touch(run.sessionId); this.finish(e.runId, run, e); return; }
-      // (an approval the answer filed — an agent's payment waiting for its owner's OK — stays with the answer, by its id)
+      // (an approval the answer filed - an agent's payment waiting for its owner's OK - stays with the answer, by its id)
       const approvals = run.visitor ? [] : [...run.approvals].map(([id, a]) => ({ id, tool: a.tool, summary: a.summary })).slice(0, 4);
       const meta = Object.fromEntries(Object.entries({ model: e.model, effort: e.effort, tokensIn: e.tokensIn, tokensOut: e.tokensOut, cost: e.cost, ms: e.ms,
         thinking: e.thinking ? e.thinking.slice(0, 6000) : undefined, approvals: approvals.length ? approvals : undefined, media: e.media }).filter(([, v]) => v !== undefined));
@@ -432,8 +432,8 @@ export class Chat {
     return { ok: true };
   }
   /**
-   * One of an agent's sessions on its provider — any, not only a chat here: one it works in on another channel or a
-   * schedule — followed for its screens while its owner watches its PC (server/pc/screen-watch.js): its runs' events go to
+   * One of an agent's sessions on its provider - any, not only a chat here: one it works in on another channel or a
+   * schedule - followed for its screens while its owner watches its PC (server/pc/screen-watch.js): its runs' events go to
    * the provider bus like a watched chat's. The same rights as watch() (its owner, managing the connection); a lease that
    * lapses by itself (150 s) unless followed again. Returns whether it is followed.
    */
@@ -458,10 +458,10 @@ export class Chat {
   // ---------------------------------------------------------------- background tasks (Agent Providers' side panel)
   /**
    * The background tasks a provider's agent started from a chat (subagents, jobs): for whoever manages the provider, as
-   * its own sessions and live activity are — the tasks run with the provider's tools and see its other channels' work.
+   * its own sessions and live activity are - the tasks run with the provider's tools and see its other channels' work.
    */
-  /** The agent and chat a task request is about (scope 'chat': the chat's tasks — it must be given; 'agent': all of the
-   *  agent's, wherever they started — its scheduled jobs and command runs belong to no chat), and how the provider is asked. */
+  /** The agent and chat a task request is about (scope 'chat': the chat's tasks - it must be given; 'agent': all of the
+   *  agent's, wherever they started - its scheduled jobs and command runs belong to no chat), and how the provider is asked. */
   managed(P, agentId, sessionId, scope = 'chat') {
     const all = scope === 'agent';
     const { a, s } = this.need(P, agentId, sessionId ?? undefined);
@@ -492,7 +492,7 @@ export class Chat {
       ...(m.ts ? { ts: m.ts } : {}), ...(m.meta && Array.isArray(m.meta.steps) && m.meta.steps.length ? { steps: m.meta.steps.slice(0, 200).map(x => ({ title: String(x.title || x.name || 'Step').slice(0, 200), status: x.status })) } : {}) }));
     return { messages, ...(r && typeof r.nextCursor === 'string' ? { nextCursor: r.nextCursor } : {}) };
   }
-  /** Words for a running task (a provider's subagent), taken into its next step — where the provider offers it. */
+  /** Words for a running task (a provider's subagent), taken into its next step - where the provider offers it. */
   async steerTask(P, agentId, sessionId, taskId, text, scope = 'chat') {
     const { a, at } = this.managed(P, agentId, sessionId, scope);
     if (typeof text !== 'string' || !text.trim() || text.length > 4000) throw new ChatError(400, 'bad_request', 'What should it do? (at most 4000 characters)');
@@ -508,7 +508,7 @@ export class Chat {
     return { cancelled: !!(r && r.cancelled), ...(r && r.reason ? { reason: String(r.reason).slice(0, 500) } : {}), ...(t ? { task: t } : {}) };
   }
   // ---------------------------------------------------------------- the agents' browser (Agent Providers' side panel)
-  /** The provider's own browser — the one its agents browse with: for whoever manages the provider (it may show pages
+  /** The provider's own browser - the one its agents browse with: for whoever manages the provider (it may show pages
    *  the agents are signed in to), through an agent of it. */
   browserOf(P, agentId) {
     const a = this.agentFor(P, agentId);
@@ -533,7 +533,7 @@ export class Chat {
     return this.call(this.linkOf(a), 'browserFrame', { tab: String(tab || ''), after: Number(after) || 0, waitMs: 4000 }, { timeoutMs: 15000 });
   }
   // ---------------------------------------------------------------- the agent's own screen (Hermes' Bot Desktop)
-  /** A provider agent's own screen — where its browser opens and its computer use acts (docs/features/agent-pc.md §4.2):
+  /** A provider agent's own screen - where its browser opens and its computer use acts (docs/features/agent-pc.md §4.2):
    *  for whoever manages the provider, as its browser is. Each person is their own viewer there (viewer: their account). */
   screenOf(P, agentId) {
     const a = this.agentFor(P, agentId);
@@ -558,7 +558,7 @@ export class Chat {
     const { a, at } = this.screenOf(P, agentId);
     return this.call(this.linkOf(a), 'screenThumb', at, { timeoutMs: 20000 });
   }
-  /** Where this person's viewer connects, once: { url (the provider's own address — nothing else), allowPrivate }. */
+  /** Where this person's viewer connects, once: { url (the provider's own address - nothing else), allowPrivate }. */
   async screenTicket(P, agentId) {
     const { a, at } = this.screenOf(P, agentId);
     const c = this.linkOf(a);
@@ -570,7 +570,7 @@ export class Chat {
     return { url: u.href, allowPrivate: c.scope === 'installation', account: P.account.id };
   }
   // ---------------------------------------------------------------- which chats are working (the Sidebar's marks)
-  /** Whether a chat is working now: an answer of this installation's being written in it, or — a provider session — the
+  /** Whether a chat is working now: an answer of this installation's being written in it, or - a provider session - the
    *  provider running a turn there (its activity feed: another channel, a job, a task). */
   /** Whether a chat works now: true, 'waiting' (for the person: an approval, a question), or false. */
   isWorking(s, a = this.agents.get(s.agentId)) {
@@ -632,7 +632,7 @@ export class Chat {
     if (key !== null && (typeof key !== 'string' || !/^[\w-]{8,80}$/.test(key))) throw new ChatError(400, 'bad_request', 'Not a request key');
     return this.call(this.linkOf(a), 'refreshCard', { agentKey: a.nativeId || a.key, sessionKey: s.key, ...(key ? { key } : {}) });
   }
-  /** Takes the session's progress card off (OpenClaw's Dismiss) — the version the person saw, not one written since. */
+  /** Takes the session's progress card off (OpenClaw's Dismiss) - the version the person saw, not one written since. */
   async dismissCard(P, agentId, sessionId, revision) {
     const { a, s } = this.need(P, agentId, sessionId);
     if (!s || s.key === LAZY_KEY) throw new ChatError(400, 'bad_request', 'This chat has no progress card yet');
@@ -705,7 +705,7 @@ export class Chat {
     return { ok: true };
   }
   /** Answers what a run asks: approved (true or false), or a decision where the provider offers more (allow-once,
-   *  allow-session — for this chat, Hermes —, allow-always, deny — Agent Providers). */
+   *  allow-session - for this chat, Hermes -, allow-always, deny - Agent Providers). */
   async approve(P, runId, approvalId, approved, decision = null) {
     const run = this.approvalRun(P, runId);
     const { a } = this.need(P, run.agentId);
@@ -760,7 +760,7 @@ export class Chat {
   async history(P, agentId, sessionId) {
     const { a, s } = this.need(P, agentId, sessionId);
     if (!s) throw new ChatError(400, 'bad_request', 'Which session?');
-    // (an answer of this person's still being written in this chat — begun before this page was opened, or in another
+    // (an answer of this person's still being written in this chat - begun before this page was opened, or in another
     // tab: the page follows it from here, the events route giving what it missed)
     const liveRun = [...this.runs].find(([, r]) => r.sessionId === s.id && r.accountId === P.account.id && !r.done && !r.uncertain);
     const live = liveRun ? { live: liveRun[0] } : {};
@@ -773,7 +773,7 @@ export class Chat {
     // messages, with only this installation's own notes after them (a message that could not be sent)
     if (out && out.authoritative) {
       const last = provider.reduce((t, m) => Math.max(t, Number(m.ts) || 0), 0);
-      // (the files a person sent are this installation's — the provider keeps its own copies apart: each of the person's
+      // (the files a person sent are this installation's - the provider keeps its own copies apart: each of the person's
       // messages gets back the files it went with, matched in order by its words)
       const sent = mirror.filter(m => m.role === 'user' && m.meta && m.meta.attachments);
       const withFiles = m => {
@@ -807,7 +807,7 @@ export class Chat {
   /**
    * Whether this person can chat with agent `id` now, and if not why, in one short line with the fix where there is one
    * (the chat window says it before anything is typed; docs/features/CHAT.md §6). An agent this person may not use is
-   * named — it walks the city in plain sight — but nothing more is said about it.
+   * named - it walks the city in plain sight - but nothing more is said about it.
    * { ok, kind, caps, manage } or { ok: false, reason, message, fix? }.
    */
   canChat(P, id) {
@@ -845,8 +845,8 @@ export class Chat {
       if (body.effort !== null && (typeof body.effort !== 'string' || !effortOk(body.effort, conn && conn.kind))) throw new ChatError(400, 'bad_effort', !conn || conn.kind === 'models' ? 'Thinking effort is off, low, medium or high' : 'That is not a thinking level');
       p.effort = body.effort;
     }
-    // (a provider that keeps its own sessions takes the model and thinking level into the session at once — as its own
-    // pickers do — and refuses one the model hasn't; a chat not started there yet takes them with its first message)
+    // (a provider that keeps its own sessions takes the model and thinking level into the session at once - as its own
+    // pickers do - and refuses one the model hasn't; a chat not started there yet takes them with its first message)
     if ((p.model || p.effort) && s.key !== LAZY_KEY && this.patches(a)) {
       await this.call(this.linkOf(a), 'patchSession', { agentKey: a.nativeId || a.key, sessionKey: s.key, ...(p.model ? { model: p.model } : {}), ...(p.effort ? { effort: p.effort } : {}) });
     }

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Bridges for vehicles (the design review 2026-10-03: "vehicles can drive through the guard rails, and there's a drivable
 // surface on either side of the bridges"): the vehicle physics' ground leaves the water open beside and under a bridge,
 // the deck is solid along the road's grade, and its rails stop a car where the drawn rails stand.
@@ -40,7 +40,7 @@ test('a bridge is a solid deck with rails; the water beside it is open', () => {
   const down = (x, z) => { const hit = physics.castRay(new RAPIER.Ray({ x, y: deck + 30, z }, { x: 0, y: -1, z: 0 }), 200, true); return hit ? deck + 30 - hit.timeOfImpact : null; };
   // on the deck: its top, along the road's grade
   assert.ok(Math.abs(down(m.x, m.z) - deck) < 0.15, `the deck at ${deck.toFixed(2)} (hit ${down(m.x, m.z)?.toFixed(2)})`);
-  // beside it (3 m past its edge, on both sides): nothing near the deck's height — the water is open
+  // beside it (3 m past its edge, on both sides): nothing near the deck's height - the water is open
   for (const sd of [1, -1]) { const h = down(m.x + nx * sd * (half + 3), m.z + nz * sd * (half + 3)); assert.ok(h === null || h < deck - 1.5, `open beside the deck (${h?.toFixed(2)})`); }
   // across the deck at a car's height: the rail stops it before the edge
   const from = { x: m.x, y: deck + 0.6, z: m.z };

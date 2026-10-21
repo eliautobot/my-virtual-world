@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The multiplayer core over the live stream (PLAN WP1.10, I14.9–I14.12, DECISIONS C62, C118) with real WebSockets:
 // one player per account shared by its tabs, moves validated and corrected, area of interest with measured rates,
 // proximity chat by distance and space, online status with Appear offline, friends, and state saved across a restart.
@@ -148,7 +148,7 @@ test('the server accepts honest moves, refuses impossible ones and corrects the 
   c.close(); k.close();
 });
 
-test('area of interest: full rate within 60 m, reduced within 250 m, nothing beyond — measured (I14.11)', async () => {
+test('area of interest: full rate within 60 m, reduced within 250 m, nothing beyond - measured (I14.11)', async () => {
   const mover = conn(cy), near = conn(ada), mid = conn(ben), far = conn(null);
   await Promise.all([mover.opened, near.opened, mid.opened, far.opened]);
   const me = await mover.msg(m => m.t === 'you');
@@ -179,7 +179,7 @@ test('area of interest: full rate within 60 m, reduced within 250 m, nothing bey
   assert.ok(rNear >= 7, `within 60 m: about 10 updates a second (measured ${rNear.toFixed(1)}/s)`);
   assert.ok(rMid >= 1 && rMid <= 3.2, `within 250 m: about 2 a second (measured ${rMid.toFixed(1)}/s)`);
   assert.equal(rFar, 0, 'beyond 250 m: no updates at all');
-  // the far browser still has the name in the online list (members) — the guest has no list
+  // the far browser still has the name in the online list (members) - the guest has no list
   assert.equal(far.msgs.some(m => m.t === 'online'), false, 'guests get no online list (C118)');
   const list = near.last('online');
   assert.ok(list && list.list.some(p => p.name === 'Cy'), 'a member sees everyone online by name, near or far');

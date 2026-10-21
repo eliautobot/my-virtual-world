@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The ambient soundscape (WP4.18, wp4-world-spec.md §6.4): synthesised in the browser with Web Audio — no recordings,
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The ambient soundscape (WP4.18, wp4-world-spec.md §6.4): synthesised in the browser with Web Audio - no recordings,
 // so nothing to license or download. Beds of shaped noise for wind (with gusts), rain, surf near the coast and the city's
 // hum; birdsong by day and crickets at night in the countryside, gulls by the sea, thunder after lightning. Levels follow
 // the weather (render/weather.js), the hour, and where the camera is (near the sea, in the city, high up). The volume is
 // the World sounds volume (Settings → Sound, audio/mixer.js); audio starts after the first click or key (browser rules). While
 // the page listens to someone (a voice conversation, dictation) it is turned down to a whisper ('audio:duck' on the bus),
-// so the microphone hears them and not the city — and finds the pause when they stop.
+// so the microphone hears them and not the city - and finds the pause when they stop.
 import { S, bus } from '../core/state.js';
 import { level } from './mixer.js';
 import { GU } from '../render/scene.js';

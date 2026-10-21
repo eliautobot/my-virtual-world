@@ -5,71 +5,71 @@
       "file": "vehicle-exit-safety.mjs",
       "sourceSHA256": "64f3d268e4edaf3216e2d6c8349e4efede7577684989d1d31e5afe4d130428c3",
       "deployedSHA256": "e789df068e2c74052d77e30a663b3b937ff51cf793c3b171fcb1bf30188b6e0e",
-      "adaptedSHA256": "e9fe373ecbd8351925fb598e1af3afe4eb1f5de274c45a72aba084724d39cf84",
-      "changes": "generated import query tokens removed only"
+      "adaptedSHA256": "c3cc7865247aaaf5e272bfdaef9afdb88a8887389920311166132e7f7b9f7508",
+      "changes": "generated import query tokens removed only; em dashes in comments changed (2026-10-21)"
     },
     {
       "file": "vehicle-exit-geometry.mjs",
       "sourceSHA256": "66e0626386050143afe8c4db2c6425c79cf4077b5cdd9dd623450cb210a39b58",
       "deployedSHA256": "f656008846d5ff86b8c5273f6f0b92c72d8e6f5035a2fe871f131ce3637028fe",
-      "adaptedSHA256": "ece6fd17b2fcaa30e9e617fb2b4877d72bc307ffc6e6b813f9b9fab597d5c4b5",
-      "changes": "generated import query tokens removed only"
+      "adaptedSHA256": "14701453f9b88472ab0e789efcb6239f49e79a611c04361b7bccf31eb141cc24",
+      "changes": "generated import query tokens removed only; em dashes in comments changed (2026-10-21)"
     },
     {
       "file": "traffic-vehicles.mjs",
       "sourceSHA256": "a2edd45b570305dd62a275097e3940d6457051cc68f13f80752a56ebfb9aa1e8",
       "deployedSHA256": "9f125da4643a26c5d4495cc5df65af08d5a9e6b74edbe2fe6755c1f072338d72",
-      "adaptedSHA256": "af54fa6d16b94cf5f1748906bbdaf62f3bc208ec7e43cfddc724e111bd0e5d2a",
-      "changes": "generated import query tokens removed only"
+      "adaptedSHA256": "f28d85dd4feb17b254379047a54595d2afc103cb5254bf58e9d97b0b6b772b05",
+      "changes": "generated import query tokens removed only; em dashes in comments changed (2026-10-21)"
     },
     {
       "file": "sedan-proportions.mjs",
       "sourceSHA256": "d6d48bb24e32fce38e6a6ae3539064e1c7f35b05d8af61749eda5c43d4091a56",
       "deployedSHA256": "d6d48bb24e32fce38e6a6ae3539064e1c7f35b05d8af61749eda5c43d4091a56",
-      "adaptedSHA256": "ab4fa6f9bb775bcbdf2bed05a725987f9ffd18923b8e6c92fdd7ec1cb9599b01",
-      "changes": "generated import query tokens removed only"
+      "adaptedSHA256": "2347b20986a1248d0e859dffdc2c74fae9a99a9e200753c09917d033bbea4f89",
+      "changes": "generated import query tokens removed only; em dashes in comments changed (2026-10-21)"
     },
     {
       "file": "fleet-vehicle-proportions.mjs",
       "sourceSHA256": "46cb4db31f75413a65f748a37e3743137372c5504ed4305e108162f1c90dc51e",
       "deployedSHA256": "46cb4db31f75413a65f748a37e3743137372c5504ed4305e108162f1c90dc51e",
-      "adaptedSHA256": "db56539fc964a85622cfa8a11086f587fe655c3a311747cfcf05a887bfe94504",
-      "changes": "generated import query tokens removed only"
+      "adaptedSHA256": "1d7703ec18b09ce9521a43bb8972edd49256fdb50e6200bb902a7647dc85017a",
+      "changes": "generated import query tokens removed only; em dashes in comments changed (2026-10-21)"
     },
     {
       "file": "vehicle-gameplay.mjs",
       "sourceSHA256": "ac9fa7c7bd0b013313f5d4228ed4b45c3e679f0e0305a43918fbc669ea3dcc08",
       "deployedSHA256": "ac9fa7c7bd0b013313f5d4228ed4b45c3e679f0e0305a43918fbc669ea3dcc08",
-      "adaptedSHA256": "eda44c58f9f2bfe1d8607ae9fbb64fc0cbd5fc240393ec0260d3b66646ee4eb9",
-      "changes": "generated import query tokens removed only"
+      "adaptedSHA256": "236cc75f31410ca85be8835b6ef2d16aae9a29463fa536f2473ee2822e261334",
+      "changes": "generated import query tokens removed only; em dashes in comments changed (2026-10-21)"
     },
     {
       "file": "vehicle-dynamics.mjs",
       "sourceSHA256": "03770da822f0d1e66ba4035884a962dc8d33819585aa3624d5eed32a72de3647",
       "deployedSHA256": "49cf38755e07e3c967daf03a4018a99f4d594b2d50242d5f2d21290e15ee4042",
-      "adaptedSHA256": "a9271c20bed6bec489df4bdcbc1bed3ecfe9fea3c3756762339f0466c5ed2820",
-      "changes": "generated import query tokens removed only"
+      "adaptedSHA256": "980315133956dba2c07671a945daca4c74969884ee903eaeec599e0df85b01cf",
+      "changes": "generated import query tokens removed only; em dashes in comments changed (2026-10-21)"
     },
     {
       "file": "vehicle-pedestrian-sweep.mjs",
       "sourceSHA256": "74efa1110ff484310eb2372cdc1dfd62af8e8c607de9030301c14d220ab8dea8",
       "deployedSHA256": "74efa1110ff484310eb2372cdc1dfd62af8e8c607de9030301c14d220ab8dea8",
-      "adaptedSHA256": "ad4e7cc5be4e162ae4815bf2591c6c7ea613a412e20022b3e8fbc678318d10ad",
-      "changes": "generated import query tokens removed only"
+      "adaptedSHA256": "06a11ebfeb9ac9b4693532aeebe194e0c9c1f682b3e6e7f94a49feaf9aeec586",
+      "changes": "generated import query tokens removed only; em dashes in comments changed (2026-10-21)"
     },
     {
       "file": "physics-collision-groups.mjs",
       "sourceSHA256": "81f62dbccb7712574d2bef843cccf5b863b055ba9846235f3214b462d9377c9f",
       "deployedSHA256": "81f62dbccb7712574d2bef843cccf5b863b055ba9846235f3214b462d9377c9f",
-      "adaptedSHA256": "3c59ce526eacd95a0e264db1b53d8440165672cdbf9b0dd1917d33311a1bd7ff",
-      "changes": "generated import query tokens removed only"
+      "adaptedSHA256": "7ea94d407b1f63e4ad2bbd9e1b72ff7bdb555d4f91c8969f5a15944c26e674b5",
+      "changes": "generated import query tokens removed only; em dashes in comments changed (2026-10-21)"
     },
     {
       "file": "vehicle-skid-marks.mjs",
       "sourceSHA256": "44fbba8aa719f563fa2ff5f54aa6852726fa2728acf355b0d60f2a4796d3783b",
       "deployedSHA256": "44fbba8aa719f563fa2ff5f54aa6852726fa2728acf355b0d60f2a4796d3783b",
-      "adaptedSHA256": "17c04223fe53b2a5ef4130280def4dd4742881dc9fcc77a896673daed99e8936",
-      "changes": "none"
+      "adaptedSHA256": "247160dcfbd436d1171901c075a84c477db20180af790ad37ac116c68996df17",
+      "changes": "none; em dashes in comments changed (2026-10-21)"
     }
   ]
 }

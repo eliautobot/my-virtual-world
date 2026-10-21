@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The promotional aircraft's models (the design review 2026-10-03: rebuilt from the ground up, in the city's style, with
 // their banners): a high-winged banner-towing light plane, an advertising blimp and a hot-air balloon, each built from
-// shaped surfaces — fuselage and hull lofted from cross-sections, wings, tails and fins with their control surfaces,
+// shaped surfaces - fuselage and hull lofted from cross-sections, wings, tails and fins with their control surfaces,
 // wheels and struts, a gondola with engine pods, a balloon envelope of coloured gores with its load tapes, skirt,
 // burner frame and wicker basket. Nose along +z, up +y, metres. Bodies are FB geometry (the furniture material: aC,
 // with lights that glow at night); the advertisement surfaces are separate geometry with texture coordinates (the
-// blimp's panels along both sides of its hull, the band round the balloon and the banner below its basket) — the
+// blimp's panels along both sides of its hull, the band round the balloon and the banner below its basket) - the
 // plane's banner is drawn trailing behind it (render/promo-aircraft.js).
 import * as THREE from 'three';
 import { FB } from './furniture.js';
@@ -50,13 +50,13 @@ export function slab(f, outline, plane, t, at = [0, 0, 0]) {
   }
 }
 /**
- * A wing, tail or fin as one smooth, closed solid (2026-10-14, the product owner: "make everything one solid piece" — the flat slabs read
- * as cardboard and shaded differently with the angle): symmetric airfoil sections — a rounded leading edge, the
- * thickness tapering to a sharp trailing edge (NACA 00xx), smoothly shaded — along its span, both ends closed.
+ * A wing, tail or fin as one smooth, closed solid (2026-10-14, the product owner: "make everything one solid piece" - the flat slabs read
+ * as cardboard and shaded differently with the angle): symmetric airfoil sections - a rounded leading edge, the
+ * thickness tapering to a sharp trailing edge (NACA 00xx), smoothly shaded - along its span, both ends closed.
  * plane 'xz': span along x, chord along z, thickness along y (a wing, a tailplane); 'yz': span along y, chord along z,
  * thickness along x (a fin). stations: [{ s (span), le, te (the chord's ends along z: the leading edge the larger),
  * o (the surface's offset across it: y for 'xz', x for 'yz'), t (thickness / chord) }], ascending in s. o.bands:
- * [[u0, u1, colour]] — parts of the chord (0 leading edge … 1 trailing edge) in their own colour (a rudder, elevators).
+ * [[u0, u1, colour]] - parts of the chord (0 leading edge … 1 trailing edge) in their own colour (a rudder, elevators).
  */
 export function airfoil(f, stations, plane = 'xz', { n = 10, bands = null } = {}) {
   const us = []; for (let k = 0; k <= n; k++) us.push((1 - Math.cos(Math.PI * k / n)) / 2);

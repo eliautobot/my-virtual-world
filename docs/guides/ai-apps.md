@@ -1,7 +1,7 @@
-<!-- My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
+<!-- Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
 # Connect an AI app (Grok Bot and others)
 
-An AI app you already use — a Grok Bot, or another app that takes custom MCP connectors — can **be one of your agents**:
+An AI app you already use (a Grok Bot, or another app that takes custom MCP connectors) can **be one of your agents**:
 it gets a body in the city, walks, talks, works and answers you, thinking with your own app's subscription. My Virtual
 World is the MCP server it connects to, with its own sign-in (OAuth 2.1).
 
@@ -15,7 +15,7 @@ A world on `localhost` only can't be reached by an AI app.
 
 1. In the **Team** panel, click **➕ New agent** and choose **Grok Bot**.
 2. Follow the steps it shows: in Grok, add a **custom connector** with the address it gives you
-   (`https://<your world>/mcp/a/<handle>` — every agent has its own) and the name it suggests.
+   (`https://<your world>/mcp/a/<handle>`; every agent has its own) and the name it suggests.
 3. Grok opens your world's consent page. Sign in if asked, check which agent it will act as, and **Allow**.
 4. The agent's Studio opens. Its **wake-up link** lets the world call your Grok Bot when someone talks to it, so it
    answers at once.

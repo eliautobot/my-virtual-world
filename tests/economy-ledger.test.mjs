@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Virtual Coin ledger (server/economy/ledger.js; docs/features/ECONOMY.md §2): balanced, atomic, idempotent,
 // append-only and signed; holds, reversals, freezing; the money supply; reconciliation and the chain check finding
 // changes made behind the server's back; thousands of transfers conserving every coin.

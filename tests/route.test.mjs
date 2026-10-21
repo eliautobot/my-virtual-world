@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // GPS routes (shared/route.js; 2026-10-05 "a map like GTA's"): along the roads and streets, connected end to end,
 // with turn-by-turn steps; the map's "travel here" and "where is home" on the server.
 import test from 'node:test';

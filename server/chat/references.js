@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Chat references (PLAN WP2.2; DECISIONS C53, decided in batch 10): notes and links attached to an agent, shown in every chat
 // window with that agent. They are shared by every account allowed to chat with it; whoever manages the agent adds and removes.
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f<>]/g, '').trim().slice(0, n);

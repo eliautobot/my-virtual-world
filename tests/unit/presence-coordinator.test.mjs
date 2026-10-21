@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The presence coordinator (server/presence-coordinator.js, PLAN WP2.3; DECISIONS A8, C120; CHECKLIST I8.6): scenario tests with a
 // fake clock and the real event bus: long quiet runs, failed runs, crashes and restarts, approvals, overlapping runs,
 // and that events for one agent never touch another.
@@ -154,7 +154,7 @@ test('the first time an agent shows as idle it is reported (a connected agent si
   assert.deepEqual(r.changes.at(-1), ['coder', 'idle', false]);
 });
 
-test('the server\'s own brain: every agent on it shares the platform id "mind", and a run names its agent by its key — that agent works, no other', () => {
+test('the server\'s own brain: every agent on it shares the platform id "mind", and a run names its agent by its key - that agent works, no other', () => {
   const r = rig();
   r.list.push({ id: 4, key: 'adam', enabled: true, connectionId: 7, nativeId: 'mind' }, { id: 5, key: 'team-acon', enabled: true, connectionId: 7, nativeId: 'mind' });
   r.ev('run.start', { runId: 'm1', agentKey: 'team-acon' });

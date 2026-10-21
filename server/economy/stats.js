@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The economy's numbers over time (docs/features/ECONOMY.md §10): a row per key per economic day in econ_stats, written
 // with each settlement, for the economy window's charts; and today's live counters (sales by the hour, the latest
 // purchases for the floating coins over venues).

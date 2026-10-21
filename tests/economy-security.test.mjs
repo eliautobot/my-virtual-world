@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The economy under attack and under load (docs/features/ECONOMY.md §2.4): every route names a capability, every POST
 // needs the CSRF token and the site's Origin, agents' routes only take an agent's token; nobody moves, reads or manages
 // money that isn't theirs; hostile bodies (wrong types, huge or negative numbers, prototype keys, long strings) never

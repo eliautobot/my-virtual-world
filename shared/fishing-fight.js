@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fight with a hooked fish (docs/features/fishing.md §The fight): what makes the game. The fish has stamina (S, in
 // seconds of good fighting) and a pull (P, kgf) from its species and weight, and a temperament that sets how it moves
-// through its modes — runs (left, right, away), rests, dives, head-shakes, charges at the boat and jumps. The player
+// through its modes - runs (left, right, away), rests, dives, head-shakes, charges at the boat and jumps. The player
 // holds REEL to gain line and tire it, and steers the rod AGAINST its run to turn it (tiring it faster, at more tension).
 // Tension over the drag gives line (the fish gains ground); a spike over the line's strength snaps it. A jump wants a
-// bow (release and tap in time) — miss it on a tight line and the spike can snap the line; on a slack line it throws the
+// bow (release and tap in time) - miss it on a tight line and the spike can snap the line; on a slack line it throws the
 // hook. Slack too long throws the hook too; all the line out spools the reel. Beaten and close: LAND.
 //
 // Deterministic for a seed (the fish's moves), stepped at FIGHT_DT; run in the angler's browser. The server doesn't
@@ -20,7 +20,7 @@ const SLACK_S = 2.4;                    // s of slack line before the hook falls
 const JUMP_WIN = 0.75;                  // s to bow to a jump
 const BOW_BONUS = 0.06;                 // of S0: a bowed jump tires it
 const ROD_LIMIT = 0.25;                 // drain when the fish is too heavy for the rod
-// (2026-10-15, the fishing game's polish: a fight should be a minute's fun, not four) — a fish too heavy for the rod
+// (2026-10-15, the fishing game's polish: a fight should be a minute's fun, not four) - a fish too heavy for the rod
 // pulls free after HEAVY_S (the player is told when it's hooked), and every fish tires faster once a fight has gone on
 // FATIGUE_T s: its drain grows by one more for every FATIGUE_RAMP s after that (minFightSeconds counts it)
 export const HEAVY_S = 30;
@@ -138,7 +138,7 @@ export function fightStep(F, input = {}, dt = FIGHT_DT) {
 /**
  * The fastest a fish could be landed with this gear (s), whatever the player did: its stamina at the most it can drain
  * (the tension at its most, reeling, held against it, every jump bowed to), or the line to reel in at the reel's top
- * speed — and 20 % to spare. The server refuses a landing sooner than this.
+ * speed - and 20 % to spare. The server refuses a landing sooner than this.
  */
 export function minFightSeconds(sp, kg, L, d0) {
   const p = fishParams(sp, kg), heavy = kg > L.maxKg ? ROD_LIMIT : 1;

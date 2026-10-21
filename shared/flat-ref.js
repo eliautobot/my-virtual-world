@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A flat's lasting address (the commerce package: flats sold and rented through the shop). Flats are numbered by their
 // place on the floor, and that number changes when the owner splits or removes flats, so a sale or a lease names the
 // flat by what doesn't change: its building's permanent id, the floor, and the flat's own dice (its seed `s`; floors

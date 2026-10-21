@@ -1,5 +1,5 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// What a sign's or an aircraft's content is made of (a design: picture, title, message, link — the designer,
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// What a sign's or an aircraft's content is made of (a design: picture, title, message, link - the designer,
 // client/js/ui/designer.js), the shapes it is shown in, and the helpers that pick an item from a list on the shared
 // clock, the same on every screen. Where signs stand: shared/signs.js.
 

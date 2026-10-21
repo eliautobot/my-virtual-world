@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The player stream (PLAN WP1.10, I14.11): one binary frame per browser per tick, holding only the players in its area
 // of interest that changed since it last heard of them. Resident plans are frame type 1 (shared/proto.js); this is 2.
 // Header 12 B: u8 type (2) | u8 0 | u16 count | f64 server time (ms)

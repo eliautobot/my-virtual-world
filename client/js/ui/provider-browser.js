@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// An agent's real browser, live: an agent provider's own (Agent Providers, docs/features/agent-providers.md §4 — the one
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// An agent's real browser, live: an agent provider's own (Agent Providers, docs/features/agent-providers.md §4 - the one
 // its agents browse with; for whoever manages the provider: /api/providers/browser) or a built-in agent's (its PC's
-// real browser, docs/features/agent-pc.md §5 — for its owner: /api/pc/browser). Its tabs, the page live, and the
+// real browser, docs/features/agent-pc.md §5 - for its owner: /api/pc/browser). Its tabs, the page live, and the
 // person's clicks, scrolling and typing on it (a browser shared with the agent). One piece, shown in the chat window's
-// side panel (./chat-dock.js) and the agent's PC (its Browser app, ./pc-more.js — mountProviderBrowser).
+// side panel (./chat-dock.js) and the agent's PC (its Browser app, ./pc-more.js - mountProviderBrowser).
 import { getJSON, post } from '../core/net.js';
 import { esc } from '../core/util.js';
 import { icon } from '../core/icons.js';
@@ -95,7 +95,7 @@ export function providerBrowser(o) {
       }
       await sleep(FRAME_GAP_MS);
     }
-    if (B.live === my && B.loop === my) B.loop++;   // (it stopped by itself — hidden: the next showing starts another)
+    if (B.live === my && B.loop === my) B.loop++;   // (it stopped by itself - hidden: the next showing starts another)
   }
   /** One of the browser's actions on the shown tab; its refusal is said in the panel. */
   async function act(action, extra = {}) {
@@ -152,7 +152,7 @@ export function providerBrowser(o) {
     if (!w.timer) w.timer = setTimeout(() => { const { dx, dy } = w; B.wheel = null; act('scroll', { dx: Math.round(dx), dy: Math.round(dy) }).catch(() => {}); }, WHEEL_MS);
   }
   function onPageKey(e) {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;   // (the browser's own shortcuts — copy, paste — stay the page's here)
+    if (e.ctrlKey || e.metaKey || e.altKey) return;   // (the browser's own shortcuts - copy, paste - stay the page's here)
     if (PAGE_KEYS.has(e.key)) { e.preventDefault(); flushTyped(); act('key', { key: e.key }).catch(() => {}); return; }
     if (e.key.length === 1) { e.preventDefault(); typeText(e.key); }
   }
@@ -250,7 +250,7 @@ export function providerBrowser(o) {
 }
 
 /**
- * The browser by itself in an element of its own (the agent's PC): it runs while the element is on screen — an
+ * The browser by itself in an element of its own (the agent's PC): it runs while the element is on screen - an
  * element hidden (its window minimised, the page in the background) stops the live picture until it shows again.
  * @returns {{ destroy: () => void }}
  */

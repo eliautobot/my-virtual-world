@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Decision A20: the driver's browser simulates its own car with the shared LocalVehicleSim; the server validates,
 // relays, refuses implausible poses and takes the car back (braked) when poses stop.
 import test from 'node:test';

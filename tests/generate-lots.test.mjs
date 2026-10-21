@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4 city on 100 × 100 ft lots (DECISIONS E25 (8c)/(9)): lots cover every block exactly and stay clear of the road
 // corridors, every building stands inside its own lot group with its entrance on its street, nothing overlaps, groups
 // are the planned sizes, and there is housing for everyone.

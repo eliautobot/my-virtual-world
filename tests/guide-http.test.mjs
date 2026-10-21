@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Getting started (2026-10-09): GET /api/guide tells the in-world guide (client/js/ui/guide.js) whether this ACCOUNT has
-// been through the welcome tour and which of the first things it has done, from what it really holds — land bought, an
-// agent made, a home view set — never from the browser. The tour's state is the account's own (display.guide): one
+// been through the welcome tour and which of the first things it has done, from what it really holds - land bought, an
+// agent made, a home view set - never from the browser. The tour's state is the account's own (display.guide): one
 // account finishing it says nothing about another; a guest has no guide.
 import test from 'node:test';
 import assert from 'node:assert/strict';

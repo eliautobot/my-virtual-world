@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents on a real server (PLAN WP2.1, I8.8, I8.12; DECISIONS A6, A17, C60, E19, E20): the platform's agents get records
 // owned by the installation's owner; creating an agent gives it a body, a home and a desk; removing retires the body and
 // keeps the record; nobody sees another account's agent beyond its body and whether it is working; demo mode locks

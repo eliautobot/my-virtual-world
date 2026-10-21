@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Configuration (server/config.js): documented defaults, every problem reported at once, the key setting, the data
 // folder, the Docker gateway rule for plain-HTTP sign-in on localhost, the log format,
 // .env.example, and that only server/config.js reads the environment.

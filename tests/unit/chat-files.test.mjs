@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a chat attachment says to the model (server/chat/extract.js) and how an owner's chat is put together and read
 // back (server/mind/assistant.js; docs/features/CHAT.md §2, §4): Office and OpenDocument text from their ZIP archives
 // with no library, bounded (a zip bomb stops at the limit); old binary formats and damaged files refused in plain
@@ -51,8 +51,8 @@ test('refused in plain words: old formats, damaged files, a binary file named .t
 
 test('the answer is shown as written; a tool request and what the agent keeps never are, even split across pieces', () => {
   const run = pieces => { let shown = ''; const s = new StreamSplit(t => { shown += t; }); for (const p of pieces) s.feed(p); const r = s.end(); return { shown, ...r }; };
-  let r = run(['Sure', ' — here:\n\n```js\nx = {"use": 1}\n```\n', '[[mvw-', 'actions]]\n{"title":"Code"}']);
-  assert.equal(r.shown.trimEnd(), 'Sure — here:\n\n```js\nx = {"use": 1}\n```'); assert.equal(r.reply, r.shown.trimEnd(), '(the final answer replaces what was shown: the same, trimmed)'); assert.equal(parseActions(r.actions).title, 'Code');
+  let r = run(['Sure', ' - here:\n\n```js\nx = {"use": 1}\n```\n', '[[mvw-', 'actions]]\n{"title":"Code"}']);
+  assert.equal(r.shown.trimEnd(), 'Sure - here:\n\n```js\nx = {"use": 1}\n```'); assert.equal(r.reply, r.shown.trimEnd(), '(the final answer replaces what was shown: the same, trimmed)'); assert.equal(parseActions(r.actions).title, 'Code');
   r = run(['  ', '{ "u', 'se": [{"tool":"menu"}]}']);
   assert.equal(r.shown, ''); assert.deepEqual(JSON.parse(r.tool), { use: [{ tool: 'menu' }] });
   r = run(['{"name": "a JSON example the owner asked for"}']);

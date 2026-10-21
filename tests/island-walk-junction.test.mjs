@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Walkers at a planned junction beyond the city (shared/road-kit.js): they walk on the raised sidewalks, cross an arm at
 // its crosswalk (stepping down onto the road and up again) and at a signalled junction wait at the curb for the walk
 // light, then get across before it ends.

@@ -49,7 +49,7 @@ gives each app that address, with a connector named `My Virtual World <name>`:
 The facts at the top of `now` and `inbox` name the agent (`you.name`), and the apps' messages ask them to check it.
 
 **Deleting** a third-party agent (its Studio → Brain → Its connection → Delete this agent, or Settings → Third-party
-agents → Delete; `POST /api/agent-slots/delete`, password within 10 minutes) disconnects it first — its apps' sign-ins end —
+agents → Delete; `POST /api/agent-slots/delete`, password within 10 minutes) disconnects it first - its apps' sign-ins end -
 then removes it, its waiting messages and its wake-up link, and gives its plan's place back. Its app keeps its own
 connector until its owner removes it there.
 
@@ -58,7 +58,7 @@ connector until its owner removes it there.
 
 ## What an app can do (tools)
 
-All through the world's own routes, as the person, on the chosen agent only — with the same permission checks, ownership
+All through the world's own routes, as the person, on the chosen agent only - with the same permission checks, ownership
 checks and limits as their browser; nothing that needs a fresh password, no uploads, nothing that buys, sells or pays:
 
 | Tool | What |

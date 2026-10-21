@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The multiplayer core (PLAN WP1.10, DECISIONS C62, C118): one player per signed-in account, shared by all of its
 // tabs; guests have none but see the players' characters and name tags.
 // - The browser predicts its own movement and sends compact states about 10 times a second; the server checks each one
@@ -100,7 +100,7 @@ export class Players {
     for (const p of this.byId.values()) if (p.dirty) { try { this.save(p); } catch (e) { this.log?.error('[players] save failed', e.message); } }
   }
   /**
-   * Shutdown: everyone's place is saved now and nothing is written after — the database closes next, and the live
+   * Shutdown: everyone's place is saved now and nothing is written after - the database closes next, and the live
    * streams the shutdown closes report their close afterwards (each would save its player into a closed database:
    * "statement has been finalized" in the log at every restart).
    */
@@ -292,7 +292,7 @@ export class Players {
     this.toAccount(p.id, { t: 'pmoved', x: p.x, y: p.y, z: p.z, ctx: p.ctx, yaw: p.yaw, seq: p.seq, home: true,
       text: h.where ? `🏠 Home: ${h.where}` : "🏠 You have no home yet, so you're at the starting point" });
   }
-  /** The map (ui/worldmap.js): where this account's home is — { t: 'phomeat', x, z, ctx, where } (where: null when it has
+  /** The map (ui/worldmap.js): where this account's home is - { t: 'phomeat', x, z, ctx, where } (where: null when it has
    *  none and the starting point stands in). */
   homeAt(ws) {
     const p = this.byId.get(ws.pid);

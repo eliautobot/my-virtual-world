@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The dock store's counter (docs/features/fishing.md §The loop 6–7): walk into a marina's Dock Store or a lake dock's
-// Bait Shack in Play mode and E opens it —
+// Bait Shack in Play mode and E opens it -
 //   · Sell: the fish and finds in your inventory, what each fetches (its price from when it was landed:
 //     server/play/fish-market.js), paid in Virtual Coin from the economy's Fish market;
-//   · Tackle: rods, reels, lines and the leader — bought into your inventory, the one you fish with chosen here;
+//   · Tackle: rods, reels, lines and the leader - bought into your inventory, the one you fish with chosen here;
 //   · Bait: bait and lures by the pack (bait is used up when a fish takes it; a lure is lost only to a snapped line);
 //   · Boat: your boat's upgrades (yours on every boat);
 //   · Skills: a point a fishing level, and a fresh start for a price (server/play/angler.js).
@@ -89,7 +89,7 @@ function tackle(A) {
   if (!A) return '<p class="hint">Loading…</p>';
   const lb = kg => Math.round(kg * 2.2046);
   const leader = A.leader;
-  return `<p class="hint">What you buy goes into your inventory (rods, reels and lines can be given or traded). The tackle you fish with is your choice — a trip takes it from your inventory.</p>
+  return `<p class="hint">What you buy goes into your inventory (rods, reels and lines can be given or traded). The tackle you fish with is your choice - a trip takes it from your inventory.</p>
     <h4>Rods</h4>${A.rods.map(g => gearRow(g, x => `${x.reach} m cast · lifts up to ${x.maxKg} kg · ${Math.round(x.win * 1000) / 1000} s to set the hook`, A)).join('')}
     <h4>Reels</h4>${A.reels.map(g => gearRow(g, x => `${x.speed} m/s · ${x.drag} kg drag · ${x.cap} m of line`, A)).join('')}
     <h4>Lines</h4>${A.lines.map(g => gearRow(g, x => `breaks at ${lb(x.kgf)} lb (${x.kgf} kg)`, A, 6)).join('')}
@@ -98,7 +98,7 @@ function tackle(A) {
 function bait(A) {
   if (!A) return '<p class="hint">Loading…</p>';
   const water = { sea: '🌊 Sea', lake: '🛶 Lake', both: '🌊🛶' };
-  return `<p class="hint">Bait (🪱 worms, shrimp, minnows…) is used up when a fish takes it. A lure is used again and again — lost only when the line snaps.</p>
+  return `<p class="hint">Bait (🪱 worms, shrimp, minnows…) is used up when a fish takes it. A lure is used again and again - lost only when the line snaps.</p>
     ${A.lures.map(l => `<div class="fm-row${l.locked ? ' off' : ''}"><div class="fm-l"><b>${l.icon} ${esc(l.name)} <small class="dim">${water[l.water] || ''}</small></b><small>${l.have ? `You have <b>${l.have}</b>` : '<span class="dim">None yet</span>'} · ${l.pack > 1 ? `a pack of ${l.pack} for` : 'one for'} ${vc(l.price)}</small><small class="dim">${esc(l.blurb)}</small></div>
       <div class="fm-r">${l.locked ? `<span class="dim">🔒 Fishing level ${l.level}</span>` : `<button type="button" class="btn small primary" data-buy="lure" data-id="${l.id}" data-packs="1"${A.atStore ? '' : ' disabled'}>Buy · ${vc(l.price)}</button><button type="button" class="btn small" data-buy="lure" data-id="${l.id}" data-packs="5"${A.atStore ? '' : ' disabled'} title="Five packs">×5</button>`}</div></div>`).join('')}`;
 }
@@ -129,7 +129,7 @@ async function onClick(e) {
     catch (err) { app.toast(err.message, 'bad', 3500); }
     busy = false; render();
   };
-  if (t.dataset.buy) await call('/api/fishing/buy', { kind: t.dataset.buy, id: t.dataset.id, packs: Number(t.dataset.packs || 1) }, r => `🛒 ${r.bought} — in your inventory`);
+  if (t.dataset.buy) await call('/api/fishing/buy', { kind: t.dataset.buy, id: t.dataset.id, packs: Number(t.dataset.packs || 1) }, r => `🛒 ${r.bought} - in your inventory`);
   else if (t.dataset.use) await call('/api/fishing/use', { [GEAR[t.dataset.use]?.id?.split('_')[0] || 'rod']: t.dataset.use }, () => `🎣 Fishing with the ${GEAR[t.dataset.use]?.name || 'new tackle'} now`);
   else if (t.dataset.leader) await call('/api/fishing/use', { leader: t.dataset.leader === '1' });
   else if (t.dataset.skill) await call('/api/fishing/skill', { id: t.dataset.skill });

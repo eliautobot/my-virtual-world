@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The starter headquarters is a normal building (DECISIONS C103): named from the configuration (MVW_HQ_NAME), renamed
 // and demolished by admins; its AI-agent residents then work at office desks.
 import assert from 'node:assert/strict';

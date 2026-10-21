@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's phone (docs/features/phone.md), as one component shown in the Agent Studio's Phone tab and in the chat
 // window's side panel. Without a phone yet: connect a Twilio account (two fields), pick one of its numbers or buy one.
 // With one: Messages (conversations, the agent's drafts to send or discard, a composer), Calls (missed, voicemail with
@@ -113,7 +113,7 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
       <button type="button" class="cw-ic ph-refresh" data-a="sync" title="Check for new texts and calls now" aria-label="Check for new texts and calls now"${P.busy ? ' disabled' : ''}>↻</button></header>
       ${controlHtml(st)}`;
   }
-  /** Who handles the phone: the agent, or the person (the whole phone) — a switch, and a bar while the person has it. */
+  /** Who handles the phone: the agent, or the person (the whole phone) - a switch, and a bar while the person has it. */
   function controlHtml(st) {
     const c = st.control || {}, h = c.human, name = esc(st.agent.name);
     const sw = `<div class="ph-ctl" role="radiogroup" aria-label="Who handles this phone">
@@ -148,7 +148,7 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
   function setupHtml(st) {
     const S = P.setup, accts = st.accounts;
     const head = `<div class="ph-setup-h"><span class="ph-big" aria-hidden="true">📱</span><div><b>Give ${esc(st.agent.name)} a phone</b>
-      <p class="hint">A real phone number from Twilio: ${esc(st.agent.name)} gets texts and calls, and you see everything here — contacts, texts, calls and voicemail.</p></div></div>`;
+      <p class="hint">A real phone number from Twilio: ${esc(st.agent.name)} gets texts and calls, and you see everything here - contacts, texts, calls and voicemail.</p></div></div>`;
     const err = P.err || S.err ? `<div class="ph-err" role="alert">${esc(P.err || S.err)}</div>` : '';
     if (!accts.length || S.adding) {
       return `<div class="ph-setup">${head}${err}<div class="ph-card"><h5>1 · Connect your Twilio account</h5>
@@ -159,7 +159,7 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
           <p class="hint">Then put the API key's secret in Auth Token.</p></details>
         <div class="row"><button type="button" class="btn primary" data-a="connect"${P.busy ? ' disabled' : ''}>${P.busy ? 'Connecting…' : 'Connect'}</button>${accts.length ? '<button type="button" class="btn" data-a="cancel-add">Cancel</button>' : ''}</div></div></div>`;
     }
-    const pick = accts.length > 1 ? `<label>Twilio account<select class="input" data-f="conn">${accts.map(a => `<option value="${a.id}"${a.id === S.connection ? ' selected' : ''}>${esc(a.label)}${a.mine ? '' : ' (shared)'}${a.enabled ? '' : ' — off'}</option>`).join('')}</select></label>` : '';
+    const pick = accts.length > 1 ? `<label>Twilio account<select class="input" data-f="conn">${accts.map(a => `<option value="${a.id}"${a.id === S.connection ? ' selected' : ''}>${esc(a.label)}${a.mine ? '' : ' (shared)'}${a.enabled ? '' : ' - off'}</option>`).join('')}</select></label>` : '';
     const nums = S.numbers === 'loading' ? '<p class="hint">Reading the account\'s numbers…</p>' : !S.numbers ? '' : !S.numbers.length ? '<p class="hint">This account has no numbers yet: buy one below.</p>'
       : `<div class="ph-numbers" role="radiogroup" aria-label="Numbers">${S.numbers.map(n => {
         const used = n.usedBy, on = S.pick === n.sid;
@@ -201,7 +201,7 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
     const msgs = T.messages.map(m => {
       if (m.state === 'draft') {
         const ed = P.open.has(`edit-${m.id}`);
-        return `<div class="ph-msg out draft" data-id="${m.id}"><div class="ph-draft-h">✏️ ${esc(st.agent.name)} wrote this — send it?</div>
+        return `<div class="ph-msg out draft" data-id="${m.id}"><div class="ph-draft-h">✏️ ${esc(st.agent.name)} wrote this - send it?</div>
           ${ed ? `<textarea class="input ph-draft-in" data-f="draft-${m.id}" maxlength="${TEXT_MAX}" rows="3">${esc(m.body)}</textarea>` : `<div class="ph-txt" data-noicon>${esc(m.body)}</div>`}
           <div class="ph-draft-a"><button type="button" class="btn small primary" data-send-draft="${m.id}">Send</button>
           ${ed ? '' : `<button type="button" class="btn small" data-edit-draft="${m.id}">Edit</button>`}<button type="button" class="btn small" data-discard="${m.id}">Discard</button></div></div>`;
@@ -295,11 +295,11 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
     const radio = (key, val, label, help = '') => `<label class="ph-opt"><input type="radio" name="${key}-${agentId}" data-set="${key}" value="${val}"${l[key] === val ? ' checked' : ''}><span><b>${label}</b>${help ? `<small>${help}</small>` : ''}</span></label>`;
     return `<div class="ph-card"><h5>Texts</h5><p class="hint">Which texts reach ${name} (you always see every one here):</p>
         ${radio('inbound', 'contacts', 'From its contacts', 'Recommended. Strangers\' texts stay in this phone for you.')}
-        ${radio('inbound', 'anyone', 'From anyone', `Anyone who has the number can write to ${name}. Their words are marked as information, never instructions — still, an agent with tools on real machines is safer with contacts only.`)}
+        ${radio('inbound', 'anyone', 'From anyone', `Anyone who has the number can write to ${name}. Their words are marked as information, never instructions - still, an agent with tools on real machines is safer with contacts only.`)}
         ${radio('inbound', 'off', 'None', `${name} doesn't read its texts.`)}
         <p class="hint">${name}'s answers to them:</p>
         ${radio('replies', 'draft', 'Drafts for my OK', 'You get a notification; Send, edit or discard each one.')}
-        ${radio('replies', 'auto', 'Send them', 'Sent at once — only ever to a contact; anyone else gets a draft.')}
+        ${radio('replies', 'auto', 'Send them', 'Sent at once - only ever to a contact; anyone else gets a draft.')}
         ${radio('replies', 'off', 'No replies', 'It reads them and tells you what matters.')}
         <p class="hint">Texts ${name} starts itself (its tools):</p>
         ${radio('agentSend', 'draft', 'Drafts for my OK')}${radio('agentSend', 'auto', 'Send them (to contacts)')}${radio('agentSend', 'off', 'Not allowed')}
@@ -321,7 +321,7 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
       <div class="ph-card"><h5>Notifications</h5><label class="check"><input type="checkbox" data-set-bool="notify"${l.notify ? ' checked' : ''}> Tell me about new texts, missed calls, voicemail and ${name}'s drafts</label>
         <p class="hint">On every device where notifications are on (the bell, then Notifications on this device).</p></div>
       <div class="ph-card"><h5>The number</h5><p class="hint">${esc(l.pretty)} · ${esc(st.account?.label || 'Twilio')}.</p>
-        ${st.chats ? `<label>${name} reads its texts in<select class="input" data-f="chat">${st.chats.some(c => c.id === l.sessionId) ? '' : '<option value="" selected>(a chat that was deleted — pick one)</option>'}${st.chats.map(c => `<option value="${c.id}"${c.id === l.sessionId ? ' selected' : ''}>${esc(c.label || 'Chat')}</option>`).join('')}<option value="new">A new chat “📱 Phone”</option></select></label>
+        ${st.chats ? `<label>${name} reads its texts in<select class="input" data-f="chat">${st.chats.some(c => c.id === l.sessionId) ? '' : '<option value="" selected>(a chat that was deleted - pick one)</option>'}${st.chats.map(c => `<option value="${c.id}"${c.id === l.sessionId ? ' selected' : ''}>${esc(c.label || 'Chat')}</option>`).join('')}<option value="new">A new chat “📱 Phone”</option></select></label>
           <p class="hint">Your chats with ${name}: its texts arrive there as messages, and you read along in the chat window. A chat it already works in gives it that context.</p>` : ''}
         <div class="row wrap">${st.chats ? '' : '<button type="button" class="btn small" data-a="new-chat">Start a new phone chat</button>'}
         <button type="button" class="btn small danger" data-a="detach">Remove the phone</button></div>
@@ -358,21 +358,21 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
     if ('dialPad' in d) return dial(toNumber(P.keypad));
     if ('textPad' in d) return go('thread', { peer: toNumber(P.keypad), thread: null });
     if (d.dial) return dial(d.dial);
-    if (d.buy) { if (!armed(t, 'Tap again to buy (monthly charge)')) return; const r = await act('/api/phone/buy', { connection: P.setup.connection, number: d.buy }, 'Bought — it\'s the agent\'s phone now'); if (r) { P.st = r; load('messages'); } return; }
+    if (d.buy) { if (!armed(t, 'Tap again to buy (monthly charge)')) return; const r = await act('/api/phone/buy', { connection: P.setup.connection, number: d.buy }, 'Bought - it\'s the agent\'s phone now'); if (r) { P.st = r; load('messages'); } return; }
     if (d.sendDraft) {
       const ed = field(`draft-${d.sendDraft}`);
       const r = await act('/api/phone/drafts/send', { id: Number(d.sendDraft), ...(ed ? { body: ed.value } : {}) }, 'Sent');
       if (r) { P.open.delete(`edit-${d.sendDraft}`); load('thread'); } return;
     }
     if (d.editDraft) { P.open.add(`edit-${d.editDraft}`); return paint(); }
-    if (d.take) { const r = await act('/api/phone/takeover', { peer: d.take, on: true }, `You're handling this conversation — ${P.st.agent.name} won't answer it`); if (r?.line) { P.st = r; load('thread'); } return; }
+    if (d.take) { const r = await act('/api/phone/takeover', { peer: d.take, on: true }, `You're handling this conversation - ${P.st.agent.name} won't answer it`); if (r?.line) { P.st = r; load('thread'); } return; }
     if (d.give) { const r = await act('/api/phone/takeover', { peer: d.give, on: false }, `${P.st.agent.name} has this conversation back`); if (r?.line) { P.st = r; load('thread'); } return; }
     if (d.discard) { const r = await act('/api/phone/drafts/discard', { id: Number(d.discard) }, 'Discarded'); if (r) load('thread'); return; }
     switch (d.a) {
       case 'mode-human': case 'mode-agent': {
         const human = d.a === 'mode-human';
         if (!!P.st?.control?.human === human) return;
-        const r = await act('/api/phone/control', { mode: human ? 'human' : 'agent' }, human ? `You're handling every text — ${P.st.agent.name} won't read or answer them` : `${P.st.agent.name} has its phone back`);
+        const r = await act('/api/phone/control', { mode: human ? 'human' : 'agent' }, human ? `You're handling every text - ${P.st.agent.name} won't read or answer them` : `${P.st.agent.name} has its phone back`);
         if (r?.line) { P.st = r; load(); } return;
       }
       case 'sync': { const r = await act('/api/phone/sync', {}); if (r && r.line) { P.st = r; load(); } return; }
@@ -393,7 +393,7 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
         if (field('ringsec')) patch.ringSeconds = Number(field('ringsec').value);
         if (field('vm')) patch.voicemail = field('vm').checked;
         if (field('greet')) patch.greeting = field('greet').value;
-        const r = await setLine(patch, patch.calls === 'keep' ? 'Calls are answered as before' : 'Saved — set up in your Twilio account');
+        const r = await setLine(patch, patch.calls === 'keep' ? 'Calls are answered as before' : 'Saved - set up in your Twilio account');
         if (r) P.open.delete('fwd'); return;
       }
       case 'save-ringme': return setLine({ ringMe: field('ringme').value }, 'Saved');
@@ -422,7 +422,7 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
     try {
       const c = await post('/api/connections', { kind: 'twilio', label: 'Twilio', scope: 'account', config: { accountSid: sid, ...(key ? { apiKeySid: key } : {}) }, secrets: { authToken: tok } });
       const t = await post('/api/connections/test', { id: c.id });
-      if (t && t.ok === false) { await post('/api/connections/remove', { id: c.id }).catch(() => {}); throw new Error(`${t.error}${t.fix ? ` — ${t.fix}` : ''}`); }
+      if (t && t.ok === false) { await post('/api/connections/remove', { id: c.id }).catch(() => {}); throw new Error(`${t.error}${t.fix ? ` - ${t.fix}` : ''}`); }
       toast(t?.detail || 'Connected', 'good');
       P.setup = { connection: c.id, numbers: null, buy: null, err: null, adding: false, form: {} };
     } catch (err) { P.err = err.message; }
@@ -443,7 +443,7 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
   async function dial(num) {
     if (!P.st?.line?.ringMe) return go('settings', { err: 'Set "Ring me at" first: your own phone rings, then theirs.' });
     const r = await act('/api/phone/dial', { to: num });
-    if (r) toast(`Calling you at ${r.ringing} — pick up to be connected to ${nameOf(num)}`, 'good');
+    if (r) toast(`Calling you at ${r.ringing} - pick up to be connected to ${nameOf(num)}`, 'good');
   }
   function onInput(e) {
     const f = e.target.dataset.f;
@@ -463,7 +463,7 @@ export function mountPhone(el, agentId, { compact = false, toast = () => {}, onC
     if (d.set) {
       if (d.set === 'calls') {
         if (t.value === 'keep') return setLine({ calls: 'keep' }, 'Calls are answered as before');
-        if (t.value === 'voicemail') return setLine({ calls: 'voicemail' }, 'Voicemail is on — set up in your Twilio account');
+        if (t.value === 'voicemail') return setLine({ calls: 'voicemail' }, 'Voicemail is on - set up in your Twilio account');
         P.open.add('fwd'); el._h = null; return paint();
       }
       return setLine({ [d.set]: t.value }, 'Saved');

@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The airport's aircraft models hold together (2026-10-14, the product owner with screenshots: "there are shapes that are not
-// connected / floating" — a tail wheel's leg and a tow hook under the tail, windows standing off the cabin, the jet's
+// connected / floating" - a tail wheel's leg and a tow hook under the tail, windows standing off the cabin, the jet's
 // pylons between its body and engines, the helicopter's steps). Each model is built here with the real builders and
 // cut into its pieces (triangles sharing corners); a piece is attached to another where one of its corners lies on the
-// other's surface (within 2 cm) or one of its edges passes through the other — and every model must be one piece. Also:
+// other's surface (within 2 cm) or one of its edges passes through the other - and every model must be one piece. Also:
 // finite positions and normals, the rotors' blades round their hubs, triangle budgets.
 import './helpers/client-paths.mjs';
 import assert from 'node:assert/strict';
@@ -87,7 +87,7 @@ test('every aircraft is one piece: nothing floats (standing, and flying with its
   const cases = { 'propeller plane (standing)': MODELS.prop(), 'jet (standing)': MODELS.jet(), 'helicopter (standing)': MODELS.heli(), 'banner plane': bannerPlane(),
     'propeller plane (flying)': assembled('prop'), 'jet (flying)': assembled('jet'), 'helicopter (flying)': assembled('heli') };
   const bad = [];
-  for (const [name, g] of Object.entries(cases)) { const f = floatingPieces(g); if (f.length) bad.push(`${name}: ${f.length} floating — ${f.map(p => `${p.tris} tris at ${p.centre.join(',')} (${p.size.join('×')} m)`).join('; ')}`); }
+  for (const [name, g] of Object.entries(cases)) { const f = floatingPieces(g); if (f.length) bad.push(`${name}: ${f.length} floating - ${f.map(p => `${p.tris} tris at ${p.centre.join(',')} (${p.size.join('×')} m)`).join('; ')}`); }
   assert.deepEqual(bad, [], `\n${bad.join('\n')}`);
 });
 

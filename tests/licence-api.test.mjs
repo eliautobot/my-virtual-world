@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Demo mode and licensing on a real server (PLAN WP1.11, I15.1–I15.3, DECISIONS E17, E19): the locks are refused on
 // the server with the licence message, the free features work, only 3 agents are agents; importing release 1's
 // receipt (validated with Lemon Squeezy, no new activation) unlocks everything. Plus the lock coverage and the
@@ -105,7 +105,7 @@ test('no bypass: nothing in the server unlocks without a key (I15.2)', () => {
     assert.equal(hit, -1, `${path.relative(ROOT, f)}:${hit + 1} looks like a licence bypass`);
   }
   // (its copyright notice, the file's first line, names the product's licence: not a setting)
-  const cfg = fs.readFileSync(path.join(ROOT, 'server/config.js'), 'utf8').replace(/^\/\/ My Virtual World — Copyright[^\n]*\n/, '');
+  const cfg = fs.readFileSync(path.join(ROOT, 'server/config.js'), 'utf8').replace(/^\/\/ Copyright \(c\) 2026 My Virtual World[^\n]*\n/, '');
   assert.equal(/LICEN[CS]E/i.test(cfg), false, 'no licence setting in the server configuration');
 });
 

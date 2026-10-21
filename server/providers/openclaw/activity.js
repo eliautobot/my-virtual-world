@@ -1,13 +1,13 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What an OpenClaw gateway's agents are doing, whatever started it (docs/features/agent-providers.md §3, live presence):
 // this installation's chats, OpenClaw's other channels, its scheduled jobs and heartbeats. The gateway's own session feed
-// — sessions.subscribe, then sessions.changed: the rows its Control UI shows, each with hasActiveRun — says which of its
+// - sessions.subscribe, then sessions.changed: the rows its Control UI shows, each with hasActiveRun - says which of its
 // sessions have a turn running, without following every session's events. Per agent, working or not (and in how many
 // sessions, and which: the chat window marks those chats working) goes to the provider bus as agent.activity; the presence
 // coordinator decides the rest (server/presence-coordinator.js).
 
 const SNAPSHOT = { limit: 200, sortBy: 'activity' };   // (a session with a turn running is among the most recently active)
-const SETTLE_MS = 250;                                  // (a burst of changes — a turn starting — is reported once; a turn shorter than this isn't shown)
+const SETTLE_MS = 250;                                  // (a burst of changes - a turn starting - is reported once; a turn shorter than this isn't shown)
 
 export class LinkActivity {
   /** @param {import('./link.js').GatewayLink} link  @param {{ emit: (e: object) => void, kind: string }} o */

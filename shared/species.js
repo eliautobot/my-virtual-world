@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The wildlife catalogue (WP4.17, wp4-world-spec.md §6.3): one data file per species in shared/world-config/species/
 // (listed in index.json), checked against this schema; adding a species needs no code as long as it uses a known model
 // and behaviour. Fields:

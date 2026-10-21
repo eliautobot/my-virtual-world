@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The play core (docs/features/play-modules.md): everything round a play module (shared/play.js), the same for every
-// module — starting a run (is the course open to this player; the module lays it out), finishing it (the module checks
+// module - starting a run (is the course open to this player; the module lays it out), finishing it (the module checks
 // what the browser reports and works the score out), experience and levels (per module and the player's own), ranks,
 // best results and leaderboards, badges, and the player's profile. Runs live in memory between start and finish (a
 // restart forgets a run in flight; nothing else); results are written in one transaction.
@@ -205,7 +205,7 @@ export class PlayCore {
    */
   finish(account, runId, report) {
     const run = this.runs.get(runId);
-    if (!run || run.account !== account.id) fail(404, 'no_run', 'That run has ended — start the course again');
+    if (!run || run.account !== account.id) fail(404, 'no_run', 'That run has ended - start the course again');
     this.runs.delete(runId);
     const m = playOf(run.module), c = courseOf(m, run.course), t = this.now();
     let res, runRow = null;
@@ -248,7 +248,7 @@ export class PlayCore {
     if (!amount) return { amount: 0, parts, paid: 0 };
     const today = this.q.vcSince.get(this.w, account.id, this.now() - 86400e3).s, room = Math.max(0, rules.dailyCap - today);
     const want = Math.min(amount, room);
-    if (!want) return { amount, parts, paid: 0, capped: true, why: 'You have reached today\'s prize limit — the next prizes pay tomorrow' };
+    if (!want) return { amount, parts, paid: 0, capped: true, why: 'You have reached today\'s prize limit - the next prizes pay tomorrow' };
     try {
       const r = this.prizes.pay(account.id, want, `${m.label}: ${c.label}`, `play:${run.id}`) || {};
       const paid = r.paid ?? want;

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Browser launcher shared by the test tools (uitest, perf, shot, securecheck).
 // Browser: MVW_TEST_BROWSER = a Playwright channel ("chrome", "chrome-beta", "msedge", ...) or the path of a
 // Chromium-based browser. Default: "chrome", Playwright's documented channel for the installed Google Chrome.

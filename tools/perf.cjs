@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Real-GPU rendering performance at fixed cameras, for each quality preset. It only views the world: no edits, and the
 // server clock is changed only on its own throwaway server. By default it starts that throwaway server itself.
 // For each preset it loads the app on a weekday afternoon and measures four camera views (whole city, downtown, street

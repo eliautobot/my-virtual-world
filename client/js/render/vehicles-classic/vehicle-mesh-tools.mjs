@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Original low-level mesh authoring helpers. No app state, cache, resources,
 // material globals, world APIs or timers. Approved sedan renderer is separate.
 export function createVehicleMeshTools(T, dims) {

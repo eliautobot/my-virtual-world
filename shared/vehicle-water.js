@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Vehicles and the island's water (WP4.3): the same rule wherever a car is simulated (the driver's browser, the server).
 // Water slows a car (drag grows with the depth it wades through), and a car can't drive into water deeper than its
 // wading depth: the engine gives no power toward deeper water past WADE_START and none at all at WADE_MAX, while
-// driving back toward shallower water keeps full power — so a car always gets out the way it came and never crosses
+// driving back toward shallower water keeps full power - so a car always gets out the way it came and never crosses
 // the sea floor. The server also refuses a driver's pose in water deeper than POSE_MAX_DEPTH (a pose no honest
 // browser could produce).
 export const WADE_START = 0.3;       // m of water under the car where power toward deeper water starts to fade

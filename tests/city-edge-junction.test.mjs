@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Where an island road leaves the city (2026-10-03: "the junction between the 4lane and the 2lane needs work"): the
 // city draws its edge junction at street level out to the road's mouth past its edge; the road runs level with that
 // paving from the junction's middle to beyond the mouth (its drawn surface, DRAW_LIFT above its profile, at exactly
-// street level — no step where they meet), and the ground under the whole junction lies just below the paving (no
+// street level - no step where they meet), and the ground under the whole junction lies just below the paving (no
 // grass showing through its corners).
 import test from 'node:test';
 import assert from 'node:assert/strict';

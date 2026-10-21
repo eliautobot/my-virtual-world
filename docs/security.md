@@ -3,7 +3,7 @@
 ## Roles
 
 **guest** (not signed in: watches, if the installation allows) · **member** (a player: their own character, lots and
-flats, agents, chats, wallet) · **admin** (runs the world — public land, residents, the clock, the economy's policy,
+flats, agents, chats, wallet) · **admin** (runs the world: public land, residents, the clock, the economy's policy,
 accounts below their own role) · **owner** (the installation: settings, connections, permissions, infrastructure,
 ownership transfer).
 
@@ -12,14 +12,14 @@ ownership transfer).
 Every HTTP route and WebSocket message names one capability; the router refuses anyone whose role is below its lowest
 role, and refuses to start with a route that names none. The owner may raise or lower a capability's lowest role in
 Settings → Permissions, except the fixed ones. All of them: [reference/capabilities.md](reference/capabilities.md);
-every route and its capability: [reference/routes.md](reference/routes.md) — also served live to administrators by
+every route and its capability: [reference/routes.md](reference/routes.md), also served live to administrators by
 `GET /api/routes`.
 
 ## Ownership
 
 A member-level route also checks that the record is the caller's, or shared with them:
 
-- **Agents**: its owner, or an account it is shared with — to *use* (chat with it, see it work) or to *manage*
+- **Agents**: its owner, or an account it is shared with, to *use* (chat with it, see it work) or to *manage*
   (everything but removing it or sharing it, which are its owner's alone). A role share gives use only. Connected
   agents are managed only from Settings → Third-party agents.
 - **Lots and buildings**: building and furnishing need the lot's title or a delegation of that right; administrators

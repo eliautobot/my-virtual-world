@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The PC's file contents, stored once by fingerprint (docs/features/agent-pc.md §3). Two agents, a team or a file's own
 // versions holding the same bytes share one copy: `refs` counts who points at it, and a copy nobody points at is swept.
 // Small contents (up to INLINE_MAX) live in pc.db; bigger ones in <data>/pc/blobs/<aa>/<sha256>. Text-like contents are
@@ -42,7 +42,7 @@ export class BlobStore {
 
   /**
    * Prepares `buf` for storing (outside any transaction: the file store is written before the database row, so a
-   * rolled-back write leaves at most a stray file that sweepFiles() removes). Returns { sha, size, put } — call put()
+   * rolled-back write leaves at most a stray file that sweepFiles() removes). Returns { sha, size, put } - call put()
    * inside the transaction that points a node or a version at it.
    */
   prepare(buf, mime = '') {
@@ -54,7 +54,7 @@ export class BlobStore {
     }
     const codec = packed ? 'zstd' : 'none', body = packed || buf;
     const inline = size <= INLINE_MAX;
-    // (no row yet: the file is written again even if one is there — a stray left by a rolled-back write may have been
+    // (no row yet: the file is written again even if one is there - a stray left by a rolled-back write may have been
     // packed differently, and the row about to be made must describe the bytes on disk)
     if (!inline && !this.q.has.get(sha)) {
       const file = this.fileOf(sha);

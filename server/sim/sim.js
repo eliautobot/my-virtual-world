@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Simulation core: clock, agents, decision scheduling, plan broadcasting, agent info.
 import { performance } from 'node:perf_hooks';
 import { Nav, MinHeap } from './nav.js';
@@ -189,7 +189,7 @@ export class Sim {
     return { ok, text };
   }
   /** An AI agent stopping to talk with someone in person (a talk in the city, server/agent-talk/): it turns to (x, z) and
-   *  stays `secs` — no line of its own and nothing shown to others (what it says is its answer, seen only by whom it talks
+   *  stays `secs` - no line of its own and nothing shown to others (what it says is its answer, seen only by whom it talks
    *  with); while it talks it is not called away to work on a message (index.mjs: presence). False when it can't (asleep). */
   hold(i, x, z, secs = this.brain.wm(10), label = '', withIdx = null) {
     const a = this.agents[i]; if (!a) return false;
@@ -237,7 +237,7 @@ export class Sim {
   /**
    * Furniture changed (server/world/edit.js softTouch: ctx → [{ b, f, id, pts: [{ x, z, r }] }]): re-plan only the people
    * using one of those pieces or holding a place at it, those standing (or lying) where a piece was or now is, and those
-   * walking on that floor (a new way round it) — everyone else carries on (a sleeper sleeps on). skip: floors already
+   * walking on that floor (a new way round it) - everyone else carries on (a sleeper sleeps on). skip: floors already
    * re-planned as a whole.
    */
   touchUsers(soft, skip = new Set()) {

@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Property over HTTP (WP4.14, wp4-world-spec.md §5.0, §5.6): the lot map, a lot's details and title history, the
-// caller's own lots, and the operations each kind of person may do — holders on their own lots (merge up to 4,
-// split back, who may enter, shared rights), administrators on the public land (transfer, zoning, holds) — every one
+// caller's own lots, and the operations each kind of person may do - holders on their own lots (merge up to 4,
+// split back, who may enter, shared rights), administrators on the public land (transfer, zoning, holds) - every one
 // through server/property.js (one transaction, revision check, idempotency key, audit). Changes are announced to every
 // browser ({ t: 'lots' }) so the map refreshes.
 import { Property, PropertyError, MUNICIPALITY } from './property.js';
@@ -182,7 +182,7 @@ export function addPropertyRoutes(router, d) {
     } catch (e) { return fail(e); }
   } });
   // A grid's lots in one go (the grid layout tool, client/js/ui/roads.js; the product owner 2026-10-14: "provide an option to
-  // place lots along with the roadway"): runs of lots along its roads — { road, side, from, to, count } — each the same
+  // place lots along with the roadway"): runs of lots along its roads - { road, side, from, to, count } - each the same
   // platting as above, all made together (one lot change), skipping what doesn't fit.
   router.add({ method: 'POST', path: '/api/property/plat-grid', cap: 'property.admin', lock: 'edit', handler: async ctx => {
     const b = body(ctx), W = d.world(), runs = Array.isArray(b.runs) ? b.runs.slice(0, 600) : [];

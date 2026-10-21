@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Next traffic dimensions/distribution. Shared by authoritative vehicles and their instanced renderer.
 export const VEHICLE_KINDS = Object.freeze([
  { n:'sedan',L:4.5,W:1.82,H:1.44,p:34,v:12.5 }, { n:'compact',L:3.9,W:1.74,H:1.5,p:22,v:12 },

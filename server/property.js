@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Property (WP4.13, wp4-world-spec.md §5, DECISIONS E25): lots, their title and its append-only history, tenure state,
 // delegated rights, access and the rules that decide who may change what. Every change runs in one database
 // transaction with a revision check, is idempotent under a caller-supplied key bound to actor + payload, writes its
@@ -347,7 +347,7 @@ export class Property {
       return { id: lot.id, name: nm || null, note: nt || null, revision: lot.revision + 1 };
     });
   }
-  /** Administrators put the city's land up for sale (available) or take it off sale (municipal) — the city keeps the
+  /** Administrators put the city's land up for sale (available) or take it off sale (municipal) - the city keeps the
    *  title either way; selling itself arrives with the land-sales package (spec §5.8). */
   offer(id, on, { actor, key = null, revision } = {}) {
     if (!actor?.admin) throw new PropertyError('rights', 'Only administrators put city land up for sale.', 403);

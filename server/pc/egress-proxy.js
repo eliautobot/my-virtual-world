@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The built-in browser's way out (docs/features/agent-pc.md §5; ./chrome.js): every connection the agents' Chrome makes
-// goes through this proxy on this machine's loopback — Chrome is started with it and nothing bypasses it, its own
-// loopback included — and reaches the public internet only. A name is resolved HERE and the connection goes to the very
+// goes through this proxy on this machine's loopback - Chrome is started with it and nothing bypasses it, its own
+// loopback included - and reaches the public internet only. A name is resolved HERE and the connection goes to the very
 // address that was checked (a name that turns into a private address between check and connection can't), the same rule
 // as the reader's (./browser.js blockedIp, publicLookup). HTTPS and WebSockets are tunnelled (CONNECT), plain HTTP is
 // forwarded; anything to a private, local or cloud-metadata address is refused with 403. A cap on open connections; idle
@@ -13,7 +13,7 @@ import { blockedIp, publicLookup } from './browser.js';
 const MAX_SOCKETS = 512, IDLE_MS = 120000;
 const HOP = new Set(['proxy-connection', 'proxy-authorization', 'connection', 'keep-alive', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
 
-/** The public address a host name (or literal) connects to — or an error (code 'blocked') when it isn't public. */
+/** The public address a host name (or literal) connects to - or an error (code 'blocked') when it isn't public. */
 export function resolvePublic(host) {
   const h = String(host || '').replace(/^\[|\]$/g, '');
   if (!h || /^(localhost|.*\.localhost|.*\.local|.*\.internal)$/i.test(h)) return Promise.reject(Object.assign(new Error('not public'), { code: 'blocked' }));
@@ -51,7 +51,7 @@ export class EgressProxy {
     this.refused++;
     try { sock.end(`HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n${why}`); } catch { /* gone */ }
   }
-  /** HTTPS, secure WebSockets — anything tunnelled: CONNECT host:port. */
+  /** HTTPS, secure WebSockets - anything tunnelled: CONNECT host:port. */
   async tunnel(req, sock, head) {
     if (!this.track(sock)) return;
     const m = /^\[?([^\]]+?)\]?:(\d{1,5})$/.exec(String(req.url || ''));

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fishing docks (docs/features/fishing.md §Venues; shared/dock-layout.js): their layouts hold together (decks join
 // up, the slips sit between the fingers and clear of them, the boats' water is inside the dredged basin), the placing
 // tool squares a dock to the shore it is pointed at, the rules say where one may stand (dry land behind, the water's

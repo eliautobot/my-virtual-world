@@ -1,6 +1,6 @@
 # Notice
 
-**My Virtual World** — the self-hosted release.
+**My Virtual World**, the self-hosted release.
 
 Required Notice: Copyright (c) 2026 My Virtual World.
 

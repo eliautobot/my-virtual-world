@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The grid layout tool, 2026-10-14 (the product owner): its roadways flat — one level, the land across the whole grid
-// levelled to it so the lots are level too — and its lots made with it (/api/property/plat-grid).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The grid layout tool, 2026-10-14 (the product owner): its roadways flat - one level, the land across the whole grid
+// levelled to it so the lots are level too - and its lots made with it (/api/property/plat-grid).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Tyre smoke (2026-10-05: Shift boosts, and from a standstill it does a burnout): soft grey puffs from every wheel
-// slipping hard — a burnout's spinning rear tyres, a handbrake slide — that swell, rise, drift with the wind and fade. One
+// slipping hard - a burnout's spinning rear tyres, a handbrake slide - that swell, rise, drift with the wind and fade. One
 // pool of points, one draw call; nothing is drawn while no tyre slips. Fed with the same wheel states as the tyre marks
 // (player/vehicles.js).
 import * as THREE from 'three';

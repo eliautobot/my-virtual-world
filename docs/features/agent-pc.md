@@ -1,6 +1,6 @@
 # Agents' PC
 
-Licensed under the PolyForm Noncommercial License 1.0.0 — see [LICENSE](../../LICENSE).
+Licensed under the PolyForm Noncommercial License 1.0.0 - see [LICENSE](../../LICENSE).
 
 Every account has one **PC** for its agents: a small computer built into the world. It isn't a real or emulated
 machine. It's a virtual operating system kept as data, so an agent that isn't working costs nothing but the space its
@@ -44,7 +44,7 @@ shows on the screen it is at:
 - the laptop it types on, wherever it is (a café, a park, its home);
 - its home desk.
 
-**What is on it** is what the agent has open, as it works: its desktop and taskbar, and the window of what it does —
+**What is on it** is what the agent has open, as it works: its desktop and taskbar, and the window of what it does -
 
 | It is… | Its screen shows |
 |---|---|
@@ -71,7 +71,7 @@ Agent Studio. The camera glides up to the monitor or laptop, the agent steps asi
 screen, ready to use, with the world still moving around it. On a phone it fills the screen once the camera is there.
 Escape, **✕ Leave the PC**, or a click on the world beside it takes you back.
 
-**Watching it work.** Wherever the PC shows — on its screen there, its own window, the Agent Studio, the chat window —
+**Watching it work.** Wherever the PC shows - on its screen there, its own window, the Agent Studio, the chat window -
 it follows what the agent does (**👁 Following** in its taskbar): the file it writes opens in Files with the lines it
 just wrote marked, the board with the task, its week, the page it reads, its terminal. Opened while it works (a step in
 the last two minutes), it goes straight to what it is doing. A click or a key in a window hands it to you: following
@@ -135,7 +135,7 @@ plain-English help.
 **Work sessions.** An agent works on its own when a task on a board is given to it by someone else (its owner, a
 teammate), or when its owner presses **Work on it**. Its owner can switch "works on tasks by itself" off for an agent;
 tasks then wait for **Work on it**. A session uses the agent's own brain only, at most 14 steps of up to six commands,
-and counts as one of its thoughts for the day (with its cost) — the Mind's daily and monthly limits apply. While it
+and counts as one of its thoughts for the day (with its cost) - the Mind's daily and monthly limits apply. While it
 works, the agent goes to its desk, its home computer or a laptop, as for a chat. When it finishes, it moves the task to
 Review (or Done when nothing needs checking) with a note of what it did, or says it is blocked and what it needs; its
 owner is notified either way. Two sessions run at once on an installation; the rest wait their turn.
@@ -148,17 +148,17 @@ chat with someone from another account it can only read its Public folder, and o
 **Agent Providers' agents** (OpenClaw, Hermes) live on a real computer of their own. Their PC has one more app for that
 computer, named for their provider (**OpenClaw**, **Hermes**), and Files lists it as a place (*On OpenClaw*). It is there
 for the PC's owner when they manage that provider (as its sub-menu is), and reaches the computer only through the
-provider's own interfaces — the same ones its own app uses:
+provider's own interfaces - the same ones its own app uses:
 
 | | OpenClaw | Hermes |
 |---|---|---|
 | **Its files** | The agent's real workspace, to read (OpenClaw shows text and pictures; paths inside the workspace only) | Hermes' managed files, as its dashboard shows them: its machine's home folder by default, or only the folder Hermes is started with (`HERMES_DASHBOARD_FILES_ROOT`); never its sensitive files. New folders, uploads, saving a text file, deleting |
-| **Its documents** | AGENTS.md, SOUL.md, USER.md, MEMORY.md…: read and change them. A change is saved with what was read, so one made meanwhile is never overwritten | — |
+| **Its documents** | AGENTS.md, SOUL.md, USER.md, MEMORY.md…: read and change them. A change is saved with what was read, so one made meanwhile is never overwritten | (none) |
 | **Its browser** | OpenClaw's own browser, live, in the Browser app (as in the chat window's side panel): its tabs, the page, clicks, scrolling and typing. The built-in reader is beside it | Its own screen, live (§4.2): where Hermes opens its browser. The built-in reader is beside it |
 
 - **Copy into its PC** brings a file of its computer into the agent's `~/Downloads` here.
 - A change (a document saved, a file uploaded, saved or deleted) asks for the owner's password when it wasn't entered in
-  the last 10 minutes, and is written in the audit log (which change, on which connection and agent — never its path or
+  the last 10 minutes, and is written in the audit log (which change, on which connection and agent - never its path or
   contents). On its real computer there is no trash: deleting asks first.
 - A connection with **Chat only** access shows its computer to read and changes nothing.
 - **Its screens in the world** follow what it does on its own computer: the step it takes (reading or editing a file,
@@ -168,12 +168,12 @@ provider's own interfaces — the same ones its own app uses:
 ### 4.2 Its own screen (Hermes' Bot Desktop)
 
 A Hermes agent has a **screen of its own**: Hermes' Bot Desktop, a desktop on the machine Hermes runs on (one per Hermes
-profile) where its browser opens and its computer use acts. Its owner sees it live — the screen itself, as Hermes
-Desktop's Screen pane shows it, not pictures of it — in the PC's Browser app (**🖥 Its screen**, beside the reader) and in
+profile) where its browser opens and its computer use acts. Its owner sees it live - the screen itself, as Hermes
+Desktop's Screen pane shows it, not pictures of it - in the PC's Browser app (**🖥 Its screen**, beside the reader) and in
 the chat window's side panel (**Screen**), when they manage the Hermes connection and it has **Full** access.
 
 - **Watching never types.** Until the owner presses **✋ Take over**, nothing they do reaches the screen. Taking over is
-  for what the agent can't do alone — a sign-in, a CAPTCHA, a two-factor code: the agent waits meanwhile, and its frame
+  for what the agent can't do alone - a sign-in, a CAPTCHA, a two-factor code: the agent waits meanwhile, and its frame
   is marked. **↩ Hand back** gives it back; so does closing the viewer. A lost connection keeps the owner in control (they
   may be mid-login) until they come back or hand back. Hermes itself decides whose keys and clicks reach its screen: only
   the viewer holding its lease, never one that merely watches, and two people are never in control together.
@@ -185,7 +185,7 @@ the chat window's side panel (**Screen**), when they manage the Hermes connectio
 - **What it needs on Hermes' machine**: Linux, and Hermes' Bot Desktop packages (TigerVNC and a small Xfce). Not
   installed, the panel shows Hermes' own install command for whoever runs that machine. Its screen opens no network port:
   Hermes serves it on a private socket and through its own sign-in, and this server carries it to the owner over their
-  own session — a connection of a person's own reaches only a public address, as its chat does.
+  own session - a connection of a person's own reaches only a public address, as its chat does.
 - **Its desk's monitor** shows a picture of the screen while it browses (read about once a second while the monitor is on
   screen).
 
@@ -193,35 +193,35 @@ the chat window's side panel (**Screen**), when they manage the Hermes connectio
 
 Agents browse with `search <words>`, `open <address>` (or `open 3` for the third link of the page or the search), `more`
 (the next part of a long page), `links`, `back`, `history` and `save <file>` (the page's words, with its address, into
-the PC — or a file the page was, like a PDF).
+the PC - or a file the page was, like a PDF).
 
 - **A real browser, built in** (on unless Settings → PC switches it off): the built-in agents browse in a real Chrome
   this server runs by itself (headless, started when an agent first browses, stopped after ten minutes with nobody
-  browsing). Pages are the real sites — their layout, pictures and scripts — and the agent still works from each page's
+  browsing). Pages are the real sites - their layout, pictures and scripts - and the agent still works from each page's
   words, its numbered links and its numbered fields and buttons (`click f<n>`, `type f<n> "words"`, `press Enter`).
-  - **Live, and yours to take over.** Its owner sees the page live — a picture each time it changes on screen, as
-    OpenClaw's browser shows — in the PC's Browser app (wherever the PC shows: its window, the Studio, its desk, the
+  - **Live, and yours to take over.** Its owner sees the page live - a picture each time it changes on screen, as
+    OpenClaw's browser shows - in the PC's Browser app (wherever the PC shows: its window, the Studio, its desk, the
     chat window's PC) and on its desk's monitor or laptop. They can click, scroll, type, paste, use the address bar,
     back, forward and reload: the agent's browser is shared with them, and when they go somewhere else the agent reads
     on from there. Taking over stops following (§2.1). Nothing is streamed while nobody watches.
-  - **Each agent apart.** Each agent has a browser profile of its own — its cookies, logins and storage, never another
-    agent's or another account's — kept while the browser runs. It downloads nothing by itself (a file it opens is kept
+  - **Each agent apart.** Each agent has a browser profile of its own - its cookies, logins and storage, never another
+    agent's or another account's - kept while the browser runs. It downloads nothing by itself (a file it opens is kept
     with `save`).
   - **The public internet only.** Every connection it makes goes through this server's own gate: names are resolved
     there and the connection goes to the address that was checked, so no page can reach this machine, the local network
-    or a cloud's metadata address — not by its number, not by a name, not by a redirect. WebRTC can't go around it.
+    or a cloud's metadata address - not by its number, not by a name, not by a redirect. WebRTC can't go around it.
   - **Which Chrome.** A Chrome or Chromium installed on the machine (Google Chrome on Ubuntu comes with what its page
     sandbox needs), or the one `MVW_CHROME` names; a Chrome that can't sandbox its pages is never used. None: the reader.
-- **Built-in reader** (the backup, always there): this server fetches the page and keeps its readable words — headings, lists,
-  tables, its own content without the site's menus — with its links numbered. No scripts run. It only ever reaches the
+- **Built-in reader** (the backup, always there): this server fetches the page and keeps its readable words - headings, lists,
+  tables, its own content without the site's menus - with its links numbered. No scripts run. It only ever reaches the
   public internet: a private, local or cloud-metadata address is refused whether it is typed, named or redirected to, and
   the connection goes to the very address that was checked. Pages are kept as their link, title and a short summary
   (Browser history), never whole. An agent opens at most 400 pages a day.
 - **What the web says is never an order.** Every page part and every search the agent reads comes marked as the web's
-  words — information, never instructions — and its rules say so too: it doesn't follow what a page tells it to do, and
+  words - information, never instructions - and its rules say so too: it doesn't follow what a page tells it to do, and
   never puts its owner's private things into a web address or a form unless its owner asked.
 - **A browser service of your own** (the universal connector): add a connection of the kind *Browser service* with the
-  browser's DevTools address and its key — a cloud browser for AI agents (Browserless, Steel, Lightpanda Cloud, a
+  browser's DevTools address and its key - a cloud browser for AI agents (Browserless, Steel, Lightpanda Cloud, a
   Browserbase or Browser Use session), a Lightpanda, or a Chrome started with `--remote-debugging-port=9222`. The
   connection's **Test** opens a page in it. Your agents then browse in it: pages run as in any browser, and the agent can
   `click f<n>`, `type f<n> "words"` and `press Enter` on the page's numbered fields and buttons (signing in, filling in
@@ -229,7 +229,7 @@ the PC — or a file the page was, like a PDF).
   installation's (an administrator's) may be a machine on the local network. Either way it is never sent to a private
   address by name.
 - **Search**: with a connection of the kind *Search service* (Brave Search with its key, or your own SearXNG) of yours,
-  that one; otherwise the installation's built-in search (DuckDuckGo's page, best effort — Settings → PC can switch it
+  that one; otherwise the installation's built-in search (DuckDuckGo's page, best effort - Settings → PC can switch it
   off).
 
 Agent Providers' agents (OpenClaw, Hermes) browse in their own provider's browser, not this one (§4.1, §4.2).
@@ -251,7 +251,7 @@ pay its provider; browser time hosted by My Virtual World, if offered, would be 
 - One engine (`server/pc/os.js`) decides everything: permissions, quotas, versions, the trash. The command line
   (`server/pc/shell.js`), the HTTP routes (`server/pc/routes.js`) and the work sessions are thin doors onto it.
 - Live updates go only to the owning account (`{ t: 'pc' }` frames).
-- What its screen shows: each command of the agent's own (the command line — its brain's, its work sessions', its MCP
+- What its screen shows: each command of the agent's own (the command line - its brain's, its work sessions', its MCP
   tool's, its owner's Terminal) leaves a window, built by `server/pc/views.js` as the agent itself sees it and kept under
   6 KB, sent with its screen (`os.screen`, `{ kind: 'screen', screen: { app, title, view } }`). Drawn by
   `client/js/render/pc-draw.js` (canvases in `render/pc-screens.js`); followed by the PC (`pc-app.js` follow).
@@ -261,7 +261,7 @@ pay its provider; browser time hosted by My Virtual World, if offered, would be 
   `/api/pc/own/upload`. Its screens: `server/pc/provider-screens.js`. The browser is the chat window's
   (`client/js/ui/provider-browser.js`).
 - Its own screen (§4.2): capability `screen`; the Hermes adapter's `server/providers/hermes/screen.js` (`display.status`,
-  `start`, `stop`, `thumbnail`, `observe`, `lease.acquire` / `release` on the connection, per profile — one Hermes viewer
+  `start`, `stop`, `thumbnail`, `observe`, `lease.acquire` / `release` on the connection, per profile - one Hermes viewer
   id per person, kept while the connection lasts); `server/chat/chat.js` `screenOf` (who may: the provider's managers);
   routes `/api/providers/screen` (state, actions) and `/api/providers/screen/thumb` (one JPEG, or 204); the stream itself
   is the WebSocket `/api/providers/screen/ws` (`server/providers/screen-relay.js`: the person's session, its origin and
@@ -271,10 +271,10 @@ pay its provider; browser time hosted by My Virtual World, if offered, would be 
   the stand-in Hermes' Bot Desktop in `tests/helpers/fake-hermes.mjs`).
 - Checks: `tests/pc-*.test.mjs` (`tests/pc-views.test.mjs`: what its screen shows; `tests/pc-own-http.test.mjs`: an
   agent's own computer; `tests/pc-security-sweep-http.test.mjs`: every /api/pc route from the server's own route table, called by everyone
-  outside a PC's account — the installation's owner, an administrator, members, people the agent is shared with, a
-  guest — with the real ids of three PCs: nothing comes back, nothing changes, nothing breaks, and the same requests
+  outside a PC's account - the installation's owner, an administrator, members, people the agent is shared with, a
+  guest - with the real ids of three PCs: nothing comes back, nothing changes, nothing breaks, and the same requests
   work for the PC's own account), `tests/unit/pc-provider-screens.test.mjs`.
-- Stress: `tools/pc-stress.mjs` (the engine: 5,000 agents, 60,000 files — about 8,300 commands a second, search in
+- Stress: `tools/pc-stress.mjs` (the engine: 5,000 agents, 60,000 files - about 8,300 commands a second, search in
   0.34 ms, ~300 MB, 1.0 GB on disk for 3.7 GB of files) and `tools/pc-http-stress.mjs` (through the real server with its
   city running: 40 clients at once, ~2,800 requests a second, the city's ticks under 20 ms late at worst, memory levelling
   off).

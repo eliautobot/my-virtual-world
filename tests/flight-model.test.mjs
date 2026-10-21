@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The flight model flown by a script (shared/flight-model.js): each plane takes off within a sensible run, climbs, cruises
 // near its cruise speed, turns when banked, stalls when slowed, lands gently and crashes when it should; the helicopter
 // spins up, lifts off, hovers, flies, lands on a roof and crashes into a wall or a hard landing.

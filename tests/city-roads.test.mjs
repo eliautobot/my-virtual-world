@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.1 compatibility layer: the city's streets as road records (shared/city-roads.js) go back to the grid exactly,
 // carry the names the addresses use, and join the roads beyond the city in one network; a new road may not run along a
 // city street or take a street's id, and the generated roads still pass.

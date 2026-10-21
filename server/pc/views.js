@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What an agent's PC screen shows (docs/features/agent-pc.md §2.1): after each command it runs, the window it would have
-// open — the file it read or wrote with the lines it changed, the folder, its search, a task board with the task it
-// touched, its calendar's week, the web page it reads — or its terminal. Kept small (about 4 KB: a window of lines, a
+// open - the file it read or wrote with the lines it changed, the folder, its search, a task board with the task it
+// touched, its calendar's week, the web page it reads - or its terminal. Kept small (about 4 KB: a window of lines, a
 // few dozen rows), built only for an agent's own commands, and sent to its owner's account alone with its screen
 // (os.screen). Every builder reads through the engine as the agent itself, so a view never holds more than it may see.
 import { COLUMNS } from './os.js';
@@ -37,7 +37,7 @@ function linesOf(text, part) {
  */
 export function fileView(sh, path, mode = 'open', { line = 1, part = null } = {}) {
   const st = sh.os.stat(sh.who, path, sh.opt());
-  // (who changed it last, by name — its screen is seen by its owner, not by the agent: never "you")
+  // (who changed it last, by name - its screen is seen by its owner, not by the agent: never "you")
   const base = { path: st.path, name: st.name, version: st.version, size: st.size, mode, by: st.by === sh.c.tag ? null : sh.namesFn(st.by) };
   if (IMAGE.test(st.mime || '')) return { kind: 'image', ...base, mime: st.mime };
   let f;
@@ -115,7 +115,7 @@ export function capView(v) {
     while (s.length > BYTES_MAX && Array.isArray(v[k]) && v[k].length > 4) { v[k] = v[k].slice(0, Math.ceil(v[k].length * 0.7)); s = JSON.stringify(v); }
   }
   if (s.length <= BYTES_MAX) return v;
-  // (still too big: what it is, without its contents — and where it is: on the agent's own computer, its provider's browser)
+  // (still too big: what it is, without its contents - and where it is: on the agent's own computer, its provider's browser)
   const o = { kind: v.kind, path: v.path, title: v.title, url: v.url };
   for (const k of ['remote', 'provider', 'app', 'name', 'mode', 'heading', 'query']) if (v[k] !== undefined) o[k] = typeof v[k] === 'string' ? v[k].slice(0, 200) : v[k];
   return o;

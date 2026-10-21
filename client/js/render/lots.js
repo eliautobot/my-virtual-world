@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The property map's drawing (WP4.14, wp4-world-spec.md §5.6; 2026-10-04: "a lot specific view to see lots for
 // sale, available, sold, realty value map that is colour coded and directly viewed in the world ... similar to the
 // latest SimCity games"). While the map is on: every lot's ground is filled with its colour for the chosen lens and

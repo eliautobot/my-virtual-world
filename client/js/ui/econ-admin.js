@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Settings → Economy (administrators; server/economy/routes.js /api/economy/admin*): switching the economy on (the
 // owner) and pausing it (the kill switch), its health (the books balance and the signed chain holds), the policy
 // (every wage, price, rent, tax, benefit, upkeep and limit), grants and corrections with a reason, freezing a wallet,

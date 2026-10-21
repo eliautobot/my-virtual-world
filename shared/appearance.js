@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Character appearance schema (shared). The client packs appearances into an RGBA8 texture (8 texels/agent).
 export const SKIN = ['#fbe0cf', '#f5cdb3', '#eab896', '#dca47c', '#c98c62', '#b17550', '#955c3d', '#77462d', '#5c3421'];
 export const HAIR_COLORS = ['#1b1512', '#2d211b', '#4a3222', '#6b4830', '#8f6a45', '#b48a58', '#d8b77a', '#e9d3a3', '#a1402b', '#c2552e', '#8e8c8a', '#d9d6d2', '#3b4c8f', '#c24d86', '#2f7d6a'];

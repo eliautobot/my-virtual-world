@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.1 the world store: the world and its residents live in next.db; an edit writes only the rows it changed, in the
 // same transaction as its journal entry; a hard crash right after an edit loses nothing; world.json and people.json are
 // exports, and one replaced by something else (a restore, an older release, a hand edit) is taken in at the next start.

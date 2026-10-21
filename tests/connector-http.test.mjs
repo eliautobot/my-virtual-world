@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// AI apps over HTTP (server/connector/): what an MCP client (Grok, ChatGPT…) meets — the 401 and its resource metadata,
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// AI apps over HTTP (server/connector/): what an MCP client (Grok, ChatGPT…) meets - the 401 and its resource metadata,
 // the authorization server's metadata, registration, the authorization request sent to the consent page, the person's
-// answer through the route table (signed in, CSRF), the token endpoint (form-encoded) — then the MCP endpoint in both eras
+// answer through the route table (signed in, CSRF), the token endpoint (form-encoded) - then the MCP endpoint in both eras
 // (legacy initialize; modern per-request _meta with its headers checked), tools acting as the person's chosen agent
 // through the world's own routes, the admins' switch, and the person disconnecting the app.
 import test from 'node:test';
@@ -89,9 +89,9 @@ test('an AI app connects as a person\'s agent and acts through MCP; the admins\'
     assert.deepEqual([disc.result.resultType, disc.result.supportedVersions[0], disc.result._meta['io.modelcontextprotocol/serverInfo'].name], ['complete', '2026-07-28', 'my-virtual-world']);
     const plan = await (await M('tools/call', { name: 'add_plan', arguments: { kind: 'must', text: 'Greet visitors at the front desk', today: true } })).json();
     assert.equal(plan.result.resultType, 'complete'); assert.equal(plan.result.isError, false, JSON.stringify(plan));
-    const brief = await (await M('tools/call', { name: 'update_work_brief', arguments: { company: 'Acme Robots — friendly robots for small shops' } })).json();
+    const brief = await (await M('tools/call', { name: 'update_work_brief', arguments: { company: 'Acme Robots - friendly robots for small shops' } })).json();
     assert.equal(brief.result.isError, false, JSON.stringify(brief));
-    assert.equal((await ann.get(`/api/agent-work?agent=${novaId}`)).json.brief.company, 'Acme Robots — friendly robots for small shops', 'the person sees what the app did');
+    assert.equal((await ann.get(`/api/agent-work?agent=${novaId}`)).json.brief.company, 'Acme Robots - friendly robots for small shops', 'the person sees what the app did');
     // its PC (docs/features/agent-pc.md): the command line as the agent, its words given as they are
     const pcw = await (await M('tools/call', { name: 'pc', arguments: { run: 'write ~/Documents/from-app.md\nls ~/Documents', text: 'Hi from the app' } })).json();
     assert.equal(pcw.result.isError, false, JSON.stringify(pcw));

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Street traffic: client-side cars in right-hand lanes that obey the shared deterministic signal timing, so they are
 // always stopped during the pedestrian scramble the server schedules crossings into. Straight-through lanes that
 // wrap at the city edge, car following, stop lines, yellow-light logic, density by time of day. Decoration only.

@@ -1,5 +1,5 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The Agent Studio's Phone tab (docs/features/phone.md): the agent's phone (./phone-app.js) — given a Twilio number here,
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The Agent Studio's Phone tab (docs/features/phone.md): the agent's phone (./phone-app.js) - given a Twilio number here,
 // then its texts, calls, voicemail, contacts and settings. The same phone shows in the chat window's side panel.
 import { mountPhone } from './phone-app.js';
 

@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Rivers and waterfalls (WP4.18, wp4-world-spec.md §6.1): each river of the island (shared/terrain.js Island.rivers)
 // as a ribbon of water down its carved channel, its ripples flowing downstream (faster where it is steep) and whitening
 // on rapids. Its waterfalls (2026-10-03, a diagram and a photo: "waterfalls fall, not run down along the mountain"):
 // at each drop (shared/terrain.js _stairs) the river runs smooth and glassy over a ledge of hard cap rock and falls
-// free — a curtain of white water thrown out from the lip, streaming down in columns and pulses, spreading and breaking
-// into spray as it falls — into its plunge pool (a small lake, drawn with the lakes), where it churns the water white
+// free - a curtain of white water thrown out from the lip, streaming down in columns and pulses, spreading and breaking
+// into spray as it falls - into its plunge pool (a small lake, drawn with the lakes), where it churns the water white
 // and raises a cloud of mist. One draw call each for all rivers, all curtains, all pools' white water, all ledges and
 // all mist.
 import * as THREE from 'three';
@@ -53,7 +53,7 @@ export class RiversLayer {
       const base = pos.length / 3;
       P.forEach((q, i) => {
         // the water reaches a few metres past its channel (2026-10-03: the channel's steep sides showed as a dark
-        // saw-tooth fringe on the coarser ground): where the bank rises above it, the bank hides it — the shore is where
+        // saw-tooth fringe on the coarser ground): where the bank rises above it, the bank hides it - the shore is where
         // the ground meets the water
         const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1, nx = -dz / l, nz = dx / l, hw = q.w / 2 + RIBBON_PAST;
         const white = Math.min(1, Math.max(0, (q.slope - 0.12) * 4));   // foam on rapids only (the falls are curtains)
@@ -76,7 +76,7 @@ export class RiversLayer {
     // the middle, foam streaks drawn out downstream (faster and whiter on rapids and falls), a lace of foam along the
     // banks, the light glinting on the ripples.
     // 2026-10-03 ("smooth ... cozy"): clear bright water, soft ripples, white water only where it runs fast, and a
-    // clean soft line of foam where it meets the bank — not streaks all over
+    // clean soft line of foam where it meets the bank - not streaks all over
     this.mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.1, metalness: 0.02, transparent: true, normalMap: tex, normalScale: new THREE.Vector2(0.3, 0.3), depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 0.6 });
     this.mat.onBeforeCompile = sh => {
       sh.uniforms.uRTime = GU.uTime;
@@ -110,9 +110,9 @@ float rN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
 
   /**
    * The waterfalls (shared/terrain.js _stairs: each drop's style and dice). A fall: a ledge of hard cap rock standing out
-   * over the undercut cliff, the river running out over it and falling free from its front edge in the drop's own style —
+   * over the undercut cliff, the river running out over it and falling free from its front edge in the drop's own style -
    * one curtain thrown out (plunge), close down the rock (horsetail) or wide and thin (veil), two parted by a buttress of
-   * rock (twin), or two tiers off a shelf (tiered) — in front of a curved wall of layered rock round its pool's back;
+   * rock (twin), or two tiers off a shelf (tiered) - in front of a curved wall of layered rock round its pool's back;
    * where it lands, churned white water, a skirt of spray bursting up, droplets thrown out and a cloud of mist. A cascade:
    * the river's own white water down its rock steps (the ribbon), a lip of rock at each step, spray at each foot, the
    * boulders round it from the terrain worker. All built once; the motion is in the shaders.
@@ -202,7 +202,7 @@ float rN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
 
   /**
    * Where falling water strikes water (2026-10-03: "some kind of mist/splash effect at the bottom"): a skirt of spray
-   * bursting up round it, droplets thrown out on their arcs, and mist billowing up and drifting downstream — all bigger
+   * bursting up round it, droplets thrown out on their arcs, and mist billowing up and drifting downstream - all bigger
    * for a taller, wider fall.
    */
   splashAt(B, d, along, side, y, Wl, F, seed) {
@@ -281,8 +281,8 @@ float rN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   /**
    * A fall's pool's rock wall (2026-10-03, on the phone: "grey dark wall ... made of angled carved rocks, not a 2d
    * surface ... more of a 3d mesh"; the first walls had gaps and see-through spots where their top met the ground):
-   * dark stone carved into angular blocks — columns of rock a few metres wide standing out by their own amounts, broken
-   * across at their own heights, each face a flat facet — round the pool's back and sides, from under its water up to
+   * dark stone carved into angular blocks - columns of rock a few metres wide standing out by their own amounts, broken
+   * across at their own heights, each face a flat facet - round the pool's back and sides, from under its water up to
    * the clifftop, then over the top and down into the ground behind (no edge left floating), its ends buried in the
    * banks. Behind the falling water it stands back under the cap rock, so the water falls clear in front of it.
    */
@@ -314,7 +314,7 @@ float rN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           y = yBot + (top - yBot) * f + (r > 0 && r < NR ? (hsh(j, r, 3) - 0.5) * 1.4 : 0);
           const brk = 4 + 5 * hsh(col, 7), band = Math.floor((y + hsh(col, 8) * brk) / brk);
           // how far the rock stands out here (toward the water): its column's own, its block's own, a tilt across the
-          // block (its face leaning), jitter — the steps between them become the slanted facets of carved rock
+          // block (its face leaning), jitter - the steps between them become the slanted facets of carved rock
           let inw = 0.35 + 1.1 * hsh(col, 4) + 0.9 * hsh(col, band, 5) + (fract((y + hsh(col, 8) * brk) / brk) - 0.5) * (hsh(col, band, 6) - 0.5) * 2.6 + (hsh(j, r, 9) - 0.5) * 0.3;
           inw = c.end ? -3 : Math.max(0.1, Math.min(maxIn, inw * (c.behind ? 0.4 : 1)));
           if (r === 0) inw = Math.max(inw, 0.8);
@@ -373,7 +373,7 @@ float rN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         sh.fragmentShader = 'uniform float uWTime, uWDay;\nvarying vec4 vFall, vFallB;\n' + NOISE_GLSL + '\n' + sh.fragmentShader
           .replace('#include <color_fragment>', `#include <color_fragment>
           // each bit of the curtain is water that left the lip at time 'launch': its pattern falls with it, stretching as
-          // it speeds up — columns of water across, pulses down; each fall its own (seed)
+          // it speeds up - columns of water across, pulses down; each fall its own (seed)
           float c = vFall.x, t = vFall.y, T = vFall.z, W = vFall.w, seed = vFallB.y, launch = uWTime - t * T + seed * 17.0, cx = (c - 0.5) * W + seed * 31.0;
           float px = max(fwidth(cx), 0.02);
           float col = wfN(vec2(cx * 1.4, launch * 0.7)) * 0.5 + wfN(vec2(cx * 4.0, launch * 1.6 + 5.0)) * 0.32;

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Voice under load, end to end (docs/features/CHAT.md §9): a throwaway server with a city of `population` residents and
 // `accounts` signed-in people, the installation's voice service a fake OpenAI-compatible server in a process of its own
 // (it answers after `speak-ms` / `hear-ms`, as a real one does, and sends MP3 sized to the text: ≈ 15 characters a second
 // at 128 kbit/s). For `seconds` every account keeps asking at once: read aloud (200–900 characters of Markdown, never the
 // same twice), dictation (a 2–12 s WAV recording, now and then a 60 s one), now and then a replay of what it just heard
-// (the cache, while it still holds it) — over HTTP, through the routes, the Voice service, the provider helper and its IPC (audio as base64 both
+// (the cache, while it still holds it) - over HTTP, through the routes, the Voice service, the provider helper and its IPC (audio as base64 both
 // ways). Measured on the server: the main loop's tick and how late each tick started (/api/health loop.late), the
 // server's and the helper's CPU, memory, the health round trip; at the people: each answer's time; at the service: calls
 // at once. Checked: every answer is right (the audio is MP3 and lasts what the service made, the text is what it heard),

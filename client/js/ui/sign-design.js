@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Designing signs (both editions; shared/signs.js): an owner's rooftop billboards (building settings: at most two, on
 // an edge of the roof, small, medium or large for the roof; the owner's own design), an owner's sign inside (furniture:
 // its size and the owner's design), and the Marketing tools' own content for a billboard or a street sign. Every design is made with the designer (ui/designer.js); changes go through /api/edit and can be
@@ -65,7 +65,7 @@ export function editRoofSigns(app, b) {
   const paintRoof = () => { const el = D.box.querySelector('.rs-map'); if (el) el.innerHTML = roofSvg(); };
   const render = () => {
     D.box.innerHTML = `<h3><span>🪧 Rooftop billboards · ${esc(B.name)}</span><button type="button" class="btn small" data-c="close" aria-label="Close">✕</button></h3>
-      <p class="hint">Your own billboards on the roof (up to ${ROOF_SIGN_MAX}): your name, your business, a message — with a link people can open. They show only what you put on them, never paid ads. Choose the side of the roof for each one: the building shows it as you go.</p>
+      <p class="hint">Your own billboards on the roof (up to ${ROOF_SIGN_MAX}): your name, your business, a message - with a link people can open. They show only what you put on them, never paid ads. Choose the side of the roof for each one: the building shows it as you go.</p>
       ${list.length ? `<div class="rs-map"></div>` : ''}
       ${list.map((x, k) => `<div class="ab-sec" data-k="${k}">
         <div class="row wrap"><b class="ab-h">Billboard ${k + 1}</b>${x.blocked ? `<span class="bad">Hidden by an administrator: ${esc(x.blocked)}</span>` : ''}<button type="button" class="btn small danger" data-a="del" data-k="${k}">🗑 Take it down</button></div>
@@ -119,7 +119,7 @@ export function editIndoorSign(app, { b, f, id }) {
         <label>Height <input type="number" class="input is-h" min="${Z.h[0]}" max="${Z.h[1]}" step="0.05"> m</label>
         <label class="is-keep"><input type="checkbox"> Keep its shape</label></div>
       <div class="chips is-shapes">${SHAPES.map(([n, a, r]) => `<span class="chip" data-ar="${a}" title="${r}">${n} <small class="dim">${r}</small></span>`).join('')}</div>
-      <p class="hint">Only the sign's panel changes — any width and height, up to ${Z.w[1]} m wide (as the room allows) and ${Z.h[1]} m high${open ? ' here in the open' : ', nearly floor to ceiling'}; ${T.family === 'stand' ? 'its base and posts stay as they are and the panel grows upwards' : 'it grows round its centre'}. Or select it while furnishing and drag its handles.</p>
+      <p class="hint">Only the sign's panel changes - any width and height, up to ${Z.w[1]} m wide (as the room allows) and ${Z.h[1]} m high${open ? ' here in the open' : ', nearly floor to ceiling'}; ${T.family === 'stand' ? 'its base and posts stay as they are and the panel grows upwards' : 'it grows round its centre'}. Or select it while furnishing and drag its handles.</p>
       <p class="hint bad is-fit" role="alert"></p></div>
     <div class="ab-sec is-dsec"><b class="ab-h">Design</b><div class="is-designer"></div></div>
     <div class="lib-btns"><button type="button" class="btn" data-c="close">Cancel</button><button type="button" class="btn primary" data-a="save">Save</button></div>`;
@@ -196,7 +196,7 @@ export function editAssetContent(app, d, done = null) {
   const A = AD_ASSETS[d.t]; if (!A) return;
   const D = dialog(`${A.label}: its own content`);
   D.box.innerHTML = `<h3><span>📣 ${esc(CATALOG[d.t]?.name || A.label)}: its own content</span><button type="button" class="btn small" data-c="close" aria-label="Close">✕</button></h3>
-    <p class="hint">${'What this sign shows: the world\'s own news, places, events — with a link people can open.'}</p>
+    <p class="hint">${'What this sign shows: the world\'s own news, places, events - with a link people can open.'}</p>
     <div class="ab-sec"><div class="mk-designer"></div></div>
     <div class="lib-btns"><button type="button" class="btn" data-c="close">Cancel</button>${d.hc ? '<button type="button" class="btn" data-a="clear">Clear it</button>' : ''}<button type="button" class="btn primary" data-a="save">Save</button></div>`;
   const des = designer(D.box.querySelector('.mk-designer'), { cr: d.hc, shapes: [A.shape], placeholder: S.world?.name || 'Welcome', captions: { [A.shape]: A.label } });

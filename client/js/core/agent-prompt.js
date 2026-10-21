@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The text a person pastes into their agent to connect it (PLAN WP2.14; Settings → Third-party agents → Advanced). The contract itself is
 // /skill.md, served with this page; a pasted copy has no address to fetch from, so this puts the server's address in front of it,
 // says what to do, and, when the owner has just made a one-time code, carries that code too. Nothing here is stored: the text is

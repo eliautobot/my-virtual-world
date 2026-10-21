@@ -14,7 +14,7 @@ signed-in account never go to guests. Admins can require sign-in to watch (`POST
 
 ## The administrator account (first start)
 
-A new installation has no account. Whoever installed it creates the **administrator** — the world's owner — with their
+A new installation has no account. Whoever installed it creates the **administrator** (the world's owner) with their
 own username, display name and password:
 
 1. Find the one-time **setup code**. The server prints it when it starts (`Setup code: XXXX-XXXX`), and writes it to
@@ -41,7 +41,7 @@ that the person replaces at their next sign-in); for the owner, run `node tools/
 
 Admins open **Settings** (⚙️) from the top bar (the owner sees more):
 
-- **Users**: every account — name, username, role, status, two-factor sign-in and when it was last seen; search by
+- **Users**: every account with its name, username, role, status, two-factor sign-in and when it was last seen; search by
   name or username. Create accounts (with a temporary password shown once), reset passwords and two-factor sign-in,
   disable and enable, change roles (the owner), delete accounts (their data is deleted or given to another account),
   and hand ownership to an admin (the owner; the former owner becomes an admin). Admins manage only accounts below

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Smoke checks for a running My Virtual World Next server. Used by tools/smoke.mjs, the deploy scripts and the tests.
 // Read-only: GET requests and one WebSocket connection; it never changes the world.
 import fs from 'node:fs';

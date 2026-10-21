@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Shared wildlife (WP4.17 tier 2, wp4-world-spec.md §6.3): the larger animals — deer, horses, cows, sheep and any
-// catalogue species with tier 'shared' — are simulated by the server so everyone sees the same herd in the same place,
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Shared wildlife (WP4.17 tier 2, wp4-world-spec.md §6.3): the larger animals - deer, horses, cows, sheep and any
+// catalogue species with tier 'shared' - are simulated by the server so everyone sees the same herd in the same place,
 // running from the same walker or car. The island is cut into regions; a region wakes when someone is near (a player
 // or a browser's camera) and sleeps again when nobody has been near for a while, so empty land costs nothing. A waking
-// region gets its herds from its habitats (shared/biome.js), the species' densities and the seed — the same herds
-// every time — and the clock (outside a species' hours the herd is bedded down). Each animal follows a small plan: a
+// region gets its herds from its habitats (shared/biome.js), the species' densities and the seed - the same herds
+// every time - and the clock (outside a species' hours the herd is bedded down). Each animal follows a small plan: a
 // segment from where it is to where it goes (or a rest), re-planned only when the segment ends or the herd takes
 // fright. Browsers receive the plans of the herds near them (area of interest) and move the animals smoothly between
 // updates; heights come from the shared ground on each side.
@@ -57,7 +57,7 @@ export class Wildlife {
       // a grid's land is town, as the city is (2026-10-14: sheep grazed on a grid's paved lots)
       I.inTown = (x, z) => grids.some(P => { const dx = x - P.x, dz = z - P.z; return Math.abs(dx * Math.cos(P.rot) - dz * Math.sin(P.rot)) <= P.hw && Math.abs(dx * Math.sin(P.rot) + dz * Math.cos(P.rot)) <= P.hd; });
       // a grid laid out or taken away: the herds wake again from the seed (2026-10-14: horses that had settled there before
-      // the grid stayed on its lots) — off the new town's land, back on the land it gave up
+      // the grid stayed on its lots) - off the new town's land, back on the land it gave up
       const gk = JSON.stringify(grids.map(P => [P.x, P.z, P.hw, P.hd, P.rot]));
       if (this._island && this._island.gk !== gk) { this.regions.clear(); this.version++; }
       this._island = { of: T, roads: this.world.roads, I, gk };

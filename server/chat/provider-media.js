@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The media of a provider's answers (Agent Providers, docs/features/agent-providers.md §4): the images, video and audio an
 // agent attached, shown in the chat window. A page never names a file. Each medium of a message the server sends carries
-// an address signed for that agent and session (the provider's own reference to it — an artifact id, a path the agent
-// wrote — stays here); only a person who may read that session is served it. It is fetched once through the provider
+// an address signed for that agent and session (the provider's own reference to it - an artifact id, a path the agent
+// wrote - stays here); only a person who may read that session is served it. It is fetched once through the provider
 // (its adapter's media call: OpenClaw's own routes and its own rules on which files a session may show) and kept in a
 // cache on disk, the least recently used dropped first.
 import crypto from 'node:crypto';
@@ -39,7 +39,7 @@ export class ProviderMedia {
   }
   sign(text) { return crypto.createHmac('sha256', this.key()).update(text).digest('base64url').slice(0, 43); }
 
-  /** A message's media as a page gets them: kind, name, type, size and the signed address — never the reference. */
+  /** A message's media as a page gets them: kind, name, type, size and the signed address - never the reference. */
   view(agentId, sessionId, list) {
     let clean = [];
     try { clean = cleanMedia('media', Array.isArray(list) ? list : []); } catch { return []; }
@@ -63,7 +63,7 @@ export class ProviderMedia {
   }
 
   /**
-   * The medium's file here — { file, mime, size } — from the cache, or fetched once through `fetch` (→ { mime, data }
+   * The medium's file here - { file, mime, size } - from the cache, or fetched once through `fetch` (→ { mime, data }
    * base64; the provider's own error when it can't). `id` names it: the connection, the provider's session, its reference.
    */
   async get(id, fetch) {

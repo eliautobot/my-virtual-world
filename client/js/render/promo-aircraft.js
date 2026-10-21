@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Promotional aircraft in the browser (WP4.11; rebuilt from the ground up for the design review 2026-10-03): banner planes,
 // blimps and hot-air balloons carrying the administrators' advertisement, on the flight plans every browser shares
 // (shared/promo.js: each on its own circuit and height band, wide banked turns, well clear of every roof and hill),
@@ -84,7 +84,7 @@ function build() {
     // no advertisement set yet: the world's own name, in each kind's own colours (an administrator's choice wins)
     const own = mine[0].settings, plain = !promoAircraftGraphicIsVisible(own), unset = own.backgroundColor === '#ffffff' && own.textColor === '#111827';
     const house = { bannerPlane: ['#ffd166', '#1d3557'], blimp: ['#1d3557', '#ffffff'], hotAirBalloon: ['#ffffff', '#c0392b'] }[id];
-    const set = plain ? { ...own, text: S.world.name || document.title.replace(/\s*[—|-].*$/, '') || 'My Virtual World', opacity: 1, ...(unset ? { backgroundColor: house[0], textColor: house[1] } : {}) } : own;
+    const set = plain ? { ...own, text: S.world.name || document.title.replace(/\s*[\u2014|-].*$/, '') || 'My Virtual World', opacity: 1, ...(unset ? { backgroundColor: house[0], textColor: house[1] } : {}) } : own;
     const ad = true, K = { id, set, ad, n: mine.length, size: SIZE[id], house: {}, surf: [] };
     // each aircraft's own ad surfaces (its own graphic, or its kind's)
     const own1 = (geo, surf, aspect) => { const m = new THREE.Mesh(geo, K.house[surf] || (K.house[surf] = adMaterial(set, aspect))); m.matrixAutoUpdate = false; m.frustumCulled = false; group.add(m); parts.objects.push(m); return m; };

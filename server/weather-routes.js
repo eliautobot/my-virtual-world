@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The weather's routes (WP4.18): what it is now and its timeline seed for anyone watching; administrators set it for
 // a number of world hours, or back to its natural course ('auto').
 /** @param {object} router @param {() => import('./world/weather.js').Weather} weather */

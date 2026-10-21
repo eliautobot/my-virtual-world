@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Smoke-test a running My Virtual World Next server (read-only).
 // Usage: node tools/smoke.mjs --url http://127.0.0.1:8570 [--expect-tag v1.0.1]
 //                             [--baseline <backup>/manifest.json | --data <data folder>] [--timeout 60] [--json]

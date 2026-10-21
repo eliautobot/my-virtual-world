@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The agents' PC under load through the real server (docs/features/agent-pc.md): a throwaway server with its city
 // running, `accounts` accounts with `agents` agents each and `files` files in every home; then `workers` clients at once
-// for `seconds` seconds, each as its own account, doing what people and agents do on a PC — list a folder, read a file,
+// for `seconds` seconds, each as its own account, doing what people and agents do on a PC - list a folder, read a file,
 // save one, search, the task board, a few commands at once on the command line. Reports each kind's time (median, 95th,
-// 99th percentile), requests a second, errors, the server's memory, and how late the city's ticks (10 a second) started —
-// idle first for as long, then under the load — so the PC is seen not to hold the world up — and its memory every 10 s.
+// 99th percentile), requests a second, errors, the server's memory, and how late the city's ticks (10 a second) started -
+// idle first for as long, then under the load - so the PC is seen not to hold the world up - and its memory every 10 s.
 //   node tools/pc-http-stress.mjs [--accounts 12] [--agents 3] [--files 20] [--workers 40] [--seconds 60] [--population 1500]
 import { parseArgs } from 'node:util';
 import { startServer, ownerSession, userSession } from './lib/testserver.mjs';

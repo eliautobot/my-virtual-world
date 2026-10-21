@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Turning a decision service's answer into one pick (docs/features/FREE-WILL.md §11.1: the same question always got the
 // same top answer, so always taking it makes an agent predictable). The service's probabilities are sharpened or
 // flattened by the agent's spontaneity and one option is drawn: 0 is nearly always the service's favourite, 0.5 follows

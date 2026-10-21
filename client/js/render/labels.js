@@ -1,12 +1,12 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // DOM labels: AI-agent name tags (with live presence dots), selected / hovered person, activity tags for the
 // focused floor, speech bubbles and the player tag. Pooled elements, positioned with transforms after each frame.
-// Above each head — except in first person (the player's own eyes), where up close a head is above the view and its
+// Above each head - except in first person (the player's own eyes), where up close a head is above the view and its
 // tag and bubble were cut off (2026-10-08): there they stand beside the person, at the shoulder on its right as the
 // camera sees it (on its left when the right has no room), the bubble above the tag, its tail toward the person.
 // A long bubble (an agent's answer: ui/talk-bar.js) shows all of it, scrolling inside (2026-10-08), and stays while
 // the pointer is on it or it was just scrolled; it is no taller than the room under what covers the top of the screen (the
-// top bar; on a phone the talk bar too) — with no room even for a few lines, it slides down to start just under it — so
+// top bar; on a phone the talk bar too) - with no room even for a few lines, it slides down to start just under it - so
 // its first words aren't hidden. Bubbles are kept per speaker, so one being
 // read is never handed to another.
 import * as THREE from 'three';
@@ -43,7 +43,7 @@ export class Labels {
     if (!e) { e = document.createElement('div'); e.className = cls; e.style.display = 'none'; e._k = e._t = e._z = ''; this.root.appendChild(e); pool[k] = e; }
     return e;
   }
-  /** The bubble of speaker `key` this frame — its own element while it speaks (a scrolled bubble keeps its place). */
+  /** The bubble of speaker `key` this frame - its own element while it speaks (a scrolled bubble keeps its place). */
   bubble(key) {
     let e = this.bubs.get(key);
     if (!e) {
@@ -91,7 +91,7 @@ export class Labels {
     P.x = (_v.x + 1) * 0.5 * innerWidth; P.y = (1 - _v.y) * 0.5 * innerHeight;
     return d;
   }
-  /** First person: where a tag `w` wide goes beside a body whose shoulder is at (cx, cy) on the screen, `d` metres away —
+  /** First person: where a tag `w` wide goes beside a body whose shoulder is at (cx, cy) on the screen, `d` metres away -
    *  just past it on its right (SIDE metres from its middle), else on its left, else (a body filling the view: a phone
    *  held upright, a step away) on the side with more room, kept on the screen over the body's edge. { x, y, side }. */
   beside(cx, cy, d, w) {
@@ -137,7 +137,7 @@ export class Labels {
     cand.sort((a, b) => a.pri - b.pri || a.d - b.d);
     let nt = 0;
     const pl = app.player;
-    if (pl && pl.active && pl.state !== 'drive' && !fp) {   // (first person: these are its own eyes — no tag of its own)
+    if (pl && pl.active && pl.state !== 'drive' && !fp) {   // (first person: these are its own eyes - no tag of its own)
       const d = this.project(pl.x, pl.y + HEAD, pl.z);
       if (d >= 0) {
         const e = this.node(this.tags, nt++, 'lbl');
@@ -174,7 +174,7 @@ export class Labels {
       const nm = p ? (vip || selc || c.pri === 2 ? p.n : p.n.split(' ')[0]) : '#' + i;
       const live = vip && S.presence[p.ag] && S.presence[p.ag].working;
       const w = 30 + nm.length * 7.5 + (icon ? 18 : 0) + (vip ? 18 : 0) + (p?.po ? 18 : 0), say = S.says.get(i);
-      // (first person: on the side with room for it — and for its bubble, when it speaks)
+      // (first person: on the side with room for it - and for its bubble, when it speaks)
       let side = 0;
       if (fp) { const at = this.beside(c.x, c.y, c.d, say ? BUBBLE_W : w); side = at.side; c.x = at.x; c.y = at.y; }
       const cx = c.x + side * w / 2;   // (the tag's middle, for keeping tags apart)
@@ -185,7 +185,7 @@ export class Labels {
       }
       placed.push({ x: cx, y, w });
       let html;
-      // (🛎 on post around the clock: anyone may walk up and ask — server/agent-posts/)
+      // (🛎 on post around the clock: anyone may walk up and ask - server/agent-posts/)
       if (vip) html = `<span class="ico" data-avatar>${p.e || '⭐'}</span>${esc(nm)}${live ? '<i class="dot"></i>' : ''}${p.po ? ' <span class="ico post" title="On duty around the clock">🛎</span>' : ''}${selc && icon && !p.po ? ` <span class="ico">${icon}</span>` : ''}`;
       else html = `${icon ? `<span class="ico">${icon}</span>` : ''}${esc(nm)}`;
       const talking = i === this.talk.i;
@@ -200,7 +200,7 @@ export class Labels {
       if (say) this.speak(i, p ? p.n : '', say.text, c.x, side ? y - 16 : y - 30, z + 3000, side, say, keep);
     }
     for (let k = nt; k < this.tags.length; k++) if (this.tags[k].style.display !== 'none') this.tags[k].style.display = 'none';
-    // (not this frame: hidden — off the screen a moment, or its words are over — and gone after a while)
+    // (not this frame: hidden - off the screen a moment, or its words are over - and gone after a while)
     for (const [k, b] of this.bubs) {
       if (b._used === this.fn) continue;
       if (b.style.display !== 'none') { b.style.display = 'none'; b._hid = now; b._hover = false; }

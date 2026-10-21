@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Hermes → the universal chat (docs/features/agent-providers.md §9). Pure functions, fed Hermes' gateway events as
 // Hermes 0.21 sends them (tests/fixtures/hermes/): a turn's events become the provider bus's events; a session's stored
 // messages become the chat window's; a model inventory, session rows and the slash-command catalogue become what its
@@ -8,11 +8,11 @@ import { toolKind as kindOfTool, inputOf } from '../openclaw/translate.js';
 
 export { inputOf };
 const OUT_MAX = 4000;
-/** Hermes' tools that are the chat's own cards — its questions (clarify) and its task list (todo): shown as those cards,
+/** Hermes' tools that are the chat's own cards - its questions (clarify) and its task list (todo): shown as those cards,
  *  never also as steps (as OpenClaw's ask_user and progress_card). todo: its tool's name before todo_list. */
 export const CARD_TOOLS = new Set(['clarify', 'todo_list', 'todo']);
-/** Hermes' tools that reach its deferred tools (offered by search): tool_call carries the call — { calls: [{ name,
- *  arguments }] } — and Hermes reports the called tool itself, live; its stored history keeps the wrapper. */
+/** Hermes' tools that reach its deferred tools (offered by search): tool_call carries the call - { calls: [{ name,
+ *  arguments }] } - and Hermes reports the called tool itself, live; its stored history keeps the wrapper. */
 const BRIDGE = new Set(['tool_call']);
 /** The tool a stored call really called: the wrapped one when tool_call carries exactly one. */
 export function unwrap(name, args) {
@@ -113,7 +113,7 @@ export class RunTranslator {
     const p = evt.payload || {};
     switch (evt.type) {
       case 'message.start': this.status('Thinking'); break;
-      // (as Hermes Desktop: a thinking.delta is its spinner's words — out of the conversation —, unless it explains a wait
+      // (as Hermes Desktop: a thinking.delta is its spinner's words - out of the conversation -, unless it explains a wait
       // on the provider, which names the wait in the status row under the turn until the next one; compacting says so)
       case 'thinking.delta': { const w = waitText(p.text); if (w) this.status(w); this.native({ op: 'status', kind: 'wait', text: w ? str(p.text).trim().slice(0, 300) : '' }); break; }
       case 'status.update': {
@@ -125,18 +125,18 @@ export class RunTranslator {
       }
       case 'message.delta': this.delta(str(p.text)); break;
       case 'message.interim':
-        // (commentary beside its tools, sealed as its own segment; already streamed — else written now)
+        // (commentary beside its tools, sealed as its own segment; already streamed - else written now)
         if (!p.already_streamed && str(p.text)) this.delta(str(p.text));
         if (this.text) { this.segments.push(this.text); this.text = ''; }
         this.seg = null;
         break;
       case 'reasoning.delta': case 'moa.reference': this.think(str(p.text)); break;
       case 'reasoning.available':
-        // (a whole block, for providers that don't stream it — Hermes also relays the model's own words here, so it waits:
+        // (a whole block, for providers that don't stream it - Hermes also relays the model's own words here, so it waits:
         // shown as reasoning unless the answer turns out to be it, and never once the answer has words, as its Desktop does)
         if (!this.text && !this.thinking && str(p.text)) this.avail = str(p.text);
         break;
-      // (Hermes' deferred-tool call, tool_call: the tool it calls is the step, as Hermes reports it — nothing to say of the wrapper)
+      // (Hermes' deferred-tool call, tool_call: the tool it calls is the step, as Hermes reports it - nothing to say of the wrapper)
       case 'tool.generating': this.flushAvail(); if (!CARD_TOOLS.has(str(p.name)) && !BRIDGE.has(str(p.name))) this.status(`Preparing ${titleOf(p.name)}`); break;
       case 'tool.start': this.flushAvail(); this.toolStart(p); break;
       case 'tool.complete': this.toolEnd(p); break;
@@ -149,7 +149,7 @@ export class RunTranslator {
         if (typeof p.reasoning_effort === 'string' && p.reasoning_effort) this.effort = p.reasoning_effort;
         break;
       case 'session.usage': this.usage(p); break;
-      // (Hermes names the session and renames it as it goes: the chat follows, live — as its Desktop's list does)
+      // (Hermes names the session and renames it as it goes: the chat follows, live - as its Desktop's list does)
       case 'session.title': if (str(p.title).trim()) { this.title = str(p.title).trim().slice(0, 200); this.native({ op: 'title', text: this.title }); } break;
       case 'message.complete': this.complete(p); break;
       case 'error': this.end('error', { error: str(p.message) || 'Hermes could not answer' }); break;
@@ -180,7 +180,7 @@ export class RunTranslator {
     if (this.tools.has(id)) return;
     const t = { id, name: str(p.name) || 'tool', t0: Date.now() };
     this.tools.set(id, t);
-    // (the Hermes view: every call, its own cards too — its questions, its todo list — in the order Hermes made them)
+    // (the Hermes view: every call, its own cards too - its questions, its todo list - in the order Hermes made them)
     this.seg = null;
     this.native({ op: 'tool', ph: 'start', id, name: t.name, ctx: str(p.context) || undefined, args: argsText(p.args) });
     if (CARD_TOOLS.has(t.name)) { t.hidden = true; return; }
@@ -291,14 +291,14 @@ export function answerFor(rq, answers, cancel) {
 // ------------------------------------------------------------------ the session's stored messages
 const parseArgs = a => { if (a && typeof a === 'object') return a; try { return JSON.parse(a || '{}'); } catch { return a || ''; } };
 /**
- * A session's stored messages (GET /api/sessions/{id}/messages: OpenAI-shaped rows — user, assistant with its tool calls
- * and reasoning, tool results) as the chat window's: the person's messages, and each answer — the assistant's turn
+ * A session's stored messages (GET /api/sessions/{id}/messages: OpenAI-shaped rows - user, assistant with its tool calls
+ * and reasoning, tool results) as the chat window's: the person's messages, and each answer - the assistant's turn
  * between two of the person's, its words, its reasoning and every step (a tool call with its result). Rows Hermes keeps
  * hidden (its own scaffolding prompts) are not shown; a compaction is marked.
  */
 export function historyOf(rows, { visible = null } = {}) {
   const out = [];
-  let turn = null, n = 0;   // (n: the record's entries so far — Hermes counts them for a branch)
+  let turn = null, n = 0;   // (n: the record's entries so far - Hermes counts them for a branch)
   const close = () => { if (turn) { if (turn.text || turn.meta.parts.length || turn.meta.thinking || turn.meta.media.length) out.push(tidy(turn)); turn = null; } };
   for (let m of Array.isArray(rows) ? rows : []) {
     if (!m || typeof m !== 'object' || m.active === 0) continue;
@@ -306,7 +306,7 @@ export function historyOf(rows, { visible = null } = {}) {
     const ts = Number.isFinite(m.timestamp) ? Math.round(m.timestamp * 1000) : null;
     let dk = str(m.display_kind);
     // (a turn stopped or redirected part-way: Hermes keeps its row hidden and empty, and shows what it wrote from its
-    // live transcript — `visible`, its session.history by row — as its Desktop does)
+    // live transcript - `visible`, its session.history by row - as its Desktop does)
     if (dk === 'hidden' && m.role === 'assistant' && !str(m.content).trim() && visible && visible.has(Number(m.id))) {
       const v = visible.get(Number(m.id));
       m = { ...m, content: str(v.text), reasoning: v.reasoning || m.reasoning, display_kind: null }; dk = '';
@@ -316,7 +316,7 @@ export function historyOf(rows, { visible = null } = {}) {
       close();
       if (dk && dk !== 'user') { out.push({ role: 'system', text: str((m.display_metadata && m.display_metadata.display_text) || m.content).slice(0, 2000) || 'Hermes continued by itself.', ts, status: dk }); continue; }
       // (its row in Hermes' record: what an edit or a checkpoint goes back to)
-      // (a skill command: Hermes stores the skill's whole text it expanded to — shown as the command, as its Desktop does)
+      // (a skill command: Hermes stores the skill's whole text it expanded to - shown as the command, as its Desktop does)
       const said = userText(m.content), skill = skillInvocationText(said);
       out.push({ role: 'user', text: skill || said, ts, ...(Number.isInteger(m.id) || skill ? { meta: { ...(Number.isInteger(m.id) ? { row: m.id } : {}), ...(skill ? { skill: true } : {}) } } : {}) });
       continue;
@@ -356,7 +356,7 @@ export function historyOf(rows, { visible = null } = {}) {
   return out;
 }
 // A skill command (/work fix the leak) reaches the model as the skill's whole text, which Hermes stores; its Desktop shows
-// the command instead (@hermes/shared skill-scaffold.ts, MIT, Nous Research — the markers mirror agent/skill_commands.py).
+// the command instead (@hermes/shared skill-scaffold.ts, MIT, Nous Research - the markers mirror agent/skill_commands.py).
 const SK_PREFIX = '[IMPORTANT: The user has invoked the ', SK_SINGLE = 'The full skill content is loaded below.]', SK_INSTR = 'The user has provided the following instruction alongside the skill invocation: ';
 const SK_RUNTIME = '\n\n[Runtime note:', SK_BUNDLE = ' skill bundle,', SK_BUNDLE_INSTR = '\nUser instruction: ', SK_BUNDLE_BLOCK = '\n\n[Loaded as part of the ';
 const between = (t, marker, end, fromEnd = false) => { const i = fromEnd ? t.lastIndexOf(marker) : t.indexOf(marker); if (i < 0) return ''; const tail = t.slice(i + marker.length), k = tail.indexOf(end); return (k >= 0 ? tail.slice(0, k) : tail).trim(); };

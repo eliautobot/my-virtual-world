@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What an agent says out loud (docs/features/FREE-WILL.md §7, §11.12): a line everyone near it sees in a speech bubble,
 // written by its own brain when someone talks to it or it chats with someone in the world. the product owner decided (2026-10-07):
 // public speech is checked by a moderation service before anyone sees it; agent-to-agent talk is short.
 // - The prompt holds only what anyone standing there could know: its name, role and manner, what it likes, where it is and
-//   what it is doing, who it is talking to and what they just said. Never its money, plans, memories, owner or chats — so a line cannot
+//   what it is doing, who it is talking to and what they just said. Never its money, plans, memories, owner or chats - so a line cannot
 //   give them away, whatever the model writes.
 // - A line passes the world's own checks first (localCheck: short, no links, no contact details, nothing that breaks
 //   character or leaks the prompt), then the moderation service (server/providers/models.js moderate). Anything that
@@ -136,7 +136,7 @@ function looksRandom(t) {
     run = [];
   }
   // in pieces with words or punctuation between them: four or more key-like pieces (letters and digits mixed, 6+ long) adding
-  // up to 28 characters or more anywhere in the text — everyday words with numbers ("R2D2", "MP3", "COVID19") stay well short
+  // up to 28 characters or more anywhere in the text - everyday words with numbers ("R2D2", "MP3", "COVID19") stay well short
   const pieces = words.map(w => w.replace(/^[^A-Za-z0-9+/=_-]+|[^A-Za-z0-9+/=_-]+$/g, ''))
     .filter(w => w.length >= 6 && /^[A-Za-z0-9+/=_-]+$/.test(w) && ((/\d/.test(w) && /[A-Za-z]/.test(w) && (/[a-z]/.test(w) && /[A-Z]/.test(w) || /[+/=_]/.test(w) || (w.match(/\d/g) || []).length >= 2))
       || ((w.slice(1).match(/[A-Z]/g) || []).length >= 3 && /[a-z]/.test(w))));   // (or mixed case with capitals inside: "BCIEIGxt", not "McDonald")
@@ -214,7 +214,7 @@ export function speechText(c, s) {
     `NOW: ${c.now.weekday} ${c.now.clock}, ${c.where}.${c.doing ? ` I am ${q(c.doing, 80)}.` : ''}`,
     situation,
     '',
-    `TASK: Say one short thing out loud (under 100 characters), in my own voice — natural, friendly${s.kind === 'reply' ? ', answering them' : ''}. Everyone around me hears it: nothing about money, my owner or anything private; no links, names of websites or contact details.`,
+    `TASK: Say one short thing out loud (under 100 characters), in my own voice - natural, friendly${s.kind === 'reply' ? ', answering them' : ''}. Everyone around me hears it: nothing about money, my owner or anything private; no links, names of websites or contact details.`,
     'JSON: {"say":"..."}',
   ].join('\n');
 }

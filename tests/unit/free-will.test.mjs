@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Free Will in the simulation (docs/features/FREE-WILL.md §2, §12): the options are the routine's own and real places,
 // questions go out ahead of the choice point, answers are used only for their own plan and only when still possible,
 // every failure falls back to the routine with its reason logged, spending stops at the limits, a failing service is

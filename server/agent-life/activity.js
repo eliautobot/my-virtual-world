@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What one planned activity means in words (docs/features/FREE-WILL.md §5): "Coffee at Café 21", "Worked out at Gym 9",
-// "Went to bed" — the line an agent's activity log keeps (./life.js) and a resident's recent activity shows (server/recent.js).
+// "Went to bed" - the line an agent's activity log keeps (./life.js) and a resident's recent activity shows (server/recent.js).
 // null: nothing worth a line (walking somewhere, waiting). key: a public place's "b.f" (familiar places), or null.
 
 import { foodName } from '../../shared/food.js';

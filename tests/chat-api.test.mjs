@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat contract on a real server with the mock provider (PLAN WP2.2, I11.4, I11.9, I8.7, X11; DECISIONS C53, C119, C120, C121, A8, A9):
 // sessions private per account and agent, events only to the account that started a run, uncertain submissions never retried,
 // interrupted runs on a helper crash, attachments and references, and credentials that never reach a browser.

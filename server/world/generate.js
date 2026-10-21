@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Procedural city generator: blocks -> lots -> buildings -> floor layouts (shared templates), parks, stations, trees.
 import { RNG } from '../../shared/rng.js';
 import { makeGrid, blockRect, lotRect, blockIndex, streetTreePositions, SIDE_CORNERS, cornerPoint } from '../../shared/city.js';
@@ -295,7 +295,7 @@ export function markLevelModes(world) {
 export function generateLevels(world, b, rng) {
   void rng;
   // every floor has its own dice (seeded by the building and the floor), so one floor's layout never depends on how many
-  // draws another one took — a resize that changes the lobby leaves the dice of the floors above as they were
+  // draws another one took - a resize that changes the lobby leaves the dice of the floors above as they were
   const fr = k => new RNG(`${b.seed}:floor:${k}`);
   b.lv = [];
   if (b.type === 'park') { const r = fr(0); b.lv = [addLevel(world, b, validate(b, buildLevel(b, 0, r, { dance: r.chance(0.3) }), 0), true)]; return; }

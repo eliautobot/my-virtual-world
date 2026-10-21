@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Puts the fountain at the centre of every park that has none (2026-10-05: the park generator reserved the cross
 // paths before placing its fountain, so no park ever got one; server/world/layouts.js parkLevel is fixed). Nothing else
 // on the parks changes; a park whose centre is taken by something else is reported and left alone.
@@ -40,7 +40,7 @@ for (const B of world.buildings) {
   seen.add(lv);
   if (L.items.some(i => i.t === 'fountain')) { had++; continue; }
   const inWay = L.items.filter(overlaps);
-  if (inWay.length) { console.log(`${B.name}: its centre has ${inWay.map(i => i.t).join(', ')} — left alone`); continue; }
+  if (inWay.length) { console.log(`${B.name}: its centre has ${inWay.map(i => i.t).join(', ')} - left alone`); continue; }
   L.nid = (L.nid || L.items.reduce((m, i) => Math.max(m, i.id || 0), 0)) + 1;
   L.items.push({ t: 'fountain', x: 0, z: 0, r: 0, id: L.nid });
   added++;

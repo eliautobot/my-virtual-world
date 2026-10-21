@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // How the fishing boats handle (shared/boat-model.js; docs/features/fishing.md §Boats): they reach their top speed and
 // get on the plane; they turn under power, a little with way on, and lean into their turns; they ride a swell (heave,
 // pitch and roll with it, never capsizing), and in a steep head sea at speed they fly off crests and slam; the shallows
@@ -48,7 +48,7 @@ test('turning: under power, a little with way on, leaning into the turn; skiddin
   assert.ok(glide.heading < g0 - 0.05 && Math.abs(glide.heading - g0) < Math.abs(s.heading - h0), 'with the engine off it still answers the wheel, less');
 });
 
-test('it rides the swell — heaving, pitching, rolling with it, never over; a steep head sea at speed throws it off crests', () => {
+test('it rides the swell - heaving, pitching, rolling with it, never over; a steep head sea at speed throws it off crests', () => {
   for (const type of Object.keys(BOATS)) {
     const s = newBoat(type, 0, 0, 0, 0.7), w1 = wave(0.6, 70, 0), w2 = wave(0.25, 25, 1.1);
     let lo = 9, hi = -9, roll = 0, pitch = 0;
@@ -100,7 +100,7 @@ test('the deck: from the wheel to every fishing spot, up on to the casting decks
     assert.equal(deckFloor(type, H[0], H[2]), H[1], `${type}: the skipper stands on the deck at the wheel`);
     for (const sp of D.spots) assert.equal(deckFloor(type, sp.x, sp.z), sp.y, `${type}: the ${sp.name} spot is on the deck`);
     assert.ok(D.spots.length >= S.anglers, `${type}: a spot for each of its ${S.anglers} anglers`);
-    // walked (as the page walks: walkDeck's small steps) — a flood from the wheel reaches every spot
+    // walked (as the page walks: walkDeck's small steps) - a flood from the wheel reaches every spot
     const h = 0.05, key = p => `${Math.round(p.x / h)},${Math.round(p.z / h)}`, start = { x: H[0], y: H[1], z: H[2] }, seen = new Map([[key(start), start]]), q = [start];
     while (q.length) {
       const a = q.shift();
@@ -114,7 +114,7 @@ test('the deck: from the wheel to every fishing spot, up on to the casting decks
     assert.ok(deckFloor(type, p.x, p.z) !== null && Math.abs(p.x) < S.B / 2, `${type}: still aboard (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
     assert.ok(p.z > start.z + 0.3, `${type}: it slid along the gunwale`);
   }
-  // the server: where the page says its player stands — on the deck, or else the wheel
+  // the server: where the page says its player stands - on the deck, or else the wheel
   const hb = Object.create(Harbour.prototype), b = { type: 'coastal' }, bow = BOATS.coastal.deck.spots[0];
   assert.deepEqual(hb.deckOf(b, [bow.x, bow.y, bow.z, 0, 52]).at, [bow.x, bow.y, bow.z], 'on the bow deck');
   assert.equal(hb.deckOf(b, [bow.x, bow.y, bow.z, 0, 52]).clip, 52);

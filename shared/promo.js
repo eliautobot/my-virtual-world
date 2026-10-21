@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Promotional aircraft (WP4.11; rebuilt for the design review 2026-10-03: "rebuilt fresh from the ground up ... they get way
 // too close to buildings and airplanes shouldn't turn around in the same spot"): the kinds, the administrators'
 // configuration (one advertisement per kind: text and/or an uploaded picture, colours, a website), the fleet, and the
@@ -181,7 +181,7 @@ export const SEPARATION = 30, NEAR = 150;
 /**
  * The whole fleet's plans at once (entries as resolvePromoAircraftFleet gives them; env as for planFlight): each at
  * the height its own circuit needs, then raised where its circuit passes near another aircraft's until there is
- * SEPARATION of clear air between them — the lowest first, so the fleet stacks no higher than it must.
+ * SEPARATION of clear air between them - the lowest first, so the fleet stacks no higher than it must.
  */
 export function planFleet(entries, env) {
   const plans = entries.map(e => planFlight({ ...env, typeId: e.typeId, index: e.index, count: e.count }));

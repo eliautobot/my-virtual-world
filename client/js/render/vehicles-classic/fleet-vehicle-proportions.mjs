@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Each entry is introduced only when that vehicle's new asset is complete.
 // Physical world units, not visual-only scaling; metadata is shared by the
 // browser geometry and authoritative traffic collision/rolling calculations.

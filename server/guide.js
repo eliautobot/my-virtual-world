@@ -1,12 +1,12 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Getting started (2026-10-09: "new users don't know how to use the interface and how to get things done"): what the
-// in-world guide (client/js/ui/guide.js) needs for a signed-in account — whether it has been through the welcome tour,
+// in-world guide (client/js/ui/guide.js) needs for a signed-in account - whether it has been through the welcome tour,
 // and which of the first things to do it has done, read from what the account actually holds (never from the browser):
 //   land     it holds a lot          build   a building stands on one of its lots     agent   it owns an agent
 //   talk     it has written to an agent in a chat                                     home    it set a home view
 // A task this account cannot do here (no land for sale on this server, no right to add agents) is left out. The guide's
 // own state (tour seen or skipped, the checklist hidden) is the account setting display.guide, written through
-// /api/account/settings like every display preference — kept with the account, so it follows it to every device and a
+// /api/account/settings like every display preference - kept with the account, so it follows it to every device and a
 // second account on the same browser starts its own tour.
 export const GUIDE_TASKS = Object.freeze(['land', 'build', 'agent', 'talk', 'home']);
 

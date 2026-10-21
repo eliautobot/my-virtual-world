@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Friends (owner request 2026-09-28, DECISIONS C118): a request the other account accepts or declines; friendship is
 // mutual; either side can remove it; the sender can cancel a pending request. Friends are listed first in the online
 // list, are told when the other comes online (unless that account appears offline), and can fly to each other.
@@ -14,7 +14,7 @@ export class FriendError extends Error {
 export class Friends {
   constructor(dbs, { accounts, now = () => Date.now() }) {
     this.dbs = dbs; this.db = dbs.db; this.w = dbs.worldId; this.accounts = accounts; this.now = now;
-    this.listeners = new Set();   // (accountId, change) — the server pushes the new list to that account's pages
+    this.listeners = new Set();   // (accountId, change) - the server pushes the new list to that account's pages
     const db = this.db;
     this.q = {
       get: db.prepare('SELECT * FROM friends WHERE world_id = ? AND a = ? AND b = ?'),

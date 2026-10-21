@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What the fishing game draws on the water (docs/features/fishing.md §Fishing): the line from the rod's tip (sagging
 // while it lies on the water, straight when a fish pulls), the bobber or the lure, the aim ring where a cast will
 // land, splashes, the hooked fish's shadow under the surface and the fish itself when it leaps clear or is held up.
-// Splashes (redone 2026-10-15 — the product owner: "way too basic"): rings of waves spreading in the water itself, a
+// Splashes (redone 2026-10-15 - the product owner: "way too basic"): rings of waves spreading in the water itself, a
 // patch of white water and stirred, milky water where it hit (render/water-marks.js); drops thrown up as streaks, a
 // crown of water rising round the spot and falling back, mist from a big one, and a jet after a heavy fish falls back
 // in (render/spray.js); the drops that fall back ring the water again. Ripples beyond the water's marks (a far
@@ -125,7 +125,7 @@ export class FishingFx {
     if (mode === 'shake' && (S.th -= dt) <= 0) { S.th = 0.3 + Math.random() * 0.4; this.splash(x, y, z, Math.max(0.08, len * 0.3)); }
   }
   /**
-   * The fish: species `id` (or a find: { find }) `len` m long at p, its nose along yaw (pitch: up), drawn `mode` —
+   * The fish: species `id` (or a find: { find }) `len` m long at p, its nose along yaw (pitch: up), drawn `mode` -
    * 'under' (only its shadow on the surface above it), 'air' (itself, leaping), 'held', or null (hidden).
    */
   fish(what, mode, p, yaw = 0, pitch = 0, len = 0.4, roll = 0) {

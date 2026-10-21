@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Mind's problems and money under load (docs/features/FREE-WILL.md §11.11): a city of `population` residents, `agents`
 // of them AI agents with a brain, on the real economy (ledger, businesses, households, agents' spending rules) and a
 // database of their own, run in real time like the server does (a 100 ms main loop; the problems watcher and the Mind's
 // scheduler on their own timers), with a brain that answers after `latency` ms (± half) and fails `fail` of the time.
 //   1. the city alone (the main loop's cost without any of it)
-//   2. every agent's money drained at once: the watcher opens a problem for each, and every Mind deals with it — looks at
-//      the flats (none here), asks its owner for money (a payment request through the economy) — 3 model calls a thought
+//   2. every agent's money drained at once: the watcher opens a problem for each, and every Mind deals with it - looks at
+//      the flats (none here), asks its owner for money (a payment request through the economy) - 3 model calls a thought
 //   3. `chats` owners at once ask their agent three times for a coffee: menu → buy, through the agent's spending rules
 //      (a daily limit that allows two): no agent may spend past its limit
-//   4. meetings: agents start chatting with people all over the city (`meetings` a second) — the first with a brain of its
+//   4. meetings: agents start chatting with people all over the city (`meetings` a second) - the first with a brain of its
 //      own says a line, an agent answers; each line is checked by a moderation service (5 % flagged) before its bubble:
 //      no agent past mind.speechPerDay, speech never taking the last thoughts at once
 //   5. the money given back: every problem resolves

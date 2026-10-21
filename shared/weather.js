@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The weather (WP4.18, wp4-world-spec.md §6.1): one deterministic timeline per world region from its seed and the world
 // clock, so the server and every browser agree without storing anything. The day is cut into spells of a few hours;
-// each spell draws its kind (clear, partly cloudy, overcast, rain, storm, fog — fog more likely around dawn) and blends
+// each spell draws its kind (clear, partly cloudy, overcast, rain, storm, fog - fog more likely around dawn) and blends
 // into the next over its first half hour. Wind turns slowly and blows harder in bad weather. An administrator can set
 // the weather for a while (an override the server holds and sends); the timeline resumes after it.
 export const WEATHER_KINDS = ['clear', 'partly', 'overcast', 'rain', 'storm', 'fog'];

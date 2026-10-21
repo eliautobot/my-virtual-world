@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat window and voice under load TOGETHER, end to end (docs/features/CHAT.md §10; tools/chat-load.mjs and
 // tools/voice-stress.mjs are each half alone). A throwaway server with a city of `population` residents; the brain and
 // the voice service are fakes in a process of their own (the brain an OpenAI-compatible server writing ~80 tokens a
-// second, the voice service one that answers after `speak-ms` / `hear-ms` with MP3 sized to the text — 15 characters a
-// second — and hears a WAV as its size). For `seconds`, all at once, over HTTP and the socket:
+// second, the voice service one that answers after `speak-ms` / `hear-ms` with MP3 sized to the text - 15 characters a
+// second - and hears a WAV as its size). For `seconds`, all at once, over HTTP and the socket:
 // - the owner's `chats` text chats with `agents` agents (each sends again as soon as its answer ended; a share `stop`
 //   stopped part-way), as chat-load;
 // - `voice-chats` accounts in voice mode, each with an agent of its own: talks 1–4 s (a recording, heard by the service),
-//   sends what was heard, and has the answer spoken WHILE it is written — the answer so far cut at words into pieces of
-//   up to 400 characters, the first alone, two requests at once, as the window does — then now and then 🔊 reads the
+//   sends what was heard, and has the answer spoken WHILE it is written - the answer so far cut at words into pieces of
+//   up to 400 characters, the first alone, two requests at once, as the window does - then now and then 🔊 reads the
 //   whole answer again from the transcript (its parts); a share `stop` interrupt (a tap): the speech and the answer stop;
 // - `accounts` other accounts reading aloud (200–900 characters of Markdown) and dictating (2–12 s, now and then 60 s),
 //   now and then a replay (the cache), as voice-stress.
@@ -141,7 +141,7 @@ async function main() {
     const voiceC = await owner.post('/api/connections', { kind: 'voice', label: 'Fake voice', scope: 'installation',
       config: { provider: 'custom', baseUrl: `http://127.0.0.1:${ports.voice}/v1`, speakModel: 'tts-1', voice: 'v1', speakPricePerMChars: 15, listenPricePerMinute: 0.006 }, secrets: { apiKey: 'sk-chat-voice' } });
     if (voiceC.status !== 200) throw new Error(`the voice connection: ${voiceC.status} ${voiceC.text}`);
-    // (requests a minute per account: 240 here, as voice-stress — a voice-mode turn in this test is far shorter than a real one)
+    // (requests a minute per account: 240 here, as voice-stress - a voice-mode turn in this test is far shorter than a real one)
     const set = await owner.post('/api/settings', { values: { 'mind.chatPerDay': '5000', 'mind.dailyUsd': '100', 'voice.speakConnection': String(voiceC.json.id),
       'voice.listenConnection': String(voiceC.json.id), 'voice.perMinute': '240', 'voice.dailyUsd': '500' } });
     if (set.status !== 200) throw new Error(`settings: ${set.status} ${set.text}`);

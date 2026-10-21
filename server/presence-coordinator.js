@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The presence coordinator (PLAN WP2.3; DECISIONS A8, C120; CHECKLIST I8.6): the one place that decides whether an agent is
 // offline, idle, working, finishing or waiting for an approval. It listens to the provider event bus, so every provider feeds the
 // same rules.
@@ -20,7 +20,7 @@ export class PresenceCoordinator {
    */
   constructor({ bus, agents, connections, registry, limits = () => ({}), online = null, onChange = null, quietRun = null, now = () => Date.now(), log = null }) {
     // online(key): false when a connected agent (WP2.14) has no live session, so it shows offline instead of idle; undefined for the rest
-    // quietRun(runId): true for a run that isn't work to show — a talk in the city (server/agent-talk/): private, the
+    // quietRun(runId): true for a run that isn't work to show - a talk in the city (server/agent-talk/): private, the
     // agent standing with whom it talks, never "started working" for everyone to see
     Object.assign(this, { bus, agents, connections, registry, limits, online, onChange, quietRun, now, log });
     this.by = new Map();      // agent key → { key, runs: Map runId → run, lastRunError, finishingUntil }
@@ -45,8 +45,8 @@ export class PresenceCoordinator {
   }
   /** True when anything can report presence: an agent linked to a provider. */
   live() { return this.agents.list().some(a => this.linked(a)); }
-  /** The agent a run's events are about: its own key first — the server's own brain (the Mind) names the agent by its key,
-   *  and every agent on it shares one platform id ('mind'), so that id alone would name the first of them — else the
+  /** The agent a run's events are about: its own key first - the server's own brain (the Mind) names the agent by its key,
+   *  and every agent on it shares one platform id ('mind'), so that id alone would name the first of them - else the
    *  platform's id for it on that connection (an agent platform names its agents its own way). */
   agentOf(e) {
     if (!e.agentKey || e.connectionId === undefined) return null;
@@ -83,7 +83,7 @@ export class PresenceCoordinator {
     }
     this.refresh(a.key);
   }
-  /** What a provider says its agent is doing, whatever started it (Agent Providers: OpenClaw's own session feed — its
+  /** What a provider says its agent is doing, whatever started it (Agent Providers: OpenClaw's own session feed - its
    *  other channels, its schedules): working while it says so, then the usual finishing grace. */
   activity(e) {
     const a = this.agentOf(e);

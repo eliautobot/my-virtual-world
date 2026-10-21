@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a voice reads (docs/features/CHAT.md §9.2): an agent's answer is Markdown, written to be seen. Spoken, the marks
 // would be read out ("asterisk asterisk") and a code block or a table would be minutes of symbols, so the text is made
 // pronounceable first: headings, emphasis and quotes lose their marks, a link is read as its text, an image as its

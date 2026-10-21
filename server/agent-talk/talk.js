@@ -1,19 +1,19 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Talking with someone else's agent in the city (docs/features/CHAT.md §14; 2026-10-08). A player walking up to it —
-// or anyone choosing it on the map — talks through a short bar; its answers show in its speech bubble, to them alone.
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Talking with someone else's agent in the city (docs/features/CHAT.md §14; 2026-10-08). A player walking up to it -
+// or anyone choosing it on the map - talks through a short bar; its answers show in its speech bubble, to them alone.
 // Its owner talks with it in the chat window instead (it is theirs: no limits, every tool).
 // - Short on purpose, against prompt injection and runaway cost (the owner's brain, or the installation's for a plan):
 //   a conversation is at most talk.maxMessages messages of talk.maxChars characters, and talk.windowMinutes after its
-//   first message it is cleared — the next message starts a new one, with nothing of the last (admin settings, read on
+//   first message it is cleared - the next message starts a new one, with nothing of the last (admin settings, read on
 //   every message). The server counts and refuses; the bar only shows what is left.
 // - Private: the answer goes to the talker only (chat.js run events); nothing is said in the world for others to see.
 //   The agent stops and turns to whom it talks with (sim.js hold), and is not called away meanwhile.
 // - Its owner reads every conversation anyone had with their agents, and blocks a player (or another agent) from
 //   talking with any of them again (talk_blocks).
-// - Who answers: the city's own agents (a model provider: the Mind, as a visitor's chat — no tools, no money, never
+// - Who answers: the city's own agents (a model provider: the Mind, as a visitor's chat - no tools, no money, never
 //   its owner's notes) and connected agents (their platform's visitor handling). An agent on an outside platform with
 //   tools on real machines (OpenClaw…) never gets a stranger's words: it greets, as residents do.
-// - What its owner gives others (the Studio's Visitors tab, the job brief's publicMode — §14.3): its job, its life in
+// - What its owner gives others (the Studio's Visitors tab, the job brief's publicMode - §14.3): its job, its life in
 //   the city, or only a greeting.
 // A conversation is a chat session of kind 'talk' (never in the chat window's lists); kept 30 days for its owner's review.
 export class TalkError extends Error {
@@ -115,7 +115,7 @@ export class Talk {
     if (i < 0 || !sim || !at) return { ok: false };
     return { ok: !!sim.hold(i, at.x, at.z) };
   }
-  /** The conversation now open between the account and the agent (null: none, or its time is up — the next message
+  /** The conversation now open between the account and the agent (null: none, or its time is up - the next message
    *  starts a new one). */
   current(accountId, agentId, L = this.limits()) {
     const s = this.sessions.latestTalk(accountId, agentId);
@@ -165,7 +165,7 @@ export class Talk {
     return { id: s.id, account: { id: s.accountId, name: this.nameOf(s.accountId) }, started: s.created,
       messages: this.transcripts.read(s.accountId, a.id, s.id, 200).filter(m => m.role !== 'system').map(m => ({ role: m.role, text: m.text, ts: m.ts })) };
   }
-  /** An owner keeps a player (account) or another agent from talking with any of their agents — or lets them again. */
+  /** An owner keeps a player (account) or another agent from talking with any of their agents - or lets them again. */
   setBlock(ownerId, { account = null, agent = null, on = true }) {
     const acc = Number.isInteger(Number(account)) && Number(account) > 0 ? Number(account) : null, ag = Number.isInteger(Number(agent)) && Number(agent) > 0 ? Number(agent) : null;
     if (!acc === !ag) throw new TalkError(400, 'bad_request', 'Block a player (account) or an agent (agent)');

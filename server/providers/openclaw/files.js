@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An OpenClaw agent's own computer in its owner's PC (docs/features/agent-pc.md §4.1): its workspace through the
-// gateway's own read-only browsing (agents.workspace.list / .get — paths inside the agent's workspace only, symlink and
+// gateway's own read-only browsing (agents.workspace.list / .get - paths inside the agent's workspace only, symlink and
 // hardlink escapes refused by OpenClaw, text and pictures only, size-capped), and its agent documents (AGENTS.md,
-// SOUL.md… — agents.files.list / .get / .set, a change sent with the hash it was read at, so one made meanwhile is
+// SOUL.md… - agents.files.list / .get / .set, a change sent with the hash it was read at, so one made meanwhile is
 // refused). A fixed set of operations; nothing else reaches the gateway from here.
 const fail = (code, message) => Object.assign(new Error(message), { code });
 const rel = p => String(p ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').slice(0, 1000);

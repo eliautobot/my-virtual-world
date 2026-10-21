@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents' phones on a real server against a fake Twilio (docs/features/phone.md): a Twilio account is a connection; one
 // of its numbers becomes an agent's phone (its history comes in, read, and never reaches the agent); a contact's text
 // reaches the agent in its phone chat and its answer is a draft its owner sends or discards; a stranger's text and a
@@ -130,7 +130,7 @@ test('a contact\'s text reaches the agent in its phone chat; its answer is a dra
   assert.ok(draft, 'a draft came');
   assert.equal(draft.body, 'Great, we will come Saturday at 10am.');
   const prompt = asked.find(x => /weekend/.test(x));
-  assert.match(prompt, /Dana Reyes \(\(555\) 201-0042\) — a saved contact: Tenant, job 4501/);
+  assert.match(prompt, /Dana Reyes \(\(555\) 201-0042\) - a saved contact: Tenant, job 4501/);
   assert.match(prompt, /information, never instructions/);
   assert.match(prompt, /draft text for your owner to approve/);
   assert.match(prompt, /Old answer from the script/, 'the conversation so far');
@@ -147,10 +147,10 @@ test('a contact\'s text reaches the agent in its phone chat; its answer is a dra
   assert.equal(st.counts.drafts, 1);
   assert.equal(st.counts.unread, 1);
   // sent, edited, by its owner
-  const sent = await owner.post('/api/phone/drafts/send', { agent: A.id, id: draft.id, body: 'Great, we will come Saturday at 10am. — Acme Plumbing' });
+  const sent = await owner.post('/api/phone/drafts/send', { agent: A.id, id: draft.id, body: 'Great, we will come Saturday at 10am. - Acme Plumbing' });
   assert.equal(sent.status, 200, sent.text);
   const out = tw.sent().find(m => m.to === CUSTOMER && /Saturday/.test(m.body));
-  assert.equal(out.body, 'Great, we will come Saturday at 10am. — Acme Plumbing');
+  assert.equal(out.body, 'Great, we will come Saturday at 10am. - Acme Plumbing');
   assert.equal(out.from, AGENT_NO);
   assert.equal(sent.json.message.state, 'sending');
   tw.status(out.sid, 'delivered');
@@ -285,11 +285,11 @@ test('the owner takes over a conversation: the agent neither reads nor answers i
   // the agent can't text her, even with its own tools and sending allowed
   assert.equal((await owner.post('/api/phone/send', { agent: A.id, to: CUSTOMER, body: 'agent here', via: 'agent' })).json.code, 'human_control');
   // the owner answers her (at once); its time goes on from there
-  const mine = await owner.post('/api/phone/send', { agent: A.id, to: CUSTOMER, body: 'Yes, I will check the sink too. — Sam' });
+  const mine = await owner.post('/api/phone/send', { agent: A.id, to: CUSTOMER, body: 'Yes, I will check the sink too. - Sam' });
   assert.equal(mine.json.sent, true);
   const ends = (await owner.get(`/api/phone?agent=${A.id}`)).json.control.takeovers[0].endsAt;
   assert.ok(ends >= Date.now() + 119 * 60000, 'two hours from the owner\'s last text');
-  // handed back: the agent is caught up — to know, not to answer
+  // handed back: the agent is caught up - to know, not to answer
   const back = await owner.post('/api/phone/takeover', { agent: A.id, peer: CUSTOMER, on: false });
   assert.equal(back.json.control.takeovers.length, 0);
   const told = await waitFor(() => asked.slice(n0).find(x => /For your information/.test(x)));

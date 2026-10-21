@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // HTTP routes and WebSocket messages. Each one names the capability it needs (server/auth/permissions.js); the request
 // pipeline in server/index.mjs (handleApi) checks the session, that capability, Origin, the CSRF token and
 // re-authentication before a handler runs, so a handler never sees a request it may not serve.
@@ -140,7 +140,7 @@ export function createApi(d) {
   // when its simulation is stuck. /api/health answers whenever the process serves HTTP.
   router.add({ method: 'GET', path: '/api/ready', cap: 'public', whileStopping: true, handler: () => { const r = d.readiness(); return ok(r, r.ready ? 200 : 503); } });
   // every route and who may use it: its capability and that capability's lowest role now (administrators: diagnostics, and
-  // the sweep that proves no one below gets through — tests/authz-sweep-http.test.mjs, step 8)
+  // the sweep that proves no one below gets through - tests/authz-sweep-http.test.mjs, step 8)
   router.add({ method: 'GET', path: '/api/routes', cap: 'server.diagnostics', handler: () => ok({ routes: router.list().map(r => ({ ...r, min: perms.minRole(r.cap) })) }) });
   router.add({ method: 'GET', path: '/api/world', cap: 'world.view', handler: () => ({ status: 200, pre: d.worldPayload() }) });
   router.add({ method: 'GET', path: '/api/people', cap: 'world.view', handler: ({ P }) => ({ status: 200, pre: d.peoplePayload(tasks(P)) }) });
@@ -159,7 +159,7 @@ export function createApi(d) {
     },
   });
   // What a person did lately (the selection card's feed, server/recent.js). An agent shown as one keeps its life private
-  // (docs/features/FREE-WILL.md, decision 5): only its owner and accounts it is shared with to manage read it — its
+  // (docs/features/FREE-WILL.md, decision 5): only its owner and accounts it is shared with to manage read it - its
   // stored activity log; anyone else learns only that it is private. A resident (or a body that passes for one) is public:
   // what anyone could see by watching.
   router.add({
@@ -521,13 +521,13 @@ export function createApi(d) {
     const i = d.agents.resolver.resolveBody(a.bodyRef), pr = d.presence.info(a.key);
     const level = d.agents.level(P, a);
     const o = { id: a.id, key: a.key, name: a.name, emoji: a.emoji, role: a.role, i, presence: tasks(P) ? pr : stripTask(pr), level, mine: !!(P.account && d.agents.isOwner(P, a)),
-      public: !!(d.agentPublic && d.agentPublic(a)) };   // (public: anyone may talk with it — the info dock's Public agents)
-    // an agent of an agent provider's own (OpenClaw): which provider it works through — its kind and the connection's name
+      public: !!(d.agentPublic && d.agentPublic(a)) };   // (public: anyone may talk with it - the info dock's Public agents)
+    // an agent of an agent provider's own (OpenClaw): which provider it works through - its kind and the connection's name
     if (isProviderKey(a.key)) { const c = d.connections.get(a.connectionId), m = c && d.registry.manifest(c.kind); if (c && m) o.provider = { kind: c.kind, label: m.label, connection: c.label }; }
     if (level === 'manage') {
       o.enabled = a.enabled; o.ownerId = a.ownerId; o.shares = d.agents.shares(a.id);
       // what it is linked to (its brain, when that is a model provider): the Agent Studio's Brain tab. Only the label and
-      // kind — the connection's settings and secrets stay behind /api/connections and its own rights.
+      // kind - the connection's settings and secrets stay behind /api/connections and its own rights.
       const c = a.connectionId ? d.connections.get(a.connectionId) : null;
       o.connection = c ? { id: c.id, label: c.label, kind: c.kind, enabled: c.enabled } : null;
     }
@@ -541,7 +541,7 @@ export function createApi(d) {
     return { id: a.id, key: a.key, working: st.working, state: st.working ? 'working' : st.state === 'offline' ? 'offline' : 'idle', meeting: !!st.meeting };
   };
   // a connected agent is listed only for those its owner lets see it (hidden, friends, public; I8.15), never confirmed to anyone else
-  // (a connected agent: whom its slot shows it to — and always to whoever manages it: its owner, a person it is shared with)
+  // (a connected agent: whom its slot shows it to - and always to whoever manages it: its owner, a person it is shared with)
   const seen = (P, a) => d.agentApi.agentKeyVisible(a.key, P.account ? P.account.id : null) || (!!P.account && d.agents.canManage(P, a));
   router.add({ method: 'GET', path: '/api/presence', cap: 'world.view', handler: ({ P }) => ok({ agents: d.agents.enabled().filter(a => d.agentOk(a.key) && seen(P, a)).map(a => presenceView(P, a)) }) });
   router.add({
@@ -566,7 +566,7 @@ export function createApi(d) {
   const mine = (P, body, need) => {
     const a = d.agents.get(agentId(body));
     if (!a || !d.agents.canUse(P, a)) throw new AuthError(404, 'not_found', 'No such agent');   // never confirm what it cannot see
-    // (a connected agent: its owner, or a person it is shared with to manage — its name, connection and removal stay with its slot)
+    // (a connected agent: its owner, or a person it is shared with to manage - its name, connection and removal stay with its slot)
     if ((need === 'manage' || need === 'own') && !d.agents.canManage(P, a)) throw new AuthError(403, 'forbidden', 'Only its owner, or an account it is shared with to manage, may do this');
     // removing it and choosing who else has it are its owner's alone: an account it is shared with to manage changes
     // everything else (step 8, 2026-10-08)
@@ -577,7 +577,7 @@ export function createApi(d) {
     const a = mine(P, body, 'manage');
     // a connected agent's name, whether it is on and what it thinks with are its slot's (Settings → Third-party agents)
     if (isExtKey(a.key) && ['name', 'enabled', 'connectionId', 'nativeId'].some(k => body[k] !== undefined)) throw new AuthError(400, 'connected_agent', 'A connected agent\'s name, connection and on/off are set in Settings → Third-party agents');
-    // (an agent of an agent provider's own — OpenClaw's — is named, and listed or not, by its provider)
+    // (an agent of an agent provider's own - OpenClaw's - is named, and listed or not, by its provider)
     if (isProviderKey(a.key) && ['name', 'enabled', 'connectionId', 'nativeId'].some(k => body[k] !== undefined)) throw new AuthError(400, 'provider_agent', 'This agent\'s name and whether it is listed come from its agent provider (Agent Providers)');
     const patch = {};
     for (const k of ['name', 'emoji', 'role', 'enabled']) if (body[k] !== undefined) patch[k] = body[k];
@@ -686,7 +686,7 @@ export function createApi(d) {
   const connId = body => { const n = Number(body && body.id); if (!Number.isInteger(n) || n < 1) throw new AuthError(400, 'bad_request', 'Which connection?'); return n; };
   // Every kind that works (nothing announces adapters still to come), whether this account may add one
   // (d.connections.addable: the same rule create() keeps), and the helper's state.
-  // (a credential the server keeps for a connection itself — system: a device key — is never a field of a form)
+  // (a credential the server keeps for a connection itself - system: a device key - is never a field of a form)
   const pageKind = (P, k) => ({ ...k, fields: k.fields.filter(f => !f.system), addable: d.connections.addable(P, k) });
   router.add({ method: 'GET', path: '/api/providers', cap: 'connections.use', handler: ({ P }) => ok({
     kinds: d.registry.list().filter(k => k.implemented).map(k => pageKind(P, k)), host: d.host.status() }) });
@@ -706,9 +706,9 @@ export function createApi(d) {
   const provCall = async fn => {
     try { return ok(await fn()); } catch (e) {
       if (e instanceof ProviderError || e instanceof ConnectionError) throw new AuthError(e.status, e.code, e.message);
-      // (what the provider refused, in its own words: a request it found wrong — a stale base hash, a bad value — is the
+      // (what the provider refused, in its own words: a request it found wrong - a stale base hash, a bad value - is the
       // person's to fix; anything else is the provider's or the link's)
-      // (conflict: changed elsewhere meanwhile — read again; not_found: gone on the provider; unavailable: busy, retry shortly)
+      // (conflict: changed elsewhere meanwhile - read again; not_found: gone on the provider; unavailable: busy, retry shortly)
       if (e instanceof HostError) throw new AuthError(['INVALID_REQUEST', 'unsupported', 'bad_request', 'conflict'].includes(e.code) ? 400 : e.code === 'not_found' ? 404 : ['UNAVAILABLE', 'unavailable'].includes(e.code) ? 503 : 502, e.code || 'provider_error', e.message || 'The provider failed');
       throw e;
     }
@@ -719,7 +719,7 @@ export function createApi(d) {
   router.add({ method: 'POST', path: '/api/agent-providers/reconnect', cap: 'connections.use', handler: ({ P, body }) => provCall(() => d.agentProviders.reconnect(P, connId(body))) });
   router.add({ method: 'POST', path: '/api/agent-providers/remove', cap: 'connections.use', handler: ({ P, body }) => provCall(() => d.agentProviders.remove(P, connId(body), actorOf(P))) });
   // a call of a provider's sub-menu (its managers only; its listed calls only; changes are audited)
-  // (a change — the provider's settings, its approval rules, its agents — needs the password entered within the last 10
+  // (a change - the provider's settings, its approval rules, its agents - needs the password entered within the last 10
   // minutes, like the world's own destructive edits: a stolen session alone never reconfigures the agent platform)
   router.add({ method: 'POST', path: '/api/agent-providers/call', cap: 'connections.use', handler: ({ P, body }) => provCall(() => {
     const id = connId(body), method = body && body.method;
@@ -769,7 +769,7 @@ export function createApi(d) {
   } });
   // the progress card brought up to date by the agent (OpenClaw's Refresh task progress)
   router.add({ method: 'POST', path: '/api/providers/progress/refresh', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.refreshCard(P, need(body && body.agent, 'agent'), need(body && body.session, 'session'), body.key ?? null)) });
-  // (scope=agent: all of the agent's tasks, wherever they started — then no chat need be named)
+  // (scope=agent: all of the agent's tasks, wherever they started - then no chat need be named)
   const taskScope = v => (v === 'agent' ? 'agent' : 'chat');
   router.add({ method: 'GET', path: '/api/providers/tasks', cap: 'chat.use', handler: ({ P, url }) => chatCall(() => d.chat.tasks(P, need(qnum(url, 'agent'), 'agent'), qnum(url, 'session'), taskScope(url.searchParams.get('scope')))) });
   router.add({ method: 'GET', path: '/api/providers/tasks/one', cap: 'chat.use', handler: ({ P, url }) => chatCall(() => d.chat.task(P, need(qnum(url, 'agent'), 'agent'), qnum(url, 'session'), need(url.searchParams.get('task'), 'task'), taskScope(url.searchParams.get('scope')))) });
@@ -783,7 +783,7 @@ export function createApi(d) {
   router.add({ method: 'POST', path: '/api/providers/tasks/cancel', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.cancelTask(P, need(body && body.agent, 'agent'), body.session ?? null, need(body.task, 'task'), taskScope(body.scope))) });
   router.add({ method: 'GET', path: '/api/providers/browser', cap: 'chat.use', handler: ({ P, url }) => chatCall(() => d.chat.browser(P, need(qnum(url, 'agent'), 'agent'), url.searchParams.get('tab'))) });
   router.add({ method: 'POST', path: '/api/providers/browser', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.browserAct(P, need(body && body.agent, 'agent'), body)) });
-  // the live picture: the tab's next frame after `after` (a JPEG, with the page's address and size), or 204 — none yet
+  // the live picture: the tab's next frame after `after` (a JPEG, with the page's address and size), or 204 - none yet
   router.add({ method: 'GET', path: '/api/providers/browser/frame', cap: 'chat.use', handler: async ({ P, url }) => {
     let f;
     try { f = await d.chat.browserFrame(P, need(qnum(url, 'agent'), 'agent'), need(url.searchParams.get('tab'), 'tab'), qnum(url, 'after') || 0); }
@@ -793,11 +793,11 @@ export function createApi(d) {
     return { body: Buffer.from(f.jpeg, 'base64'), headers: { ...h, 'content-type': 'image/jpeg', 'x-page-width': String(f.head.cssWidth), 'x-page-height': String(f.head.cssHeight),
       'x-page-url': encodeURIComponent(f.head.url || '') } };
   } });
-  // the agent's own screen (Hermes' Bot Desktop): its state and controls, and one picture of it now (a JPEG, or 204 — not
+  // the agent's own screen (Hermes' Bot Desktop): its state and controls, and one picture of it now (a JPEG, or 204 - not
   // running, or a person has control); the live screen itself is a WebSocket, /api/providers/screen/ws (server/providers/screen-relay.js)
   router.add({ method: 'GET', path: '/api/providers/screen', cap: 'chat.use', handler: ({ P, url }) => chatCall(() => d.chat.screen(P, need(qnum(url, 'agent'), 'agent'))) });
   router.add({ method: 'POST', path: '/api/providers/screen', cap: 'chat.use', handler: ({ P, body }) => {
-    // (its browser put on its screen or taken off: the provider's own settings changed — a recent password, as its sub-menu's changes)
+    // (its browser put on its screen or taken off: the provider's own settings changed - a recent password, as its sub-menu's changes)
     if (body && body.action === 'browser' && !(P.session && Date.now() - P.session.authAt <= LIMITS.reauthMs)) throw new AuthError(403, 'reauth_required', 'Changing the agent platform needs your password: confirm it to continue');
     return chatCall(() => d.chat.screenAct(P, need(body && body.agent, 'agent'), body));
   } });
@@ -845,7 +845,7 @@ export function createApi(d) {
     return ok({ deleted: f.id, used: d.attachments.used(P.account.id) });
   } });
   // one of the account's own attachments, to show it again in a chat (an image, a PDF, a video or recording opens; anything
-  // else downloads) — from the disk in byte ranges: a video plays and seeks
+  // else downloads) - from the disk in byte ranges: a video plays and seeks
   router.add({ method: 'GET', path: '/api/chat/attachments/file', cap: 'chat.use', handler: ({ P, url }) => {
     const f = d.attachments.pathOf(P.account.id, url.searchParams.get('id') || '');
     let size = null;

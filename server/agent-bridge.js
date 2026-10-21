@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The bridge between a connected agent's slot (server/agent-api.js) and the agent list (server/agents.js, server/connections.js), so
 // chat and presence treat a connected agent like any other agent (PLAN WP2.14). One slot, one server-managed connection of kind
 // "agentapi" and one agent record with the key ext-<slot id>; the record's native id is the slot id, which is how provider events

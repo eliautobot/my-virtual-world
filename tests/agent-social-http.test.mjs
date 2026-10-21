@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Agents and friends on a real server (server/agent-social/; 2026-10-10): three players — Ann and Ben are
-// friends, Eve is a stranger to both — each with a connected agent (Juno, Kai, Mal), and one of the world's own agents with
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Agents and friends on a real server (server/agent-social/; 2026-10-10): three players - Ann and Ben are
+// friends, Eve is a stranger to both - each with a connected agent (Juno, Kai, Mal), and one of the world's own agents with
 // a brain. Closeness grows only with time together, so the friendships are written into the world's database while the
 // server is stopped (as weeks of meeting would have left them), then it starts again. Over HTTP: the rule, messages
 // (checked, delivered once through the mailbox, replies, a refused one kept and felt), where a friend is, an invitation
-// answered and called off, the Mind answering a friend, the owners' page (settings, messages, reports — 404 to anyone
+// answered and called off, the Mind answering a friend, the owners' page (settings, messages, reports - 404 to anyone
 // else), blocks, ending a friendship, the admin's limits applying at once and a troublemaker refused at every step.
 // The brain and the moderation service are one fake OpenAI-compatible server on this machine.
 import assert from 'node:assert/strict';
@@ -134,7 +134,7 @@ test('weeks of meeting later (written while the server is stopped): the server s
   s = await startServer({ data: dir, population: 220, agents: 0, env: { MVW_PROVIDER_TEST: '1', MVW_KEY_FILE: keyFile } });
   for (const k of ['owner', 'ann', 'ben', 'eve']) { const c = httpClient(s.url); await c.signIn(k, P[k].password); c.password = P[k].password; P[k] = c; }
   for (const n of ['Juno', 'Kai', 'Mal']) await until(async () => (await look(n)).status === 200, `${n} back`);
-  // (the world's clock starts again at night: to the morning, when the world's own agent is up — asleep, it answers later)
+  // (the world's clock starts again at night: to the morning, when the world's own agent is up - asleep, it answers later)
   await P.owner.post('/api/clock', { skip: 10 });
 });
 
@@ -192,7 +192,7 @@ test('where a friend is, an invitation answered (both told), then called off', a
   assert.match((await inbox('Juno')).json.notices[0].text, /Kai called off/);
 });
 
-test('focused questions (2026-10-12): about a friend, its plans, its memories, a conversation — each a small answer of its own', async () => {
+test('focused questions (2026-10-12): about a friend, its plans, its memories, a conversation - each a small answer of its own', async () => {
   const inv = await act('Juno', { action: 'invite', to: 'Kai', place, inMinutes: 240, minutes: 30, note: 'Coffee?' });
   assert.equal(inv.status, 200, inv.text);
   assert.equal((await act('Kai', { action: 'answer', id: (await inbox('Kai')).json.invites[0].id, yes: true })).json.accepted, true);
@@ -236,7 +236,7 @@ test('the world\'s own agent starts something by itself with its morning plan: a
   try {
     const r = await P.owner.post('/api/mind/think', { agent: ids.Nia, kind: 'plan' });
     assert.equal(r.status, 200, r.text);
-    assert.match(F.prompts.at(-1), /FRIENDS I CAN REACH FROM A DISTANCE: «Juno» \(close friends\)\.\nIf it feels natural today — not every day — I may send one of them a short message of my own \(a hello, a thought, a question; under 200 characters/, 'its plan was told whom it can reach (not Kai or Mal: never met them)');
+    assert.match(F.prompts.at(-1), /FRIENDS I CAN REACH FROM A DISTANCE: «Juno» \(close friends\)\.\nIf it feels natural today - not every day - I may send one of them a short message of my own \(a hello, a thought, a question; under 200 characters/, 'its plan was told whom it can reach (not Kai or Mal: never met them)');
     assert.deepEqual(r.json.did.started.map(x => [x.kind, x.to, x.ok]), [['message', 'Juno', true], ['invite', 'Juno', true]]);
     const box = await until(async () => { const b = (await inbox('Juno')).json; return b.friendMessages || b.invites ? b : null; }, 'what it started');
     assert.equal(box.friendMessages.find(m => m.from === ids.niaName).text, F.start);
@@ -254,7 +254,7 @@ test('the world\'s own agent starts something by itself with its morning plan: a
   } finally { F.start = null; await P.owner.post('/api/settings', { values: { 'social.mindInvitesPerDay': 1 } }); }
 });
 
-test('the owners\' page: settings, every message (refused ones too), reports — and 404 to anyone else', async () => {
+test('the owners\' page: settings, every message (refused ones too), reports - and 404 to anyone else', async () => {
   const o = await P.ann.get(`/api/agent-social?agent=${ids.Juno}`);
   assert.equal(o.status, 200, o.text);
   assert.equal(o.json.settings.reach, 'friends'); assert.equal(o.json.limits.maxChars, 280); assert.equal(o.json.connected, true);
@@ -318,7 +318,7 @@ test('on post (2026-10-14): no invitations to or from it, a meet-up it agreed to
   assert.equal(m.status, 200, m.text);
   await slow(async () => (await box()).friendMessages?.some(x => x.from === ids.niaName && x.replyTo === m.json.id), 'its reply');
   assert.ok(F.prompts.slice(n0).some(u => /NEW MESSAGE from/.test(u) && /ON DUTY: my owner posted me at my place of work around the clock/.test(u)), 'its reply was written knowing it is on duty');
-  // the time to set off comes (for one far away, as soon as it is posted): it can't leave its post — Juno is told, and
+  // the time to set off comes (for one far away, as soon as it is posted): it can't leave its post - Juno is told, and
   // the appointment ends without anyone stood up
   await P.owner.post('/api/clock', { skip: h - 0.05 });
   await slow(async () => { await box(); return notes.find(x => /is on duty at its post and can't make it to .*: the meet-up is called off/.test(x)); }, 'the news');

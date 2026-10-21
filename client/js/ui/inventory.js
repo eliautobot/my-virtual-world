@@ -1,12 +1,12 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The inventory (docs/features/INVENTORY.md; server/economy/inventory.js): the wallet's Inventory tab (I opens it in Play
-// mode — elsewhere I is the right-hand panel's key) —
+// mode - elsewhere I is the right-hand panel's key) -
 // what you hold, or one of your agents: by category (with counts), sorted by newest, name, value, quantity, rarity or
 // category, searched; one-of-a-kind things (a fish with its own length and weight) grouped, each piece listed; a
 // thing's card (what it is, how many, what it's worth) with Give (to a player, an agent or a business: the wallet's
 // own search) and Throw away; the latest comings and goings. What the world puts in (a catch, a gift) arrives with a
 // note and shows the next time it's open. Trades (server/economy/trades.js): with a player or an agent, each side puts
-// in things and/or coin, both accept and it all swaps at once — the Trades view lists them and opens one's window.
+// in things and/or coin, both accept and it all swaps at once - the Trades view lists them and opens one's window.
 import { S, bus } from '../core/state.js';
 import { auth } from '../core/auth.js';
 import { getJSON, post } from '../core/net.js';
@@ -29,10 +29,10 @@ export function init(a) {
     app.econ?.openWallet?.('items'); return true;
   });
   bus.on('msg:inv', m => {
-    if (m.ev === 'got') app.toast?.(`${m.icon || '📦'} ${m.agent ? `${m.agent} got` : 'You got'} ${m.qty > 1 ? `${m.qty} × ` : ''}${m.name}${m.from ? ` from ${m.from}` : ''} — ${where()}`, 'good', 4200);   // (a toast is text)
+    if (m.ev === 'got') app.toast?.(`${m.icon || '📦'} ${m.agent ? `${m.agent} got` : 'You got'} ${m.qty > 1 ? `${m.qty} × ` : ''}${m.name}${m.from ? ` from ${m.from}` : ''} - ${where()}`, 'good', 4200);   // (a toast is text)
     else if (m.ev === 'trade') {
-      const said = { opened: 'wants to trade', changed: 'changed their side of a trade', accepted: 'accepted the trade — your turn', declined: 'declined the trade', done: 'and you traded — it all swapped' }[m.what];
-      if (said) app.toast?.(`🤝 ${m.from || 'Someone'} ${said}${m.agent ? ` (with ${m.agent})` : ''} — ${where()} › Trades`, m.what === 'declined' ? '' : 'good', 4200);
+      const said = { opened: 'wants to trade', changed: 'changed their side of a trade', accepted: 'accepted the trade - your turn', declined: 'declined the trade', done: 'and you traded - it all swapped' }[m.what];
+      if (said) app.toast?.(`🤝 ${m.from || 'Someone'} ${said}${m.agent ? ` (with ${m.agent})` : ''} - ${where()} › Trades`, m.what === 'declined' ? '' : 'good', 4200);
     } else return;
     st.data = null; st.trades = null;
     // the window is open: show it now (unless something is being typed)
@@ -88,7 +88,7 @@ function paint() {
     <div class="inv-bar"><div class="seg inv-cats"><button type="button" class="btn small${!st.cat ? ' on' : ''}" data-i="cat" data-c="">All <small>${D.stacks.length}</small></button>${ITEM_CATS.filter(c => counts[c.id]).map(c => `<button type="button" class="btn small${st.cat === c.id ? ' on' : ''}" data-i="cat" data-c="${c.id}">${c.icon} ${esc(c.label)} <small>${counts[c.id]}</small></button>`).join('')}</div>
       <div class="inv-tools"><input class="input inv-q" placeholder="Search" value="${esc(st.q)}" aria-label="Search the inventory"><select class="input inv-sort" aria-label="Sort by">${SORTS.map(([k, t]) => `<option value="${k}"${st.sort === k ? ' selected' : ''}>${t}</option>`).join('')}</select></div></div>
     <div class="inv-sum dim">${D.used}/${D.max} spaces · worth ${vc(D.value || 0)}</div>
-    <div class="inv-main"><div class="inv-grid">${G.length ? G.map(tile).join('') : `<p class="hint">${D.stacks.length ? 'Nothing like that.' : 'Nothing here yet. What you catch, buy and are given lands here — fish from a trip, things from the shops, gifts from friends.'}</p>`}</div>
+    <div class="inv-main"><div class="inv-grid">${G.length ? G.map(tile).join('') : `<p class="hint">${D.stacks.length ? 'Nothing like that.' : 'Nothing here yet. What you catch, buy and are given lands here - fish from a trip, things from the shops, gifts from friends.'}</p>`}</div>
       ${sel ? card(sel) : ''}</div>
     <div class="inv-hist">${st.history ? history() : '<button type="button" class="btn small" data-i="hist">⏱️ Comings and goings</button>'}</div>`;
 }
@@ -99,7 +99,7 @@ function tile(g) {
 }
 function card(g) {
   const def = itemOf(g.item), cat = CAT_BY_ID[def.cat], rar = RARITY[def.rarity];
-  const pieces = def.unique ? `<div class="inv-pieces">${g.pieces.map(p => `<label class="inv-piece"><input type="radio" name="inv-piece" value="${p.id}"${(st.giving?.stack ?? g.pieces[0].id) === p.id ? ' checked' : ''}> ${esc(pieceLabel(def, p.attrs).replace(`${def.name} — `, '') || def.name)}${p.attrs?.size ? ` <small>${esc(p.attrs.size)}</small>` : ''} <i>${vc(itemValue(def, p.attrs))}</i></label>`).join('')}</div>` : '';
+  const pieces = def.unique ? `<div class="inv-pieces">${g.pieces.map(p => `<label class="inv-piece"><input type="radio" name="inv-piece" value="${p.id}"${(st.giving?.stack ?? g.pieces[0].id) === p.id ? ' checked' : ''}> ${esc(pieceLabel(def, p.attrs).replace(`${def.name} - `, '') || def.name)}${p.attrs?.size ? ` <small>${esc(p.attrs.size)}</small>` : ''} <i>${vc(itemValue(def, p.attrs))}</i></label>`).join('')}</div>` : '';
   const max = def.unique ? 1 : g.qty, G = st.giving;
   const giveForm = G ? `<div class="inv-give">
       <label>To<span class="ec-pick"><input class="input inv-to" placeholder="A player, an agent or a business" autocomplete="off" value="${esc(G.to?.name || '')}"><span class="ec-res panel hidden"></span></span></label>
@@ -133,14 +133,14 @@ function tradesView() {
   const N = st.tnew;
   const start = N ? `<div class="inv-give inv-tnew">
       <label>Trade with<span class="ec-pick"><input class="input inv-tto" placeholder="A player or an agent" autocomplete="off" value="${esc(N.to?.name || '')}"><span class="ec-res panel hidden"></span></span></label>
-      <label>Note<input class="input inv-tmemo" maxlength="140" placeholder="Optional — what you have in mind" value="${esc(N.memo || '')}"></label>
+      <label>Note<input class="input inv-tmemo" maxlength="140" placeholder="Optional - what you have in mind" value="${esc(N.memo || '')}"></label>
       <div class="lib-btns"><button type="button" class="btn" data-i="tnewx">Cancel</button><button type="button" class="btn primary" data-i="tstart">🤝 Start the trade</button></div></div>`
     : '<div class="lib-btns"><button type="button" class="btn primary" data-i="tnew">➕ New trade</button></div>';
   const T = st.trades || [];
   const row = t => `<button type="button" class="lib-row inv-trow" data-i="topen" data-id="${esc(t.id)}"><div class="lib-main">
       <b>🤝 ${esc(t.them.who.name)}${t.status !== 'open' ? ` <small class="dim">${esc({ done: 'done', declined: 'declined', lapsed: 'ran out' }[t.status] || t.status)}</small>` : t.theirOk && !t.myOk ? ' <small class="inv-wait">waiting on you</small>' : t.myOk ? ' <small class="dim">you accepted</small>' : ''}</b>
       <span class="dim">You give: ${sideTxt(t.me)} · They give: ${sideTxt(t.them)}</span></div></button>`;
-  return `<div class="inv-trades">${start}${T.length ? `<div class="lib-list">${T.map(row).join('')}</div>` : '<p class="hint">No trades yet. Start one with a friend or an agent: each of you puts in things and/or coin, you both accept, and it all swaps at once — or nothing does.</p>'}</div>`;
+  return `<div class="inv-trades">${start}${T.length ? `<div class="lib-list">${T.map(row).join('')}</div>` : '<p class="hint">No trades yet. Start one with a friend or an agent: each of you puts in things and/or coin, you both accept, and it all swaps at once - or nothing does.</p>'}</div>`;
 }
 function tradeWin(t) {
   const isOpen = t.status === 'open', D = st.draft || draftOf(t);
@@ -156,7 +156,7 @@ function tradeWin(t) {
       <input class="input inv-tqty" type="number" min="1" value="1" aria-label="How many"><button type="button" class="btn small" data-i="tadd">Add</button></div>` : '';
   const theirLines = t.them.items.map(l => `<div class="inv-tline">${lineTxt(l)}${l.gone ? ' <small class="bad">no longer theirs</small>' : l.short ? ' <small class="bad">they have fewer now</small>' : ''}</div>`).join('');
   const ok = on => on ? '<span class="inv-ok">✔ accepted</span>' : '<span class="dim">not yet</span>';
-  const ended = { done: '✅ Done — everything swapped.', declined: '✋ This trade was declined.', lapsed: '⌛ This trade ran out (two days without a change).' }[t.status];
+  const ended = { done: '✅ Done - everything swapped.', declined: '✋ This trade was declined.', lapsed: '⌛ This trade ran out (two days without a change).' }[t.status];
   return `<div class="inv-twin"><div class="inv-thead"><button type="button" class="btn small" data-i="tback">← All trades</button><h4>🤝 Trade with ${esc(t.them.who.name)}</h4></div>
     ${t.memo ? `<p class="inv-desc">“${esc(t.memo)}”</p>` : ''}
     <div class="inv-tsides">
@@ -166,7 +166,7 @@ function tradeWin(t) {
       <div class="inv-tside"><h5>${esc(t.them.who.name)} gives ${isOpen ? ok(t.theirOk) : ''}</h5>${theirLines || '<p class="hint">Nothing yet.</p>'}
         ${t.them.vc ? `<div class="inv-tline">🪙 ${vc(t.them.vc)}</div>` : ''}<small class="dim">Worth about ${vc(sideWorth(t.them))}</small></div>
     </div>
-    ${ended ? `<p class="hint">${ended}</p>` : `<div class="lib-btns inv-tbtns">${tbtns(t)}</div><p class="hint">When you both accept, it all swaps at once — or nothing does. A change to either side takes back both acceptances.</p>`}</div>`;
+    ${ended ? `<p class="hint">${ended}</p>` : `<div class="lib-btns inv-tbtns">${tbtns(t)}</div><p class="hint">When you both accept, it all swaps at once - or nothing does. A change to either side takes back both acceptances.</p>`}</div>`;
 }
 function tbtns(t) {
   const D = st.draft || draftOf(t), empty = !D.items.length && !D.vc && !t.them.items.length && !t.them.vc;
@@ -200,12 +200,12 @@ async function tradeClick(k, t) {
       const D = st.draft || draftOf(T);
       await post('/api/inventory/trade/offer', { trade: T.id, items: D.items, vc: D.vc || 0, as });
       await refresh(); const x = tradeOf(T.id); st.draft = x ? draftOf(x) : null;
-      app.toast?.('🤝 Your side is saved — they\'ve been told', 'good', 2000);
+      app.toast?.('🤝 Your side is saved - they\'ve been told', 'good', 2000);
     }
     else if (k === 'tok' && T) {
       const r = await post('/api/inventory/trade/accept', { trade: T.id, as });
-      if (r.status === 'done') { app.toast?.(`🤝 Traded with ${T.them.who.name} — it all swapped`, 'good', 3200); await load(); }
-      else { app.toast?.(`✔ Accepted — waiting on ${T.them.who.name}`, 'good', 2400); await refresh(); }
+      if (r.status === 'done') { app.toast?.(`🤝 Traded with ${T.them.who.name} - it all swapped`, 'good', 3200); await load(); }
+      else { app.toast?.(`✔ Accepted - waiting on ${T.them.who.name}`, 'good', 2400); await refresh(); }
     }
     else if (k === 'tno' && T) {
       if (!confirm(`Decline the trade with ${T.them.who.name}?`)) return;

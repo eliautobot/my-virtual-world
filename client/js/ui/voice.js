@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Voice in the page (docs/features/CHAT.md §9.4): hearing someone — a recording sent to the server's voice service, or the
-// browser's own recognition — and speaking — audio from the server's voice service played through Web Audio, or the
-// browser's own voice — plus what the window, the Studio and Settings ask the server. Which service listens and speaks
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Voice in the page (docs/features/CHAT.md §9.4): hearing someone - a recording sent to the server's voice service, or the
+// browser's own recognition - and speaking - audio from the server's voice service played through Web Audio, or the
+// browser's own voice - plus what the window, the Studio and Settings ask the server. Which service listens and speaks
 // is the server's decision (GET /api/voice/options); when it says the browser (409 use_browser: the person's choice, none
 // set up, the plan's minutes used) the browser carries on, so a conversation is never cut off.
 import { auth } from '../core/auth.js';
@@ -63,7 +63,7 @@ export async function hear(blob, { seconds = null, language = '' } = {}) {
 
 /**
  * Asks for speech (POST /api/voice/speak: { agent?, text } | { session, message, part } | a preview { connection, voice,
- * speed, text }). Resolves { audio: ArrayBuffer, part, parts } — or { browser: true, text, part, parts, browserVoice,
+ * speed, text }). Resolves { audio: ArrayBuffer, part, parts } - or { browser: true, text, part, parts, browserVoice,
  * reason, note } when the browser's own voice is to read it. A VoiceFail otherwise (fallback 'browser': the browser may).
  */
 export async function speak(body, signal) {
@@ -92,7 +92,7 @@ export function audioCtx() {
   if (AC.state === 'suspended') AC.resume().catch(() => {});
   return AC;
 }
-/** Call inside a tap or key press: lets sound (and the browser's voice) start later without one — a phone's rule. */
+/** Call inside a tap or key press: lets sound (and the browser's voice) start later without one - a phone's rule. */
 export function unlock({ synth = false } = {}) {
   const ctx = audioCtx();
   if (ctx) { try { const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0); } catch { /* nothing to play */ } }
@@ -230,11 +230,11 @@ export function micWords(e) {
 export class Mic {
   constructor() { this.stream = null; this.opening = null; this.gen = 0; }
   /** Opens the microphone (once: a second call while it is being asked for waits for the same). Let go meanwhile
-   *  (close()), the stream that arrives is stopped at once — no microphone stays on behind a closed conversation. */
+   *  (close()), the stream that arrives is stopped at once - no microphone stays on behind a closed conversation. */
   open() {
     if (this.stream && this.stream.getAudioTracks().some(t => t.readyState === 'live')) return Promise.resolve();
     if (this.opening) return this.opening;
-    if (this.stream) this.close();   // (an ended one — another app took the microphone: its node goes too)
+    if (this.stream) this.close();   // (an ended one - another app took the microphone: its node goes too)
     const gen = this.gen;
     this.opening = (async () => {
       try {

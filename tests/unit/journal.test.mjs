@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The edit journal (PLAN WP1.8, DECISIONS C35, C116) on a generated city: every edit type undoes and redoes, each
 // account undoes only its own edits, a later change by someone else refuses the undo and names it, admins revert any
 // edit (and undo the revert), restores re-check placement, and the history keeps its depth. Plus the activity log.

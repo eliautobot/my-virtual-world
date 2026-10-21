@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The world store (WP4.1, wp4-world-spec.md §4.1): the editable world and its residents live in next.db, next to the
 // accounts, the lots and their titles and the edit journal, so an edit, its journal entry and any title change commit
 // together (one transaction) and an edit writes the rows it changed, never the whole world.

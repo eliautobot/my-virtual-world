@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents and friends (server/agent-social/; 2026-10-10), on a generated city with a real database and a
-// virtual clock: the rule (each counts the other as a friend, their owners are friends, each owner allows it — and no
+// virtual clock: the rule (each counts the other as a friend, their owners are friends, each owner allows it - and no
 // block), messages (checked, delivered once, replies, refused ones kept and felt), every limit counted from what is kept
 // (a restart doesn't start them again), where a friend is (never inside a home), friendships ending (cooling off, then
 // growing from nothing), fading with time apart, strangers' lines, invitations as appointments (kept, stood up, lapsed),
@@ -160,7 +160,7 @@ test('messages: checked (speech\'s rules, then moderation), delivered once with 
   } finally { R.done(); }
 });
 
-test('limits: a conversation, a pair a day, new messages and replies a day, its owner\'s own, the pace — counted from what is kept', async () => {
+test('limits: a conversation, a pair a day, new messages and replies a day, its owner\'s own, the pace - counted from what is kept', async () => {
   const R = rig();
   try {
     const S = R.social;
@@ -210,7 +210,7 @@ test('limits: a conversation, a pair a day, new messages and replies a day, its 
   } finally { R.done(); }
 });
 
-test('where a friend is: a public place by name, outdoors, or "somewhere private" — never inside a home; a day\'s looks', async () => {
+test('where a friend is: a public place by name, outdoors, or "somewhere private" - never inside a home; a day\'s looks', async () => {
   const R = rig({ startHour: 3 });   // (night: most are at home, asleep)
   try {
     const S = R.social;
@@ -289,7 +289,7 @@ test('time apart: closeness fades after a week apart (close friends slower, grud
   } finally { R.done(); }
 });
 
-test('time together counts for both: one walks up to the other and stays — both feel closer, the one sought out half as fast', () => {
+test('time together counts for both: one walks up to the other and stays - both feel closer, the one sought out half as fast', () => {
   const R = rig({ startHour: 11 });
   try {
     const S = R.social, a = R.i(1), b = R.i(2);
@@ -413,7 +413,7 @@ test('stood up: the one who came feels it (the other\'s AI went elsewhere); one 
   } finally { R.done(); }
 });
 
-test('its Mind starts something by itself: friends it can reach, the admin\'s daily numbers, its owner\'s switch — never more, never for a stranger', async () => {
+test('its Mind starts something by itself: friends it can reach, the admin\'s daily numbers, its owner\'s switch - never more, never for a stranger', async () => {
   const R = rig({ connected: [1, 3, 4] });   // (Milo, agent 2, is one of the world's own: its Mind plans its day)
   try {
     const S = R.social;

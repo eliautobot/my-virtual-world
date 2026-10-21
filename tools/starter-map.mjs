@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The starting map a new installation opens with (server/world/starter.js).
 // Usage: node tools/starter-map.mjs export <data folder> [--out <file.json.gz>] [--name <city name>]
 //          the world and the live lots of an installation (read from a copy of its database, so it may be running)
-//          become the starting map — no residents, accounts, agents, owners or money go with it
+//          become the starting map - no residents, accounts, agents, owners or money go with it
 //        node tools/starter-map.mjs info [<file.json.gz>]
 //          what a starting map holds
 import fs from 'node:fs';

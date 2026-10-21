@@ -1,5 +1,5 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// A brain that thinks before it answers (its connection's Thinking — 2026-10-08: set to high, it lost 45% of its agents'
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// A brain that thinks before it answers (its connection's Thinking - 2026-10-08: set to high, it lost 45% of its agents'
 // thoughts, cut off by their own reasoning): its thinking gets room of its own on top of the answer's; a thought cut off
 // anyway is asked once more at once without thinking, and the thought is kept; cut off without thinking, it is named
 // cut_off (not "made no sense"). The fake brain behaves like such a model: given room to think, it may use all of it.
@@ -55,7 +55,7 @@ test('thinking has room of its own: the answer\'s limit plus its thinking\'s', a
   assert.deepEqual([t.kind, t.status], ['reflect', 'ok']);
 });
 
-test('cut off by its own thinking anyway: asked once more at once without thinking — the thought is kept, both calls paid', async () => {
+test('cut off by its own thinking anyway: asked once more at once without thinking - the thought is kept, both calls paid', async () => {
   mode = 'greedy';
   const n = seen.length, r = await reflect(B);
   assert.equal(r.status, 200, r.text);

@@ -1,10 +1,10 @@
-<!-- My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
+<!-- Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
 # Connect OpenClaw
 
 Bring your [OpenClaw](https://openclaw.ai) agents into My Virtual World. Each one moves into the city with a body, a
 home and a desk, and you work with it in My Virtual World's chat window as fully as in OpenClaw's own app: its sessions,
 models and thinking levels, its tools as they run, its plans, approvals and questions, its background tasks and its
-browser. OpenClaw keeps running your agents — My Virtual World connects to its gateway, the way OpenClaw's own apps do.
+browser. OpenClaw keeps running your agents; My Virtual World connects to its gateway, the way OpenClaw's own apps do.
 
 You need OpenClaw 2026.9.6 or newer with its gateway running, and an administrator account in My Virtual World.
 
@@ -42,7 +42,7 @@ openclaw gateway restart
 
 `lan` makes the gateway reachable from your local network as well; it still requires its token, so keep the token
 private. Then add the provider as above with the address `ws://host.docker.internal:18789` (**🔎 Find** tries it). The container
-counts as another machine, so OpenClaw asks you to approve it — see the next section.
+counts as another machine, so OpenClaw asks you to approve it (see the next section).
 
 ## OpenClaw on another computer
 
@@ -59,7 +59,7 @@ counts as another machine, so OpenClaw asks you to approve it — see the next s
 
 ## Good to know
 
-- **Agents count as agents.** In demo mode (no License Key) a world has up to 3 agents in all — built in, OpenClaw,
+- **Agents count as agents.** In demo mode (no License Key) a world has up to 3 agents in all: built in, OpenClaw,
   Hermes or connected AI apps together.
 - **Who sees what.** The connection belongs to the administrator who added it. Share it (Settings → 🔌 Connections →
   Share…) and other accounts can chat with its agents in sessions of their own; they never see anyone else's sessions or

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Building entry/exit points shared by server planner, generator and client (player mode).
 import { CATALOG } from './catalog.js';
 import { WALL_T } from './constants.js';

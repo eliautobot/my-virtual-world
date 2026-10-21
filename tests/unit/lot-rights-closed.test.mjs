@@ -1,5 +1,5 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Lot rights fail closed (step 8, 2026-10-08): an edit op the rights table doesn't name is the administrators' — one added
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Lot rights fail closed (step 8, 2026-10-08): an edit op the rights table doesn't name is the administrators' - one added
 // later never opens to lot holders by omission.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';

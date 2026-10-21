@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The visitor's account on the client: who is signed in, what they may do (capabilities from the server), and the
 // CSRF token that every write sends. The dialogs live in ui/account.js, which sets auth.ui.
 // Emits bus 'auth' (me, previous) whenever the answer changes.

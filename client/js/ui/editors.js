@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Editors. Furnish: place / move / rotate / recolour / remove objects on the focused floor or in a park, with a live
 // preview checked against the same shared rules the server enforces. Build: edit the selected building (name, sign,
 // floors, style, roof, colours), add new buildings with a placement ghost, demolish, add residents.
@@ -59,7 +59,7 @@ const E = {};
 let ghost, bghost;
 
 // ------------------------------------------------------------------ helpers
-/** The floor being furnished: the focused floor, or a selected park — only where I may furnish (core/rights.js). */
+/** The floor being furnished: the focused floor, or a selected park - only where I may furnish (core/rights.js). */
 function target() { const tg = focusTarget(); return tg && mayOn(tg.B, 'furnish') ? tg : null; }
 function focusTarget() {
   if (S.focus.b >= 0) { const B = bld(S.focus.b); if (B && B.type !== 'park') return { B, b: S.focus.b, f: S.focus.f, y: floorAt(B, S.focus.f) }; }
@@ -305,7 +305,7 @@ function setStatus() {
   else if (F.resize) t = F.resize.reason ? `⚠️ ${F.resize.reason}` : `${sizeText(F.resize.w, F.resize.h)} · release to keep this size${F.resize.spot[0] && F.resize.spot[1] ? ' · Shift keeps its shape' : ''}`;
   else if (F.sel && INDOOR_SIGNS[selEntry()?.t]) t = 'Drag a handle to size the sign (corners: width and height; Shift keeps its shape) · drag the sign to move · R rotate · Del remove';
   else if (F.sel) t = 'Drag to move · R rotate · Del remove · Esc deselect';
-  else t = 'Pick an item to place it — or click something in the room to select it, then drag to move it.';
+  else t = 'Pick an item to place it - or click something in the room to select it, then drag to move it.';
   if (E.fstat.textContent !== t) E.fstat.textContent = t;
 }
 function refreshFurnish() {
@@ -362,7 +362,7 @@ async function floorOp(btn) {
   const n = scopeOp(tg).scope ? shared(tg) : 1, where = tg.B.type === 'park' ? 'The park' : n > 1 ? `All ${n} floors with this layout` : `${floorsName(tg.B, [tg.f]).replace(/^./, c => c.toUpperCase())}`;
   const r = await edit([{ op: `lvl.${op}`, b: tg.b, f: tg.f, ...scopeOp(tg) }]);
   E.ffloor._h = ''; refreshFurnish();
-  if (r) app.toast(`${where} ${op === 'clear' ? (n > 1 ? 'were cleared' : 'was cleared') : op === 'regen' ? (n > 1 ? 'were laid out anew' : 'was laid out anew') : (n > 1 ? 'are back to their generated layout' : 'is back to its generated layout')} — undo with ↶`, 'good', 3200);
+  if (r) app.toast(`${where} ${op === 'clear' ? (n > 1 ? 'were cleared' : 'was cleared') : op === 'regen' ? (n > 1 ? 'were laid out anew' : 'was laid out anew') : (n > 1 ? 'are back to their generated layout' : 'is back to its generated layout')} - undo with ↶`, 'good', 3200);
 }
 function updateFurnishGhost() {
   F.dirty = false;
@@ -447,7 +447,7 @@ async function onUp() {
   if (!r) { inter.setHidden(d.e, false); reselect(); }
 }
 // ------------------------------------------------------------------ sizing a sign's face by hand (2026-10-05)
-// A selected sign inside shows handles round its face — the corners size its width and height (Shift keeps its
+// A selected sign inside shows handles round its face - the corners size its width and height (Shift keeps its
 // shape), the sides one of them. The face takes any size within its kind's (shared/signs.js SIGN_SIZE); a standing
 // sign's board keeps its bottom on its post and grows up and to both sides, a wall sign round its centre. The base
 // keeps its size. The new size is checked like any move; the design follows the face's shape.
@@ -645,14 +645,14 @@ export function facingRoad(net, p, form) {
   const r = dist < want + 6 ? want : dist;               // close in: the front lines up behind the road
   return { x: near.x + nx * r, z: near.z + nz * r, rot };
 }
-/** The way from its door to its street or road (shared/door-access.js): the same rule the server checks — not through
+/** The way from its door to its street or road (shared/door-access.js): the same rule the server checks - not through
  *  the building itself, another building beyond the city, or someone else's lot. ignoreIdx: the building being moved. */
 export function doorReasonFor(spec, ignoreIdx = -1) {
   const L = app.lots, has = !!L?.lots?.length;
   return doorReason(S.world, spec, { net: app.terrain?.roadNet || null, lotAt: has ? (x, z) => L.at(x, z)?.id || null : null, lot: has ? L.at(spec.x, spec.z)?.id || null : null, ignoreIdx }) || '';
 }
-/** On a world with lots (WP4.6): the same rules the server checks — inside one lot you may build on, clear of its lines,
- *  within its zoning's floors — explained in words before you click. */
+/** On a world with lots (WP4.6): the same rules the server checks - inside one lot you may build on, clear of its lines,
+ *  within its zoning's floors - explained in words before you click. */
 export function lotReason(spec) {
   const L = app.lots;
   if (!L || !L.lots.length) return '';
@@ -669,7 +669,7 @@ export function lotReason(spec) {
   return '';
 }
 function setBuildStatus() {
-  const t = !BS.spec ? 'Point at (or tap) an empty spot on your lot.' : BS.ok ? '✅ It fits here — click (or tap) to place it, then adjust it with its handles' : '⚠️ ' + BS.reason + ' — you can still place it and move it with its handles';
+  const t = !BS.spec ? 'Point at (or tap) an empty spot on your lot.' : BS.ok ? '✅ It fits here - click (or tap) to place it, then adjust it with its handles' : '⚠️ ' + BS.reason + ' - you can still place it and move it with its handles';
   if (E.nstat.textContent !== t) E.nstat.textContent = t;
 }
 async function buildClick() {
@@ -690,12 +690,12 @@ async function buildClick() {
 function renderEdit() {
   if (!E.tedit || S.mode !== 'build') return;
   const b = S.selB, B = b >= 0 ? bld(b) : null;
-  if (!B) { E.tedit.innerHTML = '<div class="be-empty"><span>🏙️</span><p>Click a building or park in the world to edit it — or switch to <b>New building</b> to add one.</p></div>'; return; }
+  if (!B) { E.tedit.innerHTML = '<div class="be-empty"><span>🏙️</span><p>Click a building or park in the world to edit it - or switch to <b>New building</b> to add one.</p></div>'; return; }
   if (!mayOn(B, 'build')) { E.tedit.innerHTML = `<div class="hint">${esc(whyNot(B, 'build'))}. You can change buildings on your own lots.</div>`; return; }
   const park = B.type === 'park', cap = floorsCap(B.type), TI = app.TYPE_ICON || {}, TN = app.TYPE_NAME || {};
   const sub = [TN[B.type] || B.type, park ? '' : `${B.floors} floor${B.floors > 1 ? 's' : ''}`, park ? '' : STYLE_NAME[B.style] || ''].filter(Boolean).join(' · ');
   // Laid out in sections (2026-10-06: "too messy"): who it is, its size and place, how it looks, its billboards, and
-  // what to do with it — labels above their fields, choices in even grids.
+  // what to do with it - labels above their fields, choices in even grids.
   E.tedit.innerHTML = `<div class="be">
   <div class="be-head"><span class="be-ic">${TI[B.type] || '🏢'}</span><div class="be-id"><b>${esc(B.name)}</b><small>${esc(sub)}</small></div></div>
   <section class="be-sec"><h5>${park ? 'Name' : 'Name and sign'}</h5>
@@ -736,7 +736,7 @@ async function onEditClick(e) {
     if (now - BS.delArm > 3500) { BS.delArm = now; t.textContent = '⚠️ Click again to demolish'; setTimeout(() => { if (t.isConnected) t.textContent = '🗑 Demolish'; }, 3500); return; }
     BS.delArm = 0;
     const name = B.name, r = await edit([{ op: 'bld.del', b }]);
-    if (r) { app.toast(`${name} was demolished — its people will find new places`, '', 3200); selectBuilding(-1); }
+    if (r) { app.toast(`${name} was demolished - its people will find new places`, '', 3200); selectBuilding(-1); }
   }
 }
 async function onEditChange(e) {

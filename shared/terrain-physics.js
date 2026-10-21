@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The island's ground for vehicle physics (WP4.2/4.3): heightfield colliders, one per 400 ft chunk, kept around each
 // car that is driving (the browser's own car, server-simulated cars), built from the same canonical 8 ft grid the
 // renderer and the players use (roads graded in). Chunks inside the city are left to the city's own colliders; where a

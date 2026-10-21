@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent buying at venues stays within its owner's limits (server/economy/households.js agentMayBuy; 2026-10-11): an
 // outside AI told to go back to someone's café again and again can't spend past its owner's daily cap, buys nothing while
 // its owner has paused it or not allowed buying, and residents (not agents) are untouched.
@@ -32,7 +32,7 @@ test('venue purchases count against the daily cap, with what it paid in other wa
   assert.equal(h.agentMayBuy(agent, 3000), true, 'the window moved on');
 });
 
-test('paused, or not allowed to buy: nothing — and a resident is not an agent', () => {
+test('paused, or not allowed to buy: nothing - and a resident is not an agent', () => {
   let L = { paused: true };
   const { h } = fixture(() => L);
   assert.equal(h.agentMayBuy(agent, 100), false);

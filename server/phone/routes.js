@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents' phones over HTTP (docs/features/phone.md §7). Everything names an agent: its owner, or an account it is shared
 // with to manage, may use its phone (agents.phone); anyone else gets 404. AI apps reach the same routes through their MCP
-// tools (server/connector/tools.js), as the person, on the agent the person chose — texts they send go as the agent
+// tools (server/connector/tools.js), as the person, on the agent the person chose - texts they send go as the agent
 // (via: 'agent'), so the phone's rules for the agent's own texts apply.
 import { PhoneError } from './phone.js';
 

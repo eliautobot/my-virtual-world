@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Audio as bytes, for the voice services (docs/features/CHAT.md §9): what a recording or a spoken answer is (by its first
 // bytes, not by what the sender says), how long it lasts (read from the file itself, so the installation's voice is
 // metered on what was really heard or spoken, never on what a page claims), and the joins a service that speaks in short

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Original, realistically proportioned four-door saloon. Geometry is authored
 // in world-sized automotive dimensions, then uniformly converted to the
 // traffic model's +X-forward, scale=2, wheel-center-Y=-0.18 convention.

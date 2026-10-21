@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's work (docs/features/CHAT.md §13): what it is on the job for its owner, kept apart from its life in the city.
 // - The brief: who it works for (company), what it is to do and how (instructions: its system prompt for work), its tone,
 //   the time zone it works in, what it knows (knowledge), whether it keeps work notes, the mode a new chat starts in
-//   (defaultMode) and what others who talk with it get (publicMode: its job, its life, or only a greeting — CHAT.md §14.3).
+//   (defaultMode) and what others who talk with it get (publicMode: its job, its life, or only a greeting - CHAT.md §14.3).
 //   Its job title is the agent's own role.
-// - Work notes: what it keeps from work chats (its owner's preferences, decisions, names, deadlines) — never mixed with its
+// - Work notes: what it keeps from work chats (its owner's preferences, decisions, names, deadlines) - never mixed with its
 //   memories of its life (agent_memories). Its owner adds and removes them too.
 // - Knowledge files: a copy of each (deleting the upload from the Library leaves it), the text of documents read once;
 //   PDFs go to the model as they are with each work message (images are not taken: a model that cannot see would refuse
@@ -211,7 +211,7 @@ export class Work {
       pdfs: all.filter(f => f.kind === 'pdf').map(f => ({ name: f.name, mime: f.mime, size: f.size, path: path.join(this.root, String(id), f.sha256) })),
     };
   }
-  /** What a visitor's work chat goes with (CHAT.md §14.3): its brief and its documents' text — never its work notes
+  /** What a visitor's work chat goes with (CHAT.md §14.3): its brief and its documents' text - never its work notes
    *  (from its owner's chats) nor its PDFs (sent as they are, at a stranger's every message). */
   forVisitor(agentId) {
     const id = Number(agentId);

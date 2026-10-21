@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The OpenAI Decisions adapter (Free Will, docs/features/FREE-WILL.md §2.6). Runs inside the provider helper process
 // (./host-main.mjs): its environment holds none of the server's secrets and the API key arrives with each call.
 // - decide: one POST /v1/decisions with the snapshot and the questions the server built; answers come back typed (a

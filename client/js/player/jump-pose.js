@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The jump clip driven by the jump itself (player.js: real gravity, shared/standable.js). The baked clip (Tripo
-// 'jump_02', the same on every character) crouches for its first 30 %, is in the air from 31 % to 57 % — lifting the
-// hips up to 0.64 m by itself — lands and settles. Here the take-off starts at the airborne part, the air time maps
+// 'jump_02', the same on every character) crouches for its first 30 %, is in the air from 31 % to 57 % - lifting the
+// hips up to 0.64 m by itself - lands and settles. Here the take-off starts at the airborne part, the air time maps
 // onto it, and its own lift is taken back out (hipLift) so the height comes from the physics alone.
 import { JUMP_V, GRAVITY } from '/shared/standable.js';
 

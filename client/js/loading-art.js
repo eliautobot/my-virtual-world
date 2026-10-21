@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 /* The loading screen's moving art: a glowing line figure for each step of loading (a padlock, the globe, a road, the
    skyline rising, a furnished room, residents walking, sunrise, a street lamp), each with its own motion, and between two
-   figures a transformation — the lines break into sparks that swirl across and join up as the next figure. Also the status
+   figures a transformation - the lines break into sparks that swirl across and join up as the next figure. Also the status
    line and the progress line. (The sparks rising off the logo are CSS: js/loading.js.)
 
    It draws on its own canvas, in a worker when the browser can hand a canvas to one (OffscreenCanvas), so it keeps moving
@@ -107,7 +107,7 @@
     return out;
   };
 
-  /** Building streets: driving down a road at night — the centre line and lamp posts rush past, a car ahead. */
+  /** Building streets: driving down a road at night - the centre line and lamp posts rush past, a car ahead. */
   FIG.streets = (t, T) => {
     const hy = 48, vx = CX, out = [], f = 92, near = 1, far = 30;
     const sx = (X, Z) => vx + f * X / Z, sy = (Y, Z) => hy + f * (1 - Y) / Z;   // ground units; Y: height above the road
@@ -249,7 +249,7 @@
     return out;
   };
 
-  /** Lighting up the world: night — a street lamp flickers on and settles, its pool of light breathing, moon and stars. */
+  /** Lighting up the world: night - a street lamp flickers on and settles, its pool of light breathing, moon and stars. */
   const STARS = [[24, 26, 1.6], [46, 76, 1.2], [94, 18, 2], [112, 50, 1.3], [184, 24, 1.7], [212, 58, 1.3], [222, 18, 1.1]];
   const MOON = (() => {   // a crescent: the rim of one disc outside a second one, then back along the second
     const [ax, ay, ra, bx, by, rb] = [60, 47, 17, 68, 40, 14.5];
@@ -385,8 +385,8 @@
     }
   }
   /** Which particle of the next figure each particle of this one becomes: short trips, found by swapping pairs from two
-   *  starts — round the middle in angle order, and particle for particle (best when the figures are alike, as the open and
-   *  the locked padlock) — keeping the shorter. */
+   *  starts - round the middle in angle order, and particle for particle (best when the figures are alike, as the open and
+   *  the locked padlock) - keeping the shorter. */
   function match(ax, ay, bx, by) {
     const d = (i, j) => { const x = ax[i] - bx[j], y = ay[i] - by[j]; return x * x + y * y; };
     const ia = order(ax, ay, centroid(ax, ay)), ib = order(bx, by, centroid(bx, by));

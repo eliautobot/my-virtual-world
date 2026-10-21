@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The floor generators (floor layouts step 4, 2026-10-04): apartment floors of real flats (studios, one- and
 // two-bedroom) and office floors of rooms and desk clusters, both counted out from the elevator in fixed widths so that a
 // resize changes only what is at the far edge; every flat has what a home needs and nothing is left out of reach.
@@ -76,8 +76,8 @@ test('every floor has its own dice: a building of another width keeps the same f
   assert.deepEqual(first(W2, c), first(W, b));
 });
 
-// Street floors (cafés, restaurants, shops, gyms, lobbies): laid out from the entrance — or from the elevator on the
-// floors above the street — with the staff's place by the door, everything within reach, and a resize changing only the edges.
+// Street floors (cafés, restaurants, shops, gyms, lobbies): laid out from the entrance - or from the elevator on the
+// floors above the street - with the staff's place by the door, everything within reach, and a resize changing only the edges.
 function staysFrom(b, f, grow, anchor) {
   const A = floor(b, f), nb = { ...b, ...grow }; nb.core = coreFor(nb);
   const Bv = floor(nb, f), want = new Map();

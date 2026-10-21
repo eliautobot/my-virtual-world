@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // 2026-10-03 (screenshots): the city's straight shore met the island's coast in cliffs and square corners, and its
 // road ran out over the sea round them; rivers floated above the ground beside them and waterfalls looked odd; lakes stood
 // above lower ground next to them. The shore eases into the coast, the loop keeps to the land round every bay, and

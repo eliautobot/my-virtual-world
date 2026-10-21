@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The selection card's feeds (client/js/ui/sel-feeds.js): what a person did lately (server/recent.js) and their money
-// lately (server/economy/views.js personFeed). A resident's are public; an agent's day and money are its owner's — an
+// lately (server/economy/views.js personFeed). A resident's are public; an agent's day and money are its owner's - an
 // account it is shared with to manage reads its day, only its owner its money; anyone else is told "private", never shown.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';

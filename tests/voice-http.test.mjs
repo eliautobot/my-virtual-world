@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Voice over HTTP on a real server (docs/features/CHAT.md §9): the installation's voice service (a fake OpenAI-compatible
 // one on this machine) speaks and listens for everyone without their own, within the installation's daily limit; with
 // none, "use the browser's voice" with the text to read; an agent's own voice (set by whoever manages it), its
-// owner's default, the installation's, the browser's; an answer of a chat read aloud — pronounceable, in parts; a member
+// owner's default, the installation's, the browser's; an answer of a chat read aloud - pronounceable, in parts; a member
 // brings their own service (and it may not reach inside the network); limits: requests a minute, a recording's size,
 // length and format, the installation's daily spend; a service's failure in our words with the browser as the way on.
 import assert from 'node:assert/strict';
@@ -83,9 +83,9 @@ test('nothing set up: the browser\'s own voice, with the text to read made prono
   const o = (await ann.get(`/api/voice/options?agent=${A}`)).json;
   assert.deepEqual([o.listen.source, o.listen.reason, o.speak.source, o.speak.reason], ['browser', 'none', 'browser', 'none']);
   assert.deepEqual(o.limits, { maxChars: 4000, maxSeconds: 300, maxBytes: 25 * 1048576, perMinute: 60 });
-  const r = await speak(ann, { agent: A, text: 'Hello **there** — see [the docs](https://x.org/d).' });
+  const r = await speak(ann, { agent: A, text: 'Hello **there** - see [the docs](https://x.org/d).' });
   assert.equal(r.status, 409); assert.equal(r.json.code, 'use_browser'); assert.equal(r.json.fallback, 'browser'); assert.equal(r.json.reason, 'none');
-  assert.equal(r.json.text, 'Hello there — see the docs.');
+  assert.equal(r.json.text, 'Hello there - see the docs.');
   const h = await hear(ann, wav(1));
   assert.equal(h.status, 409); assert.equal(h.json.code, 'use_browser');
   assert.equal(spoken.length + heard.length, 0);
@@ -122,7 +122,7 @@ test('the installation\'s voice speaks and listens for everyone without their ow
   assert.equal(hh.json.seconds, 3, 'measured from the recording itself');
 });
 
-test('an agent\'s own voice — set by whoever manages it — then its owner\'s, the installation\'s or the browser\'s', async () => {
+test('an agent\'s own voice - set by whoever manages it - then its owner\'s, the installation\'s or the browser\'s', async () => {
   // the owner gives B a voice on the installation's service: v2, a little faster, with a manner
   const set = await owner.post('/api/voice/agent', { agent: B, connection: inst, voice: 'v2', speed: 1.2, instructions: 'Warm and calm.' });
   assert.equal(set.status, 200, set.text); assert.deepEqual([set.json.voice.voice, set.json.voice.speed, set.json.speaks.source], ['v2', 1.2, 'agent']);

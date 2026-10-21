@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A sign's panel (both editions; render/signs.js opens it when someone taps a sign that shows its own design rather
 // than an ad): the design as it stands, its message and "Open link" (a new tab). The sign's owner can design it from
 // here (ui/sign-design.js).

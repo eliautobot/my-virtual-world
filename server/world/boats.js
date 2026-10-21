@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fishing docks' boats on the server (docs/features/fishing.md §Boats): one per slip (shared/world-modules.js
 // boatSlips), as the airport's aircraft (server/world/aircraft.js). A player on the dock beside a free boat takes it
 // (bboard) and drives it in the browser (shared/boat-model.js); the server takes its poses (bpose: ten a second, each
-// checked against the boat's top speed — a jump is refused and the skipper corrected), keeps the skipper's player at its
+// checked against the boat's top speed - a jump is refused and the skipper corrected), keeps the skipper's player at its
 // helm (so the area of interest, the online list and proximity chat follow, and others see them standing there), and
 // sends everyone near the boats that are out of their slips (harbour: five a second, nearby ones only; the ids of every
 // boat out to all, so no moored copy is drawn twice). Stopped alongside a dock or the shore, the skipper steps off
@@ -46,14 +46,14 @@ export class Harbour {
   slipPose(b) { return { x: b.home.x, y: b.home.y, z: b.home.z, h: b.home.yaw, p: 0, r: 0, v: 0, l: 0 }; }
   place(b) { return b.pose || this.slipPose(b); }
   decksNow() { const W = this.world(); if (this.decksOf !== W.worldModules) { this.decksOf = W.worldModules; this.decks = moduleDecks(W); } return this.decks; }
-  /** Where the skipper stands at the helm (shared/boat-model.js BOATS helm) — or at a point H of the deck — for a pose. */
+  /** Where the skipper stands at the helm (shared/boat-model.js BOATS helm) - or at a point H of the deck - for a pose. */
   helmOf(b, pose, H = BOATS[b.type].helm) {
     const c = Math.cos(pose.h), s = Math.sin(pose.h);
     return { x: pose.x + H[0] * c + H[2] * s, y: pose.y + H[1], z: pose.z - H[0] * s + H[2] * c };
   }
   /**
    * Where on the deck the client says its player is, and what they're doing (dk: [x, y, z, facing, clip], the boat's
-   * frame — the fishing game's walking about): { at, yaw, clip } if it's somewhere one can stand on that boat
+   * frame - the fishing game's walking about): { at, yaw, clip } if it's somewhere one can stand on that boat
    * (shared/boat-model.js deckFloor), else the helm.
    */
   deckOf(b, dk) {
@@ -91,7 +91,7 @@ export class Harbour {
     const x = num(m.x), y = num(m.y), z = num(m.z), h = num(m.h), pi = num(m.p), ro = num(m.r);
     if (![x, y, z, h].every(Number.isFinite)) return;
     const now = this.now(), last = b.pose;
-    // how long passed: by arrival, or the boat's own clock (ts) when that says more — never more than really passed
+    // how long passed: by arrival, or the boat's own clock (ts) when that says more - never more than really passed
     let dt = (now - b.at) / 1000;
     const ts = num(m.ts);
     if (Number.isFinite(ts)) {
@@ -113,7 +113,7 @@ export class Harbour {
     p.x = hm.x; p.y = hm.y; p.z = hm.z; p.yaw = b.pose.h + dk.yaw; p.clip = dk.clip; p.ctx = -1; p.lastAt = now; p.ver++; p.dirty = true;
     this.ver++;
   }
-  /** Off the boat: stopped, alongside a dock or the shore — on to its deck or the dry land beside the boat. */
+  /** Off the boat: stopped, alongside a dock or the shore - on to its deck or the dry land beside the boat. */
   exit(ws) {
     const p = ws.pid != null ? this.players.byId.get(ws.pid) : null, b = p ? this.bySkipper.get(p.id) : null;
     if (!b) return;
@@ -133,7 +133,7 @@ export class Harbour {
     const pose = b.pose, near = Math.hypot(pose.x - b.home.x, pose.z - b.home.z) < HOME_RANGE;
     const point = Math.abs(pose.v) <= STOP ? this.stepOff(b, pose) : null;
     if (point && !near) { this.release(b, point, 'You stepped ashore'); b.mode = 'moored'; b.returnAt = this.now() + PARK_MS; }
-    else { this.release(b, this.besideSlip(b), near ? 'Back in its slip' : 'You left the helm — the harbour master brought the boat back to its slip'); this.home(b); }
+    else { this.release(b, this.besideSlip(b), near ? 'Back in its slip' : 'You left the helm - the harbour master brought the boat back to its slip'); this.home(b); }
     this.ver++;
   }
   /** A dock's deck or the dry shore beside the boat within a stride, else null: { x, y, z }. */

@@ -1,6 +1,6 @@
 # HTTP routes
 
-Generated from the code by `tools/gen-reference-docs.mjs` — do not edit by hand. Proprietary — see [LICENSE](../../LICENSE).
+Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand. Proprietary - see [LICENSE](../../LICENSE).
 
 434 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
 

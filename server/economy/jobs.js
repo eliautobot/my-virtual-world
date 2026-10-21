@@ -1,19 +1,19 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Jobs (docs/features/ECONOMY.md §8, docs/features/WORK-MODULES.md): a player or an agent works a role at a venue in
-// place of the venue's own staff — users first, then agents, then the residents whose job it is. Each role is a work
+// place of the venue's own staff - users first, then agents, then the residents whose job it is. Each role is a work
 // module (shared/work.js): it makes the orders and scores the raw inputs; this core owns everything around it.
 //
 // - The venue's TICKETS are its real customers: every purchase there (a resident's visit, a player's or an agent's
 //   order) opens a ticket that passes through the venue's roles in order (a restaurant: the kitchen cooks, the floor
 //   serves). A worker's next order is the oldest ticket waiting at their role; a stage nobody plays is done by the
 //   venue's own staff. With no ticket waiting the worker serves a walk-in (a resident there, or a passer-by): paid the
-//   same, but only a ticket's customer tips and reviews — a review always comes from someone who really bought.
+//   same, but only a ticket's customer tips and reviews - a review always comes from someone who really bought.
 // - The pace is a person's: an order faster than its module allows is refused, and orders a minute are capped.
 // - Pay: the venue pays for the time actually worked (real minutes at the world's usual pace, so a faster clock never
 //   pays more) × the stars earned; tips come from the customers who left them; income tax is withheld. The residents a
 //   worker covered aren't paid for those hours (./households.js), so the venue's wage bill stays what it was.
 // - An agent may also work "auto" (spec 02 §9): only in a role it has played at that venue, at the policy's share of
-//   the wage, capped a day, with no tips, experience or reviews — a script can earn a wage, never trust or skill.
+//   the wage, capped a day, with no tips, experience or reviews - a script can earn a wage, never trust or skill.
 // - Everything an order or a shift's end changes (experience, standing, the review and the venue's rating, the session,
 //   the payment and any debt) commits in one database transaction.
 import crypto from 'node:crypto';
@@ -31,7 +31,7 @@ const TICKET_MS = 20 * 60000, TICKETS_PER_VENUE = 40;
 const rid = () => `work_${crypto.randomBytes(9).toString('base64url')}`;
 const tid = () => `tkt_${crypto.randomBytes(9).toString('base64url')}`;
 const REVIEWS = {
-  5: ['Perfect — exactly what I asked for.', 'Lovely service, will be back!', 'Quick and spot on. Best in the city.', 'Made my day.'],
+  5: ['Perfect - exactly what I asked for.', 'Lovely service, will be back!', 'Quick and spot on. Best in the city.', 'Made my day.'],
   4: ['Very good, a little wait.', 'Nice and friendly.', 'Good, would come again.'],
   3: ['It was fine.', 'OK, nothing special.', 'Decent, but slow.'],
   2: ['Not what I ordered.', 'Took far too long.', 'Could be better.'],
@@ -193,7 +193,7 @@ export class Jobs {
     return this.view(this.q.get.get(this.w, id));
   }
   /**
-   * The next order: the oldest ticket waiting at this role (a real customer), else a walk-in — a resident at the venue,
+   * The next order: the oldest ticket waiting at this role (a real customer), else a walk-in - a resident at the venue,
    * or a passer-by. Returns { order, ticket: { id, customer } | null }.
    */
   _order(b, role, seed, n, session) {
@@ -364,7 +364,7 @@ export class Jobs {
   reviews(bizId, n = 30) { return this.q.reviews.all(this.w, String(bizId), n).map(r => ({ stars: r.stars, text: r.text, by: r.author_name, at: r.at, worker: r.worker ? this.e.nameOf(subj(...r.worker.split(':'))) : null })); }
   /**
    * After a day (inside the settlement's transaction): a few of the residents who really bought at a venue that day
-   * review it — kinder when its prices are fair and it was staffed — so ratings follow how a place is run even when
+   * review it - kinder when its prices are fair and it was staffed - so ratings follow how a place is run even when
    * nobody plays there. Each review names a real customer and counts once (its reference).
    */
   afterDay(day, plan) {

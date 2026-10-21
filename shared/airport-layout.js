@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The airport's layout (docs/features/play-modules.md §Airport): everything in the airport's own frame — f forward along
-// the runway (its take-off direction), s to the right of it — metres from the runway's centre, which is where an
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The airport's layout (docs/features/play-modules.md §Airport): everything in the airport's own frame - f forward along
+// the runway (its take-off direction), s to the right of it - metres from the runway's centre, which is where an
 // administrator places it (shared/world-modules.js gives the frame: x, z, rot; forward is (sin rot, cos rot), right is
 // (cos rot, −sin rot), the same as subway stations and the terrain's pads). Airside: the runway, a parallel taxiway with
 // three links, the apron with ten stands (3 propeller planes, 3 small jets, 4 helipads). Landside: the terminal (the
@@ -23,7 +23,7 @@ export const BENDS = Object.freeze([
   { s: 47, f: -322, r: 16, a0: -Math.PI / 2, a1: 0 }, { s: 47, f: 322, r: 16, a0: 0, a1: Math.PI / 2 },
 ].map(Object.freeze));
 /** Fillets in the inside corners where paving meets paving: { s, f (the corner), u, w (unit [s, f] along each edge away
- *  from it), r } — the runway's edge at each link, the taxiway's at each link, the apron's ends. */
+ *  from it), r } - the runway's edge at each link, the taxiway's at each link, the apron's ends. */
 const fil = (s, f, u, w, r) => Object.freeze({ s, f, u, w, r });
 export const FILLETS = Object.freeze([
   ...[-338, -8, 322].flatMap(f0 => [fil(15, f0, [0, -1], [1, 0], 14), fil(15, f0 + 16, [0, 1], [1, 0], 14)]),
@@ -33,11 +33,11 @@ export const FILLETS = Object.freeze([
 /** The landside, s outwards from the terminal's front to the airport's edge (2026-10-14: a new canopy and floor along the
  *  terminal end to end, the car park tied in): the forecourt (paved, under the canopy) to the kerb, the drop-off lane
  *  (under the canopy too), the planted median, the car park (two rows of bays either side of an aisle), a planted verge,
- *  the entrance road from the edge — where the access road meets the airport — through to the drop-off lane. */
+ *  the entrance road from the edge - where the access road meets the airport - through to the drop-off lane. */
 export const LANDSIDE = Object.freeze({
   front: 180, kerb: 191, lane: 191.3, median: 199, park: 201.5, parkEnd: 220.6, edge: 232, f0: -95, f1: 45, entry: Object.freeze([-25, -15]),
   rows: Object.freeze([[201.5, 206.9, 1], [213.9, 219.3, -1]].map(Object.freeze)),   // bays: [s0, s1, which way they open (+s / −s)], either side of the aisle
-  // (the car park keeps 11 m inside the airport's edge — a verge, a hedge, trees: from afar the ground's coarser mesh
+  // (the car park keeps 11 m inside the airport's edge - a verge, a hedge, trees: from afar the ground's coarser mesh
   // over a hillside beyond the edge rose through paving out to the edge, 2026-10-14)
   crossings: Object.freeze([-62, -36, 12]),   // zebra crossings over the drop-off lane (their middles, f)
   canopy: Object.freeze({ f0: -97, f1: 47, s1: 200, y0: 5.4, y1: 6.0, deck: 0.42 }),   // its underside rises 5.4 → 6.0 m outwards
@@ -82,7 +82,7 @@ export function rectAt(m, s0, f0, s1, f1) {
   return { x: c.x, z: c.z, hw: (s1 - s0) / 2, hd: (f1 - f0) / 2, rot: m.rot };
 }
 /** What of a standing aircraft people can't walk through: rectangles in its own frame [across0, along0, across1,
- *  along1] (along: towards the nose) — the fuselage, and a low wing (a high wing and a rotor are walked under). */
+ *  along1] (along: towards the nose) - the fuselage, and a low wing (a high wing and a rotor are walked under). */
 export const AIRCRAFT_SOLIDS = Object.freeze({
   prop: [[-0.55, -4.2, 0.55, 2.7], [-1.1, 0.4, 1.1, 1.1]],
   jet: [[-0.9, -6.2, 0.9, 6.2], [-6.6, -1.7, 6.6, 1.1], [-1.9, -4.9, 1.9, -2.6]],

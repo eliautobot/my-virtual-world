@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 import test from 'node:test';import assert from 'node:assert/strict';
 import{closeAccountTestPage}from'../tools/lib/ui-account-cleanup.mjs';
 function fixture(account=true,status=200){const events=[];const ctx={cookies:async()=>{events.push('cookies');return[{name:'fixture.sid',value:'never-log-this'}]},close:async()=>events.push('close')};const page={context:()=>ctx};const client={get:async path=>{events.push('GET '+path);return{status:200,json:{account:account?{id:'fixture'}:null}}},post:async(path,body)=>{events.push('POST '+path);assert.deepEqual(body,{everywhere:false});return{status}}};return{events,page,client,factory:()=>client};}

@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a Hermes backend's agents (its profiles) are doing, whatever started it (docs/features/agent-providers.md §3, live
 // presence; §9). Hermes says it two ways, both read here:
 // - its backend process's live sessions (session.active_list, per profile: idle, starting, working, streaming, waiting,
-//   resuming) — every chat it runs itself: this installation's, its Desktop's and its dashboard's;
-// - the stored sessions of every channel (its messaging gateway — Telegram and the rest — and its scheduled jobs write
+//   resuming) - every chat it runs itself: this installation's, its Desktop's and its dashboard's;
+// - the stored sessions of every channel (its messaging gateway - Telegram and the rest - and its scheduled jobs write
 //   their progress into the same session store: a session not ended whose agent recorded activity within the last
 //   ACTIVE_WINDOW_S is at work). Hermes records that progress at most about once a minute during a turn, so a turn there
 //   shows a little late and lingers a little after it ends.
@@ -45,7 +45,7 @@ export class LinkActivity {
           this.link.rest('GET', '/api/sessions', { query: { profile, limit: 25 }, timeoutMs: 10000 }).catch(() => null)]);
         // (Hermes' live list is its whole process's, every profile's: a session counts for this one when it is in its store)
         const mine = new Set((rows && Array.isArray(rows.sessions) ? rows.sessions : []).map(s => s && String(s.id)));
-        // (a session this process runs says how it stands itself — idle, working, waiting for the person: as its Desktop
+        // (a session this process runs says how it stands itself - idle, working, waiting for the person: as its Desktop
         // reads it; the activity window below is only for the other channels, which write their progress late)
         const inProcess = new Set();
         for (const s of (live && Array.isArray(live.sessions) ? live.sessions : [])) {

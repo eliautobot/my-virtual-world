@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fishing game's gear (docs/features/fishing.md §Gear): rods, reels, lines, lures and bait, the boat's upgrades and
-// the angler's skills — what each does, what it costs at the dock store (VC) and the level it needs. A player's gear is
+// the angler's skills - what each does, what it costs at the dock store (VC) and the level it needs. A player's gear is
 // theirs on every boat. The fight (shared/fishing-fight.js) and the bite (shared/fishing-trip.js) read their numbers
 // from here through loadout(). Shared by the server (sales, checks) and the browser (the store, the HUD).
 
 // ------------------------------------------------------------------------------------------- lures and bait
-// kind: how it is fished — float (under a bobber, at a set depth), bottom (sinks to the bed), cast (retrieved: its depth
+// kind: how it is fished - float (under a bobber, at a set depth), bottom (sinks to the bed), cast (retrieved: its depth
 // from how it swims), troll (towed behind the moving boat; needs rod holders). depth: [m] it swims at when cast.
 // water: where it is sold. pack: how many come in a pack; price per pack (VC). bait: used up when a fish takes it;
 // a lure is used again and again, lost only when the line snaps.
@@ -15,12 +15,12 @@ export const LURES = Object.freeze([
   { id: 'minnow', bait: true, name: 'Live Minnows', icon: '🐟', kind: 'float', depth: [0.5, 8], water: 'lake', pack: 8, price: 8, level: 2, colour: '#b8c4c8', blurb: 'Lively bait for crappie, walleye, pike and bass.' },
   { id: 'shrimp', bait: true, name: 'Live Shrimp', icon: '🦐', kind: 'float', depth: [0.5, 6], water: 'sea', pack: 10, price: 5, level: 1, colour: '#e8a080', blurb: 'The inshore favourite: almost everything on the flats and the reef takes it.' },
   { id: 'cutbait', bait: true, name: 'Cut Bait', icon: '🔪', kind: 'bottom', depth: [0, 200], water: 'both', pack: 10, price: 6, level: 2, colour: '#c06060', blurb: 'On the bottom for snapper, grouper, catfish and sharks.' },
-  { id: 'livebait', bait: true, name: 'Live Sardines', icon: '🐠', kind: 'float', depth: [1, 20], water: 'sea', pack: 8, price: 14, level: 4, colour: '#9ab8d0', blurb: 'Big predators — snook, tarpon, kingfish, amberjack — come for live bait.' },
+  { id: 'livebait', bait: true, name: 'Live Sardines', icon: '🐠', kind: 'float', depth: [1, 20], water: 'sea', pack: 8, price: 14, level: 4, colour: '#9ab8d0', blurb: 'Big predators - snook, tarpon, kingfish, amberjack - come for live bait.' },
   { id: 'squid', bait: true, name: 'Squid Jig & Strip', icon: '🦑', kind: 'bottom', depth: [0, 600], water: 'sea', pack: 6, price: 18, level: 8, colour: '#f0e0e8', blurb: 'Glows in the dark. Squid at night, and swordfish deep down.' },
   { id: 'spinner', name: 'Spinnerbait', icon: '🌀', kind: 'cast', depth: [0.5, 2.5], water: 'both', pack: 1, price: 12, level: 1, colour: '#e8d040', blurb: 'Flash and thump through the shallows.' },
   { id: 'crank', name: 'Crankbait', icon: '🎏', kind: 'cast', depth: [1.5, 5], water: 'both', pack: 1, price: 16, level: 3, colour: '#e86a3a', blurb: 'Dives as you reel; bass, walleye and pike on the edges.' },
   { id: 'soft', name: 'Soft Plastic', icon: '🪝', kind: 'cast', depth: [0.5, 8], water: 'both', pack: 4, price: 10, level: 1, colour: '#7a5ab0', blurb: 'Slow and natural. Bass, redfish, seatrout, snook.' },
-  { id: 'topwater', name: 'Topwater Popper', icon: '💥', kind: 'cast', depth: [0, 0.3], water: 'both', pack: 1, price: 18, level: 3, colour: '#f2f2e8', blurb: 'Pops and splashes on the surface — explosive strikes at dawn and dusk.' },
+  { id: 'topwater', name: 'Topwater Popper', icon: '💥', kind: 'cast', depth: [0, 0.3], water: 'both', pack: 1, price: 18, level: 3, colour: '#f2f2e8', blurb: 'Pops and splashes on the surface - explosive strikes at dawn and dusk.' },
   { id: 'jig', name: 'Bucktail Jig', icon: '🎣', kind: 'bottom', depth: [0, 120], water: 'both', pack: 2, price: 12, level: 2, colour: '#f2f2f2', blurb: 'Drop it to the bottom and bounce it. Reef fish, walleye, amberjack.' },
   { id: 'spoon', name: 'Casting Spoon', icon: '🥄', kind: 'cast', depth: [0.5, 6], water: 'both', pack: 1, price: 14, level: 2, colour: '#d8d8e0', blurb: 'Wobbles and flashes: mackerel, bonito, trout, pike.' },
   { id: 'skirt', name: 'Trolling Skirt', icon: '🪼', kind: 'troll', depth: [0, 2], water: 'sea', pack: 1, price: 40, level: 6, colour: '#3a8ae8', blurb: 'Towed behind the boat for tuna, wahoo, mahi, sailfish and marlin. Needs rod holders.' },
@@ -53,7 +53,7 @@ export const LINES = Object.freeze([
   { id: 'line_braid30', name: 'Braid 30 lb', tier: 3, kgf: 13.6, vis: 0.7, price: 250, level: 5, blurb: 'Thin and strong, no stretch.' },
   { id: 'line_braid65', name: 'Braid 65 lb', tier: 4, kgf: 29.5, vis: 0.75, price: 900, level: 9, blurb: 'Grouper, amberjack, big catfish.' },
   { id: 'line_biggame', name: 'Big Game 130 lb', tier: 5, kgf: 59, vis: 0.8, price: 2800, level: 14, blurb: 'Marlin line.' },
-  { id: 'line_legend', name: 'Legend Braid 200 lb', tier: 6, kgf: 90, vis: 0.8, price: 8000, level: 18, blurb: 'The strongest line there is — for the legends.' },
+  { id: 'line_legend', name: 'Legend Braid 200 lb', tier: 6, kgf: 90, vis: 0.8, price: 8000, level: 18, blurb: 'The strongest line there is - for the legends.' },
 ].map(Object.freeze));
 /** A fluorocarbon leader: fish see the line less (more bites). Bought once. */
 export const LEADER = Object.freeze({ id: 'leader_fluoro', name: 'Fluorocarbon Leader', vis: -0.3, price: 120, level: 4, blurb: 'Nearly invisible under water: more bites from wary fish.' });
@@ -64,7 +64,7 @@ export const BOAT_UPGRADES = Object.freeze([
   { id: 'engine', name: 'Engine tune', icon: '⚙️', unit: '% top speed', tiers: [0, 12, 25, 40], price: [0, 300, 1100, 3200], level: [1, 3, 7, 12], blurb: 'More speed: reach far grounds and get home before dusk.' },
   { id: 'cooler', name: 'Cooler', icon: '🧊', unit: 'slots', tiers: [12, 20, 30, 44], price: [0, 200, 800, 2500], level: [1, 2, 6, 11], blurb: 'Room for the catch. A big fish takes several slots.' },
   { id: 'finder', name: 'Fish finder', icon: '📡', unit: 'm range', tiers: [25, 60, 120, 220], price: [0, 250, 950, 3000], level: [1, 3, 7, 12], blurb: 'Sonar: marks under the boat, hidden grounds at range; the best names the fish.' },
-  { id: 'holders', name: 'Rod holders', icon: '🎣', unit: 'trolling rods', tiers: [0, 1, 2, 3], price: [0, 350, 1000, 2600], level: [1, 5, 8, 12], blurb: 'Troll lures behind the boat while you drive — a rod bends when one takes.' },
+  { id: 'holders', name: 'Rod holders', icon: '🎣', unit: 'trolling rods', tiers: [0, 1, 2, 3], price: [0, 350, 1000, 2600], level: [1, 5, 8, 12], blurb: 'Troll lures behind the boat while you drive - a rod bends when one takes.' },
   { id: 'lights', name: 'Deck lights', icon: '💡', unit: 'min past dusk', tiers: [0, 3, 6, 10], price: [0, 250, 700, 1800], level: [1, 4, 8, 12], blurb: 'Keep fishing after dusk without the catch spoiling.' },
   { id: 'livewell', name: 'Livewell', icon: '🫧', unit: '% slower spoiling', tiers: [0, 30, 60, 90], price: [0, 300, 900, 2400], level: [1, 4, 8, 12], blurb: 'Keeps the catch alive and fresh when you are late home.' },
   { id: 'anchor', name: 'Anchor', icon: '⚓', unit: 'hold', tiers: [1, 1.5, 2.2, 3], price: [0, 120, 400, 1000], level: [1, 2, 5, 9], blurb: 'Holds the boat on the spot in wind and current.' },

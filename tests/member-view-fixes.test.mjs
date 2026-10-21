@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a member sees, 2026-10-09 (found testing with a paid member account): the Connections list names no adapters still
 // to come and offers only what this account may add; each agent says whether it is public (anyone may talk with it) for
 // the team list's My agents / Public switch; the home view keeps its true distance and an account without one starts over

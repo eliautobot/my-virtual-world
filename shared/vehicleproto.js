@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Authoritative vehicle frame type 3. V1 remains compatible; V2 adds tire contact/normal/slip and delta frames.
 // V3 mixes entries: traffic and resting parked cars travel as 40-byte compact entries (pose, speed, wheel spin), only
 // cars with live physics carry the 216-byte detailed V2 entry. Same decoded shape for every version.

@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's work over HTTP (docs/features/CHAT.md §13): its job brief, its work notes and the files it knows. Only the
 // agent's owner, or an account it is shared with to manage, may read or change any of it (agents.profile); everyone else
-// gets 404 — a business's instructions and notes are private. Every route goes through the server's pipeline (session,
+// gets 404 - a business's instructions and notes are private. Every route goes through the server's pipeline (session,
 // capability, Origin, CSRF, JSON).
 import fs from 'node:fs';
 import { WorkError } from './work.js';

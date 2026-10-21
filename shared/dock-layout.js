@@ -1,18 +1,18 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fishing docks' layouts (docs/features/fishing.md §Venues): a beach marina on the sea and a smaller lake dock, both
 // world modules (shared/world-modules.js) placed by administrators where land meets water. Everything is in the dock's
-// own frame, the same as the airport's (shared/airport-layout.js toWorldAt): s across — +s up the land to the car park and
-// the road, −s out over the water — and f along the shore. s = 0 is the bulkhead: the quay wall where the land stops.
+// own frame, the same as the airport's (shared/airport-layout.js toWorldAt): s across - +s up the land to the car park and
+// the road, −s out over the water - and f along the shore. s = 0 is the bulkhead: the quay wall where the land stops.
 //
 // The land part is levelled (its pad) a little above the water; the launch ramp is a sloped pad from the land into the
 // water; the water under the slips is dredged to a flat basin (a pad below the water). Piers stand on piles over the
-// water: their decks are walkable (deck rectangles with heights over the water or the land, some sloped — the pier's
+// water: their decks are walkable (deck rectangles with heights over the water or the land, some sloped - the pier's
 // root up from the promenade, the gangway down to the floating dock). Five boats lie in their slips, bows out to the
 // water. The dock store is a real building (a shop with a tackle counter). Shared by the server (checks, pads, walls)
 // and the browser (it draws the same rectangles).
 import { toWorldAt, toFrame, rectAt } from './airport-layout.js';
 
-/** A deck: [s0, f0, s1, f1, kind, y0, y1, along] — y0/y1 its top at the low and high end along s or f: a number is
+/** A deck: [s0, f0, s1, f1, kind, y0, y1, along] - y0/y1 its top at the low and high end along s or f: a number is
  *  metres over the water, { l: n } metres over the land's level. kind: pier (fixed, on piles), head (the pier's T),
  *  gang (gangway), float (floating dock), finger (floating finger between slips), courtesy (by the ramp). */
 const D = (s0, f0, s1, f1, kind, y0, y1 = y0, along = 's') => Object.freeze({ s0, f0, s1, f1, kind, y0, y1, along });
@@ -37,7 +37,7 @@ export const DOCKS = Object.freeze({
     ]),
     slips: Object.freeze([7.9, 13.3, 18.7, 24.1, 29.5].map((f, k) => Object.freeze({ id: `b${k + 1}`, s: -40.2, f, heading: -Math.PI / 2 }))),
     // walls on the decks and the land (rails along the pier and the promenade's edge; the fuel kiosk; the cleaning
-    // station's bench) — [s0, f0, s1, f1, h, base (as a deck's y)]
+    // station's bench) - [s0, f0, s1, f1, h, base (as a deck's y)]
     walls: Object.freeze([
       [-72, -6.12, -8, -6, 1.05, 1.6], [-72, -2, -35, -1.88, 1.05, 1.6], [-30, -2, -8, -1.88, 1.05, 1.6],
       [-72.12, -30, -72, -6, 1.05, 1.6], [-80, -30.12, -72, -30, 1.05, 1.6], [-80, -2, -72, -1.88, 1.05, 1.6], [-80, -30, -79.88, -16, 1.05, 1.6],
@@ -140,9 +140,9 @@ export function rampOf(m) {
  *  where it cuts into the land). */
 /**
  * The dock's outdoor things as the world's own decorations (2026-10-14, the product owner: use the benches the game
- * already has — they work: people sit on them): its benches along the promenade, the picnic tables on its lawn and its
- * trees — [{ t: 'bench' | 'picnic_table' | 'tree', x, z, r }] (r: world yaw; the catalog's bench faces its +z, its length
- * along x: facing a (from +s) is a yaw of rot + a + π/2 — a promenade bench along the quay, looking out over the water).
+ * already has - they work: people sit on them): its benches along the promenade, the picnic tables on its lawn and its
+ * trees - [{ t: 'bench' | 'picnic_table' | 'tree', x, z, r }] (r: world yaw; the catalog's bench faces its +z, its length
+ * along x: facing a (from +s) is a yaw of rot + a + π/2 - a promenade bench along the quay, looking out over the water).
  * server/world/edit.js makes them with the dock (each marked with its id: mod), moves and removes them with it.
  */
 export function dockDecor(m) {
@@ -157,13 +157,13 @@ export function dockDecor(m) {
 /** The dock's pads: [the ramp, the land (its gate: shared/world-modules.js worldModulePads), the basin]. */
 export function dockPads(m) {
   const K = DOCKS[m.kind], L = K.land, B = K.basin, R = rampOf(m), out = [];
-  out.push({ ...rectAt(m, R.s0, R.f0, R.s1, R.f1), y: Math.round(((R.y0 + R.y1) / 2) * 100) / 100, k: R.slope, round: true, dryOnly: true, wy: waterOf(m) });   // (under the water: not drawn — shared/terrain.js undrawn)
+  out.push({ ...rectAt(m, R.s0, R.f0, R.s1, R.f1), y: Math.round(((R.y0 + R.y1) / 2) * 100) / 100, k: R.slope, round: true, dryOnly: true, wy: waterOf(m) });   // (under the water: not drawn - shared/terrain.js undrawn)
   out.push({ ...rectAt(m, L.s0, L.f0, L.s1, L.f1), y: m.y });
-  // (the basin's sides slope gently, rounded at its corners — 2026-10-15, polish: a flat hole with 8 m walls showed as a
+  // (the basin's sides slope gently, rounded at its corners - 2026-10-15, polish: a flat hole with 8 m walls showed as a
   // sharp square in the sea, the shallows' foam following its edges)
   out.push({ ...rectAt(m, B.s0, B.f0, B.s1, B.f1), y: Math.round((waterOf(m) - B.depth) * 100) / 100, blend: 24, round: true, undrawn: true });   // (the boats' depth, not the drawn sea floor)
   // the shore in front of the quay, under the pier and the gangway: kept clear of palms and rocks (clear: the ground
-  // as it is — shared/terrain.js nearPad only)
+  // as it is - shared/terrain.js nearPad only)
   out.push({ ...rectAt(m, B.s1 - 2, L.f0, 0, L.f1), y: m.y, clear: true });
   return out;
 }
@@ -211,28 +211,28 @@ export function dockWhy(m, env, level = null) {
   const want = K.water === 'sea' ? 'the sea' : 'a lake';
   // the slips: on the right water
   const mid = K.slips[2], w0 = wet(mid.s, mid.f);
-  if (!w0 || w0.kind !== K.water) return { why: `Its slips must be over ${want} — turn its water side to ${want}` };
+  if (!w0 || w0.kind !== K.water) return { why: `Its slips must be over ${want} - turn its water side to ${want}` };
   const same = w => w && w.kind === K.water && (K.water === 'sea' || w.id === w0.id);
   // the land part: dry (but the strip along the bulkhead, filled in)
   let wetLand = 0, n = 0;
-  for (let s = L.s0 + 2; s <= L.s1; s += 6) for (let f = L.f0 + 2; f <= L.f1 - 2; f += 8) { n++; if (wet(s, f)) { if (s > 10) return { why: 'Its car park and store must be on dry land — move it up the shore' }; wetLand++; } }
-  if (wetLand > n * 0.25) return { why: 'Too much of its land part is in the water — move it up the shore' };
+  for (let s = L.s0 + 2; s <= L.s1; s += 6) for (let f = L.f0 + 2; f <= L.f1 - 2; f += 8) { n++; if (wet(s, f)) { if (s > 10) return { why: 'Its car park and store must be on dry land - move it up the shore' }; wetLand++; } }
+  if (wetLand > n * 0.25) return { why: 'Too much of its land part is in the water - move it up the shore' };
   // the water's edge: close in front of the bulkhead, along it
   for (const f of [L.f0 + 12, 0, L.f1 - 12]) {
     let edge = null; for (let s = 0; s >= -K.shore; s -= 2) if (wet(s, f)) { edge = s; break; }
-    if (edge === null) return { why: `The water is more than ${K.shore} m out from its quay — move it down to the water's edge` };
+    if (edge === null) return { why: `The water is more than ${K.shore} m out from its quay - move it down to the water's edge` };
   }
   // the piers, floats and slips: over the water (the first metres from the bulkhead may be beach)
   for (const d of K.decks) for (const [s, f] of [[d.s0, d.f0], [d.s0, d.f1], [d.s1, d.f0], [d.s1, d.f1], [(d.s0 + d.s1) / 2, (d.f0 + d.f1) / 2]]) {
     if (s > -14) continue;
-    if (!same(wet(s, f))) return { why: `Its pier must reach out over ${want} — more water in front of it` };
+    if (!same(wet(s, f))) return { why: `Its pier must reach out over ${want} - more water in front of it` };
   }
   // out from the basin's mouth: water all the way, and deep enough within reach (the boats must get out)
   const B = K.basin, fm = (B.f0 + B.f1) / 2;
   let deep = false;
   for (let s = B.s0; s >= B.s0 - K.open.reach; s -= 6) {
     const p = at(s, fm), w = env.waterAt(p.x, p.z);
-    if (!same(w)) return { why: 'Land in the way of the boats — its basin must open on to open water' };
+    if (!same(w)) return { why: 'Land in the way of the boats - its basin must open on to open water' };
     if (w.level - env.heightAt(p.x, p.z) >= K.open.depth) { deep = true; break; }
   }
   if (!deep) return { why: `The water out there is too shallow for boats (${K.open.depth} m needed within ${K.open.reach} m)` };

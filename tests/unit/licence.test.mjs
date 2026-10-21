@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Licence keys (server/licence.js, PLAN WP1.11, I15.1, I15.3) against an in-process fake Lemon Squeezy: activation,
 // the product check, the refusals, deactivation, offline use forever (E19), the sealed receipt and the release 1
 // carry-over without a new activation (C109). The real key is never used here.

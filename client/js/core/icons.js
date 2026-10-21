@@ -1,14 +1,14 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The interface's icons: one set of line icons drawn for My Virtual World (24-unit grid, round 1.75 strokes, a few
-// solid accents), in the theme's own text colour (currentColor), so they suit every theme — dark, light, high contrast.
+// solid accents), in the theme's own text colour (currentColor), so they suit every theme - dark, light, high contrast.
 //
-//   icon(name, tone?)      SVG markup for new code (tone: 'good' | 'bad' | 'gold' | 'dim' — the theme's colours)
+//   icon(name, tone?)      SVG markup for new code (tone: 'good' | 'bad' | 'gold' | 'dim' - the theme's colours)
 //   watchIcons(root)       replaces the emoji the interface writes (EMOJI below) with these icons wherever they appear,
 //                          now and as the page changes, the way emoji-to-image libraries do: no screen has to change
 //                          how it writes its text. Each icon keeps its emoji in a <desc>, so the element's textContent
 //                          is unchanged (code comparing it keeps working). Where an icon can't be drawn (a <select>'s
-//                          options, tooltips) the emoji is dropped from the label instead. People's own words — chat,
-//                          speech bubbles — and anything inside [data-noicon] are left as written.
+//                          options, tooltips) the emoji is dropped from the label instead. People's own words - chat,
+//                          speech bubbles - and anything inside [data-noicon] are left as written.
 //   setAvatarStyle(mode)   agents' and residents' own emoji ([data-avatar]): 'normal' keeps them as emoji (the default),
 //                          'styled' draws the ones the set has in the theme's style (Settings → Display → Agents' emoji).
 //   drawIcon(ctx, name, x, y, size, colour)   the same icon on a canvas (the world map)
@@ -190,7 +190,7 @@ export const ICONS = {
   'speaker-off': ['M3.5 9.5v5h3.5l5 4.5v-14l-5 4.5zM15.5 9.5l5 5M20.5 9.5l-5 5'],
   headphones: ['M4.5 15.5V12a7.5 7.5 0 0 1 15 0v3.5' + R(3, 14, 4.5, 7, 1.6) + R(16.5, 14, 4.5, 7, 1.6)],
   plug: ['M9 3v4.5M15 3v4.5M6.5 7.5h11V11a5.5 5.5 0 0 1-11 0zM12 16.5V21'],
-  // (Agent Providers: a puzzle piece — the platforms that plug in — and a terminal — a step that runs a command)
+  // (Agent Providers: a puzzle piece - the platforms that plug in - and a terminal - a step that runs a command)
   puzzle: ['M5 8.5h3.2a2.3 2.3 0 1 1 4.6 0H16v3.2a2.3 2.3 0 1 1 0 4.6V19.5H12.8a2.3 2.3 0 1 0-4.6 0H5v-3.2a2.3 2.3 0 1 0 0-4.6z'],
   terminal: [R(3, 4.5, 18, 15, 2) + 'M7 10l3 2.5L7 15M12.5 15.5h4.5'],
   monitor: [R(3, 4, 18, 12.5, 2) + 'M8.5 20.5h7M12 16.5v4'],

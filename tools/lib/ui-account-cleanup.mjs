@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Retire a disposable test browser before revoking its session. Signing out
 // in an active world can race its pending preferences/activity requests.
 // Keep the normal unexpected-HTTP/console gates strict; never whitelist 401s.

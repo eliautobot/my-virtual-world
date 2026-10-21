@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Wildlife in the browser — the ambient tier (WP4.17, wp4-world-spec.md §6.3). Species come from the catalogue
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Wildlife in the browser - the ambient tier (WP4.17, wp4-world-spec.md §6.3). Species come from the catalogue
 // (shared/world-config/species, shared/species.js). Around the camera, each loaded tile offers habitat points (from the
 // terrain worker, which knows its biomes), lakes and the rivers' slow stretches; groups of each species settle there as their hours, the weather and
-// the seed allow — the same groups for everyone, since they come from the tile, the species and the world seed — and
+// the seed allow - the same groups for everyone, since they come from the tile, the species and the world seed - and
 // move by their behaviour on the shared clock (flocks, circling gulls, soaring hawks, swimming ducks, butterflies,
 // fireflies, grazing deer and rabbits that run from a player on foot, fish leaping at dusk). One instanced draw per
 // species, animated in the vertex shader (render/fauna-models.js). Groups fade in and out instead of popping.
@@ -152,7 +152,7 @@ function alongRiver(st, s) {
 
 // ------------------------------------------------------------------ how they move
 // The ground under the animals: worked out at the point (a road's drawn top there, else the island's height) and kept on
-// a 25 cm grid. heightAt fills a 122 m chunk of 2601 heights round any point it hasn't seen — flying over the island,
+// a 25 cm grid. heightAt fills a 122 m chunk of 2601 heights round any point it hasn't seen - flying over the island,
 // the animals coming into view built a dozen chunks a second: frames of 100-300 ms on a phone (2026-10-14).
 const GQ = new Map(), GQ_MAX = 8000;
 let gqAt = 0;
@@ -201,9 +201,9 @@ function pose(g, m, i, t, player) {
         const vs = -half * Math.sin(ph), vl = la * Math.cos(ph), vx = q.dx * vs - q.dz * vl, vz = q.dz * vs + q.dx * vl;
         m.yaw = Math.atan2(-vz, vx); m.mode = MODE.swim; m.rate = 1; return;
       }
-      // round the lake; the circle widens and narrows slowly — never faster than a part of the swim itself (on a big
-      // lake it outran it, and they slid sideways: 2026-10-03) — facing the way they really move
-      // (at their own speed along the circle: 2026-10-03 "lake animals need to move a bit faster" — they went at a
+      // round the lake; the circle widens and narrows slowly - never faster than a part of the swim itself (on a big
+      // lake it outran it, and they slid sideways: 2026-10-03) - facing the way they really move
+      // (at their own speed along the circle: 2026-10-03 "lake animals need to move a bit faster" - they went at a
       // third of it)
       const L = a.lake, w = sp.speed / Math.max(6, L.r * 0.55), ang = t * w + hash(g.key, 5) * 6.28 - i * 0.05;
       const wr = Math.min(0.02, 0.15 * sp.speed / (0.35 * Math.max(10, L.r))), pr = t * wr + hash(g.key, 6) * 6;

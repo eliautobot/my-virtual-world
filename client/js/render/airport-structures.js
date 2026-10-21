@@ -1,20 +1,20 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The airport's buildings that are drawn as part of its mesh (render/airport.js), on their own so they can be looked at
 // alone (tools-bin/model-studio.mjs). Built into a furniture builder (render/furniture.js) in the airport's frame: s
 // across (FB's x), f along (FB's z), y up.
 import { FB } from './furniture.js';
 
 const TAU = Math.PI * 2;
-/** A ring round the vertical axis at (x, z): a tube of radius r (its section) at distance R, height y — a rail. */
+/** A ring round the vertical axis at (x, z): a tube of radius r (its section) at distance R, height y - a rail. */
 function ring(f, x, z, R, y, r, seg = 40) { const p = []; for (let k = 0; k <= 8; k++) { const a = k / 8 * TAU; p.push([R + Math.cos(a) * r, y + Math.sin(a) * r]); } f.lathe(x, z, p, seg); }
 
 /**
- * The control tower (2026-10-14, the product owner: "the tower needs to be better detailed — unfinished pipes meant to be a rail, and
+ * The control tower (2026-10-14, the product owner: "the tower needs to be better detailed - unfinished pipes meant to be a rail, and
  * the base looks too plain, just a cube"), standing at (x, z) on the ground at y, h tall to the cab's roof. The base: two
- * storeys, 12 m square — concrete corner piers, glass between them in a frame of mullions and a floor band, a parapet
+ * storeys, 12 m square - concrete corner piers, glass between them in a frame of mullions and a floor band, a parapet
  * round its roof, the entrance (its doors and a canopy) facing +s, plant on the roof and the stair's penthouse. The
  * shaft: a collar where it leaves the roof, tapering, banded every few metres, window slits on two sides. The cab: the
- * balcony floor on its fascia, a rail all round (posts, a top rail and a middle one — it had posts and one bar straight
+ * balcony floor on its fascia, a rail all round (posts, a top rail and a middle one - it had posts and one bar straight
  * across), sloped glass between mullions on a dark sill, the roof, antennas, the radar, the beacon.
  */
 export function controlTower(f, x, z, y, h) {

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Source chase-camera framing (+X physics forward), constrained before smoothing.
 import {footprint,square,toLocal,bRot} from './geom.js';
 import {floorAt,baseOf} from './constants.js';

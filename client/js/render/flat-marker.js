@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // "This one is theirs": a flat marked in the world (the Agent Studio's Home → Show me; "Show" beside a resident's home).
 // Its floor outlined, pulsing, with a soft fill, and a tag over it naming whose it is. Drawn only while that floor is the
 // one being looked inside (the walls are cut there, so the floor shows); another floor of the building hides it, leaving

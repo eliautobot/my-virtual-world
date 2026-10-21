@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The settings API, display preferences that follow the account, the key for stored secrets on a real server, and an
 // end-to-end check that a real secret never reaches a log or another response (CHECKLIST I14.16; DECISIONS C86–C88,
 // C90, C91, C93, C96–C98).

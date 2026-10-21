@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Presence over the API on a real server with the mock provider (PLAN WP2.3, CHECKLIST I8.6; DECISIONS A8, C120): working while a run
 // works, finishing then idle, failed runs finish normally with the error recorded (for callers who may see tasks), a helper crash
 // never leaves an agent working, unlinked agents are offline, and task text reaches only accounts that may see it.

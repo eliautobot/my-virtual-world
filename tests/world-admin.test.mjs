@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.10 world management on real requests: administrators download a backup (lots listed, never restored), restore it
 // (the current world backed up first; the server restarts with the restored world; lots and titles untouched), reset
 // the residents (agents' residents stay); members can't.

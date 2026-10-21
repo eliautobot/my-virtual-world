@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Talking with an AI agent in the city (docs/features/CHAT.md §14; 2026-10-08) — Play mode's E face to face, or Talk
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Talking with an AI agent in the city (docs/features/CHAT.md §14; 2026-10-08) - Play mode's E face to face, or Talk
 // on the selection card from the map:
 // - its owner's own agent: the chat window opens on it (no limits, every tool); in Play mode it stops and turns to
 //   them, and each answer also shows in its speech bubble, to them alone;
-// - someone else's agent: this bar — a short message (with 🎤 to say it), sent; the answer shows only in the agent's
+// - someone else's agent: this bar - a short message (with 🎤 to say it), sent; the answer shows only in the agent's
 //   speech bubble, only on this page. The conversation's limits are the admin's and the server's (server/agent-talk/):
-//   the bar shows what is left — the time before it is cleared, messages, characters — and what the server refused;
+//   the bar shows what is left - the time before it is cleared, messages, characters - and what the server refused;
 // - an agent that only greets (a resident's way: its brain can't take a stranger's words), or one whose owner blocked
 //   this player: the greeting, as with any resident, or the reason in one line.
 // The bubble holds the whole answer (scrolling inside when long: render/labels.js) and stays while the bar is open.
@@ -30,8 +30,8 @@ export function init(a) {
 }
 
 const recOf = i => { const p = S.people[i]; return (S.agentList || []).find(a => a.i === i || (p?.ag && a.key === p.ag)) || null; };
-/** The text a bubble shows: the answer without its Markdown — its paragraphs and list items on lines of their own, code
- *  and tables left out — at most BUBBLE_MAX characters. */
+/** The text a bubble shows: the answer without its Markdown - its paragraphs and list items on lines of their own, code
+ *  and tables left out - at most BUBBLE_MAX characters. */
 export function plain(md) {
   const t = document.createElement('template');
   t.innerHTML = render(String(md || '')).html;
@@ -45,7 +45,7 @@ export function plain(md) {
   const s = c.textContent.replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   return s.length > BUBBLE_MAX ? `${s.slice(0, BUBBLE_MAX - 1).trimEnd()}…` : s;
 }
-/** Seconds of real time a bubble stays, by its length (time to read it) — as world time for the labels (S.simT). */
+/** Seconds of real time a bubble stays, by its length (time to read it) - as world time for the labels (S.simT). */
 const forSecs = text => Math.min(120, 6 + String(text).length / 14) * (app?.net?.clock?.rate || 1);
 
 /** An answer of agent `agentId` in its bubble, on this page only (its owner's chat window, or a talk). */

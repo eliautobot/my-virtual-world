@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The agent registry (PLAN WP2.1; DECISIONS A6, A17, C60, E20).
 // - Every AI agent is a record owned by an account. owner_id NULL means "the installation's owner", resolved when
 //   asked, so the platform agents that already live in the world stay correct if ownership is ever transferred.
@@ -16,7 +16,7 @@ export const EXT_VERSION = 1;
 export const emptyExt = () => ({ v: EXT_VERSION });
 
 export const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, n);
-/** An agent's badge: one emoji, whole — a sequence joined by zero-width joiners or with a skin tone is one character to
+/** An agent's badge: one emoji, whole - a sequence joined by zero-width joiners or with a skin tone is one character to
  *  a person, and cutting it by length leaves half of it. */
 const SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 export const emojiOf = s => { const t = clean(s, 64); if (!t) return ''; const g = SEGMENTER.segment(t)[Symbol.iterator]().next().value; return g && g.segment.length <= 32 ? g.segment : ''; };
@@ -165,10 +165,10 @@ export class Agents {
     if (!LEVELS.includes(level)) throw new AgentError(400, 'bad_level', 'The level is use or manage');
     who = String(who ?? '');
     if (kind === 'role' && !Object.hasOwn(RANK, who)) throw new AgentError(400, 'bad_role', 'Unknown role');
-    // everyone of a role may use it — manage it, only people its owner names one by one (step 8, 2026-10-08)
+    // everyone of a role may use it - manage it, only people its owner names one by one (step 8, 2026-10-08)
     if (kind === 'role' && level === 'manage') throw new AgentError(400, 'bad_level', 'Share it to manage with a person, not with everyone of a role');
     if (kind === 'account' && !/^\d+$/.test(who)) throw new AgentError(400, 'bad_account', 'Unknown account');
-    // a connected agent: who may chat with it is its slot's audience — it is shared only to manage, with a person
+    // a connected agent: who may chat with it is its slot's audience - it is shared only to manage, with a person
     if (isExtKey(a.key) && (kind !== 'account' || level !== 'manage')) throw new AgentError(400, 'connected_share', 'A connected agent is shared only to manage, with a person: who may chat with it is set in Settings → Third-party agents');
     this.q.putShare.run(this.w, a.id, kind, who, level, this.now());
     this.audit?.log('agent.share', { actor, detail: { id: a.id, kind, who, level } });
@@ -202,7 +202,7 @@ export class Agents {
     for (const s of this.q.shares.all(this.w, a.id)) {
       const hit = s.kind === 'account' ? s.who === String(P.account.id) : (RANK[P.role] ?? 0) >= (RANK[s.who] ?? 99);
       if (!hit) continue;
-      // (a role share gives use, never manage — even one made before that rule: step 8, 2026-10-08)
+      // (a role share gives use, never manage - even one made before that rule: step 8, 2026-10-08)
       if (s.level === 'manage' && s.kind === 'account') return 'manage';
       best = 'use';
     }

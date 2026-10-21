@@ -1,5 +1,5 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The page's sound mixer (2026-10-20, Settings → Sound): one place that says how loud each kind of sound is —
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The page's sound mixer (2026-10-20, Settings → Sound): one place that says how loud each kind of sound is -
 //   world     the ambience (audio/ambience.js): wind, rain, waves, birds, the city, thunder
 //   aircraft  flying and its games (audio/aircraft-sound.js): engines, wind, the stall horn, the ring game's chimes
 //   voices    agents speaking (ui/voice.js): voice conversations and 🔊 read aloud

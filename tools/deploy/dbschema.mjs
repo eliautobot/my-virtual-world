@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The accounts database's schema number, and lowering it for a rollback (DECISIONS C84).
 // Usage: node tools/deploy/dbschema.mjs version <next.db>              the database's schema number
 //        node tools/deploy/dbschema.mjs release-schema <release folder>  the schema a release knows (0: it has no

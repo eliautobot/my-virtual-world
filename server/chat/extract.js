@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a chat attachment says, for a model that reads text (docs/features/CHAT.md §4). Word, Excel and PowerPoint files
 // (.docx .xlsx .pptx) and their OpenDocument cousins (.odt .ods .odp) are ZIP archives of XML: read here with node's own
-// zlib, no library — the text of each paragraph, sheet row and slide, in order. Plain-text and code files are read as
+// zlib, no library - the text of each paragraph, sheet row and slide, in order. Plain-text and code files are read as
 // UTF-8. Images and PDFs are not turned into text: they go to the model as they are (server/providers/models.js parts).
 // The old binary Office formats (.doc .xls .ppt) cannot be read; the person is told to save them in the new format.
 // Bounded everywhere: the archive's size, each part's inflated size (a "zip bomb" stops at the limit, it never fills

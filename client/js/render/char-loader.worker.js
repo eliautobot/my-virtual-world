@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Fetches character assets and decodes their maps off the main thread, then transfers the results (no copies), so
 // receiving and unpacking several MB per model never blocks a frame. Same decode options as the main-thread fallback.
 const ok = r => { if (!r.ok) throw new Error(`${r.url.split('/').pop()} ${r.status}`); return r; };

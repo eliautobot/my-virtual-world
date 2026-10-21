@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.14 property over HTTP: the lot map for everyone, administrators transfer (with a reason, password re-entered),
 // holders merge up to 4 side-by-side lots and split them back, choose who may enter and share rights, nobody acts on
 // someone else's lot, requests are idempotent, and the property check stays clean (wp4-world-spec.md §5, E25).

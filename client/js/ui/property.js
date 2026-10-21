@@ -1,13 +1,13 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The property map and lot cards (WP4.14, wp4-world-spec.md §5.6; 2026-10-04: "lot specific settings ... a lot
 // specific view to see lots for sale, available, sold, realty value map that is color coded and directly view in the
 // world ... similar to how the latest SimCity games have a world property system and UI controls").
 // - The map (🏘️ button, the O key, the Property section, any lot's menu): the world turns pale and every lot takes the
-//   colour of the chosen lens — Status (for sale, yours, shared with you, owned, city land, on hold, not released),
-//   Value (shared/land-value.js) or Zoning — on its ground and on the roofs standing on it (render/lots.js). The legend
+//   colour of the chosen lens - Status (for sale, yours, shared with you, owned, city land, on hold, not released),
+//   Value (shared/land-value.js) or Zoning - on its ground and on the roofs standing on it (render/lots.js). The legend
 //   counts each colour; tapping one shows only those lots. Pins in the world name the lots that matter for the lens.
 // - Tapping a lot (or a building on it) opens its card: what it is, its size, zoning and what that allows, its value and
-//   why, what stands on it, and the actions this account may take — build here, merge, split back — with the holder's
+//   why, what stands on it, and the actions this account may take - build here, merge, split back - with the holder's
 //   settings (name and note, who may enter, who it's shared with) and the city's (for sale, zoning, hold, transfer).
 // - Merging happens in the world: the holder's own lots next to it get a ＋ pin; tap them, then Merge.
 // Everything goes through /api/property (server-checked); the card only offers what the server would allow.
@@ -63,7 +63,7 @@ export async function init(a) {
     slot.addEventListener('click', e => { const b = e.target.closest('[data-lot]'); if (b) { setMap(true); open(b.dataset.lot, true); } });
   }
   // the map's button beside Play and Chat, so it is one tap away on a phone too
-  // "Data map" (2026-10-06: it shows more than property now — SimCity's data maps, Cities: Skylines' info views)
+  // "Data map" (2026-10-06: it shows more than property now - SimCity's data maps, Cities: Skylines' info views)
   const fb = document.querySelector('#floatbtns .fb-main') || document.getElementById('floatbtns');
   if (fb) { E.fab = h(`<button type="button" class="btn pmapbtn" title="Data map (O): lots and owners, status, values, zoning" aria-label="Data map">${icon('layers')}</button>`); fb.prepend(E.fab); E.fab.onclick = () => setMap(!mapOn); }
   E.bar = root.appendChild(h(`<div id="propbar" class="panel hidden" role="region" aria-label="Data map">
@@ -324,7 +324,7 @@ function render() {
     <div class="lc-stats">
       <div><span>Size</span><b>${w} × ${d} ft</b><small>${sq(l.sqft)}${l.origins > 1 ? ` · ${l.origins} lots merged` : ''}</small></div>
       <div><span>Zoning</span><b>${esc(ZONES[l.zoning]?.label || l.zoning)}</b><small>up to ${env.maxFloors} floor${env.maxFloors > 1 ? 's' : ''} · ${ft(env.setback)} ft from the lines</small></div>
-      <div><span>Value</span>${v ? `<b style="color:${valueColor(v.score)}">${v.score} · ${esc(v.tier)}</b><small>${v.factors.slice(0, 2).map(f => esc(f.label)).join(' · ') || 'Out of the way'}</small>` : '<b>—</b>'}</div>
+      <div><span>Value</span>${v ? `<b style="color:${valueColor(v.score)}">${v.score} · ${esc(v.tier)}</b><small>${v.factors.slice(0, 2).map(f => esc(f.label)).join(' · ') || 'Out of the way'}</small>` : '<b> - </b>'}</div>
       <div><span>On it</span><b>${blds.length ? blds.map(B => `<a href="#" data-b="${B.idx}">${esc(B.name)}</a>`).join(', ') : 'Nothing yet'}</b><small>${{ public: 'Everyone may enter', friends: 'Friends may enter', private: 'Only the holder enters' }[l.access] || ''}</small></div>
     </div>
     <div class="lc-acts">${acts.join('')}</div>${sale}

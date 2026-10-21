@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Doors (shared/doors.js; 2026-10-05): every floor's doors come from what the floor is — the entrance, the doors the
-// generators leave (L.doors, while a wall still ends at them), doorways cut in a line of walls by hand — and a door in a
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Doors (shared/doors.js; 2026-10-05): every floor's doors come from what the floor is - the entrance, the doors the
+// generators leave (L.doors, while a wall still ends at them), doorways cut in a line of walls by hand - and a door in a
 // flat's corridor wall is that flat's front door.
 import test from 'node:test';
 import assert from 'node:assert/strict';

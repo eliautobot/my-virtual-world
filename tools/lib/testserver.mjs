@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Throwaway servers for the tests and tools: a free port (PORT=0) and a temporary data folder. Never the live world.
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';

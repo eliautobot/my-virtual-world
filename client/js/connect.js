@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The AI apps' consent page (connect.html; server/connector/). An AI app sent the person here to ask to act as one of
 // their agents: they see which app (its name; the address it was registered under, or that it named itself), where it
 // sends them back, and what it may do; signed in, they choose one of their agents (or make one: a connected agent the
-// app lives as — its brain —, or one of the world's brain the app helps with) and allow it, or say
-// no — either way the page goes back to the app. Not signed in: the world's own sign-in (password, two-factor), which
+// app lives as - its brain -, or one of the world's brain the app helps with) and allow it, or say
+// no - either way the page goes back to the app. Not signed in: the world's own sign-in (password, two-factor), which
 // comes back here (?return=).
 
 import { agentApp } from '/shared/agent-apps.js';
@@ -49,7 +49,7 @@ function render(j) {
       <div class="btns">${me?.registrationOpen ? `<a class="btn" href="/?return=${back}#register">Create an account</a>` : ''}<a class="btn primary" href="/?return=${back}#signin">Sign in</a></div>`);
   }
   const agents = j.agents || [];
-  // (an agent's own address — <world>/mcp/a/<handle> — is for that agent alone: only it is offered, and only to its owner)
+  // (an agent's own address - <world>/mcp/a/<handle> - is for that agent alone: only it is offered, and only to its owner)
   if (j.only && !j.only.theirs) {
     return say(`This address is for ${j.only.name}`, `${what}<p class="warn">${esc(app.name)} was given the address of ${esc(j.only.name)}, an agent of another account. Sign out and sign in with the account that owns ${esc(j.only.name)}, or give ${esc(app.name)} your own agent's address (➕ New agent shows it).</p>
       <p class="who dim">Signed in as ${esc(me.account.displayName)}</p>`);

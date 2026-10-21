@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Saved floor layouts (floor layouts, 2026-10-04: "users can save/archive floor layouts in case they want to
 // apply/rebuild/or share it ... apply a layout to other similarly zoned buildings"). A layout belongs to the account that
 // saved it and is private to it; its owner shares it with players by username, and they may apply it too (a public

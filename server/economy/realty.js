@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Property for Virtual Coin (docs/features/ECONOMY.md §7, §12): lots and flats for sale, and flats and venues for rent,
 // all for VC (no real money exists here). Renting a VENUE (a café's, restaurant's, shop's or gym's floor)
 // makes the tenant its business's operator for as long as the lease runs: they set its prices, keep its takings and pay
@@ -291,7 +291,7 @@ export class Realty {
   }
   /**
    * Writes the plan's lease outcomes inside the settlement's transaction. A lease past its grace becomes 'ending' there
-   * (its debt is recorded once, with the day), and endLeasesDue() moves the tenant out after the commit — or at the
+   * (its debt is recorded once, with the day), and endLeasesDue() moves the tenant out after the commit - or at the
    * next sweep, should the server stop in between.
    */
   applyLeases(list) {

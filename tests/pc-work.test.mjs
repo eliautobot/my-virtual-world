@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The PC as an agent's tool and its work sessions (docs/features/agent-pc.md §4): the brain's "pc" tool runs the command
 // line as the agent; a visitor's chat gets Public alone, and only when there is something in it; a task given to an agent
-// by someone else starts a session — Doing, steps on its PC, then Review (or Done, or Blocked) with a note, its owner
+// by someone else starts a session - Doing, steps on its PC, then Review (or Done, or Blocked) with a note, its owner
 // told, its presence shown, counted in its thinking; no brain, a limit or its owner's "no" stop it before it starts.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -89,7 +89,7 @@ test('a task given to an agent starts a session: Doing, its PC, then Review with
     assert.equal(pc.readText({ agent: 2 }, '/teams/ops/report.md').text, '# Weekly report\nAll good.');
     assert.equal(calls.length, 4);
     assert.match(calls[0].system, /You are «Reva», «Writer», an AI agent who works for «Sam»\. You are at your PC/);
-    assert.match(calls[0].turns[0].text, /THE TASK: #1 «Write the weekly report» — on the ops team's board/);
+    assert.match(calls[0].turns[0].text, /THE TASK: #1 «Write the weekly report» - on the ops team's board/);
     assert.match(calls[2].turns.at(-2).text, /not json/);
     assert.deepEqual(records.map(r => [r.kind, r.status, r.cost]), [['work', 'ok', 20]]);
     assert.equal(told[0].title, 'Reva finished "Write the weekly report"');

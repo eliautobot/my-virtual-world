@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Agent Studio's Brain and Free Will tabs (ui/agent-studio.js; docs/features/FREE-WILL.md §9).
 // - Brain: what it thinks with (its connection, when that is a Model provider: the Mind plans its days, reflects at night
 //   and chats), switching to another brain, connecting a new one with an API key, changing a brain's model, the Mind's
@@ -63,7 +63,7 @@ export async function brainTab(C, body, live) {
     hero = `<div class="sb-hero"><div class="sb-orb" aria-hidden="true"><span>${P.icon}</span></div><div class="sb-hero-t"><small>It thinks with</small><h3>${esc(curBrain.label)}</h3>
       <div class="sb-tags"><span class="st-pill">${esc(P.label)}</span>${b.model ? `<span class="st-pill mono">${esc(b.model)}</span>` : ''}${b.thinking && b.thinking !== 'off' ? `<span class="st-pill">thinking ${esc(b.thinking)}</span>` : ''}<span class="st-pill">${curBrain.scope === 'account' ? 'Your own' : 'Shared'}</span>${dot(curBrain)}</div></div></div>`;
   } else if (isExt(r)) {
-    // (a third-party agent: the app it lives as — its logo when its owner sees which app it is)
+    // (a third-party agent: the app it lives as - its logo when its owner sees which app it is)
     const xa = ok(slot) ? agentApp(slot.app) : null;
     hero = `<div class="sb-hero"><div class="sb-orb other" aria-hidden="true">${xa ? `<span class="na-logo na-md" style="background:${esc(xa.tile)}"><img src="${esc(xa.logo)}" alt="" draggable="false"></span>` : '<span>💻</span>'}</div><div class="sb-hero-t"><small>It thinks with</small><h3>${esc(xa ? xa.name : 'Its own AI')}</h3><p class="hint">A third-party agent brings its own AI. Its connection, who sees it and who may chat with it are below.</p></div></div>`;
   } else if (linked) {
@@ -101,14 +101,14 @@ export async function brainTab(C, body, live) {
     const f = st.form || { provider: 'openrouter', model: PROVIDERS.openrouter.models[0], open: !brains.length };
     st.form = f;
     const P = prov(f.provider);
-    add = `<details class="st-sec sb-new"${f.open ? ' open' : ''}><summary><h4>➕ Connect a new brain</h4><span class="hint">Paste an API key — it stays sealed on the server and is never shown again.</span></summary>
+    add = `<details class="st-sec sb-new"${f.open ? ' open' : ''}><summary><h4>➕ Connect a new brain</h4><span class="hint">Paste an API key - it stays sealed on the server and is never shown again.</span></summary>
       <form class="sb-form" autocomplete="off">
         <div class="sb-provs" role="radiogroup" aria-label="Provider">${Object.entries(PROVIDERS).map(([k, v]) => `<button type="button" class="sb-prov${f.provider === k ? ' on' : ''}" data-prov="${k}" role="radio" aria-checked="${f.provider === k}"><span>${v.icon}</span>${esc(v.label)}</button>`).join('')}</div>
         <p class="hint">${esc(P.hint)}</p>
         <div class="sb-fields">
           <label>Model<input class="input mono" name="model" list="sb-models" maxlength="120" spellcheck="false" placeholder="${f.provider === 'openrouter' ? 'deepseek/deepseek-v4.1-flash' : 'the model\'s name at your provider'}" value="${esc(f.model || '')}"><datalist id="sb-models">${P.models.map(m => `<option value="${esc(m)}">`).join('')}</datalist></label>
           ${f.provider === 'custom' ? `<label>Address (https)<input class="input mono" name="baseUrl" maxlength="300" spellcheck="false" placeholder="https://my-server.example.com/v1" value="${esc(f.baseUrl || '')}"></label>` : ''}
-          <label>API key<input class="input mono" name="apiKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="${f.pending ? 'set — paste again to replace' : 'sk-…'}"></label>
+          <label>API key<input class="input mono" name="apiKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="${f.pending ? 'set - paste again to replace' : 'sk-…'}"></label>
           <label>Name<input class="input" name="label" maxlength="60" placeholder="My ${esc(P.label)} brain" value="${esc(f.label || '')}"></label>
           <details class="sb-adv"><summary class="hint">Prices, for its monthly budget${f.provider === 'openrouter' ? ' (OpenRouter reports them itself: leave 0)' : ''}</summary>
             <div class="sb-two"><label>US$ per million tokens in<input class="input" name="priceIn" inputmode="decimal" value="${esc(f.priceIn ?? '0')}"></label><label>US$ per million tokens out<input class="input" name="priceOut" inputmode="decimal" value="${esc(f.priceOut ?? '0')}"></label></div></details>
@@ -124,8 +124,8 @@ export async function brainTab(C, body, live) {
     const ms = mind.status;
     can.push([ms.thinks && ms.does.includes('plan'), '☀ Plans its own day each morning']);
     can.push([ms.thinks && ms.does.includes('reflect'), '🌙 Reflects on its day at night, and remembers']);
-    can.push([ms.thinks && ms.does.includes('problems'), '🧭 Deals with problems — rent, money, a home, a job — within your spending rules']);
-    can.push([ms.thinks && ms.does.includes('speech'), '🗣️ Says its own words when people talk to it — every line checked by moderation first']);
+    can.push([ms.thinks && ms.does.includes('problems'), '🧭 Deals with problems - rent, money, a home, a job - within your spending rules']);
+    can.push([ms.thinks && ms.does.includes('speech'), '🗣️ Says its own words when people talk to it - every line checked by moderation first']);
   }
   can.push([!!(linked && linked.kind !== 'openai-decisions') || isExt(r), '💬 Chats with you']);
   if (ok(fw)) can.push([fw.settings.enabled && fw.status.active, '⚡ Decides for itself what it does (Free Will)']);
@@ -140,7 +140,7 @@ export async function brainTab(C, body, live) {
   // its problems: what is wrong now and what its Mind did about it, then what was solved lately
   const plist = ok(probs) ? probs.problems : [];
   const problems = ok(probs) && C.i >= 0 ? `<div class="st-sec"><div class="st-sec-h"><h4>🧭 Problems</h4><small class="dim">${plist.some(p => p.status === 'open') ? '' : 'nothing wrong now'}</small></div>
-    ${plist.length ? `<div class="mp-list">${problemsHtml(plist)}</div>` : `<p class="hint">When something goes wrong — rent it can't pay, money running out, no home or no job — it shows here, you are told, and ${esc(C.name)} deals with it${ok(mind) && mind.status.does.includes('problems') ? ' with its Mind' : ' (with a brain of its own, its Mind would)'}.</p>`}</div>` : '';
+    ${plist.length ? `<div class="mp-list">${problemsHtml(plist)}</div>` : `<p class="hint">When something goes wrong - rent it can't pay, money running out, no home or no job - it shows here, you are told, and ${esc(C.name)} deals with it${ok(mind) && mind.status.does.includes('problems') ? ' with its Mind' : ' (with a brain of its own, its Mind would)'}.</p>`}</div>` : '';
 
   const connHtml = isExt(r) ? connectionHtml(C, ok(slot) ? slot : null) : '';
   body.innerHTML = `<div class="sb">${hero}${connHtml}${problems}${mindHtml}${choose}${add}${canHtml}${thoughts}</div>`;
@@ -250,7 +250,7 @@ function wireBrain(C, body, { st, brains }) {
     b.onclick = async () => {
       const out = b.closest('.sb-card').querySelector('.sb-out'); out.classList.remove('hidden'); out.textContent = 'Testing…';
       const r = await C.call('/api/connections/test', { id: Number(b.dataset.test) });
-      out.textContent = !r ? 'Could not test it' : r.ok === false ? `✗ ${r.error || 'Not working'}${r.fix ? ` — ${r.fix}` : ''}` : `✓ ${r.detail || 'Working'}`;
+      out.textContent = !r ? 'Could not test it' : r.ok === false ? `✗ ${r.error || 'Not working'}${r.fix ? ` - ${r.fix}` : ''}` : `✓ ${r.detail || 'Working'}`;
       C.drop('conns');
     };
   });
@@ -285,7 +285,7 @@ function wireBrain(C, body, { st, brains }) {
     const t = await C.call('/api/connections/test', { id: saved.id });
     if (!t || t.ok === false) {
       step(1, 'fail'); form.querySelector('[type=submit]').disabled = false;
-      C.say(`Saved, but the test failed: ${t?.error || 'no answer'}${t?.fix ? ` — ${t.fix}` : ''}. Fix it and press Connect again.`, true);
+      C.say(`Saved, but the test failed: ${t?.error || 'no answer'}${t?.fix ? ` - ${t.fix}` : ''}. Fix it and press Connect again.`, true);
       C.drop('conns'); return;
     }
     step(1, 'done'); step(2, 'run');
@@ -315,11 +315,11 @@ export async function freeWillTab(C, body, live) {
     ${s.enabled ? `<div class="st-sec"><div class="st-sec-h"><h4>🎲 Spontaneity</h4><b class="sf-word">${esc(word)}</b></div>
       <input type="range" class="sf-range fw-sp" min="0" max="1" step="0.05" value="${s.spontaneity}" aria-label="Spontaneity">
       <div class="sf-scale"><span>Predictable</span><span>Steady</span><span>Balanced</span><span>Adventurous</span><span>Impulsive</span></div>
-      <p class="hint">How often it picks something other than its most likely choice — full on free time, less on meals and mornings, little on how it works.</p></div>
+      <p class="hint">How often it picks something other than its most likely choice - full on free time, less on meals and mornings, little on how it works.</p></div>
     <div class="st-sec"><div class="sf-tiles"><div class="sf-tile"><b>${v.today.requests}</b><span>asked today</span></div><div class="sf-tile"><b>${v.today.chosen}</b><span>chosen by it</span></div><div class="sf-tile"><b>${usdF(v.today.costMicro)}</b><span>cost today</span></div><div class="sf-tile"><b>${st.list.length ? Math.round(chosen / st.list.length * 100) : 0}%</b><span>its own pick, lately</span></div></div>${svc}</div>
     <div class="st-sec"><div class="st-sec-h"><h4>❓ Why it chose</h4><button type="button" class="btn small" data-c="refresh">Refresh</button></div>
       <ol class="fw-list">${st.list.map(whyRow).join('') || '<li class="hint">Nothing yet: its next choice shows here.</li>'}</ol>
-      ${st.more ? '<div class="row"><button type="button" class="btn small" data-c="older">Older</button></div>' : ''}</div>` : `<div class="st-sec"><p class="hint">With Free Will on, a decision service picks what ${esc(C.name)} does — free time, meals, mornings, the way to work, rest, how it works on a task — from the real places and prices around it, its character, plans and memories. Only sleep stays with its routine. It costs about $0.15–0.25 a month for an agent.</p></div>`}
+      ${st.more ? '<div class="row"><button type="button" class="btn small" data-c="older">Older</button></div>' : ''}</div>` : `<div class="st-sec"><p class="hint">With Free Will on, a decision service picks what ${esc(C.name)} does - free time, meals, mornings, the way to work, rest, how it works on a task - from the real places and prices around it, its character, plans and memories. Only sleep stays with its routine. It costs about $0.15–0.25 a month for an agent.</p></div>`}
   </div>`;
   const q = sel => body.querySelector(sel);
   const save = async (patch, msg) => { const r = await C.call('/api/free-will/agent', { agent: C.id, ...patch }, msg); C.drop('fw'); if (r) { st.list = null; } C.repaint(); };

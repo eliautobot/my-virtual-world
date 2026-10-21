@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.13 property store: lots and titles in next.db with append-only history, idempotent revision-checked operations,
 // holder/administrator rights (spec §5.0), merges up to 4 lots and unmerge, delegation, holds and the reconciliation
 // check (wp4-world-spec.md §5, DECISIONS E25).

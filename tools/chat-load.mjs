@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat window under load, end to end (docs/features/CHAT.md; tools/chat-stress.mjs is the same in one process, on
 // the chat contract and the Mind): a throwaway server with a city of `population` residents, `agents` of them AI agents
-// on one brain, and `chats` owners' chats kept going at once for `seconds` over HTTP and the socket — every chat its own
+// on one brain, and `chats` owners' chats kept going at once for `seconds` over HTTP and the socket - every chat its own
 // session, a message sent as soon as the last answer ended (after a pause of up to `think` ms), so the conversations
 // grow. The brain is a fake OpenAI-compatible server in a process of its own: `first-ms` before the first piece, then
 // `pieces` pieces of 4–5 characters every `piece-ms` (~80 tokens a second, as a fast model writes); a new chat's first

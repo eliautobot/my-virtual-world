@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Connections on a real server (PLAN WP2.2, I8.1, I8.7, I8.13, X11; DECISIONS C60, A8, A9): who may add what, that credentials are
 // sealed and never come back or reach the log, shares, and Test / discover through the supervised helper with the mock provider.
 import assert from 'node:assert/strict';
@@ -23,7 +23,7 @@ test('the kinds that work are listed (none still to come, no work package named)
   // (agents' phones, docs/features/phone.md: a member adds their own Twilio account; its token is a secret field)
   const tw = r.kinds.find(k => k.id === 'twilio');
   assert.deepEqual([tw.implemented, tw.byok, tw.fields.map(f => `${f.key}:${f.type}`).join(',')], [true, true, 'accountSid:text,apiKeySid:text,authToken:secret']);
-  // (Agent Providers: OpenClaw is added in its own window — hub — and a credential the server keeps for it, its device
+  // (Agent Providers: OpenClaw is added in its own window - hub - and a credential the server keeps for it, its device
   // key and token, is never a field of a form)
   const oc = r.kinds.find(k => k.id === 'openclaw');
   assert.equal(oc.hub, true);

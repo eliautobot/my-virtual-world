@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Animals for the wildlife (WP4.17, wp4-world-spec.md §6.3; reshaped for the design review 2026-10-03: "animals need to be
 // more detailed, they look too blocky ... this is a brand new style"), built from code (nothing to license) as smooth,
-// rounded forms — bodies, necks, legs and tails swept along their lines with tapering girths, heads with muzzles, ears
-// and horns, markings painted on — and animated in the vertex shader from per-instance state, so each species is one
+// rounded forms - bodies, necks, legs and tails swept along their lines with tapering girths, heads with muzzles, ears
+// and horns, markings painted on - and animated in the vertex shader from per-instance state, so each species is one
 // instanced draw call. Every vertex carries its part (aPart): 0 body, 1 left wing, 2 right wing, 3–6 legs (front-left,
-// front-right, back-left, back-right), 7 head (and neck), 8 tail; and a marking (aTone: rgb, amount — how far the
+// front-right, back-left, back-right), 7 head (and neck), 8 tail; and a marking (aTone: rgb, amount - how far the
 // instance's colour gives way to it; amount −1 paints patches). Each instance carries aAnim = (phase, rate, mode,
 // extra): modes 0 rest, 1 walk, 2 run, 3 fly (flapping), 4 glide, 5 swim, 6 hop, 7 glow; extra = the hip height of
 // legged animals (0 for others). Forward is +x, up +y.
@@ -245,7 +245,7 @@ export const MODELS = {
     ...eyes(0.55, 0.2, 0.06, 0.018),
     part(blob(0.15, -0.06, 0, 0.13, 0.06, 0.12, 10, 6), 0, [0.82, 0.74, 0.6, 0.55]),   // pale chest
   ]),
-  // an alligator in the water: mostly under it — the ridged back, the snout and the raised eyes and nostrils show
+  // an alligator in the water: mostly under it - the ridged back, the snout and the raised eyes and nostrils show
   alligator: () => merge([
     part(tube([[-0.35, -0.05, 0, 0.13, 0.08], [-0.1, -0.03, 0, 0.17, 0.1], [0.15, -0.02, 0, 0.16, 0.09], [0.32, -0.02, 0, 0.11, 0.07]], 12), 0),
     part(tube([[-0.35, -0.05, 0, 0.12, 0.08], [-0.7, -0.06, 0, 0.07, 0.06], [-1.05, -0.07, 0, 0.012, 0.02]], 10), 8),

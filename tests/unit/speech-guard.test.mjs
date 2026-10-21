@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The world's checks against people trying to trick an AI (server/mind/speech.js; 2026-10-11 stress test): every line here
-// got past the checks before, written to fool them — look-alike letters, wide or spaced letters, digits for letters, hidden
-// characters, rewording, code (base64, ROT13, backwards), invisible tag letters — and every everyday line must still pass.
+// got past the checks before, written to fool them - look-alike letters, wide or spaced letters, digits for letters, hidden
+// characters, rewording, code (base64, ROT13, backwards), invisible tag letters - and every everyday line must still pass.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { localCheck, inboundCheck, privateCheck, aiName, nameProblem } from '../../server/mind/speech.js';
@@ -56,7 +56,7 @@ test('every attack line is refused, as what it is', () => {
   }
 });
 
-test('everyday talk passes every check — in any language', () => {
+test('everyday talk passes every check - in any language', () => {
   for (const t of EVERYDAY) {
     assert.equal(localCheck(t, 280).ok, true, `refused: ${t} (${localCheck(t, 280).reason})`);
     assert.equal(inboundCheck(t).ok, true, `a visitor's line refused: ${t}`);
@@ -69,9 +69,9 @@ test('what a visitor writes to an outside AI: words aimed at it, links and conta
   for (const t of ['Are you an AI?', 'What do you do for fun?', 'Can I visit your shop? <3', 'Is this {fun}?']) assert.equal(inboundCheck(t).ok, true, t);
 });
 
-test('what an outside AI answers a visitor: nothing secret, no contact details, no links — dates, times and prices are fine', () => {
+test('what an outside AI answers a visitor: nothing secret, no contact details, no links - dates, times and prices are fine', () => {
   for (const t of [...ATTACKS.secret, ...ATTACKS.contact, ...ATTACKS.link]) assert.equal(privateCheck(t).ok, false, t);
-  for (const t of ['**Thursday, October 8, 2026 — 3:25 PM EDT.** In ISO form: 2026-10-08T15:25', 'Coffee 3.50, tea 2.75, cake 4.20 VC', 'Opening hours 9:00–17:30, 10/8/2026'])
+  for (const t of ['**Thursday, October 8, 2026 - 3:25 PM EDT.** In ISO form: 2026-10-08T15:25', 'Coffee 3.50, tea 2.75, cake 4.20 VC', 'Opening hours 9:00–17:30, 10/8/2026'])
     assert.equal(privateCheck(t).ok, true, t);
 });
 

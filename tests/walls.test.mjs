@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.8 interior walls: drawing, doorways and removal follow the rules (inside the building, not through furniture or the
 // core, not doubling a wall, never shutting off an entrance or furniture); over the API with undo/redo and lot rights.
 import test from 'node:test';
@@ -105,7 +105,7 @@ test('the design tools: snapping onto walls and to angles, corners that move tog
   assert.ok(corner.length <= 3, 'sides on the outer walls are left out');
 });
 
-test('wall.edit over the API: a corner moved, a room built, walls taken down together — each one undo', async () => {
+test('wall.edit over the API: a corner moved, a room built, walls taken down together - each one undo', async () => {
   const s = await startServer({ population: 60 });
   try {
     const owner = await ownerSession(s), alice = await userSession(s, owner, { login: 'alice' });

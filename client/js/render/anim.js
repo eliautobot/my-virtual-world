@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Character rig + procedural animation clips. Clips are evaluated once at startup and baked into a float texture
 // (model-space 3x4 skinning matrices per bone per frame); the character vertex shader samples it (rigid skinning).
 import * as THREE from 'three';

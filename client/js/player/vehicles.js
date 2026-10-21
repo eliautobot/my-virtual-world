@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Connection-bound driving presentation. With browser physics (decision A20) this browser simulates its own car and
 // sends poses the server validates and relays; otherwise the server simulates it from this browser's controls.
 import {bus,S} from '../core/state.js';
@@ -82,7 +82,7 @@ export class VehicleClient {
  stopSim(){this.sim?.clearCar();this.sim=null;this.simFor=null;this.simState='off';this.people=null;}
  physics(m){if(!this.sim||m.id!==this.id||this.simFor!==this.id)return;
   if(m.mode==='client'){const s=unpackPose(m.state);if(!s)return;this.sim.place(s);this.simState='on';this.sentSteps=this.sim.steps;this.inputKey='';this.poseBase=null;}
-  // (taken back after a silence — a stall or a slow network — this browser asks again at once; after refused poses, soon)
+  // (taken back after a silence - a stall or a slow network - this browser asks again at once; after refused poses, soon)
   else{this.simState='off';this.retryAt=performance.now()+(m.why==='invalid'?3000:m.why==='timeout'?250:1500);this.inputKey='';}}
  correct(m){if(this.simState!=='on'||m.id!==this.id)return;const s=unpackPose(m.state);if(s){this.sim.place(s);this.stats.corrections++;}}
  /** Advance this browser's own car; true while it, not the server stream, is what gets drawn. */
@@ -95,7 +95,7 @@ export class VehicleClient {
   if(this.sim.steps-this.sentSteps>=2&&this.app.net.connected){this.sentSteps=this.sim.steps;this.stats.poses++;
    this.app.net.send({t:'vpose',s:++this.poseSeq&65535,ts:this.poseTime(),...packPose(this.sim.cur)});}
   return true;}
- /** A pose's time: the server time of its simulated step — a start estimated from the car stream, then the steps simulated
+ /** A pose's time: the server time of its simulated step - a start estimated from the car stream, then the steps simulated
   *  since, so it only moves on as the car does. Taken from the stream's clock estimate each time, it went back whenever
   *  that estimate's best sample aged out; the server refuses a pose older than the last, snapping the car back, and five
   *  in two seconds handed the car to the server (2026-10-04). Moved forward (never back) after long stalls. */

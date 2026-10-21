@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The airports on the maps (2026-10-14, the product owner: "the airport doesn't appear on the map fully" — the maps drew roads and
-// buildings, so of an airport only its terminal showed): its paving as seen from above — the runway (its centre line,
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The airports on the maps (2026-10-14, the product owner: "the airport doesn't appear on the map fully" - the maps drew roads and
+// buildings, so of an airport only its terminal showed): its paving as seen from above - the runway (its centre line,
 // thresholds), the taxiways round their curves, the apron and the helipads, the landside (drop-off lane, car park, the
-// entrance road, the canopy's roof), the tower and the hangar — from shared/airport-layout.js, so the maps draw what the
+// entrance road, the canopy's roof), the tower and the hangar - from shared/airport-layout.js, so the maps draw what the
 // world does. Used by the world map and the radar (ui/worldmap.js) and the minimap's island view (ui/ui.js).
 import { SURFACES, BENDS, FILLETS, LANDSIDE, STRUCTURES, STANDS, HELIPAD_R, RUNWAY, toWorldAt } from '/shared/airport-layout.js';
 import { modulesOf, WORLD_KINDS } from '/shared/world-modules.js';

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Original four-door utility wagon: upright hatch, three side windows, tall
 // cabin, raised floor, load bay, roof rack and rear-mounted spare wheel.
 import {createVehicleMeshTools,authorRoadWheel} from './vehicle-mesh-tools.mjs';

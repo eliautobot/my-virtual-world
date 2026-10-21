@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // How a connected agent is shown (client/js/core/agent-view.js; 2026-09-29: a connected agent must be visible and usable from the
 // page): which agents have no body, what their state is called, and how the events of one chat run add up.
 import assert from 'node:assert/strict';

@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The person's take-over of an agent's phone goes back by itself (server/phone/phone.js handBackIdle): after the
-// phone's hand-back time without the person's texts — counted from their last text — the conversation (or the whole
+// phone's hand-back time without the person's texts - counted from their last text - the conversation (or the whole
 // phone) is the agent's again, its owner is told, and the agent is caught up; 0 keeps it until handed back by hand.
 // The phone runs here on its own database with a clock the test moves.
 import assert from 'node:assert/strict';

@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The world modules in the browser (shared/world-modules.js, shared/airport-layout.js): each airport is ONE static mesh
 // (runway, taxiways, apron, markings, helipads, car park, runway lights that glow at night, the terminal, the control
 // tower and the hangar), and the parked aircraft are three instanced meshes for the whole world (one per type: render/
-// aircraft-models.js) — a handful of draw calls however many airports there are (docs/features/play-modules.md
+// aircraft-models.js) - a handful of draw calls however many airports there are (docs/features/play-modules.md
 // §Performance). Rebuilt only when the world modules or the ground change. app.airports.hide(id) takes an aircraft off
 // its stand while someone flies it (the flight, step 3).
 import * as THREE from 'three';
@@ -156,8 +156,8 @@ function arcStrip(f, cs, cf, r, a0, a1, w, y0, y1) {
 /** The landside (2026-10-14, the product owner: the old canopy, its columns and kerb gone; "a new outside roof with columns and a new
  *  floor that look better, connect to the terminal and extend end to end of the building"; the car park tied into it):
  *  the forecourt along the terminal's whole front in pale stone, a tactile strip and a granite kerb; the drop-off lane;
- *  the canopy over both, on tree columns; a planted median with gaps where people cross; the car park — rows of bays and
- *  its lamps — and the entrance road from the airport's edge (where the access road meets it) to the drop-off lane. */
+ *  the canopy over both, on tree columns; a planted median with gaps where people cross; the car park - rows of bays and
+ *  its lamps - and the entrance road from the airport's edge (where the access road meets it) to the drop-off lane. */
 function landside(f, G, P0, P1, M1) {
   const L = LANDSIDE, fa = L.f0, fb = L.f1, [e0, e1] = L.entry;
   const pave = (s0, f0, s1, f1, c) => { f.col(c); f.box(s0, P0, f0, s1, P1, f1, 'b'); };
@@ -287,7 +287,7 @@ export function lettering(text, w, h) {
   return mesh;
 }
 /** The airport's name on its canopy's fascia and on the sign at its entrance (both facing the car park: +s), HANGAR on
- *  the hangar's door gable (facing the apron: −s) — placed in the world from the airport's frame. */
+ *  the hangar's door gable (facing the apron: −s) - placed in the world from the airport's frame. */
 function nameSigns(m) {
   const name = (m.name || 'Airport').toUpperCase(), L = LANDSIDE, C = L.canopy, G = -0.05, out = [];
   const put = (mesh, s, f, y, face) => { const p = toWorldAt(m, s, f); mesh.position.set(p.x, m.y + y, p.z); mesh.rotation.y = m.rot + face * Math.PI / 2; out.push(mesh); return mesh; };

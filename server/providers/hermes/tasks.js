@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A chat's background tasks on Hermes (docs/features/agent-providers.md §4 the side panel, §9): the subagents its agent
-// delegated work to from that session (delegate_task) — Hermes' subagent.list for the session (its live children), and
-// the subagent.start / progress / complete events it sends while they work — each with its goal, status, tools and
+// delegated work to from that session (delegate_task) - Hermes' subagent.list for the session (its live children), and
+// the subagent.start / progress / complete events it sends while they work - each with its goal, status, tools and
 // output; its live transcript's tail (subagent.tail); Stop (subagent.interrupt). Or all of the agent's: its children in
-// every session this connection has, and its scheduled jobs (Hermes' cron) — which belong to no chat.
+// every session this connection has, and its scheduled jobs (Hermes' cron) - which belong to no chat.
 // Changes of an agent with a chat open on a page go to the bus as session.task (a running one at most every SETTLE_MS).
 const SETTLE_MS = 400;
 const KEEP = 100;           // finished children remembered per connection
@@ -11,7 +11,7 @@ const fail = (code, message) => Object.assign(new Error(message), { code });
 const STATUS = { queued: 'queued', running: 'running', completed: 'completed', failed: 'failed', error: 'failed', timeout: 'timed_out', interrupted: 'cancelled' };
 const iso = v => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v < 1e11 ? v * 1000 : v) : typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v) : undefined);
 
-/** A Hermes subagent (an event's payload — `type` its event —, or a subagent.list row) as a task of the side panel. */
+/** A Hermes subagent (an event's payload - `type` its event -, or a subagent.list row) as a task of the side panel. */
 export function taskOf(c, prev = {}, type = '') {
   const status = STATUS[String(c.status || '')] || prev.status || 'running';
   const tail = Array.isArray(c.output_tail) ? c.output_tail.slice(-1)[0] : null;
@@ -19,8 +19,8 @@ export function taskOf(c, prev = {}, type = '') {
   if (typeof c.model === 'string' && c.model) t.model = c.model.slice(0, 120);
   const tool = c.tool_name || c.last_tool || (tail && tail.tool);
   if (tool) t.lastToolName = String(tool).slice(0, 80);
-  // (read by the event, as Hermes Desktop reads them: a thinking event's words are its spinner — not what it does; a
-  // progress event's are; a finished child's summary — else its last words — is its result)
+  // (read by the event, as Hermes Desktop reads them: a thinking event's words are its spinner - not what it does; a
+  // progress event's are; a finished child's summary - else its last words - is its result)
   const said = [c.tool_preview, tail && tail.preview, type === 'subagent.progress' ? c.text : null].find(x => typeof x === 'string' && x.trim());
   if (said) t.lastActivity = String(said).slice(0, 2000);
   // (its spinner's words, as Hermes Desktop shows them under a child that has done nothing else yet)

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Voice over HTTP (docs/features/CHAT.md §9.2). Every route goes through the server's pipeline (session, capability, Origin,
 // CSRF; JSON except the recording, which is the body itself).
 // - POST /api/voice/speak { agent?, text? | session+message+part?, connection?+voice? (a preview), speed? } → the audio
@@ -6,10 +6,10 @@
 //   409 use_browser with the pronounceable text (and why: the person's choice, none set up, the plan's minutes, a limit).
 // - POST /api/voice/transcribe?language=&seconds= (the recording as the body, at most 25 MB and 5 minutes) → { text,
 //   language, seconds, source }; 409 use_browser when the browser is to listen.
-// - GET /api/voice/options?agent= — what this account can use: who listens to it and who speaks for that agent, its
-//   services, its voice minutes, the limits. GET /api/voice/voices?connection=&language= — a service's voices.
-// - GET/POST /api/voice/prefs — the account's own choices. GET/POST /api/voice/agent — an agent's voice (whoever
-//   manages it). GET /api/voice/overview — today's voice (administrators).
+// - GET /api/voice/options?agent= - what this account can use: who listens to it and who speaks for that agent, its
+//   services, its voice minutes, the limits. GET /api/voice/voices?connection=&language= - a service's voices.
+// - GET/POST /api/voice/prefs - the account's own choices. GET/POST /api/voice/agent - an agent's voice (whoever
+//   manages it). GET /api/voice/overview - today's voice (administrators).
 // A service's failure answers in our words with fallback: 'browser', so the page carries on with the browser's voice.
 import { VoiceError, MAX_AUDIO_BYTES } from './voice.js';
 

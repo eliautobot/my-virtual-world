@@ -1,19 +1,19 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fishing game (docs/features/fishing.md §Fishing): out in a boat from a dock, at one of its fishing spots
-// (player/boating.js), with a trip under way (🎣 Trips, T: the server lays the trip's grounds out round the dock —
-// POST /api/play/start — and keeps its catch itself).
-//   · Cast: hold (Space, or the big button) — the power swings, a ring shows where it lands on the water the way the
-//     camera looks (out from the side you're fishing) — and let go: the rod comes over, the lure flies on its arc and
+// (player/boating.js), with a trip under way (🎣 Trips, T: the server lays the trip's grounds out round the dock -
+// POST /api/play/start - and keeps its catch itself).
+//   · Cast: hold (Space, or the big button) - the power swings, a ring shows where it lands on the water the way the
+//     camera looks (out from the side you're fishing) - and let go: the rod comes over, the lure flies on its arc and
 //     lands with a splash.
 //   · Wait: a bobber rides the waves (bait), a lure is reeled slowly back (hold: reel; a tap: a twitch). Over a ground
-//     the fish come sooner (shared/fishing-trip.js biteEvery). Nibbles — the bobber dips — then the strike: it goes
+//     the fish come sooner (shared/fishing-trip.js biteEvery). Nibbles - the bobber dips - then the strike: it goes
 //     under, HOOK! Too soon and it spooks; too late and it steals the bait.
 //   · The server rolls what took it (POST /api/play/act hook). The fight (shared/fishing-fight.js, stepped here): hold
 //     to reel, steer against its runs (A/D, the stick), ease off in the red, bow to its jumps (S, or tap BOW), and land
-//     it when it's beaten and close (E, LAND) — the net, then the server's check (act land) and the catch held up,
+//     it when it's beaten and close (E, LAND) - the net, then the server's check (act land) and the catch held up,
 //     its card: name, size, weight, what it's worth; keep it or let it go.
 //   · The trip: its clock to dusk, its bounties, the cooler. Back at the dock (stepping off), or 🏁 End: the server
-//     works the trip out (POST /api/play/finish) — stars, the leaderboard, XP.
+//     works the trip out (POST /api/play/finish) - stars, the leaderboard, XP.
 import * as THREE from 'three';
 import { bus } from '../core/state.js';
 import { h, esc, isTouch } from '../core/util.js';
@@ -150,7 +150,7 @@ async function start(courseId) {
   E.hud.querySelector('.fh-name').textContent = `🎣 ${c.label}`;
   hudTrip(true); lureUi();
   const g = trip.plan.grounds.filter(x => !x.hidden).length;
-  app.toast(`${c.label}: ${g} fishing ground${g === 1 ? '' : 's'} to find before dusk${app.boating.fishing ? ' — cast away!' : ' — walk to a fishing spot (F) and cast'}`, 'good', 4500);
+  app.toast(`${c.label}: ${g} fishing ground${g === 1 ? '' : 's'} to find before dusk${app.boating.fishing ? ' - cast away!' : ' - walk to a fishing spot (F) and cast'}`, 'good', 4500);
   bus.emit('fish-trip', { on: true, course: c.id });
 }
 /** The trip's end: the server weighs the catch in (quiet: just end it, no card). */
@@ -181,13 +181,13 @@ function result(t, x, why) {
       ${x.place ? `<span>🏆 #${x.place} on the leaderboard</span>` : ''}
       <span>+${x.xp} XP${x.module.level > x.module.was ? ` · 🎣 Fishing level ${x.module.level}!` : ''}</span>
       ${vc.paid ? `<span class="pf-vc">+${fmtVc(vc.paid)}</span>` : ''}
-      ${x.player.level > x.player.was ? `<span>⭐ Level ${x.player.level}${x.player.rankUp ? ` — ${esc(x.player.rank.icon)} ${esc(x.player.rank.name)} rank!` : ''}</span>` : ''}
+      ${x.player.level > x.player.was ? `<span>⭐ Level ${x.player.level}${x.player.rankUp ? ` - ${esc(x.player.rank.icon)} ${esc(x.player.rank.name)} rank!` : ''}</span>` : ''}
     </div>
     ${x.badges?.length ? `<div class="rr-badges">${x.badges.map(b => `<div class="pf-sb t-${b.tier}"><span>${b.icon}</span><b>${esc(b.label)}</b></div>`).join('')}</div>` : ''}
     ${x.unlocked?.length && m ? `<p class="rr-open">🔓 ${x.unlocked.map(id => esc(m.courses.find(o => o.id === id)?.label || id)).join(', ')} opened</p>` : ''}
     ${x.dex?.fresh?.length ? `<p class="rr-open">📖 New to your Fishdex: ${x.dex.fresh.map(id => esc(speciesOf(id)?.name || id)).join(', ')} <small class="dim">(${x.dex.count} of ${x.dex.of})</small></p>` : ''}
     ${x.dex?.records?.length ? `<p class="rr-open">🥇 World record${x.dex.records.length > 1 ? 's' : ''}: ${x.dex.records.map(rc => `${esc(speciesOf(rc.species)?.name || rc.species)} ${rc.kg < 10 ? rc.kg.toFixed(2) : rc.kg.toFixed(1)} kg`).join(', ')}</p>` : ''}
-    ${x.catch?.stowed ? `<p class="hint">🧊 ${x.catch.stowed} ${x.catch.stowed === 1 ? 'thing' : 'things'} into your inventory (I)${x.catch.bounty ? ` · bounties paid ${fmtVc(x.catch.bounty)}` : ''}${x.catch.full ? ' — your inventory was full: some had to go back' : ''}. Any dock store buys fish; or keep them to give or trade.</p>` : kept.length ? '<p class="hint">🐟 Any dock store buys your catch.</p>' : ''}
+    ${x.catch?.stowed ? `<p class="hint">🧊 ${x.catch.stowed} ${x.catch.stowed === 1 ? 'thing' : 'things'} into your inventory (I)${x.catch.bounty ? ` · bounties paid ${fmtVc(x.catch.bounty)}` : ''}${x.catch.full ? ' - your inventory was full: some had to go back' : ''}. Any dock store buys fish; or keep them to give or trade.</p>` : kept.length ? '<p class="hint">🐟 Any dock store buys your catch.</p>' : ''}
     <div class="rr-acts">${app.boating?.active ? `<button type="button" class="btn primary" data-again="${c.id}">↻ Go again</button>` : ''}<button type="button" class="btn" data-board="${c.id}">🏆 Leaderboard</button><button type="button" class="btn" data-dex="${esc(x.dex?.fresh?.[0] || '')}">📖 Fishdex</button><button type="button" class="btn" data-close="1">Close</button></div>`;
   E.res.classList.remove('hidden');
 }
@@ -198,7 +198,7 @@ function hudTrip(force = false) {
   if (!force && now - hudAt < 250) return; hudAt = now;
   const min = (now - trip.t0) / 60000, hr = hourAt(trip.data, min), left = trip.course.minutes - min;
   const hh = Math.floor(hr), mm = Math.floor((hr - hh) * 60);
-  E.hud.querySelector('.fh-clock').innerHTML = left > 0 ? `⏱️ ${hh}:${String(mm).padStart(2, '0')} · dusk in ${Math.floor(left)}:${String(Math.floor((left % 1) * 60)).padStart(2, '0')}` : '<span class="fh-late">🌙 Dusk — head back: the catch is spoiling</span>';
+  E.hud.querySelector('.fh-clock').innerHTML = left > 0 ? `⏱️ ${hh}:${String(mm).padStart(2, '0')} · dusk in ${Math.floor(left)}:${String(Math.floor((left % 1) * 60)).padStart(2, '0')}` : '<span class="fh-late">🌙 Dusk - head back: the catch is spoiling</span>';
   const met = new Set(bountiesMet(trip.plan.bounties, trip.caught.filter(c => c.species).map(c => ({ ...c, kept: c.kept }))));
   E.hud.querySelector('.fh-bounties').innerHTML = trip.plan.bounties.map(b => `<div class="${met.has(b.id) ? 'done' : ''}">${met.has(b.id) ? '✅' : '○'} ${esc(b.label)} <small>+${b.reward}</small></div>`).join('');
   const used = trip.caught.filter(c => c.kept).reduce((a, c) => a + (c.slots || 1), 0);
@@ -255,7 +255,7 @@ function down() {
     if (!trip) { openPick(); return; }
     if (!((trip.lures[trip.lure] ?? 1) > 0)) {   // (out of this one: the next it has, or none left at all)
       nextLure();
-      if (!((trip.lures[trip.lure] ?? 1) > 0)) { app.toast('Out of bait and lures — the dock store sells more (🎣 Gear & skills)', 'bad', 3500); A.held = false; return; }
+      if (!((trip.lures[trip.lure] ?? 1) > 0)) { app.toast('Out of bait and lures - the dock store sells more (🎣 Gear & skills)', 'bad', 3500); A.held = false; return; }
     }
     A.st = 'aim'; A.t0 = performance.now(); app.boating.hold(true);
   }
@@ -345,7 +345,7 @@ function waitStep(dt, now) {
   }
   W.moving = Math.max(0, W.moving - dt);
   const sf = surface(W.lure.x, W.lure.z); if (sf) W.lure.y = sf.y;
-  // the bite: sooner over a ground, with a lure it likes, at its hour — a lure that swims only while it moves
+  // the bite: sooner over a ground, with a lure it likes, at its hour - a lure that swims only while it moves
   if (!W.nib) {
     const g = groundAt(W.lure.x, W.lure.z), hr = hourAt(trip.data, (performance.now() - trip.t0) / 60000);
     const every = app.fishing.debug.fast ? 1.5 : biteEvery(g, trip.lure, hr, trip.water, trip.L.vis);
@@ -367,9 +367,9 @@ function strikeStep(now) {
   const N = A.nib, u = now - N.at;
   N.dip = Math.min(0.35, u * 2.5);
   if (app.fishing.debug.auto && u > 0.15) { strikeIt(); return; }
-  if (u > trip.L.win + 0.1) { prompt(null); A.nib = null; A.st = 'wait'; A.bite = 0; A.need = -Math.log(Math.random() + 1e-6) * 1.2; app.toast('Too late — it stole the bait', '', 1800); }
+  if (u > trip.L.win + 0.1) { prompt(null); A.nib = null; A.st = 'wait'; A.bite = 0; A.need = -Math.log(Math.random() + 1e-6) * 1.2; app.toast('Too late - it stole the bait', '', 1800); }
 }
-function spook() { A.nib = null; A.bite = 0; A.need = -Math.log(Math.random() + 1e-6) * 1.5; app.toast('Too soon — it spooked', '', 1600); }
+function spook() { A.nib = null; A.bite = 0; A.need = -Math.log(Math.random() + 1e-6) * 1.5; app.toast('Too soon - it spooked', '', 1600); }
 function twitch() {
   if (!A?.lure) return;
   const s = spotNow(); if (!s) return;
@@ -396,7 +396,7 @@ async function strikeIt() {
     const sp = speciesOf(r.what.species);
     A = { st: 'fight', hook: r.hook, what: r.what, sp, F: fightSetup(sp, { kg: r.what.kg }, trip.L, { d0: r.d0, seed: r.seed }), dir, fx: 0, acc: 0, lure, jump: null, hint: '', t0: performance.now() };
     const big = r.what.kg > Math.max(4, trip.L.maxKg * 0.6) ? 'Big one! ' : '';
-    if (r.what.kg > trip.L.maxKg) { A.heavy = true; A.hint = `Too heavy for your rod (it lifts ${trip.L.maxKg} kg) — it'll likely win`; app.toast(`🐟 A monster! Too heavy for your rod — a stronger one lands these (the dock store)`, 'warn', 3200); }   // (shared/fishing-fight.js HEAVY_S)
+    if (r.what.kg > trip.L.maxKg) { A.heavy = true; A.hint = `Too heavy for your rod (it lifts ${trip.L.maxKg} kg) - it'll likely win`; app.toast(`🐟 A monster! Too heavy for your rod - a stronger one lands these (the dock store)`, 'warn', 3200); }   // (shared/fishing-fight.js HEAVY_S)
     else app.toast(`🐟 ${big}Fish on!`, 'good', 1800);
     fx.lure(null);
     fx.splash(lure.x, lure.y, lure.z, 0.3);
@@ -444,17 +444,17 @@ function fightFrame(dt, now) {
 function fightEvent(ev) {
   const F = A.F;
   if (ev === 'jump') { const len = Math.min(3.5, A.what.cm / 100); A.jump = { t0: performance.now(), dur: 0.85 + Math.min(0.5, len * 0.25), h: Math.min(2.6, 0.5 + len * 0.9) }; fx.splash(A.px ?? 0, surface(A.px ?? 0, A.pz ?? 0)?.y ?? 0, A.pz ?? 0, len * 0.7); prompt('BOW!', 'warn'); E.bow.classList.remove('hidden'); }
-  else if (ev === 'bowed') { prompt(null); E.bow.classList.add('hidden'); A.hint = 'Bowed to it — it tires'; }
+  else if (ev === 'bowed') { prompt(null); E.bow.classList.add('hidden'); A.hint = 'Bowed to it - it tires'; }
   else if (ev === 'spike') A.flash = performance.now();
-  else if (ev === 'slack') A.hint = 'Slack line — reel!';
+  else if (ev === 'slack') A.hint = 'Slack line - reel!';
   else if (ev === 'ready') { A.ready = true; prompt(isTouch() ? 'LAND IT!' : 'LAND IT! (E)', 'hot'); setAct(); }
   else if (ev === 'landed') { prompt(null); netIt(); }
   else if (['snap', 'spat', 'spool', 'free', 'heavy'].includes(ev)) {
-    const why = { snap: 'The line snapped', spat: 'It threw the hook', spool: 'It took all your line', free: 'It pulled free', heavy: 'Too strong for your rod — it pulled free. A stronger rod lands it (the dock store)' }[ev];
+    const why = { snap: 'The line snapped', spat: 'It threw the hook', spool: 'It took all your line', free: 'It pulled free', heavy: 'Too strong for your rod - it pulled free. A stronger rod lands it (the dock store)' }[ev];
     if (ev === 'heavy') { post('/api/play/act', { run: trip?.id, act: 'lose', body: { hook: A.hook, why: 'free' } }).catch(() => {}); toReady(`❌ ${why}`); return; }
     post('/api/play/act', { run: trip?.id, act: 'lose', body: { hook: A.hook, why: ev } }).catch(() => {});
     if (ev === 'snap' && trip && !LURE_BY_ID[trip.lure]?.bait) { trip.lures[trip.lure] = Math.max(0, (trip.lures[trip.lure] || 1) - 1); lureUi(); if (!trip.lures[trip.lure]) nextLure(); }   // (a lure lost; bait went when the fish took it)
-    toReady(`❌ ${why}${ev === 'snap' ? ' — the lure is gone' : ''}`);
+    toReady(`❌ ${why}${ev === 'snap' ? ' - the lure is gone' : ''}`);
   }
   if (ev !== 'jump' && F.mode !== 'jump' && A?.jump == null) E.bow.classList.add('hidden');
   if (ev === 'jump' && !A.ready) setTimeout(() => { if (A?.st === 'fight' && !A.ready) { prompt(null); E.bow.classList.add('hidden'); } }, 800);
@@ -466,8 +466,8 @@ function gauges() {
   E.gauge.querySelector('.fg-t em').style.left = `${Math.min(100, L.drag / L.kgf * 100).toFixed(1)}%`;
   E.gauge.querySelector('.fg-s i').style.width = `${Math.max(0, F.S / F.p.S0 * 100).toFixed(1)}%`;
   E.gauge.querySelector('.fg-line').textContent = `${F.d.toFixed(0)} m`;
-  const run = F.mode === 'run' && F.dir ? (F.dir > 0 ? (isTouch() ? '◀ It runs right — pull left' : '◀ It runs right — hold A') : (isTouch() ? 'It runs left — pull right ▶' : 'It runs left — hold D ▶')) : F.mode === 'dive' ? '⤓ It dives — hold on' : F.mode === 'toward' ? 'It comes at you — reel fast!' : '';
-  const hint = A.ready ? 'Beaten — land it!' : F.T > L.drag * 0.98 ? 'Line running out — ease off' : run || A.hint;
+  const run = F.mode === 'run' && F.dir ? (F.dir > 0 ? (isTouch() ? '◀ It runs right - pull left' : '◀ It runs right - hold A') : (isTouch() ? 'It runs left - pull right ▶' : 'It runs left - hold D ▶')) : F.mode === 'dive' ? '⤓ It dives - hold on' : F.mode === 'toward' ? 'It comes at you - reel fast!' : '';
+  const hint = A.ready ? 'Beaten - land it!' : F.T > L.drag * 0.98 ? 'Line running out - ease off' : run || A.hint;
   const q = E.gauge.querySelector('.fg-hint'); if (q.textContent !== hint) q.textContent = hint;
   E.ring.style.strokeDasharray = `${(Math.min(1, t) * 276).toFixed(1)} 276`; E.ring.style.stroke = col;
   if (A.hint && !A.heavy && Math.random() < 0.01) A.hint = '';
@@ -483,7 +483,7 @@ function reelFindFrame(dt) {
   const tip = rodTip(); if (tip) fx.line(tip, _b.set(x, sf ? sf.y : s.y - 1, z), 0.05);
   app.boating.pose(A.held || auto ? CLIP.fish_reel : CLIP.fish_fight);
   E.gauge.querySelector('.fg-line').textContent = `${A.d.toFixed(0)} m`;
-  E.gauge.querySelector('.fg-hint').textContent = A.ready ? 'Land it!' : 'Something heavy — reel it in';
+  E.gauge.querySelector('.fg-hint').textContent = A.ready ? 'Land it!' : 'Something heavy - reel it in';
 }
 
 // ------------------------------------------------------------------ landing it, the catch
@@ -517,9 +517,9 @@ function card(c, r) {
     <h3>${esc(c.name)}</h3>
     ${sp ? `<div class="fk-facts"><b>${c.cm} cm</b> <small>(${(c.cm / 2.54).toFixed(1)} in)</small> · <b>${kgTxt} kg</b> <small>(${toLb(c.kg).toFixed(1)} lb)</small> · worth ~${fmtVc(Math.round(c.vc * 100))}</div>` : `<div class="fk-facts">${esc(findOf(c.find)?.blurb || 'Up from the bottom.')}</div>`}
     ${sp && trip?.dex && !trip.dex.mine[c.species] ? '<p class="fk-note good">📖 New to your Fishdex!</p>' : ''}
-    ${sp && trip?.dex && c.kg > (trip.dex.records[c.species]?.kg || 0) ? `<p class="fk-note good">🥇 ${trip.dex.records[c.species] ? `Bigger than the world record (${trip.dex.records[c.species].kg} kg)` : 'The first ever landed'} — a world record when you weigh in!</p>` : ''}
-    ${r.reveal ? '<p class="fk-note">🍾 There was a note inside — a hidden fishing ground is marked on your chart.</p>' : ''}
-    ${r.full ? '<p class="fk-note warn">🧊 The cooler is full — let something go to keep this one.</p>' : ''}
+    ${sp && trip?.dex && c.kg > (trip.dex.records[c.species]?.kg || 0) ? `<p class="fk-note good">🥇 ${trip.dex.records[c.species] ? `Bigger than the world record (${trip.dex.records[c.species].kg} kg)` : 'The first ever landed'} - a world record when you weigh in!</p>` : ''}
+    ${r.reveal ? '<p class="fk-note">🍾 There was a note inside - a hidden fishing ground is marked on your chart.</p>' : ''}
+    ${r.full ? '<p class="fk-note warn">🧊 The cooler is full - let something go to keep this one.</p>' : ''}
     <div class="rr-acts">${c.kept ? `<button type="button" class="btn" data-release="${c.n}">🫶 Let it go</button>` : `<button type="button" class="btn primary" data-keep="${c.n}">🧊 Keep it</button>`}<button type="button" class="btn primary" data-ok="1">${c.kept ? '🧊 In the cooler' : 'OK'}</button></div>`;
   E.card.classList.remove('hidden');
 }

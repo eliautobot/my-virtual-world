@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Road network model (WP4.1, wp4-world-spec.md §3–4): road types, alignments made of straight lines and circular
 // arcs, derived junctions at any angle, and the spatial queries the editor, renderer and simulation share.
 // Pure module (no THREE, no DOM): runs in the server, the browser and workers.

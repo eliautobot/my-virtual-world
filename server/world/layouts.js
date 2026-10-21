@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Interior layout generators. All coordinates are building-local (origin = footprint centre, +z = front/entrance).
 // Placement uses exact rectangle tests (items, reserved clearances, walls) so furniture can sit flush to walls.
 import { CATALOG } from '../../shared/catalog.js';
@@ -171,7 +171,7 @@ function coreSpan(L, room = 0.6) {
 
 /**
  * Where a floor of a street building is laid out from: on the street floor the entrance (columns out from the door, rows
- * in from the windows), on a floor above it the elevator (columns out from it, rows out from the back wall) — so every
+ * in from the windows), on a floor above it the elevator (columns out from it, rows out from the back wall) - so every
  * floor keeps its arrangement around the way people arrive. aisle: the half width kept free on the middle line.
  * cols(pitch, hw, gap) and rows(first, pitch, back): the grid (rows stop at z = back on the street floor and start there
  * above it); door(c, r, half): whether a place is in the way in.
@@ -239,7 +239,7 @@ function lounge(L, x0, z0, x1, z1, face = +1) {
 }
 /**
  * An office floor (floor layouts step 4, 2026-10-04): along the back wall, either side of the elevator, rooms of fixed
- * widths counted out from it — meeting rooms, private offices, a kitchen, phone booths — and in front an open plan of
+ * widths counted out from it - meeting rooms, private offices, a kitchen, phone booths - and in front an open plan of
  * desk clusters on a fixed grid from the aisle in front of the elevator, rows counted from the rooms. A resize adds or
  * takes rooms and clusters at the edges and leaves the rest where it was; every room and cluster has its own dice.
  */
@@ -344,7 +344,7 @@ function backRoom(L, kind, x0, z0, x1, z1, side, o) {
   L.tryAdd('plant', [[side < 0 ? x0 + 0.45 : x1 - 0.45, z1 - 0.5]]);
 }
 /** An office lobby (floor layouts step 4): reception beside the way in, planters lining the walk from the door to the
- *  elevators, a waiting corner on the other side, a café on the back wall when the building has one — all placed from
+ *  elevators, a waiting corner on the other side, a café on the back wall when the building has one - all placed from
  *  the entrance and the elevator, so a resize only moves what stands at the side walls. */
 export function officeLobby(L, o = {}) {
   const base = L.rng.int(1, 2 ** 30), D = (...k) => new RNG(`${base}:${k.join(':')}`);
@@ -389,7 +389,7 @@ export function vacantFloor(L) {
 
 // ---------------------------------------------------------------------------------------------
 // Apartments (floor layouts step 4, 2026-10-04): a double-loaded corridor along x (z in [-CW, CW]) with the elevator
-// at its west end, and on each side a row of real flats — studios, one- and two-bedroom — each of its own fixed width,
+// at its west end, and on each side a row of real flats - studios, one- and two-bedroom - each of its own fixed width,
 // counted from the elevator end. Only the last flat on a side takes what is left, so a resize changes the flats at the far
 // end and leaves the rest exactly as they were. Every flat has its own dice (seeded by the floor and its place in the row).
 const CW = 1.45;
@@ -560,7 +560,7 @@ function apartmentUnit(L, x0, z0, x1, z1, mirror, last, kind, rng, turned = fals
 }
 /** An apartment lobby (floor layouts step 4): the walk from the door to the hall where the elevator is, mailboxes and
  *  parcel lockers by the elevator, a waiting corner beside the door, a bike and parcel room at the far end of a wide
- *  block — placed from the entrance and the elevator, so a resize only moves what stands at the far side wall. */
+ *  block - placed from the entrance and the elevator, so a resize only moves what stands at the far side wall. */
 export function apartmentLobby(L) {
   const base = L.rng.int(1, 2 ** 30), D = (...k) => new RNG(`${base}:${k.join(':')}`);
   const { ix0, ix1, iz0, iz1 } = L;
@@ -771,7 +771,7 @@ export function loungeFloor(L, o = {}) {
 // The airport's terminal (shared/world-modules.js: a long, shallow glass hall; the front, +z, faces the car park, the
 // back the apron). The street floor: the entrance hall with an information desk; check-in desks along the back with
 // the baggage conveyors behind them and departures boards over them; the security checkpoint before the lifts to the
-// gates; arrivals with two baggage belts; restrooms. Upstairs: the departures lounge — rows of gate seats facing the
+// gates; arrivals with two baggage belts; restrooms. Upstairs: the departures lounge - rows of gate seats facing the
 // apron, the gate desks and boards, a café (a venue: residents come for coffee), duty-free shelves, an arcade corner.
 export function terminalFloor(L, o = {}) {
   const { ix0, ix1, iz0, iz1 } = L, ground = o.ground !== false, dr = L.b.door;

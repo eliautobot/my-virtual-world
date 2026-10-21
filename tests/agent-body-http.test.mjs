@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent lives in the city (PLAN WP2.10; 2026-09-29: "every agent needs a body/character"): enrolling gives it a resident
 // with a home and a desk; the public sees an ordinary citizen unless the agent is public (I8.15: a hidden agent is not even told about);
 // renaming and visibility changes follow to the body; revoking takes the body out of the city and enrolling again brings the same

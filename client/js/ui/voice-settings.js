@@ -1,12 +1,12 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Choosing voices (docs/features/CHAT.md §9.4), on the server's voice (§9.3):
 // - Settings → Voice: the account's own listening (who hears it, its language) and speaking (its agents' default voice,
 //   the speed, the browser's voice), with a preview; its voice minutes; adding its own voice service (a 'voice'
 //   connection); for administrators the installation's voice services and
 //   limits (the voice.* settings) and today's use.
-// - Agent Studio → Brain → "Its voice": the agent's own voice — one of the voices of whichever service speaks for it
+// - Agent Studio → Brain → "Its voice": the agent's own voice - one of the voices of whichever service speaks for it
 //   (2026-10-08: every agent a voice of its own; one is picked for it until one is chosen), or a service of its own,
-//   the speed, or the browser's voice — with a preview; only for whoever manages the agent (the server checks).
+//   the speed, or the browser's voice - with a preview; only for whoever manages the agent (the server checks).
 // What may be chosen comes from the server (GET /api/voice/options); nothing about a service is decided here.
 import { auth } from '../core/auth.js';
 import { getJSON, post } from '../core/net.js';
@@ -17,7 +17,7 @@ const LANGS = [['', 'Automatic'], ['en', 'English'], ['en-US', 'English (US)'], 
   ['pt', 'Portuguese'], ['pt-BR', 'Portuguese (Brazil)'], ['nl', 'Dutch'], ['pl', 'Polish'], ['ru', 'Russian'], ['uk', 'Ukrainian'], ['tr', 'Turkish'], ['ar', 'Arabic'], ['he', 'Hebrew'],
   ['hi', 'Hindi'], ['ja', 'Japanese'], ['ko', 'Korean'], ['zh', 'Chinese'], ['sv', 'Swedish'], ['el', 'Greek'], ['id', 'Indonesian'], ['vi', 'Vietnamese']];
 const player = new Player();
-/** How loud a preview playing here is now (0: none) — the Agent Studio shows it at the agent's throat. */
+/** How loud a preview playing here is now (0: none) - the Agent Studio shows it at the agent's throat. */
 export const previewLevel = () => (player.busy ? Math.max(0.04, player.level()) : 0);
 const minutes = s => Math.floor((Number(s) || 0) / 60);
 
@@ -26,7 +26,7 @@ function serviceOptions(o, what, cur, autoText) {
   const sel = v => (String(cur ?? 'auto') === v ? ' selected' : '');
   const list = (o.services || []).filter(s => s[what]);
   return `<option value="auto"${sel('auto')}>${esc(autoText)}</option><option value="browser"${sel('browser')}>The browser's own (free${what === 'listen' ? '; Chrome and Edge send it to Google' : ''})</option>
-    ${list.map(s => `<option value="${s.id}"${sel(String(s.id))}>${esc(s.label)} — ${esc(s.mine ? `your own ${s.service}` : s.installation ? `the world's (${s.service})` : `shared (${s.service})`)}</option>`).join('')}`;
+    ${list.map(s => `<option value="${s.id}"${sel(String(s.id))}>${esc(s.label)} - ${esc(s.mine ? `your own ${s.service}` : s.installation ? `the world's (${s.service})` : `shared (${s.service})`)}</option>`).join('')}`;
 }
 /** The world's service for this (its name as the administrators gave it), or null. */
 const platformOf = (o, what) => (o.services || []).find(s => s.id === o.installation?.[`${what}Id`]) || null;
@@ -102,16 +102,16 @@ export async function voiceTab(d, body, app) {
     const p = o.prefs, sp = p.speak, li = p.listen;
     const mine = conns.filter(c => c.level === 'manage');
     body.innerHTML = `<div class="aform vs">
-      <div class="tier-head">🎙️ Listening — your voice to text</div>
+      <div class="tier-head">🎙️ Listening - your voice to text</div>
       <p class="hint">For 🎤 dictation and 🎧 voice mode in the chat. Now: <b>${esc(describe(o.listen, 'listen'))}</b>${o.listen.reason && o.listen.reason !== 'choice' ? ` (${esc(REASON[o.listen.reason] || o.listen.reason)})` : ''}.</p>
-      <label>Who listens<span class="row"><select class="input vs-listen">${serviceOptions(o, 'listen', li.connection, `Automatic — ${platformOf(o, 'listen') ? `the world's (${platformOf(o, 'listen').label})` : 'the browser'}`)}</select></span></label>
+      <label>Who listens<span class="row"><select class="input vs-listen">${serviceOptions(o, 'listen', li.connection, `Automatic - ${platformOf(o, 'listen') ? `the world's (${platformOf(o, 'listen').label})` : 'the browser'}`)}</select></span></label>
       <label>The language you speak<span class="row"><select class="input vs-lang">${LANGS.map(([v, t]) => `<option value="${v}"${(li.language || '') === v ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></span></label>
       ${can.recognize() ? '' : '<p class="hint warn">This browser has no speech recognition of its own: choose a voice service to dictate and talk here (Chrome, Edge and Safari have one).</p>'}
-      <div class="tier-head">🔊 Speaking — your agents' voice</div>
+      <div class="tier-head">🔊 Speaking - your agents' voice</div>
       <p class="hint">For 🔊 read aloud and 🎧 voice mode. An agent with a voice of its own (Agent Studio → Brain → Its voice) speaks with it; the others with this. Now: <b>${esc(describe(o.speak, 'speak'))}</b>${o.speak.reason && o.speak.reason !== 'choice' ? ` (${esc(REASON[o.speak.reason] || o.speak.reason)})` : ''}.</p>
-      <label>Who speaks<span class="row"><select class="input vs-speak">${serviceOptions(o, 'speak', sp.connection, `Automatic — ${platformOf(o, 'speak') ? `the world's (${platformOf(o, 'speak').label})` : 'the browser\'s own voice'}`)}</select></span></label>
+      <label>Who speaks<span class="row"><select class="input vs-speak">${serviceOptions(o, 'speak', sp.connection, `Automatic - ${platformOf(o, 'speak') ? `the world's (${platformOf(o, 'speak').label})` : 'the browser\'s own voice'}`)}</select></span></label>
       <label class="vs-voice-l${typeof sp.connection === 'number' ? '' : ' hidden'}">Its voice<span class="row"><select class="input vs-voice"></select></span></label>
-      <label class="check"><input type="checkbox" class="vs-unique"${sp.unique === false ? '' : ' checked'}> Every agent its own voice — one is picked for each (its character's, none the same while there are enough); change it in its Agent Studio</label>
+      <label class="check"><input type="checkbox" class="vs-unique"${sp.unique === false ? '' : ' checked'}> Every agent its own voice - one is picked for each (its character's, none the same while there are enough); change it in its Agent Studio</label>
       <label>Speed<span class="row"><input type="range" class="vs-speed" min="0.5" max="2" step="0.05" value="${sp.speed || 1}" aria-label="Speed"><b class="vs-speed-v">${(sp.speed || 1).toFixed(2).replace(/0$/, '')}×</b></span></label>
       ${can.synth() ? `<label>The browser's own voice (when the browser speaks)<span class="row"><select class="input vs-bvoice"><option>Loading…</option></select></span></label>` : '<p class="hint">This browser can\'t speak by itself: with no voice service, answers are shown, not read.</p>'}
       <div class="row"><button type="button" class="btn small vs-try">▶ Hear it</button><span class="hint vs-try-out" aria-live="polite"></span></div>
@@ -124,7 +124,7 @@ export async function voiceTab(d, body, app) {
         <details class="vs-add"${form.open ? ' open' : ''}><summary>➕ Add a voice service</summary><form class="aform vs-form" autocomplete="off">
           <label>Service<span class="row"><select class="input vs-f-prov">${Object.entries(provs).map(([k, v]) => `<option value="${k}"${form.provider === k ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}</select></span></label>
           <p class="hint vs-f-hint"></p>
-          <label>API key<input class="input mono vs-f-key" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="paste it — it is never shown again"></label>
+          <label>API key<input class="input mono vs-f-key" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="paste it - it is never shown again"></label>
           <label class="vs-f-url-l">Address (https)<input class="input mono vs-f-url" maxlength="300" spellcheck="false" placeholder="https://my-voice-server.example.com/v1"></label>
           <label>Name<input class="input vs-f-label" maxlength="60" placeholder="My voice"></label>
           <details><summary class="hint">Models and voice (optional: each service has good defaults)</summary>
@@ -144,7 +144,7 @@ export async function voiceTab(d, body, app) {
     const pick = (cls, path, what) => `<select class="input ${cls}"><option value="">None (the browser's own)</option>${inst.filter(c => provs[c.config?.provider]?.[what]).map(c => `<option value="${c.id}"${String(S(path)?.value || '') === String(c.id) ? ' selected' : ''}>${esc(c.label)} (${esc(provs[c.config?.provider]?.label || '')})</option>`).join('')}</select>`;
     const on = S('voice.enabled')?.value !== false;
     const sel = (cls, path, fmt = x => x) => { const s = S(path); return `<select class="input ${cls}">${s.values.map(v => `<option value="${v}"${String(v) === String(s.value) ? ' selected' : ''}>${fmt(v)}</option>`).join('')}</select>`; };
-    return `<div class="tier-head">🏢 The world's voice — everyone without their own</div>
+    return `<div class="tier-head">🏢 The world's voice - everyone without their own</div>
       <p class="hint">One service listens and one speaks for every account that hasn't chosen its own. Add services above (For: Everyone here) or in Settings → Connections.</p>
       <p><span class="tag${on ? ' set' : ''}">${on ? 'On' : 'Off'}</span> <span class="tag">Listens: ${esc(ov.installation.listen || 'the browser')}</span> <span class="tag">Speaks: ${esc(ov.installation.speak || 'the browser')}</span></p>
       <div class="row wrap"><button type="button" class="btn small${on ? '' : ' primary'} vs-a-switch">${on ? 'Switch the world\'s voice off' : 'Switch the world\'s voice on'}</button></div>
@@ -220,14 +220,14 @@ export async function voiceTab(d, body, app) {
         catch (x) { out.textContent = `✗ ${x.message}`; return; }
         out.textContent = 'Testing it (it says "Hello." and hears half a second of silence)…';
         let ok = false;
-        try { const r = await post('/api/connections/test', { id }); ok = r.ok !== false; out.textContent = ok ? `✓ ${r.detail || 'It works'}` : `✗ ${r.error || 'It doesn\'t work yet'}${r.fix ? ` — ${r.fix}` : ''}`; }
+        try { const r = await post('/api/connections/test', { id }); ok = r.ok !== false; out.textContent = ok ? `✓ ${r.detail || 'It works'}` : `✗ ${r.error || 'It doesn\'t work yet'}${r.fix ? ` - ${r.fix}` : ''}`; }
         catch (x) { out.textContent = `✗ ${x.message}`; }
         if (ok && f.querySelector('.vs-f-use').checked && scope === 'account') {
           try { await post('/api/voice/prefs', { ...(v.listen ? { listen: { connection: id } } : {}), ...(v.speak ? { speak: { connection: id, voice: '' } } : {}) }); } catch (x) { err(x.message); }
         }
         form.open = !ok;
         await load(); render();
-        app?.toast?.(ok ? `${label} added${f.querySelector('.vs-f-use')?.checked && scope === 'account' ? ' — it listens and speaks for you now' : ''}` : `${label} added, but its test failed`, ok ? 'good' : 'bad', 4200);
+        app?.toast?.(ok ? `${label} added${f.querySelector('.vs-f-use')?.checked && scope === 'account' ? ' - it listens and speaks for you now' : ''}` : `${label} added, but its test failed`, ok ? 'good' : 'bad', 4200);
       };
     }
     // the world's voice (administrators)
@@ -260,9 +260,9 @@ export async function agentVoiceSection(C, el) {
   // its voice on whichever service speaks for it now (its own, its owner's default, the world's): chosen here, else
   // one picked for it (the server: of its character's gender, the least used by the other agents)
   const svcId = now.source !== 'browser' ? now.service?.id : null;
-  const how = now.source === 'browser' ? '' : now.chosen ? ' — chosen for it' : now.auto ? ' — picked for it, its own among your agents' : '';
+  const how = now.source === 'browser' ? '' : now.chosen ? ' - chosen for it' : now.auto ? ' - picked for it, its own among your agents' : '';
   el.innerHTML = `<div class="st-sec-h"><h4>🔊 Its voice</h4><small class="dim">read aloud and voice mode</small></div>
-    <p class="hint">${esc(C.name)} speaks with <b>${esc(describe(now, 'speak'))}</b>${esc(how)}${now.reason && now.reason !== 'choice' ? ` — ${esc(REASON[now.reason] || now.reason)}` : ''}.</p>
+    <p class="hint">${esc(C.name)} speaks with <b>${esc(describe(now, 'speak'))}</b>${esc(how)}${now.reason && now.reason !== 'choice' ? ` - ${esc(REASON[now.reason] || now.reason)}` : ''}.</p>
     <div class="sv-grid">
       ${svcId ? `<label>Voice<select class="input sv-vsel"></select></label>` : ''}
       <label>Voice service<select class="input sv-svc">${serviceOptions(o, 'speak', cur, 'Its owner\'s default (Settings → Voice)')}</select></label>
@@ -281,10 +281,10 @@ export async function agentVoiceSection(C, el) {
     const picked = now.chosen ? '' : now.voice || '';
     voiceOptions(s, svcId, chosen || '', null, `<option value=""${chosen ? '' : ' selected'}>${esc(picked ? `Picked for it: ${picked}` : 'Picked for it')}</option>`)
       .then(() => {
-        // the voice by its name a person reads (Heart — American English, female), in the list and in the line above it
+        // the voice by its name a person reads (Heart - American English, female), in the list and in the line above it
         const lv = picked && [...s.options].find(x => x.value === picked); if (lv && s.options[0]) s.options[0].textContent = `Picked for it: ${lv.textContent}`;
         const cv = [...s.options].find(x => x.value && x.value === (now.voice || '')), b = el.querySelector('p.hint b');
-        if (cv && b && now.service) b.textContent = `${now.service.label} — ${cv.textContent}`;
+        if (cv && b && now.service) b.textContent = `${now.service.label} - ${cv.textContent}`;
       });
     s.onchange = () => save({ for: svcId, voice: s.value }, s.value ? `${C.name}'s voice saved` : `A voice will be picked for ${C.name}`);
   }

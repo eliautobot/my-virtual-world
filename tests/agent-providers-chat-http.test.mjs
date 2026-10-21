@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat with an OpenClaw agent on a real server (docs/features/agent-providers.md §4–§5), against the stand-in gateway
 // replaying runs recorded from OpenClaw 2026.9.6 (tests/helpers/fake-openclaw.mjs): a new chat makes a session on the
 // gateway and follows it; an answer streams with what it is doing and its reasoning; a command waits for approval with
@@ -269,7 +269,7 @@ test('the progress card: Dismiss takes off the version the person saw; one writt
   assert.equal((await owner.get(`/api/providers/history?agent=${agent}&session=${chat.id}`)).json.plan, undefined, 'gone from the chat');
 });
 
-test('background tasks: the chat\'s subagents and jobs for whoever manages the provider — running and finished, one task\'s prompt, result and transcript, Stop, live changes', async () => {
+test('background tasks: the chat\'s subagents and jobs for whoever manages the provider - running and finished, one task\'s prompt, result and transcript, Stop, live changes', async () => {
   const chat = await newChat();
   await run(owner, chat.id, 'hello');
   const key = (await owner.get(`/api/chat/recent?agent=${agent}`)).json.sessions.find(x => x.id === chat.id).key;
@@ -317,7 +317,7 @@ test('background tasks: the chat\'s subagents and jobs for whoever manages the p
   for (let i = 0; i < 60 && !frames.length; i++) await sleep(30);
   await sleep(600);
   const ours = frames.filter(m => m.task.here !== false);
-  assert.ok(frames.filter(m => m.task.here === false).every(m => m.task.task.id === other), 'the agent\'s work elsewhere comes too — marked not this chat\'s');
+  assert.ok(frames.filter(m => m.task.here === false).every(m => m.task.task.id === other), 'the agent\'s work elsewhere comes too - marked not this chat\'s');
   assert.equal(ours.length, 1, 'a burst of changes, once');
   assert.equal(ours[0].session, chat.id); assert.equal(ours[0].task.change, 'upserted'); assert.equal(ours[0].task.task.progressSummary, 'Read 7 of 5 sites');
   const stop = await owner.post('/api/providers/tasks/cancel', { agent, session: chat.id, task: running });
@@ -331,7 +331,7 @@ test('background tasks: the chat\'s subagents and jobs for whoever manages the p
   await owner.post('/api/providers/watch', { agent, session: chat.id, on: false });
 });
 
-test('the agents\' browser: its tabs, the page live (frames), and the person\'s clicks, keys, typing and scrolling — for whoever manages the provider', async () => {
+test('the agents\' browser: its tabs, the page live (frames), and the person\'s clicks, keys, typing and scrolling - for whoever manages the provider', async () => {
   const base = `/api/providers/browser`;
   // not running: said so; started, a tab opened (the gateway's own rules: no local address)
   let st = (await owner.get(`${base}?agent=${agent}`)).json;
@@ -397,7 +397,7 @@ test('all of the agent\'s tasks (scope=agent): its scheduled jobs (no chat) and 
   // this chat: only its own
   const here = (await owner.get(`/api/providers/tasks?agent=${agent}&session=${chat.id}`)).json;
   assert.deepEqual(here.active.map(t => t.id), [mine]);
-  // all of the agent's: its job, its CLI run, this chat's — marked; never another agent's
+  // all of the agent's: its job, its CLI run, this chat's - marked; never another agent's
   const all = await owner.get(`/api/providers/tasks?agent=${agent}&session=${chat.id}&scope=agent`);
   assert.equal(all.status, 200, all.text);
   const ids = [...all.json.active, ...all.json.recent].map(t => t.id);
@@ -413,7 +413,7 @@ test('all of the agent\'s tasks (scope=agent): its scheduled jobs (no chat) and 
   assert.equal((await owner.get(`/api/providers/tasks/one?agent=${agent}&session=${chat.id}&task=${cli}&scope=agent`)).status, 200);
   assert.equal((await owner.get(`/api/providers/tasks/one?agent=${agent}&session=${chat.id}&task=${cli}`)).status, 404);
   assert.equal((await owner.get(`/api/providers/tasks/one?agent=${agent}&scope=agent&task=${otherAgent}`)).status, 404);
-  // live: with this chat open, a change in the agent's other work comes too — marked not here
+  // live: with this chat open, a change in the agent's other work comes too - marked not here
   assert.equal((await owner.post('/api/providers/watch', { agent, session: chat.id })).json.ok, true);
   const ws = new (await import('ws')).default(s.url.replace('http', 'ws') + '/ws', { headers: { cookie: owner.cookie, origin: s.url } });
   const frames = [];
@@ -432,7 +432,7 @@ test('all of the agent\'s tasks (scope=agent): its scheduled jobs (no chat) and 
   await owner.post('/api/providers/watch', { agent, session: chat.id, on: false });
 });
 
-test('which chats are working: an answer being written here, or the provider running a turn there from anywhere — in the list and live', async () => {
+test('which chats are working: an answer being written here, or the provider running a turn there from anywhere - in the list and live', async () => {
   const chat = await newChat();
   await run(owner, chat.id, 'hello');
   const key = (await owner.get(`/api/chat/recent?agent=${agent}`)).json.sessions.find(x => x.id === chat.id).key;
@@ -541,7 +541,7 @@ test('a message sent while the agent works: OpenClaw takes it into the running t
   const a = await owner.post('/api/providers/runs', { agent, session: chat.id, input: 'Take your time [[slow:700]]' });
   assert.equal(a.status, 200, a.text);
   await sleep(150);
-  // Enter while it works: sent at once, with the gateway's own setting (no queue mode of ours) — steered into the turn
+  // Enter while it works: sent at once, with the gateway's own setting (no queue mode of ours) - steered into the turn
   const b = await owner.post('/api/providers/runs', { agent, session: chat.id, input: 'And one more thing' });
   assert.equal(b.status, 200, b.text);
   assert.equal(gw.sends.find(x => x.idempotencyKey === b.json.runId).queueMode, undefined);
@@ -552,7 +552,7 @@ test('a message sent while the agent works: OpenClaw takes it into the running t
   assert.ok(h.some(m => m.role === 'user' && m.text === 'And one more thing'), 'the message is in the conversation');
   assert.ok(h.some(m => m.role === 'assistant' && /Steered in: And one more thing/.test(m.text)), 'answered in the running turn');
   assert.equal(h.some(m => m.role === 'system' && /without sending an answer/.test(m.text)), false);
-  // Ctrl+Enter: after this answer — the gateway runs it next, with an answer of its own
+  // Ctrl+Enter: after this answer - the gateway runs it next, with an answer of its own
   const c = await owner.post('/api/providers/runs', { agent, session: chat.id, input: 'Again, slowly [[slow:700]]' });
   await sleep(150);
   const d = await owner.post('/api/providers/runs', { agent, session: chat.id, input: 'After you', queue: 'later' });

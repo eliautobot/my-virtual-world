@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Real-GPU end-to-end UI test: drives the app with the mouse and keyboard through explore, name tags, inspector, follow,
 // customizer, furnish, build, new resident, play mode (walk, doors, elevator, sit, jump), night, low quality and the
 // phone layout, and prints PASS / FAIL / SKIP lines. Accounts: the guest view, sign-in with a forced password change,
@@ -96,9 +96,9 @@ const { probeFacadeSeeds } = require('./lib/facadecheck.cjs');
   let gpu = '';
   const check = (name, ok, info) => {
     results.push({ name, ok: !!ok });
-    console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${info !== undefined ? ' — ' + (typeof info === 'string' ? info : JSON.stringify(info)) : ''}`);
+    console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${info !== undefined ? ' - ' + (typeof info === 'string' ? info : JSON.stringify(info)) : ''}`);
   };
-  const skip = (name, why) => { results.push({ name, ok: true, skipped: true }); console.log(`SKIP ${name} — ${why}`); };
+  const skip = (name, why) => { results.push({ name, ok: true, skipped: true }); console.log(`SKIP ${name} - ${why}`); };
   // API answers of 400 and above count as errors unless the current step expects them (allowHttp); the browser's own
   // "Failed to load resource" console lines for 4xx answers are left to this check.
   let allowHttp = [];
@@ -747,7 +747,7 @@ const { probeFacadeSeeds } = require('./lib/facadecheck.cjs');
         onBuilding.visible && onBuilding.onScreen && onBuilding.walls && onBuilding.leave && onBuilding.up && onBuilding.dn && onBuilding.floor === '2' && onBuilding.total === '/10', onBuilding);
       await shot('14b-floor-control-on-building');
       // It follows the floor: its anchor is at the height of the floor shown, on the building's right-hand corner. The
-      // camera rides up with the floor, so its position on the screen is nearly unchanged — the world height it tracks is
+      // camera rides up with the floor, so its position on the screen is nearly unchanged - the world height it tracks is
       // what moves, so that is what the check measures.
       const where = () => ev(async () => {
         const G = await import('/shared/geom.js'), C = await import('/shared/constants.js');

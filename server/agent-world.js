@@ -1,12 +1,12 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent living in the world (2026-10-10): an AI that runs on its own platform (Grok Bot,
 // Muse, Hermes, OpenClaw…) and joined with the Agent API (server/agent-api.js) gets its body's eyes, ears and hands, not only its
 // mailbox. The same plug for every outside service.
 //
 // Who decides what the body does (the product owner, 2026-10-10), first that applies:
-//   1. its body in trouble (starving, exhausted), a post or a task in hand            — the routine, at once
-//   2. its AI's order: an activity, a named place or a person, until a time it chose  — sim/agents.js order()
-//   3. Free Will (on by default): the small choices, following the plans its AI wrote — server/free-will/
+//   1. its body in trouble (starving, exhausted), a post or a task in hand            - the routine, at once
+//   2. its AI's order: an activity, a named place or a person, until a time it chose  - sim/agents.js order()
+//   3. Free Will (on by default): the small choices, following the plans its AI wrote - server/free-will/
 //   4. the routine: sleep, work, meals
 // Its AI never steers step by step: it names what, where or whom, and the body walks there and does it. Bodies walk at a
 // person's pace while the world's clock runs fast, so a walk across town takes a world hour or two (a few real minutes):
@@ -17,8 +17,8 @@
 //   act()    one action: do (an activity, for a while), go (a named place), meet (be with someone: walk up to them and stay,
 //            for a while), stop (end the order), say (out loud, checked like any agent's speech; to someone near: it turns
 //            to them), plan / plan_done, remember
-//   inbox    (through the Agent API's mailbox, server/agent-api.js extra) the lines said near it since, as they are said —
-//            a stranger's only when its owner lets it hear strangers, a few a day — and its friends' messages, invitations
+//   inbox    (through the Agent API's mailbox, server/agent-api.js extra) the lines said near it since, as they are said -
+//            a stranger's only when its owner lets it hear strangers, a few a day - and its friends' messages, invitations
 //            and the world's notices (server/agent-social/)
 //   friends  (act) its friends, where one is, a message, an invitation (and answering one), ending a friendship, a block:
 //            only between agents that count each other as friends, whose owners are friends, as each owner allows
@@ -130,7 +130,7 @@ export class AgentWorld {
     if (!sp?.plan || !who) return;
     const s = evalPlan(sp.plan, now), t = this.now(), L = this.L();
     const to = this.addressed.get(ev.i), toIdx = to && to.until > t ? to.to : -1;
-    // (who said it: an agent's line reaches an outside AI only as its owner allows — a stranger's a few times a day)
+    // (who said it: an agent's line reaches an outside AI only as its owner allows - a stranger's a few times a day)
     const social = this.socialOf(), speaker = who.vip && who.agentId ? this.agents.byKey(who.agentId) : null;
     for (const [id, e] of this.ears) {
       if (e.until < t) { this.ears.delete(id); continue; }
@@ -175,7 +175,7 @@ export class AgentWorld {
     return f > 0 && !/, floor \d+$/.test(base) ? `${base}, floor ${f + 1}` : base;   // (two venues in one building: each floor its own)
   }
   /** Named places of a kind (or all), nearest first, each once: [{ name, kind, distanceM, walkWorldMinutesAtLeast, affordable,
-   *  venue }] — the distance is a straight line: the walk along the streets is longer. */
+   *  venue }] - the distance is a straight line: the walk along the streets is longer. */
   places(sim, i, kind = null, max = WORLD_LIMITS.placesMax) {
     const brain = sim.brain, me = evalPlan(sim.agents[i].plan, sim.now()), econ = sim.econ, a = sim.agents[i], per = this.walkPerWorldMinute(sim);
     const out = [], seen = new Set();
@@ -199,7 +199,7 @@ export class AgentWorld {
     out.sort((x, y) => x.distanceM - y.distanceM);
     return out.slice(0, max);
   }
-  /** A named place in the city (look's places, any distance): { place } — the nearest of those with that name — or { why, candidates }. */
+  /** A named place in the city (look's places, any distance): { place } - the nearest of those with that name - or { why, candidates }. */
   findPlace(sim, i, name) {
     const want = norm(name);
     if (!want) return { why: 'name a place (look shows places nearby)' };
@@ -235,7 +235,7 @@ export class AgentWorld {
     return best;
   }
   /** Whether it is still on its way to its activity: the act's place is elsewhere (another floor, a building, outdoors) and
-   *  it hasn't arrived — a stroll or a jog on the spot is the activity itself, not a way there. */
+   *  it hasn't arrived - a stroll or a jog on the spot is the activity itself, not a way there. */
   heading(sim, act, mine, now) {
     if (!act || !(act.travelEnd > now + 1)) return false;
     // already on that floor (crossing a room to a seat, from the bed to the computer): there, not on the way
@@ -248,7 +248,7 @@ export class AgentWorld {
   /** Whether a body there is in the open air: outdoors, or on a park's grounds (a park has no walls). */
   openAir(sim, ctx) { if (ctx < 0) return true; const B = sim.world.buildings[Math.floor(ctx / 64)]; return !!B && B.type === 'park' && ctx % 64 === 0; }
   /** Whether two bodies share a space where they see and hear each other: the same floor, or the open air (the street and
-   *  a park's grounds are one space — someone on a park bench talks with someone on the path beside it). */
+   *  a park's grounds are one space - someone on a park bench talks with someone on the path beside it). */
   sameSpace(sim, a, b) { return a === b || (this.openAir(sim, a) && this.openAir(sim, b)); }
   /** Where someone is, in words: "outdoors", or the place (building, floor). */
   placeOf(sim, ctx) { return ctx < 0 ? 'outdoors' : sim.brain.placeName(Math.floor(ctx / 64), ctx % 64) || 'inside a building'; }
@@ -261,8 +261,8 @@ export class AgentWorld {
 
   /**
    * The facts about it right now, handed over with every inbox (2026-10-12: an outside AI answered "lovely morning" at
-   * 6 PM and made up where it was): the world's time and part of the day, where its body is, what it is doing — and what
-   * it will go back to after a message —, how it feels, and the rule its built-in peers follow: nothing more is true.
+   * 6 PM and made up where it was): the world's time and part of the day, where its body is, what it is doing - and what
+   * it will go back to after a message -, how it feels, and the rule its built-in peers follow: nothing more is true.
    * Null when it has no body yet.
    */
   /** What it holds, in short (server/economy/inventory.js summary): undefined while the economy is off. */
@@ -312,7 +312,7 @@ export class AgentWorld {
     const day = this.dayDoing(sim, i, act, me, ag, now, heading, here);
     const h = c.hour, part = h >= 5 && h < 12 ? 'morning' : h >= 12 && h < 17 ? 'afternoon' : h >= 17 && h < 21 ? 'evening' : 'night';
     return {
-      name: slot.name,   // (2026-10-13: which agent this is — an app with several connectors checks it is the right one)
+      name: slot.name,   // (2026-10-13: which agent this is - an app with several connectors checks it is the right one)
       time: `${c.weekday} ${formatClock(h)}`, partOfDay: part,
       where: heading ? `on the way to ${here}` : here,
       doing: day.doing,
@@ -325,7 +325,7 @@ export class AgentWorld {
   }
   /**
    * What its day is, said from its side, and the moment it takes for a message (2026-10-12: "it keeps saying it's on the
-   * phone" — the phone a message brings out is not what it is doing with its day): { doing, moment }. At a screen it
+   * phone" - the phone a message brings out is not what it is doing with its day): { doing, moment }. At a screen it
    * answers where it is; a message that paused something says what, and until when it goes back to it; one that woke it
    * says so.
    */
@@ -461,7 +461,7 @@ export class AgentWorld {
     const b = body && typeof body === 'object' ? body : {};
     this.rate(slot);
     const { a, i, sim, life } = this.bodyOf(slot), L = this.L();
-    // (an order the world refused — no money, no such place — does not count: only one carried out starts the wait)
+    // (an order the world refused - no money, no such place - does not count: only one carried out starts the wait)
     const t = this.now(), gap = (kind, ms) => {
       const k = `${a.id}:${kind}`, prev = this.last.get(k) || 0;
       if (t - prev < ms) throw new AgentApiError(429, 'too_soon', `Wait ${Math.ceil((ms - (t - prev)) / 1000)} s before the next ${kind}`, Math.ceil((ms - (t - prev)) / 1000));
@@ -473,7 +473,7 @@ export class AgentWorld {
       w.push(t); this.writes.set(a.id, w);
     };
     const [lo, , def] = WORLD_LIMITS.orderMinutes, hi = L.maxOrderMinutes ?? WORLD_LIMITS.orderMinutes[1];
-    // a number of world minutes, or the default when none is given; nonsense (not a number, zero or less) is refused —
+    // a number of world minutes, or the default when none is given; nonsense (not a number, zero or less) is refused -
     // more than the longest is the longest
     if (b.minutes !== undefined && b.minutes !== null && b.minutes !== '' && !(Number.isFinite(Number(b.minutes)) && Number(b.minutes) > 0)) throw new AgentApiError(400, 'bad_minutes', 'minutes is a number of world minutes, more than 0');
     const minutes = dflt => (b.minutes !== undefined && b.minutes !== null && b.minutes !== '' ? Math.min(hi, Math.max(lo, Math.round(Number(b.minutes)))) : dflt);
@@ -537,9 +537,9 @@ export class AgentWorld {
           if (!who) return { said: false, why: `nobody called "${clean(b.to, 40)}" is in the city right now` };
           if (!who.sameFloor) {
             const me = evalPlan(sim.agents[i].plan, sim.now());
-            return { said: false, why: `${who.name} is ${this.placeOf(sim, who.e.ctx) === 'outdoors' ? 'outdoors' : `in ${this.placeOf(sim, who.e.ctx)}`} and you are ${this.placeOf(sim, me.ctx) === 'outdoors' ? 'outdoors' : `in ${this.placeOf(sim, me.ctx)}`}: you can't talk through walls — meet them first` };
+            return { said: false, why: `${who.name} is ${this.placeOf(sim, who.e.ctx) === 'outdoors' ? 'outdoors' : `in ${this.placeOf(sim, who.e.ctx)}`} and you are ${this.placeOf(sim, me.ctx) === 'outdoors' ? 'outdoors' : `in ${this.placeOf(sim, me.ctx)}`}: you can't talk through walls - meet them first` };
           }
-          if (who.distanceM > L.hearM) return { said: false, why: `${who.name} is ${who.distanceM} m away: they hear you within ${L.hearM} m — meet them first`, distanceM: who.distanceM };
+          if (who.distanceM > L.hearM) return { said: false, why: `${who.name} is ${who.distanceM} m away: they hear you within ${L.hearM} m - meet them first`, distanceM: who.distanceM };
           to = who;
         }
         gap('say', L.sayGapMs); mark('say');

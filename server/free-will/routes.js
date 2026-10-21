@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Free Will over HTTP (docs/features/FREE-WILL.md §9). Every route goes through the server's pipeline (session,
 // capability, Origin, CSRF, JSON).
 // - An agent's own switch, its decision service and spontaneity, today's numbers and the why-log: the agent's owner, or an

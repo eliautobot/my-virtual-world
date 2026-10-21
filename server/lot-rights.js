@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Who may change what in the world, by lot (WP4.6/4.13, wp4-world-spec.md §5.0, DECISIONS E25 (8)): on a world with lots,
 // holders (and the people they share rights with) change the buildings, interiors and furniture on their own lots;
 // administrators (world.edit) do so on the city's land; residents stay with administrators. A new building must stand
@@ -26,7 +26,7 @@ export class LotRights {
    * `spec` is the normalised building spec for bld.add.
    */
   check(o, actor, spec = null) {
-    // an agent's owner (or an account it is shared with to manage) dresses its body — its look and nothing else (the
+    // an agent's owner (or an account it is shared with to manage) dresses its body - its look and nothing else (the
     // Agent Studio; actor.agentBody is the edit route's check of who manages which agent)
     if (o.op === 'person.set' && !actor.admin && Object.keys(o).every(k => k === 'op' || k === 'i' || k === 'app')) return actor.agentBody?.(o.i | 0) ? null : 'Only administrators manage residents';
     if (!this.active) return actor.admin ? null : 'Only administrators can edit this world';
@@ -41,7 +41,7 @@ export class LotRights {
     if (o.op === 'bld.add') return this.checkPlacement(spec, actor);
     const need = NEED[o.op];
     // an op with no rights of its own named here is the administrators' (fail closed: one added later never opens to
-    // holders by omission — step 8, 2026-10-08); flats and doors are checked by the editor itself (edit.js op)
+    // holders by omission - step 8, 2026-10-08); flats and doors are checked by the editor itself (edit.js op)
     if (!need) return actor.admin ? null : 'Only administrators can do this';
     const B = this.world().buildings[o.b | 0];
     if (!B || B.gone) return null;   // the editor answers "No such building"

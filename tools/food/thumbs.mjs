@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The menus' pictures of every food and drink item (shared/food.js): one sheet of 16 × 16 cells, cell n = item number n,
-// 96 px each, transparent — drawn by client/dev/food.html?atlas=1 in a headless browser → client/assets/food/thumbs.webp.
+// 96 px each, transparent - drawn by client/dev/food.html?atlas=1 in a headless browser → client/assets/food/thumbs.webp.
 // Run again after an item is added or its model (client/js/render/food-models.js) changes:  node tools/food/thumbs.mjs
 // (needs the browser the browser checks use: MVW_TEST_BROWSER)
 import fs from 'node:fs';

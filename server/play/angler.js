@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The angler (docs/features/fishing.md §Gear, step 7): what a player fishes with. Rods, reels, lines, the leader and the
 // bait and lures are things in their inventory (server/economy/inventory.js: bought at a dock store's counter, given,
 // traded); which rod, reel and line they use, their boat's upgrades (theirs on every boat) and their skills (one point
 // a fishing level) are kept here (fish_anglers, schema v51). A trip's kit (shared/fishing.js prepare) is built from both;
-// what a trip used up — bait a fish took, lures lost to a snapped line — leaves the inventory when it ends. What the
+// what a trip used up - bait a fish took, lures lost to a snapped line - leaves the inventory when it ends. What the
 // store sells is paid into the economy's Tackle sink. Without the economy (or its inventory) everyone fishes with the
 // starter's kit, as before.
 import { subj } from '../economy/economy.js';
@@ -62,7 +62,7 @@ export class Angler {
     return out;
   }
   /**
-   * The kit a trip takes (shared/fishing.js prepare → the run's state): the rod, reel and line chosen (if still held —
+   * The kit a trip takes (shared/fishing.js prepare → the run's state): the rod, reel and line chosen (if still held -
    * else the best held, else the starter's the dock lends), the leader if held and on, the bait and lures held, the
    * boat's upgrades and the skills.
    */
@@ -105,7 +105,7 @@ export class Angler {
     const w = E.walletFor(subj('account', account.id));
     if (w.status === 'frozen') fail(409, 'frozen', 'Your wallet is frozen');
     return E.dbs.tx(() => {
-      if (vc > 0) E.ledger.transfer(w.id, E.sink('tackle').id, Math.round(vc * 100), { kind: 'purchase', actor: `account:${account.id}`, memo: `${store.name || 'Dock Store'} — ${what}`, idem, ref: `store:${store.id ?? ''}` });
+      if (vc > 0) E.ledger.transfer(w.id, E.sink('tackle').id, Math.round(vc * 100), { kind: 'purchase', actor: `account:${account.id}`, memo: `${store.name || 'Dock Store'} - ${what}`, idem, ref: `store:${store.id ?? ''}` });
       return fn(store);
     });
   }
@@ -162,7 +162,7 @@ export class Angler {
     if (!s) fail(404, 'not_found', 'No such skill');
     const r = this.row(me), rank = r.kit.skills?.[s.id] || 0;
     if (rank >= SKILL_MAX) fail(409, 'top', `${s.name} is at its top rank`);
-    if (this.points(me, r.kit).free < 1) fail(409, 'no_points', 'No skill points left — each fishing level brings one');
+    if (this.points(me, r.kit).free < 1) fail(409, 'no_points', 'No skill points left - each fishing level brings one');
     r.kit.skills = { ...(r.kit.skills || {}), [s.id]: rank + 1 };
     this.save(me, r);
     return this.view(account);
@@ -177,7 +177,7 @@ export class Angler {
 
   // ---------------------------------------------------------------- after a trip
   /**
-   * A trip ended (the play routes' onFinish): what it used up leaves the inventory — detail.used { lure: n } (bait a
+   * A trip ended (the play routes' onFinish): what it used up leaves the inventory - detail.used { lure: n } (bait a
    * fish took, lures lost to a snapped line), never more than is there; the running totals. Once per trip (its record).
    */
   afterTrip(account, result) {

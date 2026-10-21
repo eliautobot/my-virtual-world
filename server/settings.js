@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Installation and account settings in three tiers (PLAN WP1.5; DECISIONS C85, C89–C92, C96): 0 preferences,
 // 1 secrets, 2 infrastructure. One registry says, for each setting, its scope, tier, type and the capability that may
 // change it. Secrets are stored sealed (server/secrets.js) and only ever reported as set / not set; a blank value keeps
@@ -81,7 +81,7 @@ export const SETTINGS = Object.freeze([
     label: 'Players can chat with people near them', on: 'Proximity chat is on', off: 'Proximity chat is off',
     help: 'Messages reach players within 20 m in the same space; nothing is stored on disk.',
   },
-  // How many people live in the city (2026-10-20, server/sim/housing.js): its homes decide — the residents fill this share
+  // How many people live in the city (2026-10-20, server/sim/housing.js): its homes decide - the residents fill this share
   // of the beds in its apartment buildings, settling towards it a little at a time by the world's clock.
   {
     path: 'world.homesFilled', scope: 'install', tier: 2, type: 'number', default: 30, min: 0, max: 100, step: 1, cap: 'world.edit',
@@ -198,13 +198,13 @@ export const SETTINGS = Object.freeze([
     path: 'phone.syncSeconds', scope: 'install', tier: 2, type: 'number', min: 5, max: 300, step: 1, default: 10, cap: 'connections.manage',
     label: 'Agents\' phones: check for new texts every (seconds)', help: 'Each phone asks its Twilio account this often; calls every third time. Lower is quicker, and more requests to Twilio.',
   },
-  // Talking with others' agents in the city (docs/features/CHAT.md §14; 2026-10-08): a player — or anyone from the
-  // map — talks with someone else's agent through a short bar, its answers in its speech bubble. Each conversation is a few
+  // Talking with others' agents in the city (docs/features/CHAT.md §14; 2026-10-08): a player - or anyone from the
+  // map - talks with someone else's agent through a short bar, its answers in its speech bubble. Each conversation is a few
   // short messages and is cleared after a few minutes, so nobody builds up a long context to steer an agent with (prompt
   // injection) or a long and costly one. Read on every message: a change applies at once.
   {
     path: 'talk.enabled', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'freewill.admin',
-    label: 'Talking with others\' agents: on', help: 'Off: nobody talks with someone else\'s agent — walking up to it or in its chat window; it only greets passers-by, as a resident does.',
+    label: 'Talking with others\' agents: on', help: 'Off: nobody talks with someone else\'s agent - walking up to it or in its chat window; it only greets passers-by, as a resident does.',
   },
   {
     path: 'talk.maxMessages', scope: 'install', tier: 2, type: 'number', min: 1, max: 100, step: 1, default: 15, cap: 'freewill.admin',
@@ -284,7 +284,7 @@ export const SETTINGS = Object.freeze([
   // what it may show visitors, and the switches that stop it all at once (2026-10-11)
   {
     path: 'connected.enabled', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'freewill.admin',
-    label: 'Connected agents (outside AIs): on', help: 'Off: every outside AI is paused at once — told to try again later; nothing is lost.',
+    label: 'Connected agents (outside AIs): on', help: 'Off: every outside AI is paused at once - told to try again later; nothing is lost.',
   },
   {
     path: 'connected.requireApproval', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'freewill.admin',
@@ -390,7 +390,7 @@ export const SETTINGS = Object.freeze([
     path: 'social.coolOffDays', scope: 'install', tier: 2, type: 'number', min: 0, max: 60, step: 1, default: 3, cap: 'freewill.admin',
     label: 'Agents and friends: world days before an ended friendship can grow again', help: 'Then it starts again from nothing, by meeting.',
   },
-  // Voice (docs/features/CHAT.md §9): the installation's own voice services — one that listens (dictation, voice mode) and
+  // Voice (docs/features/CHAT.md §9): the installation's own voice services - one that listens (dictation, voice mode) and
   // one that speaks (read aloud, voice mode) for everyone without a service of their own, within its daily
   // limit. Accounts and agents may choose their own (server/voice/voice.js).
   {
@@ -442,7 +442,7 @@ export const SETTINGS = Object.freeze([
     label: 'Agents\' PC: the built-in web search (when an owner has no search service of their own)', saved: 'PC search saved',
   },
   // The built-in real browser (docs/features/agent-pc.md §5, server/pc/chrome.js): a Chrome this server runs for its
-  // built-in agents — live to their owners, who can take it over. Off: they read pages with the built-in reader.
+  // built-in agents - live to their owners, who can take it over. Off: they read pages with the built-in reader.
   {
     path: 'pc.realBrowser', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'agents.manage',
     label: 'Agents\' PC: a real browser for the built-in agents (Chrome on this server; off: the text reader)', saved: 'PC browser saved',
@@ -456,7 +456,7 @@ export const SETTINGS = Object.freeze([
   { path: 'display.agentEmoji', scope: 'account', tier: 0, type: 'enum', values: ['normal', 'styled'], default: 'normal', label: "Agents' emoji" },
   // The ambient soundscape (WP4.18): wind, rain, surf, birds, the city's hum; starts after the first click or key.
   { path: 'display.sound', scope: 'account', tier: 0, type: 'enum', values: ['off', 'quiet', 'normal', 'loud'], default: 'normal', label: 'Ambient sound' },
-  // Sound (2026-10-20, Settings → Sound; client/js/audio/mixer.js): a master volume and one per kind of sound, in % —
+  // Sound (2026-10-20, Settings → Sound; client/js/audio/mixer.js): a master volume and one per kind of sound, in % -
   // the world (wind, rain, waves, birds, the city), aircraft and games, agents' voices, videos and recordings. They
   // follow the account; the top bar's sound on/off stays with each device. (display.sound, the old Ambient sound, is
   // kept for older releases: a device that had it starts the world's volume from it.)
@@ -490,10 +490,10 @@ export const SETTINGS = Object.freeze([
   { path: 'display.favourites', scope: 'account', tier: 0, type: 'string', default: '', maxLength: 1200, label: 'Favourite places' },
   { path: 'display.seenHelp', scope: 'account', tier: 0, type: 'boolean', default: false, label: 'The controls tip was shown' },
   // 2026-10-09: the in-world guide (server/guide.js, client/js/ui/guide.js): the welcome tour seen or skipped, the
-  // Getting started checklist hidden — a small JSON value kept with the account, never taken from a device.
+  // Getting started checklist hidden - a small JSON value kept with the account, never taken from a device.
   { path: 'display.guide', scope: 'account', tier: 0, type: 'string', default: '', maxLength: 200, label: 'Getting started: the tour and the checklist' },
   // 2026-10-08: the selection widget across the top opens when something is selected and folds when nothing is (auto),
-  // or stays as the person left it (open / closed: Manual). (It replaced display.selection — the Info panel option is gone.)
+  // or stays as the person left it (open / closed: Manual). (It replaced display.selection - the Info panel option is gone.)
   { path: 'display.selectionWidget', scope: 'account', tier: 0, type: 'enum', values: ['auto', 'open', 'closed'], default: 'auto', label: 'The selection widget' },
   // 2026-10-08: how see-through windows, panels and buttons are, in % (0: solid, as the theme draws them; client/css/theme.css)
   { path: 'display.transparency', scope: 'account', tier: 0, type: 'number', min: 0, max: 60, step: 5, default: 0, label: 'Transparency' },

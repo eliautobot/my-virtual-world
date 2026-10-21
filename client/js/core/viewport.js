@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The part of the screen a phone's keyboard leaves (Chrome on Android lays the keyboard over the page): --kb is how
 // much of the bottom it covers and --vvh the height still visible, so sheets and bars fixed to the bottom (the lot card,
 // the building bar, the merge bar) sit above it and the field being typed in stays in view.

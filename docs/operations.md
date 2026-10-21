@@ -2,8 +2,8 @@
 
 ## Health
 
-- `GET /api/health` — up, version, world version, libraries (administrators also see counters and errors).
-- `GET /api/ready` — 200 when ready to serve, 503 while starting or stopping.
+- `GET /api/health`: up, version, world version, libraries (administrators also see counters and errors).
+- `GET /api/ready`: 200 when ready to serve, 503 while starting or stopping.
 - The server logs to standard output; services append it to a log file.
 
 ## Backups and restores

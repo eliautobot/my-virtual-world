@@ -1,15 +1,15 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What goes wrong in an agent's life (docs/features/FREE-WILL.md §2.7, §11.11): the world shows it, this notices it.
-//   rent   — rent it could not pay (a debt to its landlord), or a flat it rents for VC whose rent is overdue (days of
+//   rent   - rent it could not pay (a debt to its landlord), or a flat it rents for VC whose rent is overdue (days of
 //            grace counting down) or whose lease is ending
-//   money  — money running out: less than a few days of its rent and living left (not while 'rent' is open: that says it)
-//   home   — no home (its building went, its lease ended, the city had no free bed for it)
-//   job    — no job (its workplace went and the city had no free place for it)
+//   money  - money running out: less than a few days of its rent and living left (not while 'rent' is open: that says it)
+//   home   - no home (its building went, its lease ended, the city had no free bed for it)
+//   job    - no job (its workplace went and the city had no free place for it)
 // No AI here: what the world shows decides. A problem opens when a scan has seen it twice in a row and resolves when two
 // scans have not (a home or a desk is briefly empty while the city re-homes people after an edit; money crosses a line
-// back and forth as the day's purchases settle — so money opens below MONEY_OPEN_DAYS and resolves above MONEY_CLOSE_DAYS).
+// back and forth as the day's purchases settle - so money opens below MONEY_OPEN_DAYS and resolves above MONEY_CLOSE_DAYS).
 // When one opens: the agent remembers it (its life writes the memory, as it writes "Met Lea at the park"), its owner is
-// told, and — when it has a brain of its own — its Mind is given the problem to think about (server/mind/mind.js). When
+// told, and - when it has a brain of its own - its Mind is given the problem to think about (server/mind/mind.js). When
 // it resolves: a memory where there is something to remember (a new home, a new job, the rent paid), and its owner is
 // told. (The Mind's scheduler finds open problems not yet thought about today; nothing here waits for it.) Every problem is a row of agent_problems: kept, read by its owner (and manage shares) in the Agent Studio.
 

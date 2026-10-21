@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The ground of a grid's blocks, as the city draws its own (the grid layout tool; 2026-10-14, the product owner: "the
 // inner areas of lot area to be the same as the green area in the main city on the residentials … and the brick/paved
 // area if it's commercial or mixed use … flat and flush with the back of sidewalks"; then: "make sure it looks and works

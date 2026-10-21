@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Farmland (2026-10-03: "detailed farm land with like wheat fields or corn or planted anything", hay rolls, fields
-// of flowers). Fields are laid out in a gently curving "farm space" — bands of fields like a patchwork quilt, bending
-// with the land instead of a grid — each with its crop, the way its rows run, and what bounds it: a hedge, a post-and-
+// of flowers). Fields are laid out in a gently curving "farm space" - bands of fields like a patchwork quilt, bending
+// with the land instead of a grid - each with its crop, the way its rows run, and what bounds it: a hedge, a post-and-
 // rail fence, a dry-stone wall or a grass margin. A field is farmed when its middle is on the gentle, drier land of a
 // farm cluster within ~2 km of the city (shared/biome.js decides, field by field, so fields are whole).
 //

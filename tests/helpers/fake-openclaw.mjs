@@ -1,15 +1,15 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A stand-in OpenClaw gateway for the tests (Agent Providers, docs/features/agent-providers.md): the protocol v4
-// handshake as a real gateway runs it — connect.challenge first, then the client's signed connect — with the frames and
+// handshake as a real gateway runs it - connect.challenge first, then the client's signed connect - with the frames and
 // error details recorded from OpenClaw 2026.9.6 (tests/fixtures/openclaw/). It checks the device signature for real
 // (the device auth payload v3 of OpenClaw's own client, Ed25519), the shared token, and pairing: 'auto' approves a new
 // device at once (OpenClaw's silent local pairing); 'approval' answers PAIRING_REQUIRED with a request id until
 // approve(id), as a gateway with autoApproveLocal off does. Requests are answered from `methods` (name → (params, conn) =>
 // payload, or throw { code, message, details }).
-// The chat (scripted from the recorded runs, tests/fixtures/openclaw/run-*.json): sessions.create, chat.send — it replays a
+// The chat (scripted from the recorded runs, tests/fixtures/openclaw/run-*.json): sessions.create, chat.send - it replays a
 // recorded run's frames with this run's id and session (a message naming [[tool: replays the command run that waits for
 // approval until approval.resolve; [[think]] the reasoning one; [[slow]] waits between frames so Stop can cut it), to the
-// connections that follow the session (session-scoped events) — chat.abort, approval.resolve, chat.history (the run's
+// connections that follow the session (session-scoped events) - chat.abort, approval.resolve, chat.history (the run's
 // recorded history), models.list, sessions.list (with one session made elsewhere), sessions.patch (thinking levels checked
 // against the model's, as a gateway does).
 import crypto from 'node:crypto';
@@ -35,7 +35,7 @@ export const MEDIA_CLIP = Buffer.from('FAKE-MP4-'.repeat(200));
 
 export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', version = '2026.9.6', methods = {}, agents = [{ id: 'main', name: 'Main', emoji: '🦞' }] } = {}) {
   // its web routes beside the WebSocket, as OpenClaw serves them on one port: a kept attachment at its ticketed link
-  // (artifacts.download hands out the ticket), and assistant-media for a path an agent wrote — signed in with a paired
+  // (artifacts.download hands out the ticket), and assistant-media for a path an agent wrote - signed in with a paired
   // device's token (Bearer), and only the files that session may show (f.files)
   const web = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
@@ -146,7 +146,7 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
     async stop() { for (const ws of f.sockets) ws.terminate(); await new Promise(r => wss.close(r)); await new Promise(r => web.close(r)); },
     methods: {
       // as OpenClaw does: agents.list carries the name and emoji its settings give (none for an agent defined only by its
-      // workspace); agent.identity.get adds its IDENTITY.md (`file`) — agents: [{ id, name?, emoji?, file?: { name, emoji } }]
+      // workspace); agent.identity.get adds its IDENTITY.md (`file`) - agents: [{ id, name?, emoji?, file?: { name, emoji } }]
       'agents.list': () => ({ defaultId: f.agents[0] ? f.agents[0].id : null, mainKey: 'main', scope: 'per-sender',
         agents: f.agents.map(a => ({ id: a.id, ...(a.name ? { name: a.name, identity: { name: a.name, ...(a.emoji ? { emoji: a.emoji } : {}) } } : {}) })) }),
       'agent.identity.get': ({ agentId }) => {
@@ -224,7 +224,7 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
         return { status: cancel ? 'cancelled' : 'answered', ...(answers ? { answers } : {}) };
       },
       'progressCard.get': ({ sessionKey }) => ({ card: f.sessions.get(sessionKey)?.card || null }),
-      // (as OpenClaw 2026.9.6: no card, refused; otherwise the agent is asked — a hidden turn steered into the session —
+      // (as OpenClaw 2026.9.6: no card, refused; otherwise the agent is asked - a hidden turn steered into the session -
       // and accepted at once; the card it writes is announced with progressCard.changed { sessionKey, revision })
       'progressCard.refresh': ({ sessionKey, agentId, idempotencyKey }) => {
         const x = f.sessions.get(sessionKey);
@@ -237,7 +237,7 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
         }, 30);
         return { runId: `progress-card-refresh:${crypto.createHash('sha256').update(JSON.stringify([agentId, sessionKey, idempotencyKey])).digest('hex')}`, status: 'accepted', revision: card.revision };
       },
-      // (clearing with expectedRevision — the Control UI's Dismiss: only the version the person saw; a newer one stays)
+      // (clearing with expectedRevision - the Control UI's Dismiss: only the version the person saw; a newer one stays)
       'progressCard.put': ({ sessionKey, markdown, plan, expectedRevision }) => {
         const x = f.sessions.get(sessionKey); if (!x) throw Object.assign(new Error('unknown session'), { code: 'INVALID_REQUEST' });
         if (markdown || (plan && plan.length)) throw Object.assign(new Error('the stand-in only clears'), { code: 'INVALID_REQUEST' });

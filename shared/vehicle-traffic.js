@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Authoritative ambient traffic using Next's existing straight lanes, following and signal rules; on an island world
 // (WP4.5) also along the roads beyond the city (shared/lane-graph.js): city lanes that reach a road's start at the
 // city edge carry on onto it, and cars come back in the same way; junctions are taken one conflicting move at a time.

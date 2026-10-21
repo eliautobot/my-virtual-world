@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Furniture / object catalog shared by the server (placement, nav, activities) and the client (geometry, editing).
 // Item-local frame: +z = the item's front (the side a user approaches), yaw 0 faces +z, yaw PI faces -z.
 // rect = blocking rectangle [x0, z0, x1, z1] (item-local). block:false => walkable decor (rugs, mats).
@@ -101,7 +101,7 @@ export const CATALOG = {
   display: { name: 'Display Table', cat: 'Retail', h: 0.9, rect: [-0.75, -0.5, 0.75, 0.5], tint: true,
     slots: [S(0, 0.9, P, 'browse', 'browse'), S(0, -0.9, 0, 'browse', 'browse')] },
   // a shoe store (2026-10-15): a wall of sneakers on lit shelves (its colour: the wall's), and one sneaker on a plinth
-  // under glass (its colour: the shoe's) — a standing sign beside it can carry its picture, price and link
+  // under glass (its colour: the shoe's) - a standing sign beside it can carry its picture, price and link
   shoe_wall: { name: 'Shoe Wall', cat: 'Retail', h: 2.3, rect: [-1.0, -0.16, 1.0, 0.16], wall: true, tint: true,
     slots: [S(-0.45, 0.62, P, 'browse', 'browse'), S(0.45, 0.62, P, 'browse', 'browse')] },
   shoe_plinth: { name: 'Shoe Plinth', cat: 'Retail', h: 1.45, rect: [-0.32, -0.32, 0.32, 0.32], tint: true,
@@ -155,8 +155,8 @@ export const CATALOG = {
   billboard_xl: { name: 'Large billboard', cat: 'Marketing', outdoor: true, h: 12.4, rect: [-7.4, -1.2, 7.4, 1.2], slots: [] },
   billboard_xl_oh: { name: 'Large billboard (overhang)', cat: 'Marketing', outdoor: true, h: 12.4, rect: [-7.4, -1.2, 7.4, 1.2], slots: [] },
   street_sign: { name: 'Street sign', cat: 'Marketing', outdoor: true, h: 2.75, rect: [-0.72, -0.3, 0.72, 0.3], slots: [] },
-  // ---------------- Signs (inside buildings and parks: the owner's own design, or paid ads; resizable; in styles —
-  // shared/signs.js SIGN_STYLES — whose lights take the sign's colour) ----------------
+  // ---------------- Signs (inside buildings and parks: the owner's own design, or paid ads; resizable; in styles -
+  // shared/signs.js SIGN_STYLES - whose lights take the sign's colour) ----------------
   sign_stand: { name: 'Standing sign', cat: 'Signs', h: 1.55, rect: [-0.34, -0.24, 0.34, 0.24], tint: true, slots: [] },
   sign_stand_wide: { name: 'Standing sign (wide)', cat: 'Signs', h: 1.3, rect: [-0.49, -0.24, 0.49, 0.24], tint: true, slots: [] },
   sign_wall: { name: 'Wall sign', cat: 'Signs', h: 2.1, rect: [-0.64, -0.06, 0.64, 0.06], wall: true, block: false, tint: true, slots: [] },

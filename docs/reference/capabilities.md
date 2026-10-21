@@ -1,6 +1,6 @@
 # Capabilities
 
-Generated from the code by `tools/gen-reference-docs.mjs` — do not edit by hand. Proprietary — see [LICENSE](../../LICENSE).
+Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand. Proprietary - see [LICENSE](../../LICENSE).
 
 Roles, low to high: guest, member, admin, owner. *Fixed*: the owner cannot change its lowest role. *Identity*: needs a signed-in account.
 

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Version and release information, read once at start-up.
 // The version comes from package.json. A release folder built by tools/deploy/build-release.sh also carries a
 // release.json (tag, commit, build time); a development tree has none and reports the "dev" channel.

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The admin and installation tabs (WP1.4; moved into the tabbed Settings dialog in WP1.7): Users, Invites, Audit log,
 // General (the installation settings) and Permissions. ui/settings.js hosts them; every action is checked by the
 // server again, and the UI only offers what the signed-in account's role allows (always below the own role).
@@ -17,7 +17,7 @@ const getJ = async url => {
   if (!r.ok) throw Object.assign(new Error((j && j.error) || `HTTP ${r.status}`), { status: r.status, code: j && j.code });
   return j;
 };
-const when = t => (t ? new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+const when = t => (t ? new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '-');
 
 /** The app handle for toasts (ui/settings.js calls this when it opens). */
 export function useApp(a) { app = a; }
@@ -140,7 +140,7 @@ export async function invitesTab(d, body) {
   wireCopy(body);
   const note = body.querySelector('.adm-note'), tbody = body.querySelector('tbody');
   const render = invites => {
-    tbody.innerHTML = invites.map(i => `<tr><td>${ROLE[i.role]}</td><td>${esc(i.note || '')}</td><td>${esc(i.createdBy || '—')}</td><td>${when(i.expires)}</td>
+    tbody.innerHTML = invites.map(i => `<tr><td>${ROLE[i.role]}</td><td>${esc(i.note || '')}</td><td>${esc(i.createdBy || '-')}</td><td>${when(i.expires)}</td>
       <td>${i.state}${i.usedBy ? ` by ${esc(i.usedBy)}` : ''}</td>
       <td>${i.state === 'open' && RANK[i.role] < RANK[me.role] ? `<button type="button" class="btn small revoke" data-id="${i.id}">Revoke</button>` : ''}</td></tr>`).join('')
       || '<tr><td colspan="6" class="hint">No invites yet</td></tr>';
@@ -192,7 +192,7 @@ export async function auditTab(d, body) {
     if (to) p.set('to', String(new Date(`${to}T00:00`).getTime() + 86400000));
     return p;
   };
-  const row = e => `<tr><td>${when(e.at)}</td><td>${esc(e.actor_login || (e.action.startsWith('host.') ? 'host tool' : '—'))}</td><td><code>${esc(e.action)}</code></td>
+  const row = e => `<tr><td>${when(e.at)}</td><td>${esc(e.actor_login || (e.action.startsWith('host.') ? 'host tool' : '-'))}</td><td><code>${esc(e.action)}</code></td>
     <td>${esc(e.target_login || '')}</td><td>${esc(e.ip || '')}</td><td class="det">${e.detail ? esc(JSON.stringify(e.detail)) : ''}</td></tr>`;
   const load = async (append = false) => {
     const p = query();
@@ -240,8 +240,8 @@ export async function generalTab(d, body) {
   });
 }
 /**
- * A form of installation settings from GET /api/settings: the groups pick(v) chooses — [[heading, hint, settings,
- * advanced?]] (advanced: more settings, folded under "Advanced") — each
+ * A form of installation settings from GET /api/settings: the groups pick(v) chooses - [[heading, hint, settings,
+ * advanced?]] (advanced: more settings, folded under "Advanced") - each
  * row as its type wants (a switch, a choice, a number, a secret, text), saved as it changes, with who may change it.
  * extra(v): more HTML below (General: the key that encrypts stored secrets). Used by General and Agent limits.
  */

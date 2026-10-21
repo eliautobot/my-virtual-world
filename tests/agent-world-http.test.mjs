@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent's eyes and hands over HTTP on a real server (server/agent-world.js; 2026-10-10): only its
 // own session token opens them (never a browser session, never another agent's), look answers with the city as it is,
 // an order is carried out or refused with why, a refusal for going too fast carries retryAfter in its JSON and its
@@ -64,16 +64,16 @@ test('its inbox starts with the facts about it right now: the world\'s time, whe
   assert.match(you.time, /^\w+ \d{1,2}:\d{2} (AM|PM)$/);
   const [, hh, , ap] = /(\d{1,2}):(\d{2}) (AM|PM)/.exec(you.time), h = (Number(hh) % 12) + (ap === 'PM' ? 12 : 0);
   assert.equal(you.partOfDay, h >= 5 && h < 12 ? 'morning' : h >= 12 && h < 17 ? 'afternoon' : h >= 17 && h < 21 ? 'evening' : 'night');
-  // (its body lives on between the calls: the facts say where it was at the inbox call — what a look said just before or after)
+  // (its body lives on between the calls: the facts say where it was at the inbox call - what a look said just before or after)
   const after = (await agent('GET', '/api/agent-api/world?brief=1')).json;
   assert.ok([look.json.me.where, after.me.where].includes(you.where), `where (${you.where} / ${look.json.me.where} / ${after.me.where})`);
   assert.equal(typeof you.doing, 'string'); assert.equal(typeof you.feels, 'string');
   assert.match(you.rule, /facts about you right now.*Never make up the time, the part of the day, where you are or what you are doing/s);
-  // (this request sent no kit version — an older kit: it is told, once, to update)
+  // (this request sent no kit version - an older kit: it is told, once, to update)
   assert.ok((box.json.notices || []).some(n => /kit is out of date: download mvw\.mjs and mvw-agent\.mjs again/.test(n.text)), 'told to update');
 });
 
-test('an older kit (no version) still gets the facts — as a notice it prints — and is told to update; today\'s kit gets "you" only', async () => {
+test('an older kit (no version) still gets the facts - as a notice it prints - and is told to update; today\'s kit gets "you" only', async () => {
   const rec = (await ann.get('/api/agents')).json.agents.find(a => a.key === `ext-${slot}`);
   const ask = async (text, headers = {}) => {
     const sess = (await ann.post('/api/chat-sessions/create', { agent: rec.id, label: 'Facts' })).json.session;
@@ -139,7 +139,7 @@ test('the admin\'s limits (Settings → Agent limits) apply at once, and look sh
   assert.equal((await owner.post('/api/settings', { values: { 'connected.orderGapSeconds': 0 } })).status, 400);
 });
 
-test('the admin\'s one switch for lines out loud silences every agent — an outside AI too', async () => {
+test('the admin\'s one switch for lines out loud silences every agent - an outside AI too', async () => {
   assert.equal((await owner.post('/api/settings', { values: { 'mind.speech': false } })).status, 200);
   try {
     const r = await agent('POST', '/api/agent-api/act', { action: 'say', text: 'Lovely morning!' });

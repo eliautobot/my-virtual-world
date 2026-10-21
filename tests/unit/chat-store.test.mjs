@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat stores (server/chat/*, PLAN WP2.2; DECISIONS C53, C119, C121; CHECKLIST X11): the transcript mirror, sessions private to an
 // account and an agent, references shared per agent, and attachments stored by content hash with type and size limits.
 import assert from 'node:assert/strict';

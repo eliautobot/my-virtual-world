@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The list of agents this page may see (GET /api/agents), shared by the team list, the left dock and the chat panel. Connected agents
 // (WP2.14) have no body in the city, so they cannot be found among the residents; this is where the page learns about them. It reloads
 // when the server says the set of agents changed (a new agent enrolled, one revoked or renamed), when the account changes, and when
@@ -27,7 +27,7 @@ function overlayAll() {
 
 let running = null, queued = null, restored = false;
 /** Reloads the list. A call while a reload runs gets the one after it (one for all such calls), so whoever changed an
- *  agent and awaits this sees its change — not the list the reload already under way read before it. */
+ *  agent and awaits this sees its change - not the list the reload already under way read before it. */
 export function load() {
   if (running) {
     const next = () => { queued = null; return load(); };

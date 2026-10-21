@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The server boots on a throwaway data folder, passes every smoke check, reports its version and release, and keeps
 // its world across a restart. Run with: npm test
 import assert from 'node:assert/strict';

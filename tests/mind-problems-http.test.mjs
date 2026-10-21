@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Mind handles problems and money on a real server (docs/features/FREE-WILL.md §11.11): money running out opens a
-// problem (remembered, its owner's to see), the agent's Mind thinks about it with its tools — looks at the flats on offer,
-// rents one — and its owner's spending rules decide (above "ask me above" it waits for the owner's approval, which then
+// problem (remembered, its owner's to see), the agent's Mind thinks about it with its tools - looks at the flats on offer,
+// rents one - and its owner's spending rules decide (above "ask me above" it waits for the owner's approval, which then
 // moves it in); in a chat its owner asks it to buy and to pay, and it does so through the same rules (refused beyond its
 // daily limit); a visitor's chat has no tools; the problem resolves when the money is back.
 // The brain is a fake OpenAI-compatible server on this machine that uses the tools the way a model would.
@@ -77,7 +77,7 @@ before(async () => {
   assert.equal((await owner.post('/api/economy/admin/switch', { name: 'enabled', on: true })).status, 200);
   agents = (await owner.get('/api/agents')).json.agents;
   for (const a of agents) assert.equal((await owner.post('/api/mind/agent', { agent: a.id, cadence: 'off' })).status, 200);
-  // (its owner's chats here are its city self, with its life and tools: Life — docs/features/CHAT.md §13; Work is agent-work-http's)
+  // (its owner's chats here are its city self, with its life and tools: Life - docs/features/CHAT.md §13; Work is agent-work-http's)
   for (const a of agents) assert.equal((await owner.post('/api/agent-work', { agent: a.id, defaultMode: 'life' })).status, 200);
   const c = await owner.post('/api/connections', { kind: 'models', label: 'Test brain', scope: 'installation',
     config: { provider: 'custom', baseUrl: `http://127.0.0.1:${fake.address().port}/v1`, model: 'fake-small', priceInPerMTok: 1, priceOutPerMTok: 2 }, secrets: { apiKey: 'sk-test' } });
@@ -112,7 +112,7 @@ async function chat(c, a, session, input) {
   throw new Error('no answer');
 }
 
-test('money running out opens a problem; the Mind looks at flats and rents one — its owner approves above the limit', async () => {
+test('money running out opens a problem; the Mind looks at flats and rents one - its owner approves above the limit', async () => {
   // its owner's rules: it may rent and pay, up to 200 VC a day, above 10 VC the owner agrees first
   assert.equal((await owner.post('/api/economy/agent/limits', { agent: A.id, scopes: ['rent', 'pay', 'buy'], dailyCap: VC(200), approveAbove: VC(10), paused: false })).status, 200);
   // its owner takes most of its money back: 60 VC left
@@ -129,7 +129,7 @@ test('money running out opens a problem; the Mind looks at flats and rents one �
   assert.equal((await owner.post('/api/mind/agent', { agent: A.id, cadence: 'daily' })).status, 200);
   const t = await until(async () => (await thoughts(A)).find(x => x.kind === 'problem' && x.status === 'ok'), 'a problem thought');
   assert.deepEqual(t.did.used.map(u => [u.tool, u.ok]), [['flats', true], ['rent_flat', true], ['pay', false]]);
-  assert.match(t.did.used[0].text, /\[F1\] «Flat 1 on floor 2 of [^»]+» — 900 VC a month \(30 VC a day\)/);
+  assert.match(t.did.used[0].text, /\[F1\] «Flat 1 on floor 2 of [^»]+» - 900 VC a month \(30 VC a day\)/);
   assert.match(t.did.used[1].text, /waiting: my owner must agree first/, JSON.stringify(t.did.used));
   assert.match(t.did.used[2].text, /not done: that is not something I may do now/, 'paying is not a problem tool');
   assert.equal(t.did.told, 'I found a flat; please approve it.');
@@ -140,7 +140,7 @@ test('money running out opens a problem; the Mind looks at flats and rents one �
   assert.deepEqual(req.messages.map(m => m.role), ['system', 'user', 'assistant', 'user', 'assistant', 'user']);
   assert.match(req.messages[3].content, /^RESULTS:\n- flats: FLATS FOR RENT: \[F1\]/);
   const p2 = (await problems(A)).find(p => p.id === open.id);
-  assert.equal(p2.thoughts, 1); assert.match(p2.note, /^Wants to rent Flat 1 on floor 2 of .+ \(30 VC a day\) — waiting for your OK$/);
+  assert.equal(p2.thoughts, 1); assert.match(p2.note, /^Wants to rent Flat 1 on floor 2 of .+ \(30 VC a day\) - waiting for your OK$/);
   // once a world day: no second thought about it now
   await wait(1500);
   assert.equal((await thoughts(A)).filter(x => x.kind === 'problem').length, 1);

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Original midsize saloon dimensions in world units. Shared by rendering and
 // authoritative traffic; uniform class scale preserves automotive proportions.
 export function getSedanProportions(type) {

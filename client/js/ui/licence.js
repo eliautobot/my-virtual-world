@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Licence keys and demo mode on the page (PLAN WP1.11, DECISIONS C108, C109, E17, E19).
 // - Demo mode: a watermark (click it for Settings → License); the edit panels and settings stay visible and can be
 //   opened, but are greyed out and unusable (E19). The server refuses the locked features whatever the page shows.

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The PC's command line (docs/features/agent-pc.md §4): words as models write them (quotes or none, several commands in
 // one go, text after <<EOF), answers in plain words, errors that say what to do, pages, tasks, the calendar in the
 // agent's time zone, teams, and a visitor who can only read Public.
@@ -30,14 +30,14 @@ test('words and commands as models write them', () => {
   assert.deepEqual(c, [{ line: 'ls ~' }, { line: 'write ~/a.md', text: 'line 1\n\nline 3' }, { line: 'read ~/a.md' }]);
 });
 
-test('files: write, read in pages, edit, ls, mv, cp, rm, trash, restore, find, info — one request or several', async () => {
+test('files: write, read in pages, edit, ls, mv, cp, rm, trash, restore, find, info - one request or several', async () => {
   const { sh, done } = setup();
   try {
     const s = sh({ agent: 1 });
     let r = await s.run('write ~/Documents/plan.md <<EOF\n# Plan\n- call Sam\n- book the room\nEOF\nread ~/Documents/plan.md');
     assert.equal(r.results.length, 2);
     assert.match(r.results[0].out, /^made ~\/Documents\/plan\.md \(\d+ bytes, version 1\)$/);
-    assert.match(r.results[1].out, /^~\/Documents\/plan\.md — 3 lines, .* version 1, changed Sun, Oct 18, 12:00\n# Plan\n- call Sam/);
+    assert.match(r.results[1].out, /^~\/Documents\/plan\.md - 3 lines, .* version 1, changed Sun, Oct 18, 12:00\n# Plan\n- call Sam/);
     r = await s.run('edit ~/Documents/plan.md', { find: '- call Sam', replace: '- call Sam on Friday' });
     assert.equal(r.text, 'changed ~/Documents/plan.md (1 place, version 2)');
     r = await s.run('edit ~/Documents/plan.md <<EOF\nbook the room\n=====\nbook room 2\nEOF');
@@ -60,11 +60,11 @@ test('files: write, read in pages, edit, ls, mv, cp, rm, trash, restore, find, i
     assert.match(r.text, /line 450$/);
     r = await s.run('cd Documents\nls\nmkdir Old\nmv plan.md Old\ncp Old/plan.md ~/Public/plan-copy.md\nls ~/Public\npwd');
     assert.ok(r.results.every(x => x.ok), r.text);
-    assert.match(r.results[1].out, /^~\/Documents — 1 item\nplan\.md/);
+    assert.match(r.results[1].out, /^~\/Documents - 1 item\nplan\.md/);
     assert.match(r.results[5].out, /plan-copy\.md/);
     assert.equal(r.results[6].out, '~/Documents');
     r = await s.run('find room');
-    assert.match(r.text, /~\/Documents\/Old\/plan\.md — .*book room 2/);
+    assert.match(r.text, /~\/Documents\/Old\/plan\.md - .*book room 2/);
     r = await s.run('rm ~/Public/plan-copy.md\ntrash');
     const id = /\[(\d+)\]/.exec(r.results[1].out)[1];
     r = await s.run(`restore ${id}`);
@@ -107,7 +107,7 @@ test('tasks and the calendar, in the agent\'s time zone', async () => {
     pc.setMember({ human: 10 }, t.id, 1, 'lead'); pc.setMember({ human: 10 }, t.id, 2, 'member'); pc.setMember({ human: 10 }, t.id, 3, 'viewer');
     const reva = sh({ agent: 1 }), mo = sh({ agent: 2 });
     let r = await reva.run('task add "Write the weekly report" --to Mo --due "fri 5pm" --on /teams/ops');
-    assert.match(r.text, /^added #(\d+) \[To do\] Write the weekly report — Mo · due Fri, Oct 23, 17:00 to the ops team's board$/);
+    assert.match(r.text, /^added #(\d+) \[To do\] Write the weekly report - Mo · due Fri, Oct 23, 17:00 to the ops team's board$/);
     const id = /#(\d+)/.exec(r.text)[1];
     r = await reva.run('task add Something --to Kit --on /teams/ops');
     assert.match(r.text, /Kit only views this team/);
@@ -120,13 +120,13 @@ test('tasks and the calendar, in the agent\'s time zone', async () => {
     r = await reva.run(`task ${id}`);
     assert.match(r.text, /\[Review\].*\nmade by you .*\nnotes:\nDraft in/);
     r = await reva.run('tasks /teams/ops');
-    assert.match(r.text, /^the ops team's board:\nTo do: —\nDoing: —\nReview \(1\):/);
+    assert.match(r.text, /^the ops team's board:\nTo do: -\nDoing: -\nReview \(1\):/);
     await reva.run('task add "Call the dentist" --due tomorrow');
     r = await reva.run('tasks');
     assert.match(r.text, /Call the dentist · due Mon, Oct 19 · your board/);
     r = await reva.run('cal add "Team call" tomorrow 3pm --for 30m --on /teams/ops\ncal add Dentist oct 20 9:30am --at "Main St"\ncal week');
     assert.ok(r.results.every(x => x.ok), r.text);
-    assert.match(r.results[0].out, /the ops team's calendar: \[\d+\] Team call — Mon, Oct 19, 15:00 for 30 min/);
+    assert.match(r.results[0].out, /the ops team's calendar: \[\d+\] Team call - Mon, Oct 19, 15:00 for 30 min/);
     assert.match(r.results[2].out, /Mon, Oct 19, 15:00–15:30 Team call · ops team\n\[\d+\] Tue, Oct 20, 09:30–10:30 Dentist at Main St/);
     r = await mo.run('cal tomorrow');
     assert.match(r.text, /Team call/, 'a teammate sees the team\'s calendar');
@@ -136,7 +136,7 @@ test('tasks and the calendar, in the agent\'s time zone', async () => {
     r = await reva.run('cal add "x" whenever');
     assert.match(r.text, /^error: usage: cal add/);
     r = await reva.run('team');
-    assert.match(r.text, /^Ops — folder \/teams\/ops, you are lead\n {2}co-workers: Mo \(member\), Kit \(viewer\)\n {2}brief: Keep the office running\./);
+    assert.match(r.text, /^Ops - folder \/teams\/ops, you are lead\n {2}co-workers: Mo \(member\), Kit \(viewer\)\n {2}brief: Keep the office running\./);
     r = await reva.run('whoami');
     assert.match(r.text, /^You are Reva \(Front desk\), on your own PC, in ~\.\nNow: Sun, Oct 18, 12:00 \(America\/New_York\)\.\nTeams: ops \(lead\)\./);
   } finally { done(); }

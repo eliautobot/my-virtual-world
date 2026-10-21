@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A Hermes agent's own computer in its owner's PC (docs/features/agent-pc.md §4.1): the machine Hermes runs on, through
 // Hermes' own managed files (its dashboard's Files: GET /api/files, /api/files/read, POST /api/files/upload,
-// /api/files/mkdir, DELETE /api/files) — whatever Hermes itself allows there (its locked root when it has one, its
+// /api/files/mkdir, DELETE /api/files) - whatever Hermes itself allows there (its locked root when it has one, its
 // refusal of sensitive files). A fixed set of operations; changes only for a connection with Full access (adapter.js).
 const fail = (code, message) => Object.assign(new Error(message), { code });
 const pth = p => String(p ?? '').slice(0, 2000);

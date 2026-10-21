@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a thought may look at and do with money (docs/features/FREE-WILL.md §11.11): the Mind's tools. A thought that
 // has tools runs in rounds: the model answers {"use":[…]} to use up to MAX_PER_ROUND of them, gets their results as the
 // next message, and finally answers with its usual JSON (server/mind/mind.js). Every tool works on what the world lists
-// — flats on offer, a real place's menu, people it knows — by short references (F1, I3) the results gave it, never by
+// - flats on offer, a real place's menu, people it knows - by short references (F1, I3) the results gave it, never by
 // the world's own ids; and every payment, purchase or lease goes through the economy as the agent
 // (server/economy/mind-money.js → runAgentAction), so its owner's spending rules decide: scopes, the daily limit,
 // "ask me above" (an approval waits for the owner), pause. At most MAX_DO money actions in one thought.
@@ -14,13 +14,13 @@ export const MAX_ROUNDS = 4;            // model calls in one thought with tools
 export const MAX_PER_ROUND = 3;
 export const MAX_DO = 2;
 const TOOLS = {
-  flats: { look: true, scope: 'rent', about: '{"tool":"flats"} — the flats for rent now, cheapest first' },
-  menu: { look: true, about: '{"tool":"menu","place":"<a place from PLACES>"} — what it sells and the prices' },
-  rent_flat: { scope: 'rent', about: '{"tool":"rent_flat","flat":"F1"} — rent a flat "flats" listed (my owner\'s rules decide; above their limit they must agree first)' },
-  buy: { scope: 'buy', about: '{"tool":"buy","place":"<place>","items":[{"item":"I1","n":1}]} — buy what "menu" listed' },
-  pay: { scope: 'pay', about: '{"tool":"pay","to":"<my owner, a person I know or a place>","amount":<VC>,"memo":"what for"} — pay someone' },
-  ask_owner: { scope: 'pay', about: '{"tool":"ask_owner","amount":<VC>,"why":"..."} — ask my owner for money (they answer in their wallet)' },
-  give: { scope: 'pay', about: '{"tool":"give","item":"<a thing I HOLD>","n":1,"to":"<my owner or a person I know>"} — give something I hold (my owner\'s rules decide, as for paying)' },
+  flats: { look: true, scope: 'rent', about: '{"tool":"flats"} - the flats for rent now, cheapest first' },
+  menu: { look: true, about: '{"tool":"menu","place":"<a place from PLACES>"} - what it sells and the prices' },
+  rent_flat: { scope: 'rent', about: '{"tool":"rent_flat","flat":"F1"} - rent a flat "flats" listed (my owner\'s rules decide; above their limit they must agree first)' },
+  buy: { scope: 'buy', about: '{"tool":"buy","place":"<place>","items":[{"item":"I1","n":1}]} - buy what "menu" listed' },
+  pay: { scope: 'pay', about: '{"tool":"pay","to":"<my owner, a person I know or a place>","amount":<VC>,"memo":"what for"} - pay someone' },
+  ask_owner: { scope: 'pay', about: '{"tool":"ask_owner","amount":<VC>,"why":"..."} - ask my owner for money (they answer in their wallet)' },
+  give: { scope: 'pay', about: '{"tool":"give","item":"<a thing I HOLD>","n":1,"to":"<my owner or a person I know>"} - give something I hold (my owner\'s rules decide, as for paying)' },
 };
 const FOR = { problem: ['flats', 'rent_flat', 'ask_owner'], chat: ['flats', 'menu', 'rent_flat', 'buy', 'pay', 'give'] };
 const vc = c => `${(c / 100).toFixed(c % 100 ? 2 : 0)} VC`;
@@ -56,7 +56,7 @@ export function toolbox({ agent, kind, ctx, money, wallet, people, idem }) {
   const answer = r => (r && r.approval ? 'waiting: my owner must agree first (they have been asked; it waits a day)' : null);
   // what its owner reads (the problem's note, the thought's steps): a money action in plain words, by how it went
   let what = null;
-  const told = (r, done) => (r && r.approval ? `Wants to ${what} — waiting for your OK` : done);
+  const told = (r, done) => (r && r.approval ? `Wants to ${what} - waiting for your OK` : done);
   // (an approval filed: its id and what it is for, so a chat can show it with Approve and Decline)
   const pending = r => (r && r.approval ? { approval: String(r.approval), wants: what } : {});
 
@@ -72,7 +72,7 @@ export function toolbox({ agent, kind, ctx, money, wallet, people, idem }) {
           const list = money.flats(agent.id).slice(0, 8);
           flats.clear();
           list.forEach((f, k) => flats.set(`F${k + 1}`, f));
-          return { tool, ok: true, text: list.length ? `FLATS FOR RENT: ${list.map((f, k) => `[F${k + 1}] ${q(f.title, 90)} — ${vc(f.perMonth)} a month (${vc(f.perDay)} a day), let by ${q(f.landlord, 40)}`).join('; ')}` : 'FLATS FOR RENT: none on offer right now' };
+          return { tool, ok: true, text: list.length ? `FLATS FOR RENT: ${list.map((f, k) => `[F${k + 1}] ${q(f.title, 90)} - ${vc(f.perMonth)} a month (${vc(f.perDay)} a day), let by ${q(f.landlord, 40)}`).join('; ')}` : 'FLATS FOR RENT: none on offer right now' };
         }
         case 'menu': {
           const pl = place(u.place);
@@ -101,7 +101,7 @@ export function toolbox({ agent, kind, ctx, money, wallet, people, idem }) {
         }
         case 'pay': {
           const who = payee(u.to), amount = amountOf(u.amount);
-          if (!who) return { tool, ok: false, text: `not done: I can pay my owner, a person I know or a place — not ${q(u.to, 40)}` };
+          if (!who) return { tool, ok: false, text: `not done: I can pay my owner, a person I know or a place - not ${q(u.to, 40)}` };
           if (!amount) return { tool, ok: false, text: 'not done: the amount must be a number of VC' };
           const to = who.name === 'my owner' ? 'you' : clean(who.name, 50);
           did++; what = `pay ${vc(amount)} to ${to}`;
@@ -110,7 +110,7 @@ export function toolbox({ agent, kind, ctx, money, wallet, people, idem }) {
         }
         case 'give': {
           const who = payee(u.to), cnt = Math.max(1, Math.min(9999, Math.floor(Number(u.n) || 1)));
-          if (!who) return { tool, ok: false, text: `not done: I can give to my owner, a person I know or a place — not ${q(u.to, 40)}` };
+          if (!who) return { tool, ok: false, text: `not done: I can give to my owner, a person I know or a place - not ${q(u.to, 40)}` };
           const thing = clean(u.item, 60);
           if (!thing) return { tool, ok: false, text: 'not done: say which thing I hold' };
           const to = who.name === 'my owner' ? 'you' : clean(who.name, 50);

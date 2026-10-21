@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.18 rivers (terrain island-v3): the same rivers everywhere from the seed, water that only flows downhill to the sea
 // or a lake, a channel under the water that walkers and cars treat as water, roads crossing on causeways, never looping
 // and never on the city's plain; waterfalls only at real drops.

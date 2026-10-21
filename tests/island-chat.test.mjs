@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.5 residents beyond the city stop and chat as they do on the city's sidewalks: one idles by an island road, the
 // other walks up (along the footpaths) and they talk; never meeting in the water.
 import test from 'node:test';

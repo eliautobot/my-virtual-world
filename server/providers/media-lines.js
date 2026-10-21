@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's media lines (docs/features/agent-providers.md §5 Media, §9): OpenClaw's and Hermes' agents both attach a
-// file with a line of its own, `MEDIA:<path or URL>`. They become the universal chat's media — { kind, name, ref: {
-// source } } — and the line leaves the text. A line inside a code block is text (an example), as both read it.
+// file with a line of its own, `MEDIA:<path or URL>`. They become the universal chat's media - { kind, name, ref: {
+// source } } - and the line leaves the text. A line inside a code block is text (an example), as both read it.
 // Pure functions, shared by the adapters.
 const MEDIA_LINE = /^\s*MEDIA:\s*(.+?)\s*$/i;
 const KIND_BY_EXT = [[/\.(png|jpe?g|gif|webp|avif|bmp)$/i, 'image'], [/\.(mp4|webm|mov|m4v|mkv|ogv)$/i, 'video'], [/\.(mp3|wav|ogg|oga|m4a|aac|flac|opus)$/i, 'audio']];

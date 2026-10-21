@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Ferries in the browser (WP4.15, shared/ferries.js): a pier from the shore to each dock with a shelter at its end, and
-// the boats — one instanced mesh for every boat in the world — sailing on the shared timetable (the simulation clock),
+// the boats - one instanced mesh for every boat in the world - sailing on the shared timetable (the simulation clock),
 // so every screen shows the same boat at the same dock, and residents waiting on the pier vanish aboard as it leaves.
 // The boats rock gently with the water; far ones (beyond FAR m) are not drawn.
 import * as THREE from 'three';

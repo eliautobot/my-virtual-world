@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A fake Twilio for the phone's tests (docs/features/phone.md): the REST API 2010-04-01 and the Serverless API as
-// server/providers/twilio.js uses them — the account, numbers (list, one, change, buy, numbers to buy), Messages (send,
+// server/providers/twilio.js uses them - the account, numbers (list, one, change, buy, numbers to buy), Messages (send,
 // list with To/From/DateSent> and pages, one, media), Calls (list, one, start), Recordings, Transcriptions, and a call
 // handler's deployment. It checks the Basic credentials like Twilio, and the tests drive it: a text arriving, a call, a
 // message's delivery status. Everything it was asked is kept (requests).

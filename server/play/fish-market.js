@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fish market (docs/features/fishing.md §The loop 6, docs/features/INVENTORY.md): a fishing trip ends (the play
-// core's finish: shared/fishing.js verify — the catch as the server kept it), and what was kept goes into the angler's
+// core's finish: shared/fishing.js verify - the catch as the server kept it), and what was kept goes into the angler's
 // inventory (server/economy/inventory.js): each fish its own piece with its length, weight, size and price (its worth
 // when landed, fresh or late, with the trader's skill), the finds as stacks; the bounties won pay at once. Fish keep:
 // sell them, give them, trade them. A dock's store buys them (inside it, or at its door) for Virtual Coin from the
@@ -51,7 +51,7 @@ export class FishMarket {
     const E = this.econ, T = this.terms(account.id);
     if (E && T.on && d.bonusSale > 0) {
       bounty = Math.round(d.bonusSale * 100 * T.pct / 100);
-      E.ledger.transfer(E.faucet('fishMarket').id, E.walletFor(subj('account', account.id)).id, bounty, { kind: 'fish_sale', actor: 'system:fishing', memo: `Fish market — bounties on ${label}`, idem: `fish-bounty:${r.id}`, ref: `play_run:${r.id}` });
+      E.ledger.transfer(E.faucet('fishMarket').id, E.walletFor(subj('account', account.id)).id, bounty, { kind: 'fish_sale', actor: 'system:fishing', memo: `Fish market - bounties on ${label}`, idem: `fish-bounty:${r.id}`, ref: `play_run:${r.id}` });
     }
     return { stowed, full, bounty };
   }
@@ -81,7 +81,7 @@ export class FishMarket {
     const E = this.econ, inv = this.inv, T = this.terms(account.id);
     if (!E || !inv || !T.on) fail(409, 'closed', 'The fish market is closed');
     const want = this.view(account).items.filter(s => !stacks || stacks.includes(s.stack));
-    if (!want.length) fail(404, 'nothing', 'Nothing to sell — go fishing first');
+    if (!want.length) fail(404, 'nothing', 'Nothing to sell - go fishing first');
     let left = T.left, paid = 0, capped = false;
     const sold = [], who = subj('account', account.id), wallet = E.walletFor(who).id;
     for (const s of want) {
@@ -90,12 +90,12 @@ export class FishMarket {
       E.dbs.tx(() => {   // the fish out of the inventory and the coin in, together
         const idem = `fish-sale:${s.stack}:${s.qty}:${s.attrs?.at ?? ''}:${this.now()}`;
         inv.take(who, s.stack, s.qty, { kind: 'sell', actor: `account:${account.id}`, memo: b.name || 'Dock Store', ref: `store:${b.id ?? ''}`, idem });
-        if (price > 0) E.ledger.transfer(E.faucet('fishMarket').id, wallet, price, { kind: 'fish_sale', actor: 'system:fishing', memo: `Fish market — ${itemOf(s.item)?.name || 'catch'} at ${b.name || 'the Dock Store'}`, idem });
+        if (price > 0) E.ledger.transfer(E.faucet('fishMarket').id, wallet, price, { kind: 'fish_sale', actor: 'system:fishing', memo: `Fish market - ${itemOf(s.item)?.name || 'catch'} at ${b.name || 'the Dock Store'}`, idem });
       });
       // (the log line's worth is what was paid: the daily cap counts it)
       left -= price; paid += price; sold.push({ stack: s.stack, paid: price });
     }
-    if (!sold.length && capped) fail(429, 'limit', 'You\'ve sold all the fish market buys from you today — come back tomorrow');
+    if (!sold.length && capped) fail(429, 'limit', 'You\'ve sold all the fish market buys from you today - come back tomorrow');
     return { sold, paid, capped, store: b.name || 'Dock Store' };
   }
 }

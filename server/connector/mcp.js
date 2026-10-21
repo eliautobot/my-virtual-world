@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The world's MCP endpoint (POST /mcp; ./http.js authenticates first): JSON-RPC 2.0 over Streamable HTTP for AI apps
 // acting as a person's agent (./auth.js, ./tools.js). A "dual-era" server (MCP 2026-07-28, Versioning):
 // - modern requests (2026-07-28) carry their protocol version in params._meta and the MCP-Protocol-Version header, the

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {createVehicles} from '../server/world/vehicles.js';import {generateWorld} from '../server/world/generate.js';import {PlayerNav} from '../shared/playernav.js';import {Store} from '../server/store.js';import {decodeVehicles,encodeVehicles} from '../shared/vehicleproto.js';import {blockAt,makeGrid} from '../shared/city.js';import {GROUND_Y} from '../shared/constants.js';
 import RAPIER from '@dimforge/rapier3d-compat';

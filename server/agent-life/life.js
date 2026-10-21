@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's life (docs/features/FREE-WILL.md §5): who it is (character, story, goals), what it plans (intentions),
 // what it did (the activity log), what it remembers (short-term memories fade after SHORT_DAYS world days; long-term
 // ones stay) and whom it knows (relationships).
 // - It only watches. The simulation reports every planned activity (Sim.actObservers); for owned agents with a body
 //   this turns it into a line of the activity log (consecutive parts of one activity at one place are one line), and a
 //   few events into memories: the first time at a place, meeting someone, a friendship forming, a visit to a flat.
-//   Nothing here changes what anyone does — a city with it attached plans exactly what one without it plans.
+//   Nothing here changes what anyone does - a city with it attached plans exactly what one without it plans.
 // - Writes are batched (one transaction every few seconds); the line still in progress is kept in memory and shown.
 // - It gives Free Will (and later the Mind) a small context: the traits that stand out, purpose, today's plans, a few
 //   relevant memories, what the agent did earlier today, and how well it knows each place it could go.
@@ -51,7 +51,7 @@ export class AgentLife {
     this.queue = [];             // finished activity lines to write
     this.memQueue = [];          // memories to write
     this.relQueue = new Map();   // `${agentId}|${kind}|${id}` → relation row to write
-    this.known = new Map();      // agent id → Map(placeKey → { n, lastDay }) — how well it knows each place
+    this.known = new Map();      // agent id → Map(placeKey → { n, lastDay }) - how well it knows each place
     this.relCache = new Map();   // agent id → Map(`${kind}|${id}` → { affinity, trust, interactions, name })
     this.autoToday = new Map();  // agent id → { day, n }: memories written by itself today
     this.timers = [];
@@ -92,7 +92,7 @@ export class AgentLife {
         ON CONFLICT (world_id, agent_id, other_kind, other_id) DO UPDATE SET affinity = excluded.affinity, ended_until = excluded.ended_until, blocked = excluded.blocked, updated = excluded.updated`),
       fadeDue: db.prepare(`SELECT agent_id, other_kind, other_id, other_name, affinity FROM agent_relations WHERE world_id = $w AND affinity != 0
         AND last_day < $today - $after AND (faded_day IS NULL OR faded_day < $today) AND affinity >= $friend AND other_kind = 'agent'`),
-      // (faded_day: the last world day its fading was counted — NULL: never; the days counted are those since then, or
+      // (faded_day: the last world day its fading was counted - NULL: never; the days counted are those since then, or
       // since the week apart began, whichever is later)
       fade: db.prepare(`UPDATE agent_relations SET
         affinity = ROUND(CASE WHEN affinity > 0 THEN MAX(0, affinity - $rate * ($today - MAX(COALESCE(faded_day, last_day + $after), last_day + $after)) * (1 - 0.5 * affinity))
@@ -185,7 +185,7 @@ export class AgentLife {
     if (c.with) {
       this.met(e.agentId, a, c.with, day, row.$time, c.place);
       // someone walked up to it and stayed (a connected agent's meet, or words said to it): the time together is the other
-      // agent's too — unless its own act says so already (both meeting each other). Being sought out counts half: someone
+      // agent's too - unless its own act says so already (both meeting each other). Being sought out counts half: someone
       // who keeps following an agent around doesn't win it over as fast as time it chose
       const back = act.kind === 'talk' ? this.byPerson.get(c.with.i) : null;
       if (back && !(c.with.act?.kind === 'talk' && c.with.act.talkWith === a.i)) this.met(back.agentId, c.with, a, day, row.$time, c.place, { quiet: true, weight: 0.5 });
@@ -225,7 +225,7 @@ export class AgentLife {
     this.relQueue.set(`${agentId}|${ck}`, { $w: this.w, $a: agentId, $kind: kind, $id: id, $name: name, $aff: r.affinity, $trust: r.trust, $n: r.interactions,
       $first: r.first, $last: day, $place: place ? clean(place, 80) : null, $at: this.now() });
     if (r.interactions === 1) this.remember(agentId, { kind: 'person', text: `Met ${name}${place ? ` at ${place}` : ''}`, importance: 2, place, people: [name], day, time });
-    if (!quiet) this.onMet?.(agentId, o);   // (the Mind: an agent with a brain of its own may say something — server/mind/mind.js onMet)
+    if (!quiet) this.onMet?.(agentId, o);   // (the Mind: an agent with a brain of its own may say something - server/mind/mind.js onMet)
     for (const [step, words] of FRIEND_STEPS) {
       if (!frozen && before < step && r.affinity >= step) this.remember(agentId, { term: 'long', kind: 'person', text: `Became ${words} ${name}`, importance: 3, place, people: [name], day, time });
     }
@@ -445,7 +445,7 @@ export class AgentLife {
   }
   /**
    * Time apart (server/agent-social/): every relation whose last meeting was more than afterDays world days ago moves
-   * toward zero by rate a world day — close ones more slowly (rate × (1 − closeness / 2)), grudges thaw the same way.
+   * toward zero by rate a world day - close ones more slowly (rate × (1 − closeness / 2)), grudges thaw the same way.
    * Counted once a world day, however long since. Returns the agents' friendships that fell below the friend level
    * ([{ agentId, kind, id, name }]) so they can be remembered.
    */

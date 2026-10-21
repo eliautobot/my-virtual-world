@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.4 road edits on real requests (wp4-world-spec.md §3, §5.0): administrators build, change and remove roads beyond
 // the city; members can't; a road inside the city, across a building or off the island is refused with the reason;
 // undo and redo put roads back only where they still fit; every browser gets the new roads.

@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Which of this person's Agent Providers' agents' screens are watched now — a PC window open (./pc-app.js), a live screen
-// in the world (render/pc-screens.js) — told to the server (POST /api/pc/watch: server/pc/screen-watch.js), so the work
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Which of this person's Agent Providers' agents' screens are watched now - a PC window open (./pc-app.js), a live screen
+// in the world (render/pc-screens.js) - told to the server (POST /api/pc/watch: server/pc/screen-watch.js), so the work
 // those agents do elsewhere (another channel, a schedule) is followed onto their screens while someone looks, and not
 // otherwise. Each place says its own agents; the server hears all of them together, at once for one newly watched, then
 // once a minute while any is.

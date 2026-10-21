@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fountains' water (2026-10-05: a fountain in the middle of every park, "make sure it looks great"): one
-// instanced mesh for every fountain in the world — the parks' (their level items) and the ones placed outdoors
-// (world.decorations) — drawn over the stone model (render/furniture.js D.fountain, FOUNTAIN) with an animated
+// instanced mesh for every fountain in the world - the parks' (their level items) and the ones placed outdoors
+// (world.decorations) - drawn over the stone model (render/furniture.js D.fountain, FOUNTAIN) with an animated
 // water material: the pool and both bowls ripple out from where water falls, foam where it lands, curtains of
 // streaky water spill over both lips, a crown jet rises from the spout and eight jets arc in from the rim. Pool lamps
 // light it from below at night. All motion is in the shader (GU.uTime); the geometry is built once.

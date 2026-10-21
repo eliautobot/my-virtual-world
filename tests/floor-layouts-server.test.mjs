@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Floor layouts on a resize, end to end (op bld.place with fit; 2026-10-04): a generated floor is laid out again for
-// the new size and comes back exactly with undo; a floor changed by hand is refused until the person chooses — keep the
+// the new size and comes back exactly with undo; a floor changed by hand is refused until the person chooses - keep the
 // layout without the pieces that don't fit (deleted; undo brings them back) or regenerate the floor (generated again).
 import test from 'node:test';
 import assert from 'node:assert/strict';

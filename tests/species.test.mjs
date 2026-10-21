@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.17 the wildlife catalogue: every species file listed in the index passes the schema (adding a species is data),
 // the schema refuses broken entries, and active hours wrap past midnight.
 import test from 'node:test';

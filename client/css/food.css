@@ -1,4 +1,4 @@
-/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
 /* Menus with pictures and the menu editor (ui/food-menu.js); the pictures: one sheet, assets/food/thumbs.webp. */
 .fd-th { display: inline-block; flex: none; background-image: url(/assets/food/thumbs.webp); background-repeat: no-repeat; border-radius: 10px; background-color: var(--btn); }
 .fm-dlg { width: min(860px, calc(100vw - 20px)); max-height: calc(100dvh - var(--topbar-height, 56px) - 20px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; overflow: hidden; }

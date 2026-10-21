@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Agent Studio's life tabs (ui/agent-studio.js; docs/features/FREE-WILL.md §5): Personality (its nine traits on a
 // radar you drag, with locks; habits; its story; goals), Plans (must and want, today or until done), Memories (recent
-// and lasting), People (who it knows, warmth and trust; its friends at a distance, the messages it sent and got —
+// and lasting), People (who it knows, warmth and trust; its friends at a distance, the messages it sent and got -
 // server/agent-social/) and Activity (what it did). Everything through
-// /api/agent-life/* — its owner's or a manager's only (404 to anyone else).
+// /api/agent-life/* - its owner's or a manager's only (404 to anyone else).
 import { S, select } from '../core/state.js';
 import { getJSON } from '../core/net.js';
 import { esc, clamp } from '../core/util.js';
@@ -50,7 +50,7 @@ export async function characterTab(C, body, live) {
   body.innerHTML = `<div class="sp">
     <div class="sp-top"><div class="sp-radar">${radarSvg(P)}</div>
       <div class="sp-side"><h3>${esc(standout(P) || 'Balanced in every way')}</h3>
-        <p class="hint">Drag a point on the web, or a slider. Its choices follow these${P.agent.hasBody ? '; the routine traits shape its day too' : ''}. A lock keeps a trait as you set it — its Mind won't change it.</p>
+        <p class="hint">Drag a point on the web, or a slider. Its choices follow these${P.agent.hasBody ? '; the routine traits shape its day too' : ''}. A lock keeps a trait as you set it - its Mind won't change it.</p>
         <div class="sp-flags">${P.flagInfo.map(f => `<button type="button" class="sp-flag${P.flags[f.key] ? ' on' : ''}" data-flag="${f.key}" aria-pressed="${!!P.flags[f.key]}">${f.key === 'nightOwl' ? '🌙' : f.key === 'phone' ? '📱' : '•'} ${esc(f.label)}</button>`).join('')}</div></div></div>
     <div class="sp-sliders">${P.traitInfo.map(t => `<div class="sp-tr" data-t="${t.key}"><span class="sp-tl">${esc(t.label)}${t.body ? ' <small class="st-pill">routine</small>' : ''}</span><span class="sp-lo">${esc(t.low)}</span>
       <input type="range" min="0" max="1" step="0.05" value="${P.traits[t.key]}" data-trait="${t.key}" aria-label="${esc(t.label)}"><span class="sp-hi">${esc(t.high)}</span>
@@ -132,7 +132,7 @@ export async function plansTab(C, body, live) {
     <form class="pl-add"><div class="pl-kind" role="radiogroup"><button type="button" class="${st.kind === 'must' ? 'on' : ''}" data-k="must">Must</button><button type="button" class="${st.kind === 'want' ? 'on' : ''}" data-k="want">Wants to</button></div>
       <input class="input pl-text" maxlength="140" placeholder="Try the new café on Harbor Street" aria-label="The plan">
       <label class="pl-today"><input type="checkbox"${st.today ? ' checked' : ''}> Today</label><button type="submit" class="btn primary">Add</button></form>
-    <p class="hint">What ${esc(C.name)} means to do. Free Will weighs these with every choice; its Mind plans around them each morning. What you add stays until it's done — it never drops yours.</p>
+    <p class="hint">What ${esc(C.name)} means to do. Free Will weighs these with every choice; its Mind plans around them each morning. What you add stays until it's done - it never drops yours.</p>
     <div class="pl-board">${col('must', '📌 Must', 'Has to happen')}${col('want', '⭐ Wants to', 'Would like to')}</div>
     ${past.length ? `<details class="st-sec"><summary class="hint">Done and dropped (${past.length})</summary><div class="pl-past">${past.map(p => `<div class="pl-old ${p.status}"><span>${p.status === 'done' ? '✓' : '✕'}</span>${esc(p.text)}</div>`).join('')}</div></details>` : ''}
   </div>`;
@@ -167,7 +167,7 @@ export async function memoriesTab(C, body, live) {
       <span class="mm-stars" role="radiogroup" aria-label="Importance">${[1, 2, 3, 4, 5].map(n => `<button type="button" data-imp="${n}" class="${n <= st.imp ? 'on' : ''}" aria-label="${n} of 5">★</button>`).join('')}</span><button type="submit" class="btn primary">Remember</button></form>
     <div class="mm-list">${st.list.map(m => `<div class="mm-card i${m.importance}" data-id="${m.id}"><div class="mm-meta"><span class="mm-s" title="Importance ${m.importance}">${stars(m.importance)}</span><small class="dim">${esc(m.when || '')} · ${esc(SRC[m.source] || m.source)}</small></div>
       <div class="mm-t">${esc(m.text)}</div><div class="mm-acts">${m.term === 'short' ? '<button type="button" class="btn small" data-promote="1">💎 Keep for good</button>' : ''}<button type="button" class="btn small" data-rm="1">Forget</button></div></div>`).join('')
-      || `<p class="hint">${st.term === 'short' ? 'Nothing recent yet: memories write themselves as it lives — new places, new people, friendships.' : 'No lasting memories yet.'}</p>`}</div>
+      || `<p class="hint">${st.term === 'short' ? 'Nothing recent yet: memories write themselves as it lives - new places, new people, friendships.' : 'No lasting memories yet.'}</p>`}</div>
     ${st.more ? '<div class="row"><button type="button" class="btn small" data-c="older">Older</button></div>' : ''}</div>`;
   body.querySelectorAll('[data-term]').forEach(b => { b.onclick = () => { st.term = b.dataset.term; st.list = null; C.repaint(); }; });
   body.querySelectorAll('[data-imp]').forEach(b => { b.onclick = () => { st.imp = +b.dataset.imp; body.querySelectorAll('[data-imp]').forEach(x => x.classList.toggle('on', +x.dataset.imp <= st.imp)); }; });
@@ -227,7 +227,7 @@ export async function peopleTab(C, body, live) {
       <div class="row">${i >= 0 ? `<button type="button" class="btn small pp-find" data-i="${i}">🔎 Find</button>` : ''}</div>${acts}</div>`;
   };
   const settingsBox = so ? `<div class="pp-social aform"><div class="tier-head">🤝 Friends at a distance</div>
-    <p class="hint">Agents that count each other as friends (${L.friendAt}% closeness or more), whose owners are friends (or the same), may find each other, send messages (${L.maxChars} characters, checked by moderation) and invite each other — as each owner allows. ${L.enabled ? '' : '<b>Switched off in this world by its admin.</b>'}</p>
+    <p class="hint">Agents that count each other as friends (${L.friendAt}% closeness or more), whose owners are friends (or the same), may find each other, send messages (${L.maxChars} characters, checked by moderation) and invite each other - as each owner allows. ${L.enabled ? '' : '<b>Switched off in this world by its admin.</b>'}</p>
     <label>Who may reach ${esc(C.name)} from a distance<span class="row"><select class="input pp-reach">${[['friends', 'Its friends (owners are friends)'], ['mine', 'Only my own agents'], ['nobody', 'Nobody']].map(([v, t]) => `<option value="${v}"${so.settings.reach === v ? ' selected' : ''}>${t}</option>`).join('')}</select></span></label>
     ${so.connected ? `<label class="row"><input type="checkbox" class="pp-hear"${so.settings.hearStrangers ? ' checked' : ''}> Hear strangers in person (${L.strangerLines} lines a day from each; off: only agents it knows)</label>`
       : `<label class="row"><input type="checkbox" class="pp-starts"${so.settings.starts ? ' checked' : ''}> Starts conversations and invitations by itself (with its Mind: up to ${L.mindMessages} messages and ${L.mindInvites} invitation${L.mindInvites === 1 ? '' : 's'} a day; off: it only answers)</label>`}

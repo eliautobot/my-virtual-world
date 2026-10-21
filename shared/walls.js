@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Interior walls (WP4.8, PLAN WP4.8, wp4-world-spec.md §9): draw and erase partitions on a floor, solid or glass,
 // snapping to the floor's quarter-metre grid, to the ends of existing walls and to the outer walls; cut doorways into
 // them. A wall may not run through furniture or the lift and stair core, double an existing wall, or shut anyone or

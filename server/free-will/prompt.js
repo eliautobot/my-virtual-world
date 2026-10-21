@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a decision service is told at one choice point (docs/features/FREE-WILL.md §2.5): a short snapshot of the agent
 // and its situation, and one question with the legal options. Kept small on purpose (~400 input tokens; the price is per
 // input token). Everything other people wrote stays out of it: names and places are the world's own.
@@ -31,7 +31,7 @@ const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f<>]/g, ' ').repla
 /**
  * s = { name, role, tr, needs, h, day, place, atHome, job, money: { available, rentPerDay } | null,
  *       recent: [{ clock, label }] } and, when the agent has a profile (server/agent-life/): personality (words), bio,
- *       purpose, aspirations, likes, dislikes, plans, memories — all written by the agent's owner or by its own life —
+ *       purpose, aspirations, likes, dislikes, plans, memories - all written by the agent's owner or by its own life -
  *       and worries: its problems (server/mind/problems.js: rent behind, money tight, no home, no job).
  */
 export function snapshotText(s) {

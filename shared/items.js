@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Items (docs/features/INVENTORY.md): the kinds of thing a player, an agent or a business can hold in its inventory —
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Items (docs/features/INVENTORY.md): the kinds of thing a player, an agent or a business can hold in its inventory -
 // one list the server and the browser share, every part of the world adding its own: the fishing game its fish, finds,
 // lures and tackle; the cafés and restaurants their food and drink; the shops their goods. An item is { id, name, icon,
-// cat (a category below), value (hundredths of a Virtual Coin: what it's worth — a one-of-a-kind piece may carry its
+// cat (a category below), value (hundredths of a Virtual Coin: what it's worth - a one-of-a-kind piece may carry its
 // own in its attrs.vc), rarity, stack (the most a plain stack holds), unique (each piece is one of a kind: a fish with
 // its own length and weight, kept apart and shown grouped), trade (may be given or traded; default yes), desc }.
 import { SPECIES, FINDS, RARITY } from './fish-species.js';
@@ -36,12 +36,12 @@ export const itemOf = id => ITEMS.get(String(id)) || null;
 export const allItems = () => [...ITEMS.values()];
 /** What a piece is worth (hundredths): its own (attrs.vc) for a one-of-a-kind, else its kind's. */
 export const itemValue = (def, attrs) => (attrs && Number.isFinite(attrs.vc) ? Math.round(attrs.vc) : def?.value || 0);
-/** A stack's (or a group's) name with what sets a piece apart: "Red Snapper — 52 cm, 2.1 kg". */
+/** A stack's (or a group's) name with what sets a piece apart: "Red Snapper - 52 cm, 2.1 kg". */
 export function pieceLabel(def, attrs) {
   if (!def) return 'Something';
   if (!attrs) return def.name;
   const bits = [attrs.cm ? `${attrs.cm} cm` : '', attrs.kg ? `${attrs.kg < 10 ? (+attrs.kg).toFixed(2) : (+attrs.kg).toFixed(1)} kg` : ''].filter(Boolean);
-  return bits.length ? `${def.name} — ${bits.join(', ')}` : def.name;
+  return bits.length ? `${def.name} - ${bits.join(', ')}` : def.name;
 }
 
 // ------------------------------------------------------------------ sorting (the server's lists and the browser's)
@@ -65,7 +65,7 @@ export function sortStacks(stacks, by = 'newest') {
 // ------------------------------------------------------------------ the welcome kit
 /**
  * What everyone finds in their inventory the first time it's opened (the product owner, 2026-10-14: "a welcome kit
- * would be nice") — a player: a starter rod, reel and line with bait for a first fishing trip, a coffee and a gift to
+ * would be nice") - a player: a starter rod, reel and line with bait for a first fishing trip, a coffee and a gift to
  * give someone; an agent: a small gift set to give or trade. [[item, qty], …]
  */
 export const WELCOME_KIT = Object.freeze({
@@ -79,7 +79,7 @@ const fishIcon = s => (s.body?.shape === 'shark' ? '🦈' : s.body?.shape === 's
 registerItems([
   // the fishing game: every species (each fish one of a kind: its length, weight, size and worth), the finds, the lures
   // (sold by the pack), the tackle
-  ...SPECIES.map(s => ({ id: `fish:${s.id}`, name: s.name, icon: fishIcon(s), cat: 'fish', value: vcOf(s.val), rarity: s.rarity, unique: true, stack: 1, desc: `${s.water === 'sea' ? 'A sea fish' : 'A lake fish'}${s.legend ? ' — a legend' : ''}.` })),
+  ...SPECIES.map(s => ({ id: `fish:${s.id}`, name: s.name, icon: fishIcon(s), cat: 'fish', value: vcOf(s.val), rarity: s.rarity, unique: true, stack: 1, desc: `${s.water === 'sea' ? 'A sea fish' : 'A lake fish'}${s.legend ? ' - a legend' : ''}.` })),
   ...FINDS.map(f => ({ id: `find:${f.id}`, name: f.name, icon: f.icon, cat: f.kind === 'junk' ? 'junk' : 'treasure', value: vcOf(f.val), rarity: f.kind === 'junk' ? 'common' : f.kind === 'coins' ? 'rare' : 'uncommon', stack: f.kind === 'junk' ? 99 : 20, desc: f.kind === 'junk' ? 'Up from the bottom. The dock store takes it off your hands.' : 'Up from the bottom.' })),
   ...LURES.map(l => ({ id: `lure:${l.id}`, name: l.name, icon: l.icon, cat: 'bait', value: Math.round(l.price * 100 / l.pack), stack: 999, desc: l.blurb })),
   ...[...RODS, ...REELS, ...LINES, LEADER].map(g => ({ id: `gear:${g.id}`, name: g.name, icon: g.id.startsWith('reel') ? '⚙️' : '🎣', cat: 'tackle', value: vcOf(g.price || 0), rarity: g.tier >= 5 ? 'legendary' : g.tier >= 4 ? 'epic' : g.tier >= 3 ? 'rare' : g.tier >= 2 ? 'uncommon' : 'common', stack: 9, desc: g.blurb })),

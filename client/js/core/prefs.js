@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Display preferences (DECISIONS C91, C96, C100): name labels, interior walls, the people list folded away, whether the
 // controls tip was shown, which docks are open (a small JSON value, C112), how the team list is sorted and which places
-// are favourites (C115) and which theme (C39, C117) — three token sets in client/css/theme.css. Guests keep them in the browser. A signed-in account keeps them on the server, so they
+// are favourites (C115) and which theme (C39, C117) - three token sets in client/css/theme.css. Guests keep them in the browser. A signed-in account keeps them on the server, so they
 // follow it to every device; at the account's first sign-in on a device, every preference it has not stored yet takes
 // the device's current choice. Graphics quality stays with each device (ui.js). They are tier 0: no password entry.
 // Emits bus 'prefs' (names) when the account's values replace the device's.
@@ -21,13 +21,13 @@ function vol(key, dflt) {
 }
 const PREFS = {
   theme: { path: 'display.theme', get: () => local.get('mw.theme') || 'dark', apply: v => local.set('mw.theme', v && v !== 'dark' ? v : null) },
-  // agents' and residents' own emoji: as emoji (normal) or drawn in the theme's icon style (styled) — core/icons.js
+  // agents' and residents' own emoji: as emoji (normal) or drawn in the theme's icon style (styled) - core/icons.js
   agentEmoji: { path: 'display.agentEmoji', get: () => local.get('mvw.agentEmoji') || 'normal', apply: v => local.set('mvw.agentEmoji', v === 'styled' ? 'styled' : null) },
   labels: { path: 'display.labels', get: () => S.labels, apply: v => { S.labels = !!v; local.set('mvw.labels', v ? '1' : '0'); } },
   walls: { path: 'display.walls', get: () => S.walls, apply: v => { S.walls = v; local.set('mvw.walls', v); } },
   rosterFolded: { path: 'display.rosterFolded', get: () => local.get('mvw.roster') === '0', apply: v => local.set('mvw.roster', v ? '0' : '1') },
   seenHelp: { path: 'display.seenHelp', get: () => !!local.get('mvw.seenHelp'), apply: v => local.set('mvw.seenHelp', v ? '1' : null) },
-  // the home view: each account's own, kept on this device under that account (a guest's under its own key) — another
+  // the home view: each account's own, kept on this device under that account (a guest's under its own key) - another
   // account's home on a shared device is never this account's (2026-10-09: "every user account has their own home")
   home: { path: 'display.home', get: () => local.get(homeKey()) || '', apply: v => local.set(homeKey(), v || null) },
   docks: { path: 'display.docks', get: () => local.get('mvw.docks') || '', apply: v => local.set('mvw.docks', v || null) },

@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent (an outside AI) in its owner's Agent Studio (server/agents.js level, routes.js; 2026-10-11): its owner
-// manages it like any agent — its look, role, badge, life, friends, money — and so does a person it is shared with to manage;
+// manages it like any agent - its look, role, badge, life, friends, money - and so does a person it is shared with to manage;
 // its name, whether it is on, what it thinks with and disconnecting it stay with its slot (Settings → Third-party agents);
 // it is shared only to manage, with a person (who may chat with it is the slot's audience); strangers get nothing.
 import assert from 'node:assert/strict';
@@ -29,7 +29,7 @@ before(async () => {
 after(async () => { await s?.stop(); });
 const levelOf = async c => (await c.get('/api/agents')).json.agents.find(a => a.id === S.rec.id)?.level ?? null;
 
-test('its owner manages it: the Studio\'s level, its role and badge — its name, on/off and brain stay with its slot', async () => {
+test('its owner manages it: the Studio\'s level, its role and badge - its name, on/off and brain stay with its slot', async () => {
   assert.equal(await levelOf(ann), 'manage');
   const ok = await ann.post('/api/agents/update', { id: S.rec.id, role: 'Explorer', emoji: '🚀' });
   assert.equal(ok.status, 200, ok.text); assert.equal(ok.json.role, 'Explorer');

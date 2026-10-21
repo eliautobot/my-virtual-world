@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Web Push (docs/features/CHAT.md §8): a notification to a phone or a browser that isn't open, through the push
-// service its browser chose (Google's, Mozilla's, Apple's…) — the standard protocol, on node's own crypto, no library:
+// service its browser chose (Google's, Mozilla's, Apple's…) - the standard protocol, on node's own crypto, no library:
 //   VAPID (RFC 8292): the server's own P-256 key pair; each request carries a short ES256-signed token for the push
 //   service's origin, so only this server can push to the subscriptions it was given.
 //   Encryption (RFC 8291, aes128gcm, RFC 8188): the message is encrypted for the browser's own key (p256dh) and secret
@@ -85,7 +85,7 @@ function guardedLookup(hostname, options, cb) {
 }
 
 /**
- * Sends one message to one subscription: { status } — 201 delivered, 404/410 gone (drop it), anything else a failure.
+ * Sends one message to one subscription: { status } - 201 delivered, 404/410 gone (drop it), anything else a failure.
  * o: { ttl (seconds the service keeps it for a device that is away), urgency, topic (a later message with the same
  * topic replaces it), allowLocal (tests only) }.
  */

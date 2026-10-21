@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Interiors: parks (always drawn: finishes, hedges, gates, name arch, instanced objects) and the focused building
 // floor (slab, floor finishes, perimeter walls whose openings line up with the facade windows, partitions, elevator
 // core, instanced furniture). Walls mode: cut (1.2 m cutaway), up (full height), down (stubs).
@@ -24,13 +24,13 @@ const _ray = new THREE.Ray(), _box = new THREE.Box3(), _hit = new THREE.Vector3(
 function mk(geo, mat, cast = true) { const m = new THREE.Mesh(geo, mat); m.matrixAutoUpdate = false; m.castShadow = cast; m.receiveShadow = true; return m; }
 
 // what people sit at and set things down on (tableTopAt): the top of each, as render/furniture.js draws it (not
-// shared/standable.js itemTop — the height walked on, a little off for some: a laptop stood 2 cm above a picnic table
+// shared/standable.js itemTop - the height walked on, a little off for some: a laptop stood 2 cm above a picnic table
 // and its base 2 cm into a bar's counter by it)
 const TABLE_TOP = Object.freeze({
   dining_table: 0.76, cafe_table: 0.76, cafe_table4: 0.76, picnic_table: 0.76, bar_counter: 1.1, meeting_table: 0.76,
   desk: 0.755, desk_l: 0.755, desk_exec: 0.77, desk_home: 0.755, coffee_table: 0.42, counter: 0.94,
 });
-// (and what is set down stays in front of: a bar's bottles along the back of its counter — its own z, toward its front)
+// (and what is set down stays in front of: a bar's bottles along the back of its counter - its own z, toward its front)
 const TABLE_KEEP = Object.freeze({ bar_counter: -0.15 });
 /** An item's box for picking and its selection outline: its rectangle and heights (a sign's: round its face). */
 function dims(e) {
@@ -295,7 +295,7 @@ export class Interiors {
     for (const e of this.park.entries) if (e.b === b && e.id === id) return e;
     return null;
   }
-  /** The top (m, world) of the table at (x, z) on the floor looked into or in a park — the highest at or below `highest` —
+  /** The top (m, world) of the table at (x, z) on the floor looked into or in a park - the highest at or below `highest` -
    *  or null (a laptop or a mug set down on it stands there: render/characters.js deskLift). far ({ x, z }: the farthest
    *  point of what is set down, its lid): far.back is set to how far it must come toward its front to stay clear of what
    *  stands at the table's back (TABLE_KEEP). */

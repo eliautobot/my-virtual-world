@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Population: AI-agent residents (a roster from agent connections, given by the caller) + generated citizens,
 // with homes (apartment beds), jobs (office desks, venue staff slots, remote work) and daily schedules.
 import { RNG } from '../../shared/rng.js';
@@ -174,7 +174,7 @@ export function generatePopulation(world, index, opts = {}) {
 
 /** Validate a person's home/job references after world edits; returns true if anything changed. */
 /** The furniture an AI agent may be posted at, around the clock (server/agent-posts/): the serving side of a counter, a
- *  checkout or a reception desk, a desk, a kitchen — never a customer's side, a bed or a seat to relax. */
+ *  checkout or a reception desk, a desk, a kitchen - never a customer's side, a bed or a seat to relax. */
 export const POST_USES = Object.freeze(new Set(['staff', 'work', 'computer', 'cook', 'prep']));
 
 export function validatePerson(world, index, p) {
@@ -248,7 +248,7 @@ export function makeCitizen(people, o = {}, seed = Date.now()) {
   p.sched = schedule(rng, 'free', 9, 17, p.tr.night);
   return p;
 }
-/** A free bed in apartment building b (one nobody else sleeps in), or null — for the resident editor (WP4.12). */
+/** A free bed in apartment building b (one nobody else sleeps in), or null - for the resident editor (WP4.12). */
 export function freeBed(world, index, people, b, except = -1) {
   const B = world.buildings[b];
   if (!B || B.gone || B.type !== 'apartment') return null;
@@ -267,7 +267,7 @@ export function freeBed(world, index, people, b, except = -1) {
   }
   return null;
 }
-/** A free work place in building b — a desk in an office, else a staff place (a counter, a venue) — or null. */
+/** A free work place in building b - a desk in an office, else a staff place (a counter, a venue) - or null. */
 export function freeWork(world, index, people, b, except = -1) {
   const B = world.buildings[b];
   if (!B || B.gone) return null;

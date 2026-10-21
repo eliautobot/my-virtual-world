@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The living economy of the residents (docs/features/ECONOMY.md §5): what they buy at the city's venues (reported by
 // the simulation as it plans their day), the hours they work, the groceries for meals at home; and the daily settlement
 // that pays wages, collects rent and taxes, pays benefits, credits businesses and the city, and sums it all up.
 //
 // - Purchases and hours are added up in memory per economic day and written to econ_pending every few seconds (and when
-//   the server stops), so a crash loses at most those seconds of residents' activity — never money: nothing is paid
+//   the server stops), so a crash loses at most those seconds of residents' activity - never money: nothing is paid
 //   until the day settles. A resident can only buy what their wallet holds after everything not settled yet.
 // - The settlement of a day is ONE database transaction: the plan (pure arithmetic on the day's totals and the wallets'
 //   balances) nets every wallet to one posting with a note that itemises it ("wages +104 · rent −22 · spent −31.50 ·
@@ -101,7 +101,7 @@ export class Households {
   }
   /**
    * The economic day activity at sim time t counts in: its own, unless that day is settled already (the clock went back a
-   * little after a crash, to its last save) — then the next open day, so nothing lands on a closed day.
+   * little after a crash, to its last save) - then the next open day, so nothing lands on a closed day.
    */
   dayFor(t) { const d = this.e.econDay(t); return this.lastSettled != null && d <= this.lastSettled ? this.lastSettled + 1 : d; }
   /** What a business sold today so far (residents and players), for its card. */
@@ -118,7 +118,7 @@ export class Households {
 
   // ------------------------------------------------------------------------------------------- what residents can afford
   /**
-   * An agent buys at a venue within its owner's limits (./agents.js), whoever sent it there — its own routine, Free Will or
+   * An agent buys at a venue within its owner's limits (./agents.js), whoever sent it there - its own routine, Free Will or
    * an outside AI told to go back again and again: not while paused, not without the 'buy' scope, and not past its daily cap
    * with what it spent in the last 24 hours (payments and venue purchases together). Records the purchase it allows.
    */
@@ -157,7 +157,7 @@ export class Households {
     const keep = essential ? 0 : this.rentOf(p) * Math.max(1, pol.households.thriftyDays);
     return this.available(p) >= price + keep;
   }
-  /** Demand v1 (spec 02 §7): a venue's weight against distance — dearer and worse-rated venues seem farther away. */
+  /** Demand v1 (spec 02 §7): a venue's weight against distance - dearer and worse-rated venues seem farther away. */
   venueFactor(b, f) {
     const biz = this.e.parts.businesses?.at(b, f);
     if (!biz) return 1;
@@ -179,8 +179,8 @@ export class Households {
       const hrs = Math.max(0, act.holdEnd - act.holdStart) * sim.clock.dayScale / 3600;
       if (!(hrs > 0)) return;
       const R = this._res(day, p.id);
-      // on post (an AI agent its owner posted at a desk or counter around the clock — server/agent-posts/): it works
-      // there instead of at its job, and is paid for it (2026-10-14, the product owner: "they don't get paid") — below
+      // on post (an AI agent its owner posted at a desk or counter around the clock - server/agent-posts/): it works
+      // there instead of at its job, and is paid for it (2026-10-14, the product owner: "they don't get paid") - below
       if (act.kind === 'post') { if (p.job?.kind === 'remote') R.rh = round2(R.rh + hrs); else R.ph = round2((R.ph || 0) + hrs); return; }
       if (p.job?.kind === 'remote') R.rh = round2(R.rh + hrs);
       else if (p.job && act.b === p.job.b) R.h = round2(R.h + hrs);
@@ -454,8 +454,8 @@ export class Households {
       return null;
     };
     const shiftHours = p => { const j = p.job; if (!j || !(j.end > j.start)) return 0; return Math.min(16, j.end - j.start) + 0.5; };
-    // an agent on post without a job of its own: the business where it serves employs it — a venue's staff, a company's
-    // reception or office — for a full day's shift
+    // an agent on post without a job of its own: the business where it serves employs it - a venue's staff, a company's
+    // reception or office - for a full day's shift
     const POST_SHIFT = 8.5;
     const postJobOf = p => {
       const r = p.post; if (!r) return null;

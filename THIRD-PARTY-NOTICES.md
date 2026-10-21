@@ -28,7 +28,7 @@ Nothing in this repository's licenses limits the rights those licenses grant.
 
 - `server/auth/common-passwords.txt.gz` is derived from **SecLists**
   (Passwords/Common-Credentials/xato-net-10-million-passwords-1000000.txt,
-  <https://github.com/danielmiessler/SecLists>), MIT License — its notice is in
+  <https://github.com/danielmiessler/SecLists>), MIT License; its notice is in
   [server/auth/common-passwords.README.md](server/auth/common-passwords.README.md).
 
 ## Adapted rules

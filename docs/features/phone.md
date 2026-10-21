@@ -1,6 +1,6 @@
 # Agents' phones
 
-Licensed under the PolyForm Noncommercial License 1.0.0 — see [LICENSE](../../LICENSE).
+Licensed under the PolyForm Noncommercial License 1.0.0 - see [LICENSE](../../LICENSE).
 
 Any agent can have a phone: a real phone number from a Twilio account. The agent can be made here, connected, or an Agent
 Provider's (OpenClaw, Hermes…). Its owner, and anyone it is shared with to manage, uses the phone like a real one:

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Charts for the economy (ui/economy.js, ui/econ-city.js): line charts with a crosshair and tooltip, bar lists with the
 // value at the tip, sparklines, SimCity-style demand bars and stat tiles. Plain SVG and HTML, coloured by role through
 // CSS variables (css/economy.css: --ec-1 … --ec-4 are the validated categorical slots for the dark and light themes,
@@ -38,7 +38,7 @@ export const FORMATS = {
  * draws it at its real width once it is on the page (and again when the window is resized), so text never stretches.
  */
 export function lineChart(series, o = {}) {
-  if (!series.some(s => s.points?.length)) return '<p class="hint ec-empty">No history yet — it grows with each world day.</p>';
+  if (!series.some(s => s.points?.length)) return '<p class="hint ec-empty">No history yet - it grows with each world day.</p>';
   const spec = { series: series.map((s, k) => ({ label: s.label, color: s.color || SERIES[k % SERIES.length], points: s.points })), o: { fmt: o.fmt || 'num', zero: o.zero !== false, h: o.h || 170, area: !!o.area, title: o.title || '' } };
   const legend = series.length > 1 ? `<div class="ec-legend">${spec.series.map(s => `<span><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join('')}</div>` : '';
   return `${legend}<div class="ec-chart" data-spec='${esc(JSON.stringify(spec))}'></div>`;

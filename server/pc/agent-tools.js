@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The PC as a tool of an agent's brain (docs/features/agent-pc.md §4): one tool, "pc", in the brain's usual JSON —
-// {"use":[{"tool":"pc","run":"ls ~/Documents"},{"tool":"pc","run":"write ~/notes.md","text":"…"}]} — running the PC's
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The PC as a tool of an agent's brain (docs/features/agent-pc.md §4): one tool, "pc", in the brain's usual JSON -
+// {"use":[{"tool":"pc","run":"ls ~/Documents"},{"tool":"pc","run":"write ~/notes.md","text":"…"}]} - running the PC's
 // command line (./shell.js) as the agent. One toolbox lasts one answer (or one work session), so the folder it is in and
 // the versions it read carry from step to step. What goes into the prompt is short: how to ask, the commands, and what
 // is on its plate (its open tasks, its skills' first lines, its teams) so a small model starts in the right place.
 //   kind 'owner'   its owner's chat, a work session: its home and its teams
-//   kind 'visitor' someone from another account talking with it: its Public folder, to read — offered only when there
+//   kind 'visitor' someone from another account talking with it: its Public folder, to read - offered only when there
 //                  is something in it
 import { PcShell } from './shell.js';
 import { COLUMN_NAMES } from './os.js';
@@ -38,10 +38,10 @@ export function pcToolbox({ pc, agent, kind = 'owner', tz = 'UTC', names = t => 
       if (kind === 'visitor') {
         return ['YOUR PUBLIC FOLDER (things your owner lets visitors see; read one before you answer about it):',
           ...publicFiles.map(e => `- ~/Public/${e.name}${e.dir ? '/' : ''}`),
-          'To read one, answer with ONLY {"use":[{"tool":"pc","run":"read ~/Public/<name>"}]} — the result comes back, then answer.',
+          'To read one, answer with ONLY {"use":[{"tool":"pc","run":"read ~/Public/<name>"}]} - the result comes back, then answer.',
           'Never mention, look for or describe any other file or folder of yours: only Public may be shared.'];
       }
-      const lines = ['To use your PC, answer with ONLY one JSON object and nothing else: {"use":[{"tool":"pc","run":"<a command>"}]} — up to 6 uses at once, each "run" may hold several commands, one per line.',
+      const lines = ['To use your PC, answer with ONLY one JSON object and nothing else: {"use":[{"tool":"pc","run":"<a command>"}]} - up to 6 uses at once, each "run" may hold several commands, one per line.',
         'For write and append, put the text in "text"; for edit, put the exact words now in "find" and the new words in "replace". Example:',
         '{"use":[{"tool":"pc","run":"ls ~/Documents"},{"tool":"pc","run":"write ~/Documents/plan.md","text":"# Plan\\n- call Sam"}]}',
         'You get the results back; then use more, or give your answer. Never say you did something on your PC that its results don\'t show.',
@@ -53,7 +53,7 @@ export function pcToolbox({ pc, agent, kind = 'owner', tz = 'UTC', names = t => 
       } catch { /* no board yet */ }
       try {
         const sk = pc.list(who, '~/Skills', { limit: 20 }).entries.filter(e => !e.dir);
-        if (sk.length) lines.push(`YOUR SKILLS (how-to notes you wrote — read the one that fits before that kind of work; write a new one when you learn a way that works): ${sk.slice(0, 12).map(e => e.name).join(', ')}`);
+        if (sk.length) lines.push(`YOUR SKILLS (how-to notes you wrote - read the one that fits before that kind of work; write a new one when you learn a way that works): ${sk.slice(0, 12).map(e => e.name).join(', ')}`);
       } catch { /* none */ }
       try {
         const ts = pc.teamsOf(who);

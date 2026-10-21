@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The way from a building's door to its street (the product owner, 2026-10-09: "lots should connect to roadways so that a
 // building can be placed there that connects as they already connect … this has to work flawlessly"). Residents walk
 // out of the door in a straight line: in the city to the sidewalk of the block side the door faces (server/sim/nav.js

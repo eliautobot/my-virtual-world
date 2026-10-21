@@ -1,13 +1,13 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fishing boats (docs/features/fishing.md §Boats; their handling: shared/boat-model.js), built in code like the
 // aircraft: bow along +z, port along +x, the waterline at y = 0, one piece each. Hulls lofted from cross-sections
 // (render/vessels.js hull: a fine entry, flare, a deep V for the sea boat, the transom), painted in bands.
-//   · Coastal Fisher 26 — a centre console sport fisher: deep-V hull with a boot stripe and sheer stripe, a rub rail; the
+//   · Coastal Fisher 26 - a centre console sport fisher: deep-V hull with a boot stripe and sheer stripe, a rub rail; the
 //     cockpit sole; a raised bow casting deck with cushions and a bow rail; the console (windscreen and grab rail, the
 //     wheel and throttle, a chartplotter and fish finder), the T-top on four posts with its rocket launcher of rods; a
 //     leaning post with a tackle station; a cooler seat; the livewell in the transom; gunwale rod holders, cleats,
 //     navigation lights, the anchor at the bow; twin outboards (their own parts: they turn with the wheel).
-//   · Lake Skiff 16 — a riveted aluminium modified-V: green topsides, raised casting decks fore and aft (carpeted) with
+//   · Lake Skiff 16 - a riveted aluminium modified-V: green topsides, raised casting decks fore and aft (carpeted) with
 //     pedestal seats, a side console, a bow trolling motor, a livewell, a single 40 hp outboard (its own part).
 // boatParts(type) → { body, motors: [{ geo, at: [x, y, z] (the pivot) }] }; boatGeometry(type) → all in one (moored).
 import { FB } from './furniture.js';
@@ -71,7 +71,7 @@ function coastal(withMotors) {
   // the cooler seat before the console
   f.col('#f4f4f0'); f.box(-0.5, S.floor, 0.45, 0.5, 0.88, 1.05); f.col('#24405e'); f.box(-0.48, 0.88, 0.47, 0.48, 0.96, 1.03); f.col('#c9ced3'); f.box(-0.5, 0.6, 1.05, -0.38, 0.66, 1.08); f.box(0.38, 0.6, 1.05, 0.5, 0.66, 1.08);
   // the console: its walls, a raked windscreen over the dash, the grab rail, the electronics, the wheel and the lever
-  const c0 = -0.85, c1 = 0.3, cy = 1.55;   // (the dash 1.1 m over the sole: the wheel at a standing skipper's hands — shared/boat-model.js helm)
+  const c0 = -0.85, c1 = 0.3, cy = 1.55;   // (the dash 1.1 m over the sole: the wheel at a standing skipper's hands - shared/boat-model.js helm)
   f.col('#f4f4f0'); f.box(-0.56, S.floor, c0, 0.56, cy, c1);
   f.quad([[-0.56, cy, c1], [0.56, cy, c1], [0.56, cy + 0.12, c0 + 0.25], [-0.56, cy + 0.12, c0 + 0.25]], [0, 0.9, 0.4]);   // the dash, sloping to the skipper
   f.col('#7fa6bf'); f.quad([[-0.55, cy, c1 + 0.02], [0.55, cy, c1 + 0.02], [0.5, cy + 0.42, c1 - 0.2], [-0.5, cy + 0.42, c1 - 0.2]], [0, 0.45, 0.9]);   // the windscreen
@@ -145,7 +145,7 @@ export function boatGeometry(type) {
 }
 /**
  * A boat out: its body, and its outboards as parts (turned with the wheel about their pivots); a T-top's canopy as a
- * part too (top: hidden while it blocks the view on deck; topBox: its extent in the boat's frame — x half-width, z
+ * part too (top: hidden while it blocks the view on deck; topBox: its extent in the boat's frame - x half-width, z
  * from and to, y).
  */
 export function boatParts(type) {

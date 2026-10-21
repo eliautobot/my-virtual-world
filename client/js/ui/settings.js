@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // One compact tabbed Settings dialog (PLAN WP1.7; DECISIONS C112, CHECKLIST I3.5): General, Display, Sound, Player, Account,
 // Connections, Voice (ui/voice-settings.js), Data, Residents, Promotions, Users, Invites, Permissions, Audit and About. Admin tabs appear only to accounts with the
 // matching capability, and the dialog never covers the middle of the world view. The tab bodies live in admin.js
@@ -98,7 +98,7 @@ function soundTab(d, body) {
     const on = soundOn();
     body.innerHTML = `
     <label class="check snd-on"><input type="checkbox" class="snd-all"${on ? ' checked' : ''}> Sound on</label>
-    <p class="hint">All sound on or off on this device — the same as the 🔊 button on the top bar.</p>
+    <p class="hint">All sound on or off on this device - the same as the 🔊 button on the top bar.</p>
     <div class="snd-list${on ? '' : ' off'}">${SOUNDS.map(([k, label, about]) => `<label class="snd-l">${esc(label)}<span class="row snd-row"><input type="range" class="snd" data-k="${k}" min="0" max="100" step="5" value="${pref(k)}" aria-describedby="snd-${k}">
       <output class="snd-v">${pref(k)}%</output></span></label>
       <p class="hint" id="snd-${k}">${esc(about)}</p>`).join('')}</div>
@@ -122,7 +122,7 @@ function displayTab(d, body) {
     <p class="hint">Dark is the default. The choice follows your account; a guest's stays in this browser.</p>
     <label class="tr-l">Transparency<span class="row tr-row"><input type="range" class="tr" min="0" max="${TRANSPARENCY_MAX}" step="${TRANSPARENCY_STEP}" value="${transparencyOf(pref('transparency'))}" aria-describedby="tr-hint">
       <output class="tr-v">${transparencyOf(pref('transparency'))}%</output></span></label>
-    <p class="hint" id="tr-hint">See the world through windows, panels and buttons — 0% is solid. High contrast stays solid.</p>
+    <p class="hint" id="tr-hint">See the world through windows, panels and buttons - 0% is solid. High contrast stays solid.</p>
     <label>Agents' emoji<span class="row"><select class="input agemo">
       ${AGENT_EMOJI.map(([v, t]) => `<option value="${v}"${pref('agentEmoji') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></span></label>
     <p class="hint">How agents and residents show their own emoji: as the emoji they chose (Normal), or drawn in the theme's icon style (Stylized). It follows your account.</p>
@@ -138,7 +138,7 @@ function displayTab(d, body) {
       .map(([k, label, opts]) => `<label>${label}<span class="row"><select class="input dp" data-k="${k}">${opts.map(([v, t]) => `<option value="${v}"${pref(k) === v ? ' selected' : ''}>${t}</option>`).join('')}</select></span></label>`).join('')}
     <p class="hint">For slower devices: these change only what this screen draws, not the world.</p>
     <label>Graphics quality<span class="row"><select class="input qual">
-      ${[['high', 'High — all effects'], ['medium', 'Medium'], ['low', 'Low — fastest']].map(([v, t]) => `<option value="${v}"${qual === v ? ' selected' : ''}>${t}</option>`).join('')}</select></span></label>
+      ${[['high', 'High - all effects'], ['medium', 'Medium'], ['low', 'Low - fastest']].map(([v, t]) => `<option value="${v}"${qual === v ? ' selected' : ''}>${t}</option>`).join('')}</select></span></label>
     <p class="hint">Quality stays with this device; the other settings follow your account. Changing it reloads the page.</p>
     <label>Frame rate<span class="row"><select class="input fps">
       ${FPS_MODES.map(([v, t]) => `<option value="${v}"${(app?.pace?.mode || 'auto') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></span></label>
@@ -170,13 +170,13 @@ function displayTab(d, body) {
   body.querySelector('.walls').onchange = e => { setPref('walls', e.target.value); if (app) app.applyFocus(); };
   for (const cb of body.querySelectorAll('.rf')) cb.onchange = e => {
     setRenderFlag(e.target.dataset.k, e.target.checked);
-    app.toast(`${e.target.parentElement.textContent.trim()}: ${e.target.checked ? 'on' : 'off'} — reloading…`);
+    app.toast(`${e.target.parentElement.textContent.trim()}: ${e.target.checked ? 'on' : 'off'} - reloading…`);
     setTimeout(() => { const u = new URL(location.href); u.searchParams.delete('rf'); location.href = u.toString(); }, 700);
   };
   body.querySelector('.fps').onchange = e => { app?.pace?.setMode(e.target.value); say(app, `Frame rate: ${e.target.selectedOptions[0].textContent}`); };
   body.querySelector('.qual').onchange = e => {
     localStorage.setItem('mvw.quality', e.target.value);
-    app.toast(`Graphics: ${e.target.value} — reloading…`);
+    app.toast(`Graphics: ${e.target.value} - reloading…`);
     setTimeout(() => { const u = new URL(location.href); u.searchParams.delete('q'); location.href = u.toString(); }, 700);
   };
 }
@@ -188,7 +188,7 @@ function playerTab(d, body) {
     <div class="dpad"><button type="button" class="btn primary look">🎨 My look</button></div>
     <div class="sep"></div>
     <label>Driving physics<span class="row"><select class="input drive">
-      ${[['auto', `Automatic (now: ${drivePhysicsMode() === 'browser' ? 'this browser' : 'the server'})`], ['browser', 'This browser — instant controls'], ['server', 'The server — for phones and slow devices']]
+      ${[['auto', `Automatic (now: ${drivePhysicsMode() === 'browser' ? 'this browser' : 'the server'})`], ['browser', 'This browser - instant controls'], ['server', 'The server - for phones and slow devices']]
         .map(([v, t]) => `<option value="${v}"${(localStorage.getItem(DRIVE_PHYSICS_KEY) || 'auto') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></span></label>
     <p class="hint">In this browser your car reacts the moment you press a key and the server checks and shares its position. Automatic uses this browser on every device. Takes effect the next time you get in a car; kept on this device.</p>`;
   body.querySelector('.look').onclick = () => { if (app.openCustomizer) app.openCustomizer({ kind: 'player' }); };
@@ -222,7 +222,7 @@ function dataTab(d, body) {
   const canB = auth.can('world.backup'), canM = auth.can('world.manage');
   body.innerHTML = `
     <h4>🗄️ World backup</h4>
-    <p class="hint">Everything built and lived in — buildings and their floors, roads, the land and its changes, the islands, stations, decorations and residents — in one file. Lots and who holds them are listed for reference but never restored: a restore never changes property.</p>
+    <p class="hint">Everything built and lived in - buildings and their floors, roads, the land and its changes, the islands, stations, decorations and residents - in one file. Lots and who holds them are listed for reference but never restored: a restore never changes property.</p>
     <div class="dpad"><button type="button" class="btn primary dl"${canB ? '' : ' disabled'}>⬇️ Download a backup</button></div>
     <div class="sep"></div>
     <h4>♻️ Restore a backup</h4>
@@ -251,14 +251,14 @@ function dataTab(d, body) {
     let b; try { b = JSON.parse(await f.text()); } catch { stat('That file is not a backup.'); return; }
     if (!confirm(`Restore the world from ${b.exportedAt ? new Date(b.exportedAt).toLocaleString() : 'this backup'}? The world as it is now is backed up first, and the server restarts.`)) return;
     stat('Restoring…');
-    try { const r = await post('/api/world/restore', b); stat(`Restoring — the server restarts now (the world before is kept in ${r.backup}).`); }
+    try { const r = await post('/api/world/restore', b); stat(`Restoring - the server restarts now (the world before is kept in ${r.backup}).`); }
     catch (e) { stat(e.message); }
   };
   body.querySelector('.rp').onclick = async () => {
     const n = +body.querySelector('.pn').value;
     if (!confirm(`Reset the residents to ${n.toLocaleString()} new people? The agents' residents stay. The server restarts.`)) return;
     stat('Resetting…');
-    try { const r = await post('/api/world/reset-population', { population: n }); stat(`${r.people.toLocaleString()} residents — the server restarts now.`); }
+    try { const r = await post('/api/world/reset-population', { population: n }); stat(`${r.people.toLocaleString()} residents - the server restarts now.`); }
     catch (e) { stat(e.message); }
   };
 }
@@ -268,24 +268,24 @@ async function aboutTab(d, body) {
   body.innerHTML = '<p class="hint">Loading…</p>';
   let h1 = null;
   try { const r = await fetch('/api/health', { cache: 'no-store' }); h1 = await r.json(); } catch { /* shown below */ }
-  const rel = h1 && h1.release ? (h1.release.tag || h1.release.channel) : '—';
+  const rel = h1 && h1.release ? (h1.release.tag || h1.release.channel) : '-';
   const libs = (h1 && h1.libs) || [];
   body.innerHTML = `
     <h4>My Virtual World</h4>
-    <div class="kv2"><span>Version</span><b>${esc((h1 && h1.version) || '—')}</b></div>
+    <div class="kv2"><span>Version</span><b>${esc((h1 && h1.version) || '-')}</b></div>
     <div class="kv2"><span>Release</span><b>${esc(rel)}</b></div>
-    <div class="kv2"><span>World</span><b>${esc((h1 && h1.worldVersion) || '—')}</b></div>
+    <div class="kv2"><span>World</span><b>${esc((h1 && h1.worldVersion) || '-')}</b></div>
     ${aboutLine()}
     <div class="kv2"><span>Residents</span><b>${(S.people.length || 0).toLocaleString()}</b></div>
-    <div class="kv2"><span>Buildings</span><b>${esc(String((h1 && h1.buildings) ?? '—'))}</b></div>
+    <div class="kv2"><span>Buildings</span><b>${esc(String((h1 && h1.buildings) ?? '-'))}</b></div>
     <div class="sep"></div>
     <h5>This release ships</h5>
     <ul class="notice-list">${libs.length
-      ? libs.map(l => `<li><b>${esc(l.name)}</b>${l.version ? ` ${esc(l.version)}` : ''} — ${esc(l.license)}</li>`).join('')
+      ? libs.map(l => `<li><b>${esc(l.name)}</b>${l.version ? ` ${esc(l.version)}` : ''} - ${esc(l.license)}</li>`).join('')
       : '<li class="dim">No libraries listed.</li>'}</ul>
     <p class="hint">Each library is vendored in this installation; the licence above is the one the package declares, and its licence file sits beside it where the package ships one. City, residents and buildings are generated from a seeded world file; AI agents are connected over the settings.</p>
     <h5>License</h5>
-    <p class="hint">My Virtual World — © 2026 My Virtual World. Source-available under the PolyForm Noncommercial License 1.0.0 (noncommercial use, modification and sharing; commercial use needs a separate written license); creative assets under CC BY-NC-SA 4.0. A License Key unlocks the product's features; it does not change these licenses. The libraries above keep their own licences; the brand is reserved.</p>`;
+    <p class="hint">My Virtual World - © 2026 My Virtual World. Source-available under the PolyForm Noncommercial License 1.0.0 (noncommercial use, modification and sharing; commercial use needs a separate written license); creative assets under CC BY-NC-SA 4.0. A License Key unlocks the product's features; it does not change these licenses. The libraries above keep their own licences; the brand is reserved.</p>`;
 }
 
 /** Settings → Free Will & Mind: Free Will's part, then the Mind's (ui/free-will.js, ui/mind.js). */

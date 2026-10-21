@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Terrain edits (WP4.7, wp4-world-spec.md §9): administrators reshape the land beyond the city with brush strokes over
 // the generated island: raise or lower ground, flatten it to a level, dig a pond, clear woodland or plant it. Strokes
 // are kept in order in world.terrain.edits and applied by the one height function every browser and the server share

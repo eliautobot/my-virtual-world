@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The built-in browser (docs/features/agent-pc.md §5): a real Chrome this server starts by itself for its built-in
-// agents, headless, when one first needs it — and stops after a while with nobody browsing. Every page it loads goes
+// agents, headless, when one first needs it - and stops after a while with nobody browsing. Every page it loads goes
 // through the egress proxy (./egress-proxy.js: the public internet only, this machine and the local network never),
 // WebRTC can't go around it, and it downloads nothing by itself. Each agent browses in a context of its own (its own
 // cookies, logins and storage, never another agent's or another account's), kept while Chrome runs. The browser
@@ -17,12 +17,12 @@ import { EgressProxy } from './egress-proxy.js';
 const START_MS = 20000, IDLE_MS = 10 * 60000;
 
 /**
- * Chrome on this machine: the one MVW_CHROME names (server/config.js), else a system Chrome or Chromium (installed with what its sandbox needs — on
+ * Chrome on this machine: the one MVW_CHROME names (server/config.js), else a system Chrome or Chromium (installed with what its sandbox needs - on
  * Ubuntu 23.10+ a copy without it can't sandbox its pages), else the newest Chromium Playwright keeps. A Chrome that
  * can't sandbox its pages is never used (start() fails: the agents read with the reader).
  */
 export function findChrome({ chrome = '' } = {}) {
-  if (chrome === 'off') return null;   // (none: the reader only — MVW_CHROME, server/config.js)
+  if (chrome === 'off') return null;   // (none: the reader only - MVW_CHROME, server/config.js)
   if (chrome && fs.existsSync(chrome)) return chrome;
   for (const p of ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium']) if (fs.existsSync(p)) return p;
   const cache = path.join(os.homedir(), '.cache', 'ms-playwright');
@@ -39,7 +39,7 @@ export class LocalChrome {
    * (findChrome). enabled(): whether the installation uses it (Settings → PC).
    */
   constructor({ dir, exe = findChrome(), enabled = () => true, log = null, idleMs = IDLE_MS, resolve = undefined } = {}) {
-    Object.assign(this, { dir, exe, enabledFn: enabled, log, idleMs, resolve });   // (resolve: the proxy's address check — tests give their own)
+    Object.assign(this, { dir, exe, enabledFn: enabled, log, idleMs, resolve });   // (resolve: the proxy's address check - tests give their own)
     this.proc = null; this.ws = null; this.endpoint = null; this.starting = null; this.ua = null; this.failed = null;
     this.contexts = new Map();   // agent id → its browser context (while Chrome runs)
     this.used = 0; this.n = 0; this.wait = new Map();
@@ -63,7 +63,7 @@ export class LocalChrome {
     await this.stop();
     this.proxy = new EgressProxy({ log: this.log, ...(this.resolve ? { resolve: this.resolve } : {}) });
     const proxyAt = await this.proxy.listen();
-    // (its profile and cache: a folder of its own outside the world's data, removed when it stops — nothing it browsed is
+    // (its profile and cache: a folder of its own outside the world's data, removed when it stops - nothing it browsed is
     // kept on disk, and backups never carry it)
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mvw-chrome-'));
     fs.chmodSync(root, 0o700);

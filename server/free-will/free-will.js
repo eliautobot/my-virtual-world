@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Free Will (docs/features/FREE-WILL.md §2): an agent whose owner switched it on lets a decision service choose what it
 // does with its free time, from the options the world offers.
 //
@@ -355,7 +355,7 @@ export class FreeWill {
 
   failed(i, job, err) {
     const code = (err && err.code) || 'provider_error';
-    if (code === 'bad_request') { this.log?.warn?.('[free-will] a decision service refused a request as malformed — check the connection\'s model setting'); this.breakerOk(job.connId); }
+    if (code === 'bad_request') { this.log?.warn?.('[free-will] a decision service refused a request as malformed - check the connection\'s model setting'); this.breakerOk(job.connId); }
     else this.breakerFail(job.connId, code);
     this.settle(i, job, { error: code === 'timeout' ? 'timeout' : `service_${code}`, ms: this.now() - job.t0, tok: null, micro: null });
   }

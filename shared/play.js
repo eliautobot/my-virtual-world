@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Play modules (docs/features/play-modules.md): the fun in the world — a whole building (an airport, a race track, a
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Play modules (docs/features/play-modules.md): the fun in the world - a whole building (an airport, a race track, a
 // fishing port) or a thing inside one (a kitchen, an arcade cabinet) that runs a minigame or a game mechanic. Each is a
 // MODULE registered here: its courses (the levels, harder as a player gets on), how a finished run is checked and
 // scored, how much experience it is worth, and its badges. The platform's core (server/play/play.js) owns everything
 // around a module and is the same for all of them: who may start what, runs, experience and levels (per module and the
 // player's own), ranks, best results, leaderboards, badges and the player's profile. A new module is registerPlay()
-// here plus its own browser game — no change to the core, the profile or the leaderboards.
+// here plus its own browser game - no change to the core, the profile or the leaderboards.
 //
 // Not to be confused with WORK modules (shared/work.js): those are jobs at venues, paid in Virtual Coin.
 //
@@ -137,10 +137,10 @@ export function publicPlay(m) {
     courses: m.courses.map(c => ({ id: c.id, label: c.label, tier: c.tier, difficulty: c.difficulty, after: c.after || null, stars: c.stars, blurb: c.blurb || '' })),
     badges: m.badges.map(publicBadge) };
 }
-export const publicBadge = b => ({ id: b.id, label: b.label, icon: b.icon, desc: b.secret ? 'A secret — keep playing' : b.desc, tier: b.tier, module: b.module, secret: !!b.secret });
+export const publicBadge = b => ({ id: b.id, label: b.label, icon: b.icon, desc: b.secret ? 'A secret - keep playing' : b.desc, tier: b.tier, module: b.module, secret: !!b.secret });
 /** Formats a score the way the module counts it (time: 1:05.32; points: 1,250 pts). */
 export function formatScore(m, v) {
-  if (v == null || !Number.isFinite(v)) return '—';
+  if (v == null || !Number.isFinite(v)) return '-';
   if (m.score.kind === 'time') { const s = Math.max(0, v), mm = Math.floor(s / 60), ss = (s - mm * 60).toFixed(2).padStart(5, '0'); return mm ? `${mm}:${ss}` : `${(+ss).toFixed(2)} s`; }
   return `${Math.round(v).toLocaleString('en-US')} ${m.score.unit}`;
 }

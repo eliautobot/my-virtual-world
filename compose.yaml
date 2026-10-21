@@ -1,4 +1,4 @@
-# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 # My Virtual World with Docker Compose. Install guide: docs/INSTALL.md.
 #   docker compose up -d                    the app at http://localhost:8570, reachable from this machine only
 #   docker compose --profile proxy up -d    plus a reverse proxy with HTTPS for MVW_DOMAIN, reachable from anywhere

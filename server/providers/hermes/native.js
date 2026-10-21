@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Hermes' own stream for its chat view (docs/features/agent-providers.md §9 "Drawn as Hermes Desktop draws it"): beside
-// the universal events (the run's text, its end, presence), a Hermes run sends what its Desktop builds a turn from — where
+// the universal events (the run's text, its end, presence), a Hermes run sends what its Desktop builds a turn from - where
 // a thinking or a text section begins, each tool call with Hermes' own arguments and result, its status lines, its todo
-// list — so the chat window's Hermes view lays the turn out in Hermes' order. Each operation is rebuilt here from a
+// list - so the chat window's Hermes view lays the turn out in Hermes' order. Each operation is rebuilt here from a
 // whitelist, field by field, length-limited (the provider bus's rule: nothing else a provider sends travels further).
 const OPS = new Set(['seg', 'tool', 'status', 'todo', 'ask', 'title', 'side', 'control']);
 const ASKS = new Set(['clarify', 'secret', 'sudo']);
@@ -23,13 +23,13 @@ const clean = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== 
  *   todo    { items: [{ text, status }], rev }  the todo tool's whole list
  *   title   { text }  Hermes named (or renamed) the session
  *   ask     { id, kind: clarify|secret|sudo, command, env, prompt, desc }  what one of Hermes' requests to the person
- *           says beyond its questions (the command a sudo password is for, the variable a secret goes into) — never
+ *           says beyond its questions (the command a sudo password is for, the variable a secret goes into) - never
  *           an answer
- *   control { control }  the session's goal, loop and heartbeat as Hermes holds them (session.control.update) — rebuilt
+ *   control { control }  the session's goal, loop and heartbeat as Hermes holds them (session.control.update) - rebuilt
  *           field by field (controlOf below)
  *   side    { kind: btw|bg|review, id, question, text }  a side question (/btw) or a background task (/bg) the chat
  *           started answered (Hermes' btw.complete / background.complete), or what Hermes' self-improvement review saved
- *           to its memory or skills after a turn (review.summary) — a session's, outside any turn
+ *           to its memory or skills after a turn (review.summary) - a session's, outside any turn
  */
 export function nativeOp(v) {
   if (!v || typeof v !== 'object' || !OPS.has(v.op)) return null;
@@ -91,7 +91,7 @@ function heartbeatOf(h) {
   return tidy({ prompt: h.prompt.slice(0, 4000), status: ONE(['active', 'paused'])(h.status) || 'active', interval_seconds: NUM(h.interval_seconds), created_at: NUM(h.created_at),
     last_fired_at: NUM(h.last_fired_at), fire_count: INT(h.fire_count) ?? 0 });
 }
-/** A session's control snapshot (its goal, loop, heartbeat), rebuilt — or null. */
+/** A session's control snapshot (its goal, loop, heartbeat), rebuilt - or null. */
 export function controlOf(v) {
   if (!v || typeof v !== 'object') return null;
   return { goal: goalOf(v.goal), loop: loopOf(v.loop), heartbeat: heartbeatOf(v.heartbeat), revision: S(v.revision, 100) || '', updated_at: NUM(v.updated_at) ?? 0 };
@@ -103,19 +103,19 @@ const CONTROL_ACTIONS = ['goal.clear', 'goal.pause', 'goal.resume', 'goal.unwait
 export function sideOf(evt) {
   const kind = evt && SIDES[evt.type], p = (evt && evt.payload) || {};
   if (!kind) return null;
-  // (a review's words start with Hermes' 💾, which the line draws as its own glyph — as its Desktop)
+  // (a review's words start with Hermes' 💾, which the line draws as its own glyph - as its Desktop)
   const text = typeof p.text === 'string' ? (kind === 'review' ? p.text.trim().replace(/^[^\p{L}\p{N}]+/u, '') : p.text) : '';
   return nativeOp({ op: 'side', kind, id: typeof p.task_id === 'string' ? p.task_id : undefined, question: typeof p.question === 'string' ? p.question : undefined, text });
 }
 
 // ------------------------------------------------------------------ Hermes' own calls, for its view's composer
-// What Hermes Desktop's composer calls beside a message: its slash commands — Hermes runs them (slash.exec, falling back
+// What Hermes Desktop's composer calls beside a message: its slash commands - Hermes runs them (slash.exec, falling back
 // to command.dispatch for a skill, a quick command, a plugin's), some through the dedicated call its Desktop uses
 // (session.status, session.save, session.compress, session.title, config.get/set for /reasoning and /yolo,
-// session.interrupt and process.stop for /stop) —, its suggestions while one is typed (complete.slash, commands.catalog)
+// session.interrupt and process.stop for /stop) -, its suggestions while one is typed (complete.slash, commands.catalog)
 // and while an @reference is (complete.path), its side question (/btw: prompt.btw) and background task (/bg:
 // prompt.background). Only these; each one's arguments rebuilt here field by field, and the session it acts on always the
-// chat's own — named by the server, never by the page. session: 'need' (acts on the chat's session: a new chat's is made
+// chat's own - named by the server, never by the page. session: 'need' (acts on the chat's session: a new chat's is made
 // on Hermes first), 'opt' (the chat's when it has one, else the agent's profile), 'none'.
 const word = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);
 const oneOf = list => v => (list.includes(v) ? v : undefined);
@@ -135,15 +135,15 @@ const CALLS = {
   'prompt.btw': { session: 'need', args: { text: v => word(v, 8000) }, need: ['text'] },
   'prompt.background': { session: 'need', args: { text: v => word(v, 8000) }, need: ['text'] },
   'config.get': { session: 'need', args: { key: oneOf(['reasoning']) }, need: ['key'] },
-  // (its goal, loop and heartbeat — read, and its own actions on them: only a chat with its session on Hermes has them)
+  // (its goal, loop and heartbeat - read, and its own actions on them: only a chat with its session on Hermes has them)
   'session.control.read': { session: 'have', args: {} },
   'session.control': { session: 'have', args: { action: oneOf(CONTROL_ACTIONS), args: v => (v && typeof v === 'object' && !Array.isArray(v) ? (typeof v.text === 'string' ? { text: v.text.slice(0, 2000) } : Number.isInteger(v.index) && v.index >= 0 ? { index: v.index } : {}) : {}) },
     need: ['action'], check: a => (a.action === 'subgoal.add' ? !!(a.args && a.args.text && a.args.text.trim()) : a.action === 'subgoal.remove' ? !!(a.args && Number.isInteger(a.args.index)) : true) },
-  // (/reasoning — this chat's, or --global: Hermes' own setting —, /yolo: this chat's only)
+  // (/reasoning - this chat's, or --global: Hermes' own setting -, /yolo: this chat's only)
   'config.set': { session: 'need', args: { key: oneOf(['reasoning', 'yolo']), value: v => word(v, 60), scope: oneOf(['session', 'global']) }, need: ['key', 'value'],
     check: a => !(a.key === 'yolo' && a.scope === 'global') },
 };
-/** One of the calls above with its arguments rebuilt — { method, params, session, timeoutMs } — or null (not one of them,
+/** One of the calls above with its arguments rebuilt - { method, params, session, timeoutMs } - or null (not one of them,
  *  or not as it takes them). */
 export function nativeCall(method, params) {
   const c = typeof method === 'string' && Object.hasOwn(CALLS, method) ? CALLS[method] : null;

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.12 the resident editor: an administrator gives a resident a home in a chosen building, work in a chosen building
 // with its hours, and a daily routine; removes a resident (they move away) and brings them back with undo. Members
 // cannot; an agent's resident keeps what its agent gives it; times out of range are refused in clock terms.

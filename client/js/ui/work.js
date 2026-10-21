@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Working a shift (docs/features/ECONOMY.md §8; shared/work.js, server/economy/jobs.js): the mini-game panel at the foot
-// of the screen while a player works a role at a venue — barista, chef, server, cashier, trainer. Each order's steps are
+// of the screen while a player works a role at a venue - barista, chef, server, cashier, trainer. Each order's steps are
 // played here (a timing bar to stop in the green, a meter to hold until the band, a choice remembered from what the
 // customer said, a sequence tapped in the order shown); only the raw inputs go to the server, which scores them and
 // pays at the end of the shift. Space or Enter stops a needle; the panel never covers the middle of the world.
@@ -141,7 +141,7 @@ async function serve() {
 }
 function feedback(r) {
   const play = W.el.querySelector('.wk-step');
-  play.innerHTML = `<div class="wk-res s${r.stars}"><b>${stars(r.stars)}</b><span>${esc(r.title)} for ${esc(r.customer)}${r.tip ? ` · tip ${vc(r.tip)}` : ''}</span>${r.review ? `<em>“${esc(r.review.text)}” — ${esc(r.review.by)}</em>` : ''}</div>`;
+  play.innerHTML = `<div class="wk-res s${r.stars}"><b>${stars(r.stars)}</b><span>${esc(r.title)} for ${esc(r.customer)}${r.tip ? ` · tip ${vc(r.tip)}` : ''}</span>${r.review ? `<em>“${esc(r.review.text)}” - ${esc(r.review.by)}</em>` : ''}</div>`;
   W.el.querySelector('.wk-head').outerHTML = head();
   setTimeout(() => { if (W) renderOrder(); }, r.review ? 1800 : 1100);
 }
@@ -151,7 +151,7 @@ async function end() {
   try {
     const r = await post('/api/economy/work/end', { session: s.id });
     W.el.innerHTML = `<div class="wk-head"><b>Shift over · ${esc(s.roleLabel)} at ${esc(s.business?.name || '')}</b><button type="button" class="btn small" data-w="close">Close</button></div>
-      <div class="wk-sum"><div><span>Served</span><b>${r.session.served}</b></div><div><span>Stars</span><b>${r.avgStars || '—'}</b></div><div><span>Time</span><b>${r.hours} world h</b></div><div><span>Paid</span><b>${vc(r.pay)}</b></div></div>
+      <div class="wk-sum"><div><span>Served</span><b>${r.session.served}</b></div><div><span>Stars</span><b>${r.avgStars || '-'}</b></div><div><span>Time</span><b>${r.hours} world h</b></div><div><span>Paid</span><b>${vc(r.pay)}</b></div></div>
       <p class="hint">Wages ${vc(r.gross)}${r.tips ? ` + tips ${vc(r.tips)}` : ''}, income tax withheld.${r.owed ? ` ${esc(s.business?.name || 'The venue')} couldn't pay ${vc(r.owed)} yet: it owes you and pays when it can.` : ''}</p>
       <div class="row"><button type="button" class="btn primary" data-w="again">Work another shift here</button></div>`;
     app.econ?.refresh?.();

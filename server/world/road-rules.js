@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a road an administrator draws must satisfy (WP4.4, wp4-world-spec.md §3, §5.0): a valid alignment of a known
 // road type; with the other roads, no two running on top of each other and no junctions crowding each other; outside
 // the city (its streets are the grid; a road may start on the city's edge); on the island, crossing water no deeper than
-// a causeway can; clear of every building and every lot (roads go between lots — a lot must be re-platted or retired
+// a causeway can; clear of every building and every lot (roads go between lots - a lot must be re-platted or retired
 // first). Problems come back in words. Pure: the editor applies, journals and syncs.
 import { RoadNetwork, checkAlignment, samplePolyline, project, DEFAULT_ROAD_PROFILES } from '../../shared/roads.js';
 import { isUm } from '../../shared/units.js';
@@ -34,7 +34,7 @@ export function normalizeRoad(input, profiles = DEFAULT_ROAD_PROFILES) {
     pts.push(r ? { x, z, r } : { x, z });
   }
   const out = { id, profile, name, closed: !!input.closed, pts };
-  // A grid's roads (the grid layout tool): one flat level for all of them (m) and the grid they belong to — the land
+  // A grid's roads (the grid layout tool): one flat level for all of them (m) and the grid they belong to - the land
   // across the whole grid is levelled to it (shared/island-build.js gridPads), so its lots are level too.
   if (input.level !== undefined && input.level !== null) {
     const y = Number(input.level);
@@ -67,7 +67,7 @@ export function roadProblems(world, rec, { island = null, lots = [], profiles = 
   for (const p of net.validate()) if ((p.roads || []).includes(rec.id) || (p.junctions || []).some(k => k.split('@')[0].split('+').includes(rec.id))) out.push(p.message);
   const G = net.geometry(rec.id), pts = samplePolyline(G, 0, { maxChord: 4 }), g = makeGrid(world.grid), T = world.terrain;
   // The city's own streets serve the inside of the city; a road may start or end on its edge.
-  // (a road may end on an edge street's centre line, joining the city's junction there — shared/city-roads.js)
+  // (a road may end on an edge street's centre line, joining the city's junction there - shared/city-roads.js)
   const ix0 = g.X[0] + 0.5, ix1 = g.X.at(-1) - 0.5, iz0 = g.Z[0] + 0.5, iz1 = g.Z.at(-1) - 0.5;
   if (g.empty) { /* no city: no streets to keep clear of */ }
   else if (pts.some(p => p.x > ix0 && p.x < ix1 && p.z > iz0 && p.z < iz1)) out.push('Roads inside the city are its streets; start the road at the city\'s edge');

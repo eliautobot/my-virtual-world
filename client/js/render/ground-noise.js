@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The ground's random texture (render flag 'noise', core/render-flags.js): 256² RGBA bytes from a fixed seed, made the
 // same in the page (render/ground-detail.js: the shader looks it up) and in the terrain worker (render/terrain.worker.js:
 // flowers and grass tufts stand where the shader draws their drifts and tints). x: value noise; y: hashes.

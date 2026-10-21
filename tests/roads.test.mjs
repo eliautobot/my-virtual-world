@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.1 road model: exact units, road types, straight/arc alignments, junctions at any angle, queries, and the
 // conversion of today's grid city into alignments with the same centrelines (wp4-world-spec.md §3–4).
 import test from 'node:test';

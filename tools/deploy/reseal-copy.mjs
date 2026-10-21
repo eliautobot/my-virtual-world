@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Prepares the stored secrets of a staging copy of live data (DECISIONS C99). Staging keeps a key of its own: the
 // two-factor secrets and the recovery-code key are opened with live's key and sealed again with staging's key, so
 // signing in to staging works exactly as on live; every other stored secret (service credentials) is deleted from the

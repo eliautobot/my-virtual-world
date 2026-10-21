@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Stable, allocation-bounded vehicle presentation. This never writes authoritative physics poses.
 import * as THREE from 'three';
 const qa=new THREE.Quaternion(),qb=new THREE.Quaternion(),UP=new THREE.Vector3(0,1,0),qe=new THREE.Quaternion(),QI=new THREE.Quaternion(),v3=new THREE.Vector3();

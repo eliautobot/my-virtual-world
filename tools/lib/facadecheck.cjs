@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Regression probe for the real facade material, compiled and rasterized by the page's WebGL2 renderer.
 // Reads the actual window seed expressions from its onBeforeCompile hook (no duplicate hash implementation).
 // Uses a private scene/render target only: no world, clock, settings, or account writes.

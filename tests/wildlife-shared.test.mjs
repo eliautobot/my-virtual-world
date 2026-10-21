@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.17 shared wildlife (wp4-world-spec.md §6.3 tier 2): herds simulated by the server near someone, the same herds
 // whenever a region wakes, nothing simulated where nobody is, herds running from a walker, plans small enough to send.
 import test from 'node:test';

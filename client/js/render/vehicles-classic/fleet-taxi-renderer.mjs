@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Original full-size fleet taxi, authored independently of the approved
 // compact/midsize sedan. Distinct body sections, cabin, lamps and equipment.
 import { createVehicleMeshTools, authorRoadWheel, authorTaxiLettering } from './vehicle-mesh-tools.mjs';

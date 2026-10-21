@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Next's side of the home view (PLAN WP1.9, DECISIONS C44, C117): the reused classic module fixes the frame as position,
-// distance and angle, and this envelope adds the one thing Next's camera has that the module does not — the tilt — so
+// distance and angle, and this envelope adds the one thing Next's camera has that the module does not - the tilt - so
 // "Set home to current view" and "Go to home view" restore the exact view. The envelope is what the account preference
 // holds (a small JSON string, like the docks): { frame, pitch }.
 import { HOME_DEFAULTS, isHomeConfigured, normalizeHome } from '../vendor-classic/g8-extras/home-location.mjs';
@@ -9,7 +9,7 @@ export const FRAME_VERSION = 1;
 const round = v => Math.round(v * 1e4) / 1e4;
 
 /** The camera's current view as an envelope: the module's frame, plus the tilt and the true distance it does not carry
- *  (the module holds a frame's distance between 4.5 and 120 m; a view over the whole city is farther — `dist`). */
+ *  (the module holds a frame's distance between 4.5 and 120 m; a view over the whole city is farther - `dist`). */
 export function frameFromCamera(cam) {
   return {
     v: FRAME_VERSION,

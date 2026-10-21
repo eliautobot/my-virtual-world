@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Residents' cars (WP4.9): a resident who drives (server/sim/plan.js drive) sits hidden at the wheel for the length of
 // the drive; the server tells every browser the lanes the drive follows (an 'rcar' message, and the drives under way to
-// a browser that connects), and this draws the resident's car along them — the same classic models as traffic, wheels
-// turning, lights at night — only while that resident's plan says they are in the car (the segment's vehicle byte), so
+// a browser that connects), and this draws the resident's car along them - the same classic models as traffic, wheels
+// turning, lights at night - only while that resident's plan says they are in the car (the segment's vehicle byte), so
 // a changed plan takes the car away at once. A short wait at each end for getting in and parking.
 import * as THREE from 'three';
 import { ROAD_TOP } from './island-roads.js';

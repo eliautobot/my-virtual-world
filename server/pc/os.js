@@ -1,12 +1,12 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The agents' PC (docs/features/agent-pc.md): one engine that decides everything — who may reach what, the tree of files
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The agents' PC (docs/features/agent-pc.md): one engine that decides everything - who may reach what, the tree of files
 // and folders, versions, the trash, the storage pool, teams, boards, calendars, search and the activity feed. The
 // command line (./shell.js), the HTTP routes (./routes.js) and the work sessions are thin doors onto it.
 //
 // Who asks (`who`):
-//   { human: accountId }    a person through the PC window — reaches every space of their own account, nothing else
-//   { agent: agentId }      an agent at work — its own home, and the teams it belongs to (a viewer reads only)
-//   { visitor: agentId }    an agent talking with someone from another account — its home's Public folder, to read
+//   { human: accountId }    a person through the PC window - reaches every space of their own account, nothing else
+//   { agent: agentId }      an agent at work - its own home, and the teams it belongs to (a viewer reads only)
+//   { visitor: agentId }    an agent talking with someone from another account - its home's Public folder, to read
 // Nothing here reveals another account's PC: a space this caller may not reach is "not found", like one that isn't there.
 //
 // Paths are names inside the PC's own tree, never places on disk. An agent's view: ~ (its home), /teams/<team>, and /
@@ -28,7 +28,7 @@ export const HOME_DIRS = Object.freeze(['Documents', 'Downloads', 'Skills', 'Pub
 export const COLUMNS = Object.freeze(['todo', 'doing', 'review', 'done']);
 const TERM_LINES = 18;   // an agent's terminal: its last lines on its screen
 // a window it works in (a page, a file, its board…) stays up this long against what only sets the scene: a step of the
-// terminal's no app claims (a quick command), its run writing between steps — those go to its terminal meanwhile
+// terminal's no app claims (a quick command), its run writing between steps - those go to its terminal meanwhile
 export const HOLD_MS = 30000;
 export const COLUMN_NAMES = Object.freeze({ todo: 'To do', doing: 'Doing', review: 'Review', done: 'Done' });
 export const ROLES = Object.freeze(['lead', 'member', 'viewer']);
@@ -185,7 +185,7 @@ export class PcOS {
 
   // ------------------------------------------------------------------------------------------- who and where
   accountOf(agent) { return agent ? (agent.ownerId ?? this.ownerAccount() ?? null) : null; }
-  /** The caller in one shape: { kind, account, agent, tag } — throws not_found for an agent that isn't there. */
+  /** The caller in one shape: { kind, account, agent, tag } - throws not_found for an agent that isn't there. */
   caller(who) {
     if (who && Number.isInteger(who.human)) return { kind: 'human', account: who.human, agent: null, tag: `h:${who.human}` };
     const id = who && (who.agent ?? who.visitor);
@@ -224,13 +224,13 @@ export class PcOS {
     if (!s) { this.q.addSpace.run(t.account_id, 'team', t.id, this.now()); s = this.q.space.get('team', t.id); }
     return s;
   }
-  /** 'rw', 'r' or null: what `c` (a caller()) may do in space `s` — parts: the path inside it (a visitor's Public). */
+  /** 'rw', 'r' or null: what `c` (a caller()) may do in space `s` - parts: the path inside it (a visitor's Public). */
   access(c, s, parts = []) {
     if (!s || s.gone || s.account_id !== c.account) return null;
     if (c.kind === 'human') return 'rw';
     if (s.kind === 'agent') {
       if (s.ref !== c.agent) return null;
-      // (a visitor: Public, to read — and the home's top, which lists Public alone: list())
+      // (a visitor: Public, to read - and the home's top, which lists Public alone: list())
       if (c.kind === 'visitor') return !parts.length || keyOf(parts[0]) === 'public' ? 'r' : null;
       return 'rw';
     }
@@ -278,7 +278,7 @@ export class PcOS {
       const t = this.q.teamBySlug.get(c.account, slugOf(all[1]));
       if (!t) throw notFound(vpath, `There is no team "${all[1]}" here. Your teams: ${this.teamsOf(c, profile).map(x => x.slug).join(', ') || 'none'}`);
       const s = this.teamSpace(t.id), parts = all.slice(2);
-      // (a person sees the teams of the agent whose view this is — and any team of theirs directly)
+      // (a person sees the teams of the agent whose view this is - and any team of theirs directly)
       const viewer = c.kind === 'human' ? { kind: 'agent', account: c.account, agent: profile } : c;
       const acc = c.kind === 'human' ? (this.access(viewer, s, parts) ? 'rw' : null) : this.access(c, s, parts);
       if (!acc) throw notFound(vpath, `This agent isn't in the team "${t.name}"`);
@@ -396,7 +396,7 @@ export class PcOS {
     if (!buf) throw new PcError(500, 'lost', `${r.view} could not be read (its content is missing)`);
     return { node: r.node, info: this.info(r.node, r.space), buf, path: r.view, space: r.space };
   }
-  /** A file as text: { text, info, path, kind: 'text'|'doc', truncated } — throws for pictures, PDFs, recordings. */
+  /** A file as text: { text, info, path, kind: 'text'|'doc', truncated } - throws for pictures, PDFs, recordings. */
   readText(who, vpath, o = {}) {
     const f = this.readFile(who, vpath, o);
     const mime = f.node.mime || mimeOf(f.node.name);
@@ -407,7 +407,7 @@ export class PcOS {
     if (isDoc(f.node.name)) {
       try { const d = extractBuffer(f.buf, f.node.name); return { text: d.text, truncated: d.truncated, info: f.info, path: f.path, kind: 'doc' }; } catch (e) { throw new PcError(415, 'unreadable', `${f.path}: ${e.message}`); }
     }
-    throw new PcError(415, 'not_text', `${f.path} is ${describe(mime, f.node.size)} — it can't be read as text`);
+    throw new PcError(415, 'not_text', `${f.path} is ${describe(mime, f.node.size)} - it can't be read as text`);
   }
 
   // ------------------------------------------------------------------------------------------- writing
@@ -423,11 +423,11 @@ export class PcOS {
     if (more <= 0) return;
     const u = this.usage(account);
     if (u.limit && u.used + more > u.limit) {
-      throw new PcError(507, 'full', `The PC is full: ${mbText(u.used)} of ${mbText(u.limit)} used. Delete files you no longer need, or empty the trash (it is kept 30 days) — nothing was saved.`, { used: u.used, limit: u.limit });
+      throw new PcError(507, 'full', `The PC is full: ${mbText(u.used)} of ${mbText(u.limit)} used. Delete files you no longer need, or empty the trash (it is kept 30 days) - nothing was saved.`, { used: u.used, limit: u.limit });
     }
   }
   /** Writes a file (made with its folders when missing). content: Buffer or string. o.expect: the version the writer
-   *  last read — refused (409 changed) when someone saved since; o.force: replace a file someone else wrote without
+   *  last read - refused (409 changed) when someone saved since; o.force: replace a file someone else wrote without
    *  having read it. Returns { info, created, same }. */
   write(who, vpath, content, o = {}) {
     const c = this.caller(who);
@@ -480,7 +480,7 @@ export class PcOS {
     const glue = before && !before.endsWith('\n') ? '\n' : '';
     return this.write(who, vpath, before + glue + String(text ?? ''), { ...o, expect, force: true });
   }
-  /** Replaces `find` with `repl` in a text file — exactly one place, unless o.all. */
+  /** Replaces `find` with `repl` in a text file - exactly one place, unless o.all. */
   edit(who, vpath, find, repl, o = {}) {
     const f = this.readText(who, vpath, o);
     if (f.kind !== 'text') throw new PcError(415, 'not_text', `${f.path} is a document: write it again instead of editing it`);
@@ -557,7 +557,7 @@ export class PcOS {
     if (dst.space.id !== src.space.id) this.changed(c, dst.space, { kind: 'files', path: info.path }, null);
     return { info, from: src.view };
   }
-  /** Copies a file or folder (its contents are shared, so a copy takes no more room on disk — it counts toward the
+  /** Copies a file or folder (its contents are shared, so a copy takes no more room on disk - it counts toward the
    *  limit as its own size, as for its owner it is one more file). */
   copy(who, from, to, o = {}) {
     const c = this.caller(who);
@@ -711,7 +711,7 @@ export class PcOS {
     this.q.ftsDel.run(id);
     this.q.ftsAdd.run(id, marked(name, spaceId), body ? marked(body, spaceId) : '');
   }
-  /** Files and folders whose name or words match: [{ path, name, dir, size, modified, snippet }] — in the spaces the
+  /** Files and folders whose name or words match: [{ path, name, dir, size, modified, snippet }] - in the spaces the
    *  caller reaches (o.in: only under that folder). */
   find(who, query, o = {}) {
     const c = this.caller(who);
@@ -1031,10 +1031,10 @@ export class PcOS {
   // ------------------------------------------------------------------------------------------- activity, screens
   /**
    * What its screen shows now (owner-only: the frame goes to its account alone): the app, a line of what it did, and the
-   * window open (./views.js — a file, a folder, a board, a page…). o.log: lines its terminal gets (the command and what it
-   * said); o.view: the window — none given, its terminal when lines came, else the window that was open stays. o.soft: it
+   * window open (./views.js - a file, a folder, a board, a page…). o.log: lines its terminal gets (the command and what it
+   * said); o.view: the window - none given, its terminal when lines came, else the window that was open stays. o.soft: it
    * only sets the scene (and so is a step that brings only terminal lines): within HOLD_MS of a window it works in, that
-   * window stays up and the lines go to its terminal alone — a quick command between two pages never covers the page.
+   * window stays up and the lines go to its terminal alone - a quick command between two pages never covers the page.
    */
   screen(agentId, app, title, detail = '', o = {}) {
     const a = this.agents.get(agentId);

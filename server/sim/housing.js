@@ -1,12 +1,12 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // How many people live in the city (2026-10-20, the product owner: "the population should be based on buildings, homes,
 // businesses … not an arbitrary number"): its homes decide. The residents fill a share of the beds in its apartment
-// buildings — "Homes filled" (Settings → Residents, world.homesFilled, in %) — and only homes bring people: offices,
+// buildings - "Homes filled" (Settings → Residents, world.homesFilled, in %) - and only homes bring people: offices,
 // shops and restaurants bring jobs, which the residents take. The city settles towards that number by itself, both ways
 // and a little at a time, by the world's clock (paused: nothing changes):
 //   - fewer residents than that, and free beds: people move in, about 1/24 of the gap each world hour and at least one
 //     (a new building is mostly full within a world day or two, not at once)
-//   - more than that (the setting lowered, homes taken away): people move away the same way — first those without a
+//   - more than that (the setting lowered, homes taken away): people move away the same way - first those without a
 //     home, then those without work, then anyone; never an agent's resident
 //   - a resident without a home for a whole world day moves away (when no free home turned up meanwhile)
 // A new world starts with its homes already filled to that share (server/index.mjs). Moving in and away goes through the
@@ -76,7 +76,7 @@ export class Housing {
       else if (now - since >= DAY) leave.push(i);
     });
     // towards the target: 1/24 of the gap each world hour, at least one person a world hour while there is a gap
-    // (what is owed carries over between steps — never more than the gap, and not into the other direction)
+    // (what is owed carries over between steps - never more than the gap, and not into the other direction)
     const gap = s.target - s.residents, dir = Math.sign(gap);
     if (dir !== this.dir) { this.carry = 0; this.dir = dir; }
     if (dir) this.carry = Math.min(Math.abs(gap), this.carry + Math.max(Math.abs(gap) * Math.min(1, dt / DAY), Math.min(dt, DAY) / HOUR));

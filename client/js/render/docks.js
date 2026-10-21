@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fishing docks drawn (docs/features/fishing.md §Venues; layouts: shared/dock-layout.js): one mesh per dock, built in
 // its own frame (s across: +s up the land, −s out over the water; f along the shore) like the airport's. The land: the
 // promenade along the quay, the plaza and lawn round the store, the car park with its bays (long ones for trailers),
@@ -89,7 +89,7 @@ function land(f, K, G, P0, P1, M1) {
   // the promenade's expansion joints; the plaza's paver courses
   f.col('#9d988e'); for (const [s0, f0, s1, f1, kind] of L.surfaces) if (kind === 'walk') for (let z = f0 + 2.5; z < f1; z += 2.5) f.box(s0, P1, z - 0.02, s1, P1 + 0.004, z + 0.02, 'b');
   f.col('#a8987f'); for (const [s0, f0, s1, f1, kind] of L.surfaces) if (kind === 'pavers') for (let x = s0 + 1.2; x < s1; x += 1.2) f.box(x - 0.02, P1, f0, x + 0.02, P1 + 0.004, f1, 'b');
-  // parking bays: their lines and the line at their back (rows back to back share it) — no wheel stops (2026-10-15, the
+  // parking bays: their lines and the line at their back (rows back to back share it) - no wheel stops (2026-10-15, the
   // product owner: two bars side by side read as long double bays)
   for (const [s0, s1, f0, f1, w, open] of L.bays) {
     f.col('#eeeeea');
@@ -106,7 +106,7 @@ function land(f, K, G, P0, P1, M1) {
   f.col('#c9c5bc'); f.box(L.lawn[2] - 0.18, G, L.lawn[1], L.lawn[2], G + 0.14, L.lawn[3]); f.box(L.lawn[0], G, L.lawn[1], L.lawn[2], G + 0.14, L.lawn[1] + 0.18);
   for (const [s, z] of L.lamps) lampPost(f, s, z, G, 6.5);
   // (its trees, benches and picnic tables are the world's own decorations, made with the dock: shared/dock-layout.js
-  // dockDecor — people sit on them; render/decor.js draws them)
+  // dockDecor - people sit on them; render/decor.js draws them)
   // bins by the benches, a bike rack by the store, the entrance sign's stone base (its lettering: dockSigns)
   for (const [s, z] of L.benches) { f.col('#3d4a3f'); f.cyl(s + 0.4, z + 1.4, 0.28, G, G + 0.85, 10); f.col('#2c3530'); f.cyl(s + 0.4, z + 1.4, 0.3, G + 0.85, G + 0.92, 10); }
   const E = K.roadEnd;
@@ -223,7 +223,7 @@ function deck(f, d, y0, y1, Wr, K) {
     f.col('#3a3f45'); f.box(s0, y1 - 0.08, f1 - 0.15, s1, y1 + 0.02, f1 + 0.4);   // its roller plate on the float
     return;
   }
-  // the boards: across the deck's long way (a sloped deck — a pier's root — in steps, a board at a time)
+  // the boards: across the deck's long way (a sloped deck - a pier's root - in steps, a board at a time)
   const longS = s1 - s0 >= f1 - f0, len = longS ? s1 - s0 : f1 - f0, wid = longS ? f1 - f0 : s1 - s0;
   const yS = s => (along === 's' && y1 !== y0 ? y0 + (y1 - y0) * (s - s0) / (s1 - s0) : y0);
   const P = (u, v, y) => (longS ? [s0 + u, y, f0 + v] : [s0 + v, y, f0 + u]);   // u along the deck, v across it
@@ -326,8 +326,8 @@ function fixtures(f, m, K, G, Wr, yOf) {
 
 // ------------------------------------------------------------------ names
 /**
- * The dock's words — its name on the entrance sign (to the road), the store's on its porch board, BOAT RAMP, WEIGH-IN,
- * FUEL — as one mesh: every line in one canvas, a quad each (one draw call for all of them).
+ * The dock's words - its name on the entrance sign (to the road), the store's on its porch board, BOAT RAMP, WEIGH-IN,
+ * FUEL - as one mesh: every line in one canvas, a quad each (one draw call for all of them).
  */
 function dockSigns(m) {
   const K = DOCKS[m.kind], G = -0.05, E = K.roadEnd, Wr = waterOf(m) - m.y, St = K.store, R = K.ramp, items = [];

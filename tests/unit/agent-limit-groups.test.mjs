@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Settings → Agent limits (client/js/ui/agent-limit-groups.js; 2026-10-11): every limit on agents is controlled in one
-// place — each listed setting exists and is an administrator's, none is listed twice, and no setting about agents talking,
+// place - each listed setting exists and is an administrator's, none is listed twice, and no setting about agents talking,
 // acting or spending is left only on the General tab.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';

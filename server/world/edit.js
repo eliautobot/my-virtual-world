@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // World editor: furniture (per floor or per shared layout), buildings (properties, floors, add, delete), residents.
 // Every op is validated with the shared rules; patches are broadcast to clients and agents re-plan around changes.
 // The journal (PLAN WP1.8, DECISIONS C35, C116): each accepted batch records, for every piece of the world it changed,
@@ -91,7 +91,7 @@ export class Editor {
     const lv = B.lv[f];
     if (st.touched.has(`lv:${lv}`)) throw new Error('That floor was just laid out again; change it in a separate step');
     if (scope === 'all' || this.refs(B, lv) <= 1) {
-      // (furniture alone: only the people using or standing at the pieces that changed re-plan — softTouch, finish)
+      // (furniture alone: only the people using or standing at the pieces that changed re-plan - softTouch, finish)
       if (!furniture) for (let k = 0; k < B.floors; k++) if (B.lv[k] === lv) st.ctx.add(ctxOf(B.idx, k));
       st.levels.add(lv);
       if (byHand) this.byHand(lv, st);
@@ -382,7 +382,7 @@ export class Editor {
   /**
    * The economy's part of a flat's record (server/economy/realty.js; never from a browser): 'sold' for Virtual Coin to a
    * player (its owner), 'rented' for Virtual Coin to a player or an AI agent's character (the tenant; o.rent: whole VC a
-   * month) — whoever lived there moves out, a character who rents it moves in — or 'own' again when a lease ends (o.vacate
+   * month) - whoever lived there moves out, a character who rents it moves in - or 'own' again when a lease ends (o.vacate
    * moves out). Records it touches carry vc: 1.
    */
   flatLease(o, st) {
@@ -425,7 +425,7 @@ export class Editor {
     return { key, flat: rec };
   }
   /** Holds a door open or lets it close, for everyone (the world doc `doors`, "<b>:<f>:<door key>"; not journaled: a door
-   *  is opened and shut all day). A locked flat's door: only its people — its owner, tenants, visitors — or the building's. */
+   *  is opened and shut all day). A locked flat's door: only its people - its owner, tenants, visitors - or the building's. */
   doorOp(o, st) {
     const B = this.bld(o.b), f = this.floorOf(B, o.f), key = String(o.key || '').slice(0, 40), W = this.world;
     if (!/^(entrance|flat:-?\d+:-?\d+|room:-?\d+:-?\d+)$/.test(key)) throw new Error('No such door');
@@ -452,7 +452,7 @@ export class Editor {
     }));
   }
   /** Takes flat o.u away (flat.del: its width goes to the flat beside it) or makes it two (flat.add); the floor is laid out
-   *  again from its plan — every other flat as it was — and flat records and residents follow their flats. */
+   *  again from its plan - every other flat as it was - and flat records and residents follow their flats. */
   flatPlanOp(o, st) {
     const B = this.bld(o.b), f = this.floorOf(B, o.f), W = this.world, L0 = W.levels[B.lv[f]], u = o.u | 0;
     if (B.type !== 'apartment' || f === 0 || !L0?.units?.[u]) throw new Error('No such flat');
@@ -507,7 +507,7 @@ export class Editor {
   /**
    * A piece of furniture changed on level lv of B (was / now: the item before and after, null when there was none):
    * remember it for every floor using that level, so finish() re-plans only the people who use it, hold a place at it,
-   * or stand where it was or now is — not everyone on the floor (2026-10-07: moving a chair woke the sleepers).
+   * or stand where it was or now is - not everyone on the floor (2026-10-07: moving a chair woke the sleepers).
    */
   softTouch(st, B, lv, was, now) {
     const pts = [];
@@ -1072,8 +1072,8 @@ export class Editor {
     return { id };
   }
   /**
-   * A module's own outdoor things (a dock's benches, picnic tables and trees: shared/world-modules.js moduleDecor) — the
-   * world's own decorations, which people sit at — made with it, each marked with its id (mod), moved and removed with
+   * A module's own outdoor things (a dock's benches, picnic tables and trees: shared/world-modules.js moduleDecor) - the
+   * world's own decorations, which people sit at - made with it, each marked with its id (mod), moved and removed with
    * it, in the same edit (one undo).
    */
   addModuleDecor(m, st) {
@@ -1232,7 +1232,7 @@ export class Editor {
     const P = this.rights?.property; if (!P) return [];
     try { return P.under(pts.map(p => ({ x: Math.round(p.x * 1e6), z: Math.round(p.z * 1e6) }))); } catch { return []; }
   }
-  /** A module's own building — an airport's terminal, a dock's store: a real building (shared/world-modules.js
+  /** A module's own building - an airport's terminal, a dock's store: a real building (shared/world-modules.js
    *  terminalSpec: people and residents go in), made with the module, moved and removed with it, in the same edit (one
    *  undo). */
   addTerminal(m, st) {
@@ -1275,7 +1275,7 @@ export class Editor {
       const B = Number.isInteger(m.terminal) ? W.buildings[m.terminal] : null;
       if (B && !B.gone && B.module === m.id) {
         // terminals named before one name was the rule: a sign renamed by hand (neither the airport's name nor the one its
-        // terminal was given) names the whole airport — its canopy and entrance sign too; otherwise the airport's name
+        // terminal was given) names the whole airport - its canopy and entrance sign too; otherwise the airport's name
         // names the terminal
         if (this.airportOf(B)) {
           const auto = `${m.name || WORLD_KINDS[m.kind].label} Terminal`, s = typeof B.sign === 'string' ? B.sign.trim().slice(0, 28) : '';
@@ -1318,7 +1318,7 @@ export class Editor {
     try { return levelFor(this.ground().env.heightAt, m); } finally { W.worldModules = all; }
   }
   /** Where a module's access road meets it, the level the module must stand at for its paving to meet the road's top
-   *  flush (2026-10-14, the product owner: "the airport roadway doesn't connect properly to the road, at any angle" — a road laid again,
+   *  flush (2026-10-14, the product owner: "the airport roadway doesn't connect properly to the road, at any angle" - a road laid again,
    *  or meeting it lower than the land it had been levelled to, started up to 30 cm below the airport's ground: buried,
    *  grass between the airport and its road). null without an access road. */
   roadLevel(m) {
@@ -1839,7 +1839,7 @@ export class Editor {
     for (const lv of st.levels) { sim.nav.invalidate(lv); sim.index.invalidate(lv); }
     if (st.blds.size || st.newB.length || st.removedB.length || st.roads.size || st.terrain || st.stations || st.ferries || st.wmods) sim.nav.refreshAccess();
     sim.index.rebuild();
-    // (new homes bring no one at once: the city's residents settle towards its homes by themselves — server/sim/housing.js)
+    // (new homes bring no one at once: the city's residents settle towards its homes by themselves - server/sim/housing.js)
     // agents: jump out of removed floors / buildings, re-plan everyone touching changed floors
     const jumpFor = (a, e) => {
       const b = ctxB(e.ctx);

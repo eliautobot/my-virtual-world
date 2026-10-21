@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Free Will decides more than free time (FREE-WILL.md §11.4), and tasks are worked on where the agent is: when its agent
 // is working (a message, a scheduled job) an agent's body works at its desk when it is at work, at the computer when it
-// is at home, with a laptop at a table where there is one, else on its phone — woken from sleep if need be, and back to
+// is at home, with a laptop at a table where there is one, else on its phone - woken from sleep if need be, and back to
 // bed afterwards. With Free Will the agent chooses how; without, or when the answer is late, the routine does the same.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';

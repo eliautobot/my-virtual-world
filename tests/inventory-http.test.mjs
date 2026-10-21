@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The inventory over HTTP (server/economy/inventory.js, docs/features/INVENTORY.md): an administrator's grant (a plain
 // stack, a one-of-a-kind fish), giving to another player (part of a stack, a fish with its length and weight intact),
 // what can't be given (more than you have, someone else's, to yourself), a new account's daily cap, a repeat that
@@ -86,7 +86,7 @@ test('the welcome kit: a player\'s first look at the inventory, and an agent\'s,
   assert.equal(again.welcome, false); assert.equal(again.stacks.length, first.stacks.length, 'nothing more');
 });
 
-test('a trade: both sides put things and coin in, a change takes back the acceptance, both accept — it all swaps at once', async () => {
+test('a trade: both sides put things and coin in, a change takes back the acceptance, both accept - it all swaps at once', async () => {
   const tia = await userSession(s, owner, { login: 'tia', displayName: 'Tia' }), udo = await userSession(s, owner, { login: 'udo', displayName: 'Udo' });
   const ti = (await tia.get('/api/inventory')).json, ud = (await udo.get('/api/inventory')).json;   // (their welcome kits)
   const tShrimp = ti.stacks.find(x => x.item === 'lure:shrimp'), uGift = ud.stacks.find(x => x.item === 'goods:gift'), uCoffee = ud.stacks.find(x => x.item === 'food:coffee');

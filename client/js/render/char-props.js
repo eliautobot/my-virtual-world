@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Things the characters hold or set down: a phone, a mug, a coffee to go, a book (closed, or open to read), a ping-pong
 // paddle, a dumbbell, a shopping bag, a briefcase, and a laptop on the table in front of someone typing (2026-10-07: the
-// server gave people these all along — shared/anims.js PROPS — but no character drew them).
+// server gave people these all along - shared/anims.js PROPS - but no character drew them).
 //
 // Each character model gets one instanced mesh holding every shape; an instance draws only its own shape. A held shape is
 // moved by the hand's bone from the same baked clips as the body (render/characters.js SKIN_GLSL), in that hand's grip
@@ -10,12 +10,12 @@
 // own root at its desk point (where its fingertips rest typing). Both take the body's height and build and the rig's
 // arm calibration, so they meet the hands the body draws.
 //
-// Which shape: what the server says the person holds (prop) and what they are doing (the clip) — a coffee is in the hand
+// Which shape: what the server says the person holds (prop) and what they are doing (the clip) - a coffee is in the hand
 // while walking or sipping, on the table while typing or talking; a book is open while reading; a laptop only on a table.
 //
 // Eating (2026-10-07, "proper eating animations depending on the meal"): someone at a table with a dish eats it the
 // dish's way (shared/food.js eat): a burger or a sandwich in both hands, a slice or a pastry in one, knife and fork, a
-// fork, a spoon or chopsticks — the clip (eatClip; tools/chars/extra-clips.mjs) and what is in the hands (the held food:
+// fork, a spoon or chopsticks - the clip (eatClip; tools/chars/extra-clips.mjs) and what is in the hands (the held food:
 // BITE below, the cutlery), at the points of shared/eating.js that the clips bring to the dish and the mouth. Held food
 // and drinks take their own colour from a table of every item (TINT, by item number).
 import * as THREE from 'three';
@@ -132,7 +132,7 @@ function briefcase(f) {
 // the laptop's keys). Things on the table stand on the table's top, whoever sits there (2026-10-19, the product owner: laptops sank into
 // some tables, or stood at a café table's far edge): the desk point is taken at DESK_TOP above the feet, never more than
 // DESK_FWD ahead of them, and nothing set down grows with the body (deskPoint below; the shader's PLACE does the same).
-// (DESK_FWD keeps the whole laptop on every table people work at — its base reaches 0.17 back from the desk point, its
+// (DESK_FWD keeps the whole laptop on every table people work at - its base reaches 0.17 back from the desk point, its
 // lid DESK_LID on: the dining table's near edge is 0.33 ahead of its chair; a bar's bottles are kept clear of by
 // render/interiors.js tableTopAt)
 const TABLE = -0.004, LAP_H = 0.014, ON = TABLE - LAP_H;   // ON: the table's top in this frame
@@ -173,7 +173,7 @@ const HELD_OF = { mug: 'h-mug', latte: 'h-glass', cup: 'h-cup', espresso: 'h-cup
   beer_bottle: 'h-bottle', bottle_water: 'h-bottle', sake: 'h-bottle', can: 'h-can', wine: 'h-stem', wine_big: 'h-stem', flute: 'h-stem', coupe: 'h-stem', martini: 'h-stem', hurricane: 'h-stem' };
 
 // ------------------------------------------------------------------ eating: the food in the hand, the cutlery
-// (frames from shared/eating.js — the clips bring these points to the dish and the mouth)
+// (frames from shared/eating.js - the clips bring these points to the dish and the mouth)
 // both hands (the right's grip frame): the food's middle BOTH_R out of the palm (and a little toward the wrist), upright
 // when the fingers rise BOTH_LIFT over its top; its front (away from the mouth) ahead, its sides toward the palms
 const BOTH = basis([0, 0, 1], [Math.cos(BOTH_LIFT), Math.sin(BOTH_LIFT), 0], [-Math.sin(BOTH_LIFT), Math.cos(BOTH_LIFT), 0], [0, -0.012, BOTH_R]).scale(new THREE.Vector3(HELD_SCALE, HELD_SCALE, HELD_SCALE));
@@ -281,7 +281,7 @@ const HELD_FOOD = {
   'f-disc': [biteF, disc], 'f-toast': [biteF, toast], 'f-donut': [biteF, donut], 'f-pastry': [biteF, pastry], 'f-chip': [biteF, chip],
 };
 /**
- * Every dish: what is held eating it by hand (a shape above) and its colour — the patty, the filling, the topping; for
+ * Every dish: what is held eating it by hand (a shape above) and its colour - the patty, the filling, the topping; for
  * the cutlery ways the colour of a forkful (a spoonful, what the chopsticks hold). Keep with shared/food.js (a test
  * checks every dish has one).
  */
@@ -384,7 +384,7 @@ function pick(c, p) {
   const typing = TYPING.has(c), seated = SEATED.has(c), talking = TALKING.has(c);
   switch (p) {
     case PROP.laptop: return typing && c !== CLIP.stand_work ? SHAPE.laptop : 0;
-    // (sitting down with a coffee — a café's table — it comes in a cup; walking, standing or by a laptop it is to go)
+    // (sitting down with a coffee - a café's table - it comes in a cup; walking, standing or by a laptop it is to go)
     case PROP.coffee: return typing ? (c === CLIP.stand_work ? 0 : SHAPE['laptop+coffee']) : talking ? (seated ? SHAPE['mug-table'] : 0) : seated ? SHAPE.mug : SHAPE.coffee;
     case PROP.cup: return typing || talking ? (seated && c !== CLIP.stand_work ? SHAPE['mug-table'] : 0) : SHAPE.mug;
     case PROP.phone: return typing || talking ? 0 : SHAPE.phone;
@@ -403,7 +403,7 @@ export const GEAR_CLIP = new Uint8Array(256);
 for (const c of [...ROD, CLIP.fish_net]) GEAR_CLIP[c] = 1;
 /**
  * The shape drawn for someone in MVW clip c holding prop p (0: nothing); item: the food or drink their plan carries
- * (shared/food.js number) — a drink in the hand is its own glass and colour (a fraction on the shape number); a drink
+ * (shared/food.js number) - a drink in the hand is its own glass and colour (a fraction on the shape number); a drink
  * set down on a table is drawn by render/food-table.js, not here.
  */
 export function shapeFor(c, p, item = 0) {
@@ -447,7 +447,7 @@ const MEAL = new Set(['sit_eat', 'sit_high', 'sit', 'sit_drink'].map(n => CLIP[n
 const EAT_OF = new Int16Array(256).fill(-1);
 for (const it of FOOD) if (!it.v) EAT_OF[it.n] = CLIP[EAT_CLIP[it.eat]];
 // with no table (2026-10-08, "if the agent has no table they can only eat handheld items"): on a seat (a sofa, an
-// armchair), or standing in the kitchen — the food in the hands (shared/food.js homeMeal picks such a dish there; a café
+// armchair), or standing in the kitchen - the food in the hands (shared/food.js homeMeal picks such a dish there; a café
 // sofa's dessert is eaten the same way, its spoon in the hand)
 const LAP = new Set(['sit_relax'].map(n => CLIP[n])), STAND = new Set(['idle', 'idle_hold'].map(n => CLIP[n]));
 /**

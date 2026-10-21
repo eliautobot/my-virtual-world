@@ -1,4 +1,4 @@
-/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
 /* The Agent Studio (client/js/ui/agent-studio.js and its tabs: studio-mind.js, studio-life.js, studio-world.js).
    Every tab has a colour of its own (--sc, set on the window as the tab changes and on each tab button, card and pin):
    the window's glow, the stage's light, headings, switches and meters take it, so each part of the agent reads as its
@@ -130,7 +130,7 @@
 .sp-save.dirty span { color: var(--sct); font-weight: 600; }
 .sp-save.dirty span::before { content: '● '; }
 
-/* ---- Overview: the day and its story on top, then nine cards in three rows that fill the panel — nothing to scroll on
+/* ---- Overview: the day and its story on top, then nine cards in three rows that fill the panel - nothing to scroll on
    a laptop or larger (a small window or a phone scrolls instead of squeezing) */
 .st-ov { height: 100%; min-height: 540px; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; }
 .st-ov-top { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; }

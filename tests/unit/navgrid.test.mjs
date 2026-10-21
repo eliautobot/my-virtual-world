@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Indoor navigation grid and A* paths, shared by the server planner and the client player (shared/navgrid.js).
 import assert from 'node:assert/strict';
 import test from 'node:test';

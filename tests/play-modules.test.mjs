@@ -1,5 +1,5 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Play modules (docs/features/play-modules.md): the registry, the airport's courses and its run check, and the core —
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Play modules (docs/features/play-modules.md): the registry, the airport's courses and its run check, and the core -
 // courses open in order, a run is checked by the server (never a score from the browser), experience, levels, ranks,
 // best results and places, badges, the profile, and a deleted account's play going with it.
 import assert from 'node:assert/strict';

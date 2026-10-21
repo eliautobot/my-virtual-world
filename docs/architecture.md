@@ -1,6 +1,6 @@
 # Architecture
 
-Proprietary — see [LICENSE](../LICENSE).
+Proprietary - see [LICENSE](../LICENSE).
 
 ## One process, three parts
 

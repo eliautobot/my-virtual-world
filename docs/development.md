@@ -1,6 +1,6 @@
 # Development
 
-Proprietary — see [LICENSE](../LICENSE). Contributors work only with the owner's authorization.
+Proprietary - see [LICENSE](../LICENSE). Contributors work only with the owner's authorization.
 
 ## Layout and conventions
 

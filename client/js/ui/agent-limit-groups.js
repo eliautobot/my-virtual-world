@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What Settings → Agent limits shows (the product owner, 2026-10-11: "as intuitive and easy to control" as it can be): the
-// switches, then one section for each direction words and actions travel — people → agents, agents → agents, the world →
-// an agent, an agent → the world — and what thinking may cost. Each section shows the few limits an admin needs; the
+// switches, then one section for each direction words and actions travel - people → agents, agents → agents, the world →
+// an agent, an agent → the world - and what thinking may cost. Each section shows the few limits an admin needs; the
 // rest wait under "Advanced". Labels here are the page's own (short: the section says who and where); the settings keep
 // their full labels everywhere else. Every path listed here lives on this page only (General leaves them out).
-// [path, label] — label null: the setting's own.
+// [path, label] - label null: the setting's own.
 export const AGENT_LIMIT_SECTIONS = [
   {
     title: '🔌 Switches',
@@ -23,7 +23,7 @@ export const AGENT_LIMIT_SECTIONS = [
   },
   {
     title: '👥 People → agents',
-    hint: 'Someone talking with another person\'s agent — walking up to it in the world or in its chat window, whatever its brain.',
+    hint: 'Someone talking with another person\'s agent - walking up to it in the world or in its chat window, whatever its brain.',
     main: [
       ['talk.enabled', 'People may talk with others\' agents'],
       ['talk.maxChars', 'Longest message (characters)'],

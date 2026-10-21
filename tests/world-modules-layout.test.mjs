@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The airport's layout and its access road (shared/world-modules.js, shared/airport-layout.js): the road leaves square to
-// the airport's edge where its entrance road ends — straight on to a road ahead, or out and one curve round to the nearest
+// the airport's edge where its entrance road ends - straight on to a road ahead, or out and one curve round to the nearest
 // road, met square on, never back across the airport; the module's access roads are the ones ending at its entrance; the
 // paving's curves sit in real corners; the canopy's columns are solid.
 import assert from 'node:assert/strict';
@@ -21,7 +21,7 @@ test('the access road leaves square to the airport: straight on to a road ahead'
   assert.ok(Math.abs(pts[1].z - pts[0].z) < 1.5 && Math.abs(pts[1].x - 300) < 1e-6, 'straight out, square to its edge, to the road');
 });
 
-test('a road to one side: out, one curve, met square on — a road the network accepts; never back across the airport', () => {
+test('a road to one side: out, one curve, met square on - a road the network accepts; never back across the airport', () => {
   for (const rot of [0, -0.6, -0.2]) {   // (its entrance square to the road's line, or turned towards it)
     const m = airport(rot), pts = accessRoadPath(m, net([[-2000, 600], [2000, 600]]));
     assert.equal(pts.length, 3, `rot ${rot}: out and round`);
@@ -34,7 +34,7 @@ test('a road to one side: out, one curve, met square on — a road the network a
     const pad = padOf(m);
     for (let k = 1; k <= 40; k++) { const u = k / 40, x = pts[1].x + (pts[2].x - pts[1].x) * u, z = pts[1].z + (pts[2].z - pts[1].z) * u; assert.ok(!inRect(pad, x, z, 0), 'not across the airport'); }
   }
-  // the road behind it: out, along the airport past its nearer end, on to the road — every stretch clear of it
+  // the road behind it: out, along the airport past its nearer end, on to the road - every stretch clear of it
   for (const [rot, line] of [[0.6, [[-2000, 600], [2000, 600]]], [0, [[-700, -2000], [-700, 2000]]]]) {
     const m = airport(rot), back = accessRoadPath(m, net(line)), pad = padOf(m), e = roadEndOf(m);
     assert.equal(back.length, 4, `rot ${rot}: round the airport (${back.length} points)`);

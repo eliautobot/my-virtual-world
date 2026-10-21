@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Decorations (WP4.7, wp4-world-spec.md §4.1, §9): outdoor items people place on the land itself — trees, bushes,
-// flower beds, benches, picnic tables, fountains — kept in world.decorations ({ id, t, x, z, r (radians) }) and drawn
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Decorations (WP4.7, wp4-world-spec.md §4.1, §9): outdoor items people place on the land itself - trees, bushes,
+// flower beds, benches, picnic tables, fountains - kept in world.decorations ({ id, t, x, z, r (radians) }) and drawn
 // on the ground. Lot holders (and those they share build rights with) place them inside their own lots;
 // administrators on public land. The rules here are the same in the browser's ghost and on the server; who may place
 // where is checked against the lots (server/lot-rights.js). The Marketing tools' billboards and street signs

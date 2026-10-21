@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Painting ads (the shop's advertising, shared/ads.js): one painter for every surface — the billboards' faces
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Painting ads (the shop's advertising, shared/ads.js): one painter for every surface - the billboards' faces
 // (render/ad-spaces.js), the banners, blimps and balloons (render/promo-aircraft.js), and the ad builder's previews and
-// the ad panel (ui/ads.js) — so what a buyer designs is exactly what flies and stands in the world. A picture is
+// the ad panel (ui/ads.js) - so what a buyer designs is exactly what flies and stands in the world. A picture is
 // loaded once per address; textures are kept per ad and shape, and given back when the ad stops running.
 import * as THREE from 'three';
 

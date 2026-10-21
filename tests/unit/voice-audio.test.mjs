@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Audio read from its bytes (server/voice/audio.js) and the text a voice reads (server/voice/text.js), docs/features/
 // CHAT.md §9: every format a browser records or a service sends is known by its first bytes; its length is read from the
 // file itself (WAV, MP3 frames, Ogg's last granule, a browser's WebM without a Duration, MP4's mvhd, FLAC's STREAMINFO),
@@ -71,11 +71,11 @@ test('pieces joined into one file: WAVs of one format; MP3s with only the first 
   assert.equal(m.length, 14 + 7 * 417, 'the second tag dropped'); near(seconds(m), 7 * 1152 / 44100, 'joined MP3');
 });
 
-test('what a voice reads: Markdown made pronounceable — no marks, links as their text, code and tables named, emoji gone', () => {
-  const md = '## Your plan\n\nHere is **the** _plan_ — see [the docs](https://example.com/docs) or https://www.openai.com/x.\n\n'
+test('what a voice reads: Markdown made pronounceable - no marks, links as their text, code and tables named, emoji gone', () => {
+  const md = '## Your plan\n\nHere is **the** _plan_ - see [the docs](https://example.com/docs) or https://www.openai.com/x.\n\n'
     + '- [x] Buy milk\n- [ ] Call Mia 📞\n1. First\n2. Second\n\n```python\nprint("hello")\n```\n\n| Day | Food | Price |\n|---|---|---|\n| Mon | Soup | 3 |\n| Tue | Rice | 4 |\n\n> A quote.\n\n---\n\n![a red bike](x.png) and `npm test`.';
   const s = speakable(md);
-  assert.equal(s, 'Your plan. Here is the plan — see the docs or openai.com. Buy milk. Call Mia. First. Second. (There is a python code block here.) '
+  assert.equal(s, 'Your plan. Here is the plan - see the docs or openai.com. Buy milk. Call Mia. First. Second. (There is a python code block here.) '
     + '(A table with 2 rows: Day, Food, Price.) A quote. (picture: a red bike) and npm test.');
   assert.ok(!/[*_#|`]/.test(s));
   assert.equal(speakable('Plain words stay as they are.'), 'Plain words stay as they are.');

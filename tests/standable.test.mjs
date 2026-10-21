@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Jumping onto things without a physics engine (2026-10-05): the server's position check (shared/playernav.js)
 // lets a body stand on a decoration or a piece of furniture only when its feet are on top of it (shared/standable.js),
 // and never on anything taller, nor inside a wall.

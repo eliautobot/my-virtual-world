@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Doors (2026-10-05: "doors on buildings and apartments ... make them open and close"). A floor's doors are read from
-// what the floor already is, so every floor — generated, changed by hand, saved and laid out again — has them without new
+// what the floor already is, so every floor - generated, changed by hand, saved and laid out again - has them without new
 // data: the building's entrance on the street floor, the doors the generators leave in their walls (L.doors), and every
 // doorway left in a line of inner walls (the walls tool's doorways); a door in a flat's corridor wall is its front door.
 import { WALL_T } from './constants.js';

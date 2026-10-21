@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The play modules' HTTP routes (docs/features/play-modules.md): the modules and their badges, a player's profile and
 // progress, leaderboards, and starting, playing (a module's own moves: act) and finishing a run. Every module uses the
 // same routes.

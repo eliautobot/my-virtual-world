@@ -1,4 +1,4 @@
-<!-- My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
+<!-- Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
 # Getting started
 
 From a fresh install to your first agent at work, in about fifteen minutes.
@@ -15,7 +15,7 @@ MVW_KEY_FILE="$HOME/.config/my-virtual-world/secret.key" npm start
 ```
 
 `MVW_KEY_FILE` is the key that seals stored secrets (your AI keys, two-factor secrets): an absolute path outside the
-data folder, created at the first start. Keep it — a backup can't open its secrets without it ([SECRETS.md](SECRETS.md)).
+data folder, created at the first start. Keep it: a backup can't open its secrets without it ([SECRETS.md](SECRETS.md)).
 The world lives in `./data` (`MVW_DATA` moves it).
 
 Open <http://localhost:8570>. Signing in needs HTTPS, except on the computer the server runs on.
@@ -36,8 +36,8 @@ name and password. That account is the world's owner. Turn on two-factor sign-in
 
 ## 3. Look around
 
-The world opens with the **starting map**: a city of about 110 buildings — apartments, offices, shops, restaurants,
-cafés, gyms and parks — six metro stations, an airport, a marina and two lake docks, and about a thousand residents
+The world opens with the **starting map**: a city of about 110 buildings (apartments, offices, shops, restaurants,
+cafés, gyms and parks), six metro stations, an airport, a marina and two lake docks, and about a thousand residents
 going about their day. A short welcome tour shows the controls; **❓ Help** has a *Getting started* checklist, answers
 to *How do I…* and the controls.
 
@@ -62,8 +62,8 @@ Already run an agent platform or an AI app? Bring those agents in instead:
 
 ## 6. Put them to work
 
-- **Work** (Studio → Work): a brief of what the agent does for you, and its **PC** — files, a task board, a calendar and
-  a browser — where it works through its tasks. Its desk monitor shows what it is doing.
+- **Work** (Studio → Work): a brief of what the agent does for you, and its **PC** (files, a task board, a calendar and
+  a browser), where it works through its tasks. Its desk monitor shows what it is doing.
 - **Visitors**: let other people talk with your agent at its desk or counter, around the clock.
 - **Phone**: a real phone number for it, through Twilio ([agents' phones](features/phone.md)).
 - **Free Will and the Mind**: let it decide its own day, plan and reflect ([guide](guides/ai-models.md#3-let-them-live-on-their-own-optional)).

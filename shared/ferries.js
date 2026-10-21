@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Ferries (WP4.15/4.9/4.5, wp4-world-spec.md §3.4, §6.5): scheduled boats between two docks, on the shared timetable.
 // An administrator draws a line over the water: its first and last points are the docks (a pier runs from the nearest
 // shore to each), the points between are where it turns; the boat rounds them in arcs. One to three boats shuttle on
 // it, each waiting DWELL s at a dock; where every boat is at any moment follows from the simulation clock alone, so the
 // browsers draw them and residents board and leave them at the same times (server/sim: a ferry crossing is a hidden
 // ride from dock to dock, as the subway is). Docks need water deep enough for the boat, a shore within PIER_MAX m with
-// a road near it, and — on the sea — a growth coast (as bridges do).
+// a road near it, and - on the sea - a growth coast (as bridges do).
 import { growthAt, landOf } from './coasts.js';
 import { inFootprint } from './geom.js';
 

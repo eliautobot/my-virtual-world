@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a step works on (server/pc/recognize.js) and an Agent Providers' agent's screen following it
 // (server/pc/provider-screens.js, os.screen's hold): docs/features/agent-pc.md §2.2.
 import assert from 'node:assert/strict';
@@ -15,7 +15,7 @@ test('a terminal command that drives a browser is browsing; one that reads or wr
   assert.equal(c.app, 'browser'); assert.equal(c.view.kind, 'page'); assert.equal(c.view.provider, true); assert.equal(c.view.url, 'https://news.ycombinator.com');
   assert.equal(exec('agent-browser --cdp 9222 snapshot -i').app, 'browser', 'a step without an address: still its browser');
   assert.equal(exec('npx playwright screenshot https://a.example b.png').app, 'browser');
-  // (agent-browser's own build by its full path, with its provider's words for the step — a real agent, 2026-10-19)
+  // (agent-browser's own build by its full path, with its provider's words for the step - a real agent, 2026-10-19)
   const AB = '~/.npm-global/lib/node_modules/agent-browser/bin/agent-browser-linux-x64';
   c = recognize({ name: 'exec', toolKind: 'execute', title: 'Exec Open project picker', input: JSON.stringify({ command: `${AB} snapshot -c -s '[aria-labelledby="AddTime"]'` }) });
   assert.deepEqual([c.app, c.view.kind, c.view.provider, c.title], ['browser', 'page', true, 'Exec Open project picker']);

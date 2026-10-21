@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Version bookkeeping: package.json, package-lock.json and the newest CHANGELOG entry agree, and a release folder built
 // from a version tag reports that version.
 import assert from 'node:assert/strict';

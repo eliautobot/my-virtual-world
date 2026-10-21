@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Agent Studio's world tabs (ui/agent-studio.js):
-// - Home & Work: which flat is its home — the building's floors with its floor lit, the floor's plan with its flat lit
-//   and its door, who lives with it, the rent — and "Show me", which looks inside that floor and marks the flat in the
+// - Home & Work: which flat is its home - the building's floors with its floor lit, the floor's plan with its flat lit
+//   and its door, who lives with it, the rent - and "Show me", which looks inside that floor and marks the flat in the
 //   world (render/flat-marker.js); its job, workplace and hours on a day bar.
 // - Money (its owner): its wallet, giving and taking back, what it may use money for (the spending rules the economy
 //   checks before every spend: server/economy/agents.js), approvals waiting, and its statement.
@@ -72,7 +72,7 @@ export async function placeTab(C, body, live) {
         <div class="hw-tiles"><div><b>${home.f + 1}</b><span>floor</span></div>${home.u >= 0 ? `<div><b>${home.u + 1}</b><span>flat</span></div>` : ''}${home.kind ? `<div><b>${esc(home.kind)}</b><span>size</span></div>` : ''}<div><b>${onFloor}</b><span>on this floor</span></div></div>
         <div class="kv">${r?.rent ? `<span class="k">Rent</span><span>${coin()} ${vc(r.rent)} a night${r.landlord ? ` to ${esc(r.landlord)}` : ''}</span>` : ''}
           ${deal ? `<span class="k">The flat</span><span>${deal}${rec.locked ? ' · 🔒 door locked' : ''}</span>` : rec?.locked ? '<span class="k">Door</span><span>🔒 locked</span>' : ''}
-          <span class="k">Lives with</span><span>${mates.length ? mates.map(p => esc(p.n)).join(', ') : 'Nobody — it lives alone'}</span></div>
+          <span class="k">Lives with</span><span>${mates.length ? mates.map(p => esc(p.n)).join(', ') : 'Nobody - it lives alone'}</span></div>
         <div class="row wrap"><button type="button" class="btn primary" data-c="show">📍 Show me in the world</button>${home.u >= 0 ? '<button type="button" class="btn" data-c="flat">🚪 The flat</button>' : ''}</div></div></div>`
     : '<div class="st-sec"><p class="hint">It has no home yet: residents look for a free flat on their own.</p></div>';
   const bar = (h0, h1, cls, label) => {
@@ -96,7 +96,7 @@ export async function placeTab(C, body, live) {
 
 // ------------------------------------------------------------------------------------------------ its post
 // On post around the clock (server/agent-posts/, 2026-10-08: "assign agents to be permanent occupants of certain
-// spots, like the reception desk … restaurants … 24/7"): where it is, or the spots its owner may choose — the serving side
+// spots, like the reception desk … restaurants … 24/7"): where it is, or the spots its owner may choose - the serving side
 // of a reception desk, a counter or a checkout, a desk, a kitchen, where they could furnish.
 const POST_USE = { staff: 'serving side', work: 'desk', computer: 'desk', cook: 'stove', prep: 'counter' };
 function postHtml(C, d) {
@@ -111,14 +111,14 @@ function postHtml(C, d) {
       ${st.choosing ? spotsHtml(d) : ''}</div>`;
   }
   return `<div class="st-sec pt">${head}
-    <p class="hint">Post ${esc(C.name)} around the clock at a reception desk, a counter, a checkout, a desk or a kitchen in a place you hold — anyone who walks up there talks with it, day and night.</p>
+    <p class="hint">Post ${esc(C.name)} around the clock at a reception desk, a counter, a checkout, a desk or a kitchen in a place you hold - anyone who walks up there talks with it, day and night.</p>
     ${st.choosing ? spotsHtml(d) : `<button type="button" class="btn small primary" data-pt="choose">Choose a post</button>`}</div>`;
 }
-/** The spots by building and floor; on a floor, alike pieces (a row of desks) are one line — the first free one is taken —
+/** The spots by building and floor; on a floor, alike pieces (a row of desks) are one line - the first free one is taken -
  *  and a piece of its own (a reception desk, a counter) a line of its own, with who is there. */
 function spotsHtml(d) {
   const bs = d.buildings || [];
-  if (!bs.length) return '<p class="hint dim">Nowhere yet: you can post an agent where you could furnish — a building on a lot you hold, or a flat you own or rent.</p>';
+  if (!bs.length) return '<p class="hint dim">Nowhere yet: you can post an agent where you could furnish - a building on a lot you hold, or a flat you own or rent.</p>';
   const isMine = (b, f, it, s) => d.post && d.post.b === b && d.post.f === f && d.post.item === it.id && d.post.slot === s.k;
   const floorRows = (b, f) => {
     const groups = new Map();
@@ -193,7 +193,7 @@ export async function moneyTab(C, body, live) {
         <small class="dim">Your wallet: ${vc(econ.wallet?.balance ?? 0)}</small></div></div>
     ${appr.length ? `<div class="st-sec mn-appr"><div class="st-sec-h"><h4>✋ Waiting for you</h4><span class="st-count">${appr.length}</span></div>${appr.map(p => `<div class="mn-ask"><div><b>${esc(p.action === 'buy' ? 'Buy' : 'Pay')} ${vc(p.amount)}</b><small>${p.payload?.memo ? `“${esc(p.payload.memo)}” · ` : ''}${esc(p.summary || '')} · asked ${when(p.created)}</small></div><button type="button" class="btn small primary" data-appr="${esc(p.id)}" data-yes="1">Approve</button><button type="button" class="btn small" data-appr="${esc(p.id)}" data-yes="0">Decline</button></div>`).join('')}</div>` : ''}
     <div class="st-sec"><div class="st-sec-h"><h4>📐 Its spending rules</h4>${toggleHtml('mn-pause', L.paused, 'Pause all spending')}</div>
-      <p class="hint">The world checks these before every coin it spends — whether it decides itself or you ask it in a chat.</p>
+      <p class="hint">The world checks these before every coin it spends - whether it decides itself or you ask it in a chat.</p>
       <div class="mn-scopes">${SCOPES.map(([k, ic, lb, d]) => `<button type="button" class="mn-scope${L.scopes.includes(k) ? ' on' : ''}" data-scope="${k}" aria-pressed="${L.scopes.includes(k)}"><span>${ic}</span><b>${lb}</b><small>${d}</small></button>`).join('')}</div>
       <div class="mn-limits"><label>Most it spends in 24 h<span class="mn-in">${coin()}<input class="input" data-l="dailyCap" inputmode="decimal" value="${(L.dailyCap / 100).toFixed(0)}"></span></label>
         <label>Ask me first above<span class="mn-in">${coin()}<input class="input" data-l="approveAbove" inputmode="decimal" value="${(L.approveAbove / 100).toFixed(0)}"></span></label></div>
@@ -239,8 +239,8 @@ export async function settingsTab(C, body, live) {
       <div class="ss-badges" role="listbox" aria-label="Badge">${BADGES.map(e => `<button type="button" class="${e === st.emoji ? 'on' : ''}" data-avatar data-emoji="${e}" role="option" aria-selected="${e === st.emoji}">${e}</button>`).join('')}<input class="input ss-emoji" maxlength="8" placeholder="Other" aria-label="Another emoji"></div>
       <div class="row end"><button type="button" class="btn primary" data-c="save-id">Save</button></div></div>`
     : `<div class="st-sec"><p class="hint">${ext ? `${esc(r.name)} is a third-party agent: who can see it, who can chat with it and its connection are in its Brain tab.` : 'Only its owner, or someone it is shared with to manage it, changes these.'}</p>${ext ? '<button type="button" class="btn small" data-go="brain">Open its connection</button>' : ''}</div>`;
-  // (who else has it, and removing it, are its owner's alone; a manager sees who it is shared with — step 8)
-  // (a connected agent is shared only to manage, with a person: who may chat with it is its slot's audience — 2026-10-11)
+  // (who else has it, and removing it, are its owner's alone; a manager sees who it is shared with - step 8)
+  // (a connected agent is shared only to manage, with a person: who may chat with it is its slot's audience - 2026-10-11)
   const own = C.owner;
   const share = own ? `<div class="st-sec"><div class="st-sec-h"><h4>👥 Shared with</h4></div>
       <div class="ss-shares">${(r.shares || []).map(s => `<div class="ss-share"><span>${esc(nameOf(s))}</span><span class="st-pill">${s.level === 'manage' ? 'may manage' : 'may use'}</span><button type="button" class="btn small" data-unshare="${esc(s.kind)}:${esc(s.who)}">Remove</button></div>`).join('') || `<p class="hint">${ext ? 'Only you. Share it with a friend to manage it with you; who may chat with it is set in its Brain tab.' : 'Only you. Share it with a friend, or with everyone of a role.'}</p>`}</div>

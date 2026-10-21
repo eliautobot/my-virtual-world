@@ -1,13 +1,13 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat window's side panel (Agent Providers, docs/features/agent-providers.md §4), as beside a chat in OpenClaw's
-// Control UI, for whoever manages the provider. Tasks: the background work the agent started from this chat —
-// subagents, scheduled jobs, CLI and ACP runs — the running ones and the latest finished, each with what it is doing or
+// Control UI, for whoever manages the provider. Tasks: the background work the agent started from this chat -
+// subagents, scheduled jobs, CLI and ACP runs - the running ones and the latest finished, each with what it is doing or
 // waiting for, kept up to date as the provider announces changes; a task's prompt, output and transcript; Stop. Under the
 // composer, a row says how many are running and opens the panel. Browser: the provider's own browser, the one its agents
-// browse with — its tabs, the page live, and the person's clicks, scrolling and typing on it (a browser shared with the
-// agent). Phone: the agent's phone (./phone-app.js, docs/features/phone.md) — any agent's, for its owner or whoever it is
+// browse with - its tabs, the page live, and the person's clicks, scrolling and typing on it (a browser shared with the
+// agent). Phone: the agent's phone (./phone-app.js, docs/features/phone.md) - any agent's, for its owner or whoever it is
 // shared with to manage: its texts, calls, voicemail and contacts beside the chat. PC: the agent's PC (./pc-app.js,
-// docs/features/agent-pc.md) — for the account whose PC it is: what it is doing on it, live, beside the chat (the
+// docs/features/agent-pc.md) - for the account whose PC it is: what it is doing on it, live, beside the chat (the
 // Sidebar's 💻 PC opens it too). The panel sits beside the conversation
 // when the window has room, and slides over it when it hasn't.
 import { getJSON, post } from '../core/net.js';
@@ -26,7 +26,7 @@ const DOCK_W = 360;     // the panel's width beside it (css: --cw-dock-w)
 const DOCK_W_BROWSER = 560;   // … wider while it shows the browser (css: .chatwin.dock-browsing)
 const MAIN_MIN = 440;   // the conversation keeps at least this much beside the panel; less, and the panel slides over it
 const RECENT_MAX = 100;
-// the agents whose PC is this account's (GET /api/pc): read once, again after a minute — the PC tab is theirs alone
+// the agents whose PC is this account's (GET /api/pc): read once, again after a minute - the PC tab is theirs alone
 let pcIds = null, pcAt = 0, pcLoading = null;
 function readPcIds() {
   if (!auth.can('agents.pc')) { pcIds = new Set(); return Promise.resolve(pcIds); }
@@ -34,7 +34,7 @@ function readPcIds() {
   pcLoading ||= getJSON('/api/pc').then(o => { pcIds = new Set(o.agents.map(a => a.id)); pcAt = Date.now(); return pcIds; }, () => pcIds || new Set()).finally(() => { pcLoading = null; });
   return pcLoading;
 }
-// Which tasks the Tasks tab lists: this chat's (as beside a chat in OpenClaw's Control UI), or all of the agent's — its
+// Which tasks the Tasks tab lists: this chat's (as beside a chat in OpenClaw's Control UI), or all of the agent's - its
 // scheduled jobs and command runs belong to no chat (OpenClaw's Tasks page). The person's choice, kept in this browser.
 const SCOPE_KEY = 'mvw.chat.taskScope';
 const AGENT_POLL_MS = 15000;    // all of an agent's tasks with no chat followed (one just begun): read again this often
@@ -70,7 +70,7 @@ export function attach(host) {
       pc: !!(host.agentId && pcIds?.has(host.agentId)) };
   };
   const enabled = () => { const h = has(); return h.tasks || h.browser || h.screen || h.phone || h.pc; };
-  // the Screen tab: the agent's own screen (Hermes' Bot Desktop — ./provider-screen.js), mounted while the tab shows
+  // the Screen tab: the agent's own screen (Hermes' Bot Desktop - ./provider-screen.js), mounted while the tab shows
   const Sc = { agent: null, app: null };
   function dropScreen() { Sc.app?.destroy(); Sc.app = null; Sc.agent = null; }
   // the PC tab: the agent's PC, mounted while the tab shows (its own window component; it follows what the agent does)
@@ -157,7 +157,7 @@ export function attach(host) {
     }
     if (repaint) paint();
   }
-  /** A change the provider announced for the open chat's agent (server: session.task) — `here`: the chat's own. */
+  /** A change the provider announced for the open chat's agent (server: session.task) - `here`: the chat's own. */
   function onTask(c) {
     if (!D.key || !c) return;
     if (c.change === 'upserted' && c.task) { if (D.scope === 'agent' || c.here !== false) upsert({ ...c.task, here: c.here !== false }); }
@@ -341,7 +341,7 @@ export function attach(host) {
     if (!dock) return;
     dock.hidden = !D.open;
     clearInterval(D.timer); D.timer = null;
-    // (all of the agent's tasks with no chat followed — one just begun — have no live news: read again now and then)
+    // (all of the agent's tasks with no chat followed - one just begun - have no live news: read again now and then)
     const pollAll = D.open && D.tab === 'tasks' && D.scope === 'agent' && !chatOf() && !!D.key;
     if (pollAll && !D.poll) D.poll = setInterval(() => { if (!D.loading) load(); }, AGENT_POLL_MS);
     if (!pollAll && D.poll) { clearInterval(D.poll); D.poll = null; }

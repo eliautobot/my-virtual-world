@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents that connect outbound with a key they hold (server/agent-api.js; PLAN WP2.14; DECISIONS E22, E23, C122 to C130;
 // CHECKLIST I8.14, I8.15): enrolment with a one-time code, signed sessions with replay protection, isolation between accounts,
 // revoke and re-enrol, visibility and chat audience, refusal limits. Fake clock, a real database, real Ed25519 keys.

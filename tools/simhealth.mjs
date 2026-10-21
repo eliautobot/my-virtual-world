@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Simulation health on a virtual clock. Runs the real simulation code (server/sim) much faster than real time, inside
 // this process, and reports how well the residents get through their day. It never touches a running server.
 // Usage: node tools/simhealth.mjs [--data <data folder> | --seed <seed> --population <n>]
@@ -264,7 +264,7 @@ console.log(`decisions  ${S.decisions} (${S.decisionsPerWorldHour}/world hour); 
 console.log(`trips      ${S.trips.total}, success ${S.trips.successPct} % (teleports ${S.trips.teleports}, straight-line ${S.trips.straightLine}, squeezed out of a pocket ${S.trips.detours}); modes ${JSON.stringify(S.trips.modes)}`);
 console.log(`           street trip minutes mean ${S.trips.streetMinutes.mean}, p50 ${S.trips.streetMinutes.p50}, p95 ${S.trips.streetMinutes.p95}, max ${S.trips.streetMinutes.max}`);
 console.log(`paths      ${S.paths.searches} indoor searches; A* found none for ${S.paths.failed}: ${S.paths.detours} pocket squeezes, ${S.paths.straight} straight lines (${S.paths.floorsWithStraight} floors); straight lines walked ${S.paths.straightUses} times`);
-console.log(`unreachable homes ${S.unreachable.homes}, jobs ${S.unreachable.jobs}; approach points in a pocket or behind a wall: homes ${S.unreachable.rawHomes}, jobs ${S.unreachable.rawJobs} (moved ${S.unreachable.moved})${S.unreachable.places.length ? ' — ' + S.unreachable.places.map(([k, v]) => `${k} (${v})`).join('; ') : ''}`);
+console.log(`unreachable homes ${S.unreachable.homes}, jobs ${S.unreachable.jobs}; approach points in a pocket or behind a wall: homes ${S.unreachable.rawHomes}, jobs ${S.unreachable.rawJobs} (moved ${S.unreachable.moved})${S.unreachable.places.length ? ' - ' + S.unreachable.places.map(([k, v]) => `${k} (${v})`).join('; ') : ''}`);
 console.log(`stuck      expired plans max ${S.stuck.expiredMax} (in ${S.stuck.expiredSamples} samples), bad positions ${S.stuck.badPositions}, idle > 3 h ${S.stuck.longIdle}`);
 console.log(`tick ms    mean ${S.tickMs.mean}, p50 ${S.tickMs.p50}, p95 ${S.tickMs.p95}, p99 ${S.tickMs.p99}, max ${S.tickMs.max} (${S.tickMs.ticks} ticks, budget ${BUDGET} ms); lag max ${S.lagMaxSec} s`);
 console.log(`plans      ${S.plans.perSec}/s, ${S.plans.bytesPerSec} B/s per client; memory rss ${S.memoryMB.rss} MB`);

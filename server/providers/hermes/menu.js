@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Hermes' sub-menu in Agent Providers (docs/features/agent-providers.md §9): a fixed list of calls, each one of Hermes'
-// own — its gateway JSON-RPC or its dashboard's REST, as its dashboard and Desktop settings use them. The changing ones are
+// own - its gateway JSON-RPC or its dashboard's REST, as its dashboard and Desktop settings use them. The changing ones are
 // the manifest's menuWrite (a test keeps the two the same). No secret's value leaves Hermes for a page: its secrets
 // (/api/env) are never read, and a setting named like a key, token or password comes back as { secret, set }.
 const fail = (code, message) => Object.assign(new Error(message), { code });
@@ -39,7 +39,7 @@ export const MENU_READ = Object.freeze({
   'sessions.list': (l, p) => l.rest('GET', '/api/sessions', { query: { profile: profileOf(p), limit: Math.min(200, Number(p.limit) || 100), offset: Math.max(0, Number(p.offset) || 0) } }),
 });
 
-/** What the sub-menu changes (each needs the person's recent password and is recorded — server/agent-providers.js). */
+/** What the sub-menu changes (each needs the person's recent password and is recorded - server/agent-providers.js). */
 export const MENU_WRITE = Object.freeze({
   'profiles.create': (l, p) => l.request('profiles.create', { name: name(p.name), ...(p.description ? { description: String(p.description).slice(0, 500) } : {}),
     ...(p.clone_from ? { clone_from: name(p.clone_from) } : {}) }, { timeoutMs: 60000 }),

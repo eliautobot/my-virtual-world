@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The PC's Files app (client/js/ui/pc-app.js): the agent's home (~), its teams' folders (/teams/<team>) — or one team's
-// space as the Teams app opens it — and the trash. Folders and files, uploads (a button, or dropped from the computer),
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The PC's Files app (client/js/ui/pc-app.js): the agent's home (~), its teams' folders (/teams/<team>) - or one team's
+// space as the Teams app opens it - and the trash. Folders and files, uploads (a button, or dropped from the computer),
 // new folders and documents, rename, move, copy (to a team's folder: shared with the team), delete into the trash, search.
 // A text file opens in an editor (saved with Ctrl+S; if someone saved it meanwhile, it says so and offers both ways), a
 // Markdown file also as it reads, a picture, a recording or a video as itself, a document's words read-only, anything else
@@ -38,7 +38,7 @@ export function filesApp(P, el, args = {}) {
     } catch (e) { if (my === F.seq) F.err = e.message; }
     paint();
   }
-  /** o.live: the agent's window on this file (server/pc/views.js) — it is shown live, its changed lines marked. */
+  /** o.live: the agent's window on this file (server/pc/views.js) - it is shown live, its changed lines marked. */
   async function openFile(path, o = {}) {
     clearTimeout(soon); const my = ++F.seq;   // (a folder being read meanwhile is not shown over the file)
     if (!o.live) { F.busy = true; paint(); }
@@ -220,7 +220,7 @@ export function filesApp(P, el, args = {}) {
   }
   function paintUps() {
     const box = el.querySelector('.pc-ups');
-    if (box) box.innerHTML = F.ups.map(u => `<div class="pc-up">${u.err ? `<span class="bad">${esc(u.name)}: ${esc(u.err)}</span>` : `${esc(u.name)} — ${u.pct} %`}</div>`).join('');
+    if (box) box.innerHTML = F.ups.map(u => `<div class="pc-up">${u.err ? `<span class="bad">${esc(u.name)}: ${esc(u.err)}</span>` : `${esc(u.name)} - ${u.pct} %`}</div>`).join('');
   }
   function paint() {
     if (!P.alive) return;
@@ -282,7 +282,7 @@ export function filesApp(P, el, args = {}) {
       if (a.find) { search(a.find); return; }
       load(a.path || F.path);
     },
-    // (a change somewhere on the PC: the folder shown is read again — only while a folder is shown, never pulling the
+    // (a change somewhere on the PC: the folder shown is read again - only while a folder is shown, never pulling the
     // person out of a file they opened meanwhile)
     onFrame(f) { if (f.kind === 'files' && F.view === 'list') { clearTimeout(soon); soon = setTimeout(() => { if (F.view === 'list') load(); }, 300); } },
     destroy() { clearTimeout(soon); },

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Hermes → the universal chat (server/providers/hermes/translate.js), replaying frames recorded from a real Hermes 0.21.5
 // backend (tests/fixtures/hermes/run-*.json: its gateway JSON-RPC events and its requests to the client): reasoning, a
 // command with its output, an approval, the agent's questions, commentary beside a tool, a model failure; and the
@@ -228,7 +228,7 @@ test('a turn stopped part-way: its hidden empty row shows what it wrote, from He
   assert.deepEqual(h.map(m => [m.role, m.text]), [['user', 'go on'], ['assistant', 'Paragraph 1: half of it'], ['user', 'next'], ['assistant', 'done']]);
 });
 
-test('the bus keeps what a Hermes request says beyond its questions — never anything else', () => {
+test('the bus keeps what a Hermes request says beyond its questions - never anything else', () => {
   const e = normalize({ type: 'native', kind: 'hermes', connectionId: '1', runId: 'r1', ev: { op: 'ask', id: 'srq-1', kind: 'sudo', command: 'apt-get update', value: 'x' } });
   assert.deepEqual(e.ev, { op: 'ask', id: 'srq-1', kind: 'sudo', command: 'apt-get update' });
   assert.throws(() => normalize({ type: 'native', kind: 'hermes', connectionId: '1', runId: 'r1', ev: { op: 'ask', id: 'x', kind: 'shell' } }));
@@ -281,12 +281,12 @@ test('a wait on the provider names the status row as Hermes Desktop names it; it
   const st = () => out.filter(e => e.type === 'native' && e.ev.op === 'status').map(e => e.ev);
   t.feed({ type: 'message.start', payload: {} });
   t.feed({ type: 'thinking.delta', payload: { text: '(´･_･`) mulling...' } });
-  t.feed({ type: 'thinking.delta', payload: { text: '⏳ waiting on provider — retrying in 2s (attempt 1/3)' } });
+  t.feed({ type: 'thinking.delta', payload: { text: '⏳ waiting on provider - retrying in 2s (attempt 1/3)' } });
   t.feed({ type: 'thinking.delta', payload: { text: '' } });
-  t.feed({ type: 'status.update', payload: { kind: 'lifecycle', text: '⏳ Provider temporarily unavailable — retrying automatically in 18s (cycle 1/5); send /stop to cancel' } });
+  t.feed({ type: 'status.update', payload: { kind: 'lifecycle', text: '⏳ Provider temporarily unavailable - retrying automatically in 18s (cycle 1/5); send /stop to cancel' } });
   t.feed({ type: 'status.update', payload: { kind: 'compacting', text: 'Compressing…' } });
   t.feed({ type: 'status.update', payload: { kind: 'compacted', text: 'done' } });
-  assert.deepEqual(st(), [{ op: 'status', kind: 'wait', text: '' }, { op: 'status', kind: 'wait', text: '⏳ waiting on provider — retrying in 2s (attempt 1/3)' },
+  assert.deepEqual(st(), [{ op: 'status', kind: 'wait', text: '' }, { op: 'status', kind: 'wait', text: '⏳ waiting on provider - retrying in 2s (attempt 1/3)' },
     { op: 'status', kind: 'wait', text: '' }, { op: 'status', kind: 'compacting', text: 'Summarizing thread' }, { op: 'status', kind: 'compacting', text: '' }]);
   assert.ok(!out.some(e => e.type === 'run.delta' && /mulling/.test(e.thinking || e.text || '')), 'the spinner\'s words are not its reasoning');
 });

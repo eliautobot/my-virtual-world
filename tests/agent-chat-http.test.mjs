@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Chatting with a connected agent, end to end over HTTP (PLAN WP2.14; DECISIONS E22, C125, C127, C129; CHECKLIST I8.14, I8.15):
 // the owner writes to their own hidden agent from the chat, the agent (a fake client that only makes outbound calls) fetches the
 // message, reports on its work and answers; the owner's approvals reach it; a stopped or unfetched message is taken back; nobody else

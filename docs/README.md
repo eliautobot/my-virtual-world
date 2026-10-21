@@ -1,6 +1,6 @@
-# My Virtual World — documentation
+# My Virtual World documentation
 
-Source-available under the PolyForm Noncommercial License 1.0.0 — see [LICENSING.md](LICENSING.md).
+Source-available under the PolyForm Noncommercial License 1.0.0; see [LICENSING.md](LICENSING.md).
 
 ## Start here
 

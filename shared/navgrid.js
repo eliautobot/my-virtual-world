@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Indoor / park navigation grid: shared by the server (pathfinding) and the client (player collision).
 // Coordinates are building-local metres (origin = footprint centre).
 import { CATALOG } from './catalog.js';

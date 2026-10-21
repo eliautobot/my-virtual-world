@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// OpenClaw's sub-menu, the gateway side (docs/features/agent-providers.md §6): the methods its pages may call — a fixed
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// OpenClaw's sub-menu, the gateway side (docs/features/agent-providers.md §6): the methods its pages may call - a fixed
 // list, reads and changes apart (a change is recorded by the server; the gateway checks its own scopes: operator.admin
-// for its settings) — and what leaves the gateway for a page: no secret's value ever. OpenClaw marks its secret settings
+// for its settings) - and what leaves the gateway for a page: no secret's value ever. OpenClaw marks its secret settings
 // itself (the config schema's uiHints: sensitive, 204 of them in 2026.9); those, and any field named like a key, token or
 // password, are shown as set or not, never their value.
 
@@ -42,7 +42,7 @@ export async function menuCall(link, method, params = {}) {
 }
 
 /** A plugin as switching it on needs it: what it declares (its tools, providers, channels, hooks, MCP servers…) and is
- *  granted, which credentials it needs (set or not, never their value), and OpenClaw's review token — not a credential:
+ *  granted, which credentials it needs (set or not, never their value), and OpenClaw's review token - not a credential:
  *  it names this inspection, so switching on agrees to exactly what was shown (the gateway checks it against a fresh one).
  *  Nothing else (its readme, its files). */
 function inspected(out) {
@@ -52,7 +52,7 @@ function inspected(out) {
     reviewToken: typeof o.reviewToken === 'string' ? o.reviewToken.slice(0, 256) : null };
 }
 
-/** The settings' sections (OpenClaw's own: label, group, order, help, documentation), and its secret paths — read once
+/** The settings' sections (OpenClaw's own: label, group, order, help, documentation), and its secret paths - read once
  *  per gateway version from its config schema. */
 async function outline(link) {
   const s = await schema(link);

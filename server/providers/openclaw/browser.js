@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// An OpenClaw gateway's own browser — the one its agents browse with — in the chat window's side panel
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// An OpenClaw gateway's own browser - the one its agents browse with - in the chat window's side panel
 // (docs/features/agent-providers.md §4), as OpenClaw's Control UI shows it beside a chat: its tabs, the page live, and the
 // person's clicks, typing and scrolling on it. Everything goes through the gateway's browser.request (operator.admin), with
 // the routes and actions the Control UI uses; nothing here runs a script of the page's or the person's choosing (scrolling
-// and history are fixed functions with numbers in them). The live picture: the gateway's screencast — a WebSocket on its
+// and history are fixed functions with numbers in them). The live picture: the gateway's screencast - a WebSocket on its
 // HTTP address, opened with a short-lived token minted on this connection, carrying a JSON header (url, cssWidth,
 // cssHeight) and a JPEG for each change of the page. One per tab, shared by everyone watching it, held while someone asks
 // for frames (a lease) and closed after.
@@ -53,7 +53,7 @@ export class LinkBrowser {
   }
   need() { const a = this.available(); if (!a.available) throw fail('forbidden', a.reason); }
   /** A browser.request; the gateway refusing the request itself (a closed tab, an address its rules block) is said as
-   *  such — not as the gateway failing. */
+   *  such - not as the gateway failing. */
   async req(method, path, body) {
     this.need();
     try { return await this.link.request('browser.request', { method, path, ...(body ? { body } : {}) }, { timeoutMs: 30000 }); }
@@ -65,7 +65,7 @@ export class LinkBrowser {
     }
   }
 
-  /** The browser's tabs: { available, running, tabs, view? } — view: the last frame's address and size of a watched tab. */
+  /** The browser's tabs: { available, running, tabs, view? } - view: the last frame's address and size of a watched tab. */
   async state({ tab = null } = {}) {
     const a = this.available();
     if (!a.available) return { ...a, running: false, tabs: [] };
@@ -85,7 +85,7 @@ export class LinkBrowser {
     if (a === 'navigate') { const r = await this.req('POST', '/navigate', { targetId: id, url: webUrl(p.url) }); return { ok: true, url: String((r && r.url) || '') }; }
     if (a === 'reload') { const c = this.casts.get(id), url = (c && c.frame && c.frame.head.url) || p.url; await this.req('POST', '/navigate', { targetId: id, url: webUrl(url) }); return { ok: true }; }
     if (a === 'back' || a === 'forward') {
-      // (going back leaves the page the function ran in: the browser reports it gone — the navigation it asked for)
+      // (going back leaves the page the function ran in: the browser reports it gone - the navigation it asked for)
       try { await this.evaluate(id, `() => { history.go(${a === 'back' ? -1 : 1}); return true; }`); }
       catch (e) { if (!/Execution context was destroyed|because of a navigation/i.test(e.message)) throw e; }
       return { ok: true };

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A driver's own car, simulated where the driver is (decision A20) with the same Rapier vehicle code and static
 // collision world as the server. The caller supplies RAPIER and VehicleDynamics, the world data and nearby obstacles.
 import {buildVehicleStatics,bodyOffset} from './vehicle-world.js';

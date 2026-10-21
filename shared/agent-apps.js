@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The third-party agents a person can bring in (2026-10-12): AI apps that live in the world as one of the person's agents,
 // connected through this world's MCP address (server/connector/). The server keeps which app an agent is for
 // (agent_slots.app) so its Studio and lists show that app's logo; each app's few steps (add the address in the app, sign
 // in when it asks, choose the agent) are the client's words (client/js/core/agent-app-steps.js).
 // Who may choose each app in ➕ New agent is the admin's setting (offer: its default; server/settings.js agentApps.*):
 // everyone, admins only (while it is being tested) or no one. An agent made for an app earlier keeps working either way.
-// (2026-10-13, the product owner: OpenAI Dot stays hidden until it can live here — OpenAI approves Sign in with ChatGPT
+// (2026-10-13, the product owner: OpenAI Dot stays hidden until it can live here - OpenAI approves Sign in with ChatGPT
 // (players' own ChatGPT plans as their agents' brains) or lets an account have more than one dot (one dot made for this
 // world, like a Grok Bot); Meta Muse is for admins only until it is tested.)
 

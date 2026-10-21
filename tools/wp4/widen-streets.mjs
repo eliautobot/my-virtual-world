@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Widens a world's city streets to the city avenue (2026-10-03: four lanes and a 10 ft parking lane each side;
 // shared/roads.js 'avenue-4'), so the city is drawn and run by the road kit like any other road (shared/city-roads.js
 // cityRoadSet). Blocks keep their size and everything in them moves with its block: buildings, lots (in next.db, by
-// whole micrometres — shapes, areas and titles unchanged), stations, street trees, saved player spots; the roads that
+// whole micrometres - shapes, areas and titles unchanged), stations, street trees, saved player spots; the roads that
 // leave the city move their ends to its new edge. The island itself is not regenerated: the city grows into the flat
 // plain around it (the terrain's own city rectangle stays; terrain.cityStreets records the new one). Parked cars are
 // cleared. Homes, jobs and interiors are untouched (they are by building and in each building's own frame).

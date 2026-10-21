@@ -1,5 +1,5 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The baked characters' skeletons, recovered from their clips, and posing by aiming bones — shared by the tools that add
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The baked characters' skeletons, recovered from their clips, and posing by aiming bones - shared by the tools that add
 // clips to the characters (tools/chars/extra-clips.mjs) and those that measure them.
 //
 // A character's bake (client/assets/chars/<kind>.bin) carries no rest skeleton, only per-frame skinning matrices (bind
@@ -20,7 +20,7 @@ export const f2h = (() => {
     fb[0] = v; const x = ib[0], s = (x >>> 16) & 0x8000; let e = ((x >>> 23) & 0xff) - 127 + 15, m = x & 0x7fffff;
     if (e <= 0) { if (e < -10) return s; m = (m | 0x800000) >> (1 - e); return s | ((m + 0x1000) >> 13); }
     if (e >= 31) return s | 0x7c00;
-    // rounding may carry into the exponent: added, not or-ed — or-ing it halved such a value whenever the exponent was odd
+    // rounding may carry into the exponent: added, not or-ed - or-ing it halved such a value whenever the exponent was odd
     // (a hand's matrix entry of 0.49997 came out 0.25: a bent wrist in one frame, 2026-10-07)
     return s | ((e << 10) + ((m + 0x1000) >> 13));
   };
@@ -128,11 +128,11 @@ export function loadRig(dir, kind) {
   }
   const hips = idx.Hips;
   J[hips] = [(J[idx.LeftUpLeg][0] + J[idx.RightUpLeg][0]) / 2, (J[idx.LeftUpLeg][1] + J[idx.RightUpLeg][1] + J[idx.Spine][1]) / 3, (J[idx.LeftUpLeg][2] + J[idx.RightUpLeg][2]) / 2];
-  // HeadTop_End never moves against the head, so the bake can't place it (it came out anywhere — the swimming heads were
+  // HeadTop_End never moves against the head, so the bake can't place it (it came out anywhere - the swimming heads were
   // twisted out of shape, 2026-10-05): put it on the neck's line, 0.2 m above the head's joint, as it stands in any rig
   { const hn = nrm(sub(J[idx.Head], J[idx.Neck])); J[idx.HeadTop_End] = [J[idx.Head][0] + hn[0] * 0.2, J[idx.Head][1] + hn[1] * 0.2, J[idx.Head][2] + hn[2] * 0.2]; }
   // the same for each finger's end (…Index4, …Thumb4: never moves against the knuckle before it): it came out 0.75–1.6 m
-  // away, on some bodies behind the hand, and the last knuckle of every finger posed to hold something was aimed at it —
+  // away, on some bodies behind the hand, and the last knuckle of every finger posed to hold something was aimed at it -
   // the fingertips bent backward (2026-10-07, drinking). Put it on the line of the bone before, 0.8 of its length on.
   for (const n of N) {
     const m = /^(Left|Right)Hand(Index|Middle|Ring|Pinky|Thumb)4$/.exec(n);
@@ -188,7 +188,7 @@ export function poseFrom(R, F0, pose) {
       else {
         // a grip: each joint bends toward the palm (the fingers close round a cup or a phone's edge); the thumb comes
         // across the palm's side, opposite the fingers. Open (a phone, a book) it stands off the index finger's side; closed
-        // round something (a cup, a burger, a knife's handle) it wraps the far face of it, toward the fingertips — not up
+        // round something (a cup, a burger, a knife's handle) it wraps the far face of it, toward the fingertips - not up
         // along it (2026-10-07: the thumb stood up like a thumbs-up on every cup)
         const k = mode === 'grip' ? 1 : +mode;
         if (fg === 'Thumb') {

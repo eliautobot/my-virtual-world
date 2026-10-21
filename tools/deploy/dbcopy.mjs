@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Consistent copy of a (possibly running) server's accounts database: node tools/deploy/dbcopy.mjs <next.db> <copy>
 // SQLite's online backup copies every page even while the server writes; a plain file copy of a WAL database can be
 // torn. The copy is created with mode 0600 and checked with PRAGMA integrity_check. The source is never migrated.

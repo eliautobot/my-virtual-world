@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Biomes of the island (WP4.2, WP4.17): what grows at a point and its ground colour, from the shared deterministic
-// generator — the terrain worker paints the ground and places the scatter with it, the server's wildlife finds its
+// generator - the terrain worker paints the ground and places the scatter with it, the server's wildlife finds its
 // habitats with it (server/world/wildlife.js), so both agree on where the meadows, fields and woods are. Farmland is
 // laid out field by field (shared/farms.js).
 import { noise2, fbm, SNOW_LINE, lakeQ } from './terrain.js';
@@ -9,7 +9,7 @@ import { toFarm, fromFarm, fieldOf, fieldRect, fieldPlace, CROP } from './farms.
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
-// Biome palette (sRGB components 0..1). 2026-10-03: "smooth ... cozy, a bit cartoon but semi-realistic" — fresh,
+// Biome palette (sRGB components 0..1). 2026-10-03: "smooth ... cozy, a bit cartoon but semi-realistic" - fresh,
 // warm, clean colours (lush greens, warm cream sand, clear turquoise shallows, soft greys), the ground's variety drawn
 // per pixel by the ground shader (render/ground-detail.js), never as speckle baked into the mesh's corners.
 export const C = {

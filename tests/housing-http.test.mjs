@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The residents follow the homes, on a real server (server/sim/housing.js, MVW_HOUSING on): a new world starts with its
-// homes filled to Homes filled (30 % by default) — not MVW_POPULATION —; Settings → Residents reads the numbers
+// homes filled to Homes filled (30 % by default) - not MVW_POPULATION -; Settings → Residents reads the numbers
 // (administrators only) and changes the share. How the city then settles is tests/unit/housing.test.mjs.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';

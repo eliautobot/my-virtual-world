@@ -131,7 +131,7 @@ Built in code like the aircraft, low-poly but detailed, one piece, instanced whi
 | Wreck | deep sea (rare) | sonar only | big grouper, amberjack, the wreck's legend |
 | Weed bed / lily pads | lake shallows | pads on the water | bass, pike, sunfish |
 | Deep hole | lake | sonar only | catfish, lake trout, sturgeon |
-| Open water | anywhere | — | a thin mix (casting anywhere can catch something) |
+| Open water | anywhere | (none) | a thin mix (casting anywhere can catch something) |
 
 - **Changes during a trip:**
   - Grounds wear out as you fish them; the fish move on.
@@ -268,14 +268,14 @@ one before, in each water's own line.
   - Splashes, sprays and rings from one pooled particle system; bird flocks instanced.
   - The water's marks (`render/water-marks.js`, 2026-10-15): wakes, splash rings, foam and churned water are drawn
     from above into one small map round the view each frame (512², 1024² at High), which the sea's and the lakes' own
-    shaders read — so they ride the waves and are lit as water. A boat leaves its wash (foam breaking into lace and
+    shaders read - so they ride the waves and are lit as water. A boat leaves its wash (foam breaking into lace and
     streaks over milky water that lingers), its wake's arms at the Kelvin angle, the waves between them, and a bow wave
     (`render/boat-fx.js`); spray is drops drawn as streaks, mist and a splash's crown (`render/spray.js`). The foam's
     pattern is a baked tiling texture (worked out per pixel it cost the phone a third of its frame rate at Medium).
     Dev page: `client/dev/wake.html`; phone timing: `tools-bin/phone-wake.mjs`.
   - The water keeps out of the boats' hulls (2026-10-15: waves showed in the cockpit): the water's shaders skip what is
     inside the nearest four hulls (`render/water-marks.js` mkDry: the hull as `render/vessels.js` lofts it, in each
-    boat's own frame). Every boat in the water — yours, other players', the moored ones — has a line of foam where it
+    boat's own frame). Every boat in the water - yours, other players', the moored ones - has a line of foam where it
     meets the water and rings spreading as it bobs (the marks' laps); a slow boat's bow dipping into a swell slaps up
     white water and drops. Boats register with `hullAt(key, HULL_FORM[type], { obj | m })` each frame.
   - Docks: one merged mesh per module; parked boats instanced.
@@ -348,7 +348,7 @@ one before, in each water's own line.
 4. **Done.** On deck:
    - **The deck plan** (`shared/boat-model.js` deck, shared with the server): each boat's floors (the cockpit sole, the
      casting decks), the width you can stand at along it, its fixtures (console, leaning post, cooler, livewell, the
-     T-top's posts), and its fishing spots — the coastal boat four (bow, port, starboard, stern), the skiff two (bow,
+     T-top's posts), and its fishing spots - the coastal boat four (bow, port, starboard, stern), the skiff two (bow,
      stern). `walkDeck` moves you along it: round the fixtures, along the gunwale as the hull narrows, up a step on to
      a casting deck, never over the side.
    - **Walking** (`client/js/player/boating.js`): **F** (📱 🚶 Walk) leaves the wheel (the lever to neutral); WASD or the
@@ -360,9 +360,9 @@ one before, in each water's own line.
      pumping), `fish_net`, `fish_show` (the catch held up). The left hand slides along the rod for shorter arms so
      both hands stay on it. The rod (a spinning rod with its reel and guides) and the landing net are props of their
      own (`render/char-props.js`, a third set drawn only for someone fishing). The clip table in the skinning shader is
-     packed two clips to a vec4 (36 uniform slots for 71 clips, not 142 — phones allow as few as 256).
-   - **The server** takes where you stand and what you're doing with the boat's pose (`bpose` dk) — only a point one
-     can stand on that boat, else the wheel — so everyone sees you walking, at the wheel or fishing.
+     packed two clips to a vec4 (36 uniform slots for 71 clips, not 142 - phones allow as few as 256).
+   - **The server** takes where you stand and what you're doing with the boat's pose (`bpose` dk) - only a point one
+     can stand on that boat, else the wheel - so everyone sees you walking, at the wheel or fishing.
    - **Fixed on the way:** the coastal skipper stood inside the console and the skiff's inside its aft deck; the
      consoles are raised to standing height, the bow cushions fit the bow's taper.
    - **Checks:** `tests/boats.test.mjs` (every spot walkable from the wheel, never over the side, the server's check),
@@ -371,26 +371,26 @@ one before, in each water's own line.
 5. **Done.** Fishing:
    - **Trips** (`client/js/play/fishing-game.js`): 🎣 Trips (T) lists this water's trips (sea from a marina, lake from a
      lake dock), locked ones saying what opens them. Go: the server lays the trip out round the dock you're out from
-     (`server/index.mjs` fishingContext: the dock, its water, the ground sites for the trip's reach — or the whole
-     lake — kept per dock and reach, and the kit, the starter's until step 7). The trip panel: its clock (the trip's
+     (`server/index.mjs` fishingContext: the dock, its water, the ground sites for the trip's reach - or the whole
+     lake - kept per dock and reach, and the kit, the starter's until step 7). The trip panel: its clock (the trip's
      own day, dawn to dusk over its minutes: `shared/fishing.js` tripClock), its bounties ticking off, the cooler.
      Stepping off the boat (or 🏁 End) weighs the catch in: stars, the leaderboard, XP.
-   - **Cast**: hold Space (the big button on a phone) — the power swings, a ring and an arc show where it lands on the
+   - **Cast**: hold Space (the big button on a phone) - the power swings, a ring and an arc show where it lands on the
      water the way the camera looks (within 75° of the way you face out, never past land); let go: the rod comes over
      (`fish_cast` driven through its phases) and the lure flies its arc to a splash.
    - **Wait**: the bobber rides the drawn waves (the sea probe); hold to reel (a lure swims only while it moves), tap
      to twitch. The bite comes by `biteEvery` (the ground under the lure, the lure, the trip's hour); nibbles dip the
-     bobber, then the strike — HOOK! within the rod's window (`L.win`). Too soon spooks it; too late steals the bait.
-   - **Hook**: the server rolls the fish (act hook). **Fight**: `shared/fishing-fight.js` stepped here by real time —
+     bobber, then the strike - HOOK! within the rod's window (`L.win`). Too soon spooks it; too late steals the bait.
+   - **Hook**: the server rolls the fish (act hook). **Fight**: `shared/fishing-fight.js` stepped here by real time -
      hold to reel, steer against its runs (A/D, the stick), bow to its jumps (S, BOW), LAND when it's beaten (E). On
      screen: the tension bar (the drag marked) and a ring round the button (green, amber, red), the fish's stamina,
-     the line out, what it's doing ("It runs right — hold A"). Its shadow moves under the surface; it leaps clear with
+     the line out, what it's doing ("It runs right - hold A"). Its shadow moves under the surface; it leaps clear with
      splashes going out and back in; the line hangs off the rod's real tip (`render/characters.js` gripPoint: the
      hand's bone from the baked frames on the CPU).
    - **Land and the catch**: the net (`fish_net`), the server's check (act land), then you hold it up (`fish_show`, the
-     model between your hands) with its card — rarity, size class, cm/in, kg/lb, its worth — keep it or let it go.
+     model between your hands) with its card - rarity, size class, cm/in, kg/lb, its worth - keep it or let it go.
      Finds (a boot, a bottle with a note…) are just reeled in.
-   - **The fish** (`client/js/render/fish-models.js`): every species built from its body spec — a lofted body, its
+   - **The fish** (`client/js/render/fish-models.js`): every species built from its body spec - a lofted body, its
      tail and fins, a bill, hammer, whiskers or snout, its own painted skin (back to belly, its pattern, the eye); the
      squid and the ray their own way; the finds. `client/dev/fish.html` shows them all (`tools-bin/fish-shot.mjs`).
    - **Splashes** (`client/js/render/fishing-fx.js`): rings spreading on the water and thrown drops; the line, the
@@ -404,32 +404,32 @@ one before, in each water's own line.
    - **The grounds on the water** (`client/js/render/fishing-grounds.js`): bird flocks wheel over theirs and dive into
      the water (seen from far off), surface boils break with bait fish (ripples and splashes near you), lily pads,
      weed beds and rocks off a point, and the water's own colour over the flats (sand), a reef (dark), a drop-off (a
-     band) and the blue water. Flocks and boils wander (`shared/fishing-trip.js` groundPos — the same on the server).
+     band) and the blue water. Flocks and boils wander (`shared/fishing-trip.js` groundPos - the same on the server).
      Hidden grounds show nothing; the legend's ground gets a golden ring while it is about.
    - **The chart** (C, 🗺️ in the trip panel; `client/js/play/fishing-nav.js`): the water round the dock, the trip's
-     reach, the grounds you can see or have found, the legend, the dock and you — each listed with its distance and
+     reach, the grounds you can see or have found, the legend, the dock and you - each listed with its distance and
      bearing. 📍 sets a course: an arrow at the top of the screen, a buoy and a beam on the water. ▶ Cruise drives
      there (`player/boating.js` autopilot): it steers round points and shallows, eases in, stops inside the ground or
      as close as the depth allows, and hands back the wheel if it grounds or you touch the wheel or the lever. The
      trip's marks show on the map (M) and the radar too (`ui/worldmap.js` app.mapMarks).
    - **The fish finder**: the bottom scrolling under the boat, fish marks over (and near) a ground at its kind of depth;
      a hidden ground within its range (the finder upgrade's metres) is found and goes on the chart.
-   - **Fair play**: a bite's ground must be where the angler is — the server's own position for them (the boat's deck)
+   - **Fair play**: a bite's ground must be where the angler is - the server's own position for them (the boat's deck)
      within the ground's circle and the line's length (`PlayCore` whereIs → act's `pos`).
    - **Selling** (`server/play/fish-market.js`, `client/js/play/fish-store.js`): inside a dock store, E at its counter
-     — the trips weighed in and not sold yet, each fish and its price, Sell it all — paid from the economy's **Fish
+     - the trips weighed in and not sold yet, each fish and its price, Sell it all - paid from the economy's **Fish
      market** faucet (policy `fishMarket`: on, pct, dailyCap; 1,500 VC a day by default), once per trip (the ledger's
      key), within a day of the trip. `GET /api/fishing/market`, `POST /api/fishing/sell`.
-   - **The store's interior**: a tackle shop — rod racks, the lure wall, the live bait fridge and the fish market's
+   - **The store's interior**: a tackle shop - rod racks, the lure wall, the live bait fridge and the fish market's
      counter with its scale (new docks; a store placed before this keeps its shelves until it's placed again).
    - **Checks:** `tests/docks-http.test.mjs` (a catch sold at the store once, refused out on the water);
      `tests/floor-generators.test.mjs` (the tackle shop); `tools-bin/dock-check.mjs` (the grounds, the chart, a cruise,
      fishing, the store's counter and the sale).
-7. Gear and skills — in two parts:
+7. Gear and skills - in two parts:
    - **7a. Done. The gear shop, the boat, skills** (`server/play/angler.js`, `client/js/play/fish-store.js`; schema v51
      `fish_anglers`):
      - **Gear is in the inventory** (docs/features/INVENTORY.md): rods, reels, lines, the leader, bait and lures are
-       things you hold — bought at the counter, given, traded. Everyone's welcome kit has the starter rod, reel and
+       things you hold - bought at the counter, given, traded. Everyone's welcome kit has the starter rod, reel and
        line and bait for a first trip.
      - **The counter** (E inside a dock store, or 🎣 Gear & skills in the trips panel): tabs **Sell**, **Tackle** (each
        rod, reel and line with what it does: Buy, Use it, or the fishing level it needs), **Bait** (by the pack, ×5),
@@ -444,22 +444,22 @@ one before, in each water's own line.
      - Without the economy everyone fishes with the starter's kit, as before.
      - `GET /api/fishing/angler`, `POST /api/fishing/buy` `{ kind: gear|lure|boat, id, packs }`, `use`
        `{ rod|reel|line|leader }`, `skill` `{ id }`, `respec`.
-     - The play core keeps a run's detail whole (up to 6,000 characters) — a cut-off string isn't JSON.
+     - The play core keeps a run's detail whole (up to 6,000 characters) - a cut-off string isn't JSON.
      - **Checks:** `tests/docks-http.test.mjs` (the gear shop end to end), `tests/fishing.test.mjs` (bait and lures used),
        `tools-bin/dock-check.mjs` (the counter's tabs, a pack of shrimp bought).
    - **7b. Done. The Fishdex, world records, badges** (`client/js/play/fishdex.js`, `server/play/angler.js`):
      - **The Fishdex** (📖 in the trips panel, the dock store's head and a trip's result): all 87 species, each drawn
        from the game's own fish model (side on, once, a few a frame; a dark shape until you've landed one), how many
-       you've landed and your biggest, filters (sea, lake, legends; landed or not yet) and a species' card — your
+       you've landed and your biggest, filters (sea, lake, legends; landed or not yet) and a species' card - your
        biggest, the **world record** and who holds it, and **where to find it** (its grounds, the hours it feeds best,
        its depth, the baits it takes, the trips that go there; a legend at its own ground in its hour).
      - **Every species landed counts, kept or let go**: a trip's detail lists them (`landed`: species, how many, the
        biggest's kg and cm), and when it's weighed in the angler's Fishdex (`fish_dex`) and the world's records
-       (`fish_records`: the biggest of each species, who, when) are brought up to date — once per trip.
+       (`fish_records`: the biggest of each species, who, when) are brought up to date - once per trip.
      - **The catch card** says *New to your Fishdex!* and *bigger than the world record* as the fish comes up; the
        trip's result lists the new species and the records set.
      - **Badges**: Night owl (a fish after dusk), Fishdex 10 / 25 / 50 / Complete, Record breaker (the biggest of a
-       species anyone has landed — taken from someone else, or the first ever), Gentle hands (25 fish let go). The
+       species anyone has landed - taken from someone else, or the first ever), Gentle hands (25 fish let go). The
        Fishdex and record badges are given by the angler's records (`PlayCore.grant`: a module's own badges only).
      - `GET /api/fishing/dex` → `{ mine, records, count, of }`.
      - **Checks:** `tests/fishing.test.mjs` (the Fishdex and records over two anglers, once per trip, the badges),

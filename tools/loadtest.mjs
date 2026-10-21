@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Load test for the multiplayer core (PLAN WP1.10, I14.13): N simulated signed-in players on a throwaway server.
 // 1. Starts a throwaway server on a copy of a data folder (or a generated city), with enough connections allowed.
 // 2. Creates N accounts through the owner, signs each in and replaces its temporary password.

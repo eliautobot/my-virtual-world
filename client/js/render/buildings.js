@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Building exteriors. Shells for a 2x2-block chunk are merged into one mesh with a procedural facade shader
 // (6 styles, window grids, storefronts, lobby doors, night lighting by hour + building type, distance-filtered).
 // Details (entrances, awnings, roofs, balconies) share one merged mesh per chunk; signs use the shared text atlas.
@@ -511,7 +511,7 @@ if (fadeOut(vWP, vBi)) discard;`);
   // ------------------------------------------------------------ signs
   signs(sq, f, B, bi) {
     let text = null, style = null, big = false;
-    if (B.tackle && B.module) return;   // (a dock's store: its name is on the dock's own porch board — render/docks.js dockSigns)
+    if (B.tackle && B.module) return;   // (a dock's store: its name is on the dock's own porch board - render/docks.js dockSigns)
     if (B.type === 'hq') { text = B.sign || B.name; style = { bg: '#e8453c', fg: '#ffffff', logo: '◆', logoBg: '#1c2226', span: 2 }; big = true; }
     else if (isStore(B)) { text = B.sign || B.shopName || B.name; style = SIGN_STYLE[B.mixed || B.type] || SIGN_STYLE.shop; if (style === SIGN_STYLE.shop) style = { ...style, bg: B.colors?.accent || '#23395b' }; }
     else if (B.sign) { text = B.sign; style = SIGN_STYLE.office; }
@@ -610,7 +610,7 @@ if (fadeOut(vWP, vBi)) discard;`);
   /** The selected and the hovered building drawn alone, for their outline (render/outline.js): its chunk's meshes
    *  through a mask material that keeps only its own triangles (aB), cut where it is looked into as the facade is. */
   outlineDraw(draw) {
-    // (the building looked into is open already — its floor controls say so: never outlined, picked or hovered)
+    // (the building looked into is open already - its floor controls say so: never outlined, picked or hovered)
     const open = GU.uFocusB.value, sel = this.uni.uSelB.value === open ? -1 : this.uni.uSelB.value, hov = this.uni.uHoverB.value === open ? -1 : this.uni.uHoverB.value;
     this.masks ??= { sel: { mat: maskMatB(), list: [] }, hov: { mat: maskMatB(), list: [] } };
     for (const [b, M] of [[sel, this.masks.sel], [hov === sel ? -1 : hov, this.masks.hov]]) {

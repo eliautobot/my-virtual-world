@@ -1,11 +1,11 @@
-/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
-/* The selection (2026-10-07): a card that comes in as things are selected (ui.js placeSel and selCard) — on a
-   computer a wide widget across the top under the top bar (2026-10-08), on a phone a compact one in the same place —
-   or the Info panel's Selection section (the preference "What you select shows"); and a person's feeds — what they did
+/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* The selection (2026-10-07): a card that comes in as things are selected (ui.js placeSel and selCard) - on a
+   computer a wide widget across the top under the top bar (2026-10-08), on a phone a compact one in the same place -
+   or the Info panel's Selection section (the preference "What you select shows"); and a person's feeds - what they did
    and their money lately, in one panel with two tabs, newest at the top (ui/sel-feeds.js).
    --kc is the colour of what is selected (an agent, a resident, a kind of building).
-   Its parts (ui.js showAgent, showBuilding) are written in the order they stack — the Info panel, a phone, a narrow
-   widget — and the widget places them side by side: a person's who (.title, their Studio, the buttons), how they are
+   Its parts (ui.js showAgent, showBuilding) are written in the order they stack - the Info panel, a phone, a narrow
+   widget - and the widget places them side by side: a person's who (.title, their Studio, the buttons), how they are
    (.sel-info: what they said, their needs, job, home, routine) and what they do (.sel-feed); a building's name, people
    and buttons, its floors (.sel-place) and what other modules add (.sel-slot: its business, your agents who live there). */
 
@@ -13,8 +13,8 @@
 
 /* ---- the widget: across the top, between the side panels (or their edge buttons), following them as they open; it comes
    down from under the top bar and folds back up (ui.js setSelOpen), its handle staying just under the top bar. No header:
-   its kind is a badge beside the name. --sel-gap: from the top bar to its top — none (2026-10-08: no gap, no coloured
-   edge — as little in the way as it can be): it hangs from the top bar, its top corners square. */
+   its kind is a badge beside the name. --sel-gap: from the top bar to its top - none (2026-10-08: no gap, no coloured
+   edge - as little in the way as it can be): it hangs from the top bar, its top corners square. */
 .selcard { --sel-gap: 0px; position: fixed; z-index: 3;   /* (under the top bar's own menus and search results) */
   top: calc(var(--topbar-height, 56px) + var(--sel-gap)); left: calc(var(--dock-lt, 35px) + 8px); right: calc(var(--dock-rt, 35px) + 8px);
   width: auto; max-width: 1240px; margin-inline: auto; max-height: min(340px, 46dvh); display: flex; flex-direction: column; container: sel / inline-size;
@@ -92,7 +92,7 @@ body.play .selcard .insp { border-top: 1px solid color-mix(in srgb, var(--kc) 30
   .selcard .st-entry-ic { width: 28px; height: 28px; font-size: 14px; border-radius: 8px; }
   .selcard .st-entry-btn b { font-size: 13px; line-height: 1.2; white-space: nowrap; } .selcard .st-entry-btn small { font-size: 10.5px; }
   .selcard .st-entry-go { font-size: 18px; }
-  /* the feeds: three entries, then they scroll — what they do now and two before it; three lines of thoughts or money */
+  /* the feeds: three entries, then they scroll - what they do now and two before it; three lines of thoughts or money */
   .selcard .sel-person .feed-scroll { gap: 4px; }
   .selcard .sel-person .sf-pane { height: 116px; display: flex; flex-direction: column; }
   .selcard .sel-person .sf-pane .feed-scroll { height: auto; flex: none; max-height: 98px; min-height: 0; }
@@ -147,7 +147,7 @@ body.play .selcard .insp { border-top: 1px solid color-mix(in srgb, var(--kc) 30
 .insp .nd-l { font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
 .insp .nd .bar { height: 5px; }
 
-/* ---- the feeds: one panel, two tabs (Activity, Money); newest at the top — the three newest clear, then each older one
+/* ---- the feeds: one panel, two tabs (Activity, Money); newest at the top - the three newest clear, then each older one
    fainter; scrolled down to read back, all of them clear. One height for both tabs, so switching never jumps. */
 .sel-feed { margin: 10px 0 6px; border: 1px solid var(--line); border-radius: 15px; padding: 6px; background: color-mix(in srgb, var(--kc, #38bdf8) 3%, transparent); }
 .sf-tabs { display: flex; gap: 4px; padding: 0 0 6px; }
@@ -204,7 +204,7 @@ body.play .selcard .insp { border-top: 1px solid color-mix(in srgb, var(--kc) 30
 .mf-rent { color: var(--dim); font-size: 11.5px; }
 
 /* ---- a phone (2026-10-07): between the two docks' edge buttons (never over them), just under the top bar, under a
-   third of the screen — one-line feed entries, the kind and name compact, the Studio a slim bar; the rest (needs, job,
+   third of the screen - one-line feed entries, the kind and name compact, the Studio a slim bar; the rest (needs, job,
    home) a scroll away inside it; folded and opened by the same handle */
 @media (max-width: 760px) {
   .selcard { --sel-gap: 0px; left: calc(var(--dock-lt, 50px) + 4px); right: calc(var(--dock-rt, 50px) + 4px); max-height: 31dvh; }

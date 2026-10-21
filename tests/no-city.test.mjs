@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A world without a city (2026-10-18, the product owner: "remove the built-in grid"): its grid is empty (nx, nz 0) and
-// its terrain's cityStreets null — a clean island the owner builds up with roads, lots and buildings of their own.
+// its terrain's cityStreets null - a clean island the owner builds up with roads, lots and buildings of their own.
 // Residents with no home wait out of town until there are footpaths; the land where the city stood is a plain that
 // takes terrain strokes like any land.
 import test from 'node:test';

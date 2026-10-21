@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Where a terrain stroke may go (WP4.7, wp4-world-spec.md §9: terrain and water are administrators' tools, checked over
 // the whole affected area): on the island's land, clear of the city's ground, every road (its corridor, junctions and
 // the land graded to it), every building beyond the city (its pad and yard) and every lot someone other than the city

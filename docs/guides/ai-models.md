@@ -1,4 +1,4 @@
-<!-- My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
+<!-- Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
 # Give your agents a brain
 
 My Virtual World's **built-in agents** think with an AI model you choose, on your own key. This guide connects one and
@@ -16,7 +16,7 @@ makes your first agent. (Already run OpenClaw or Hermes? Their agents come with 
    | Name | Anything, for example `My brain` |
    | For | **Only me**, or **Everyone I share it with** to let other accounts' agents use it (administrators) |
    | Provider | **OpenRouter** (one key, hundreds of models: the easiest start), **OpenAI**, **Anthropic**, **Google**, or **custom** for a model on your own machine |
-   | Base URL (custom) | Only for *custom* — see [local models](#local-models) below |
+   | Base URL (custom) | Only for *custom*: see [local models](#local-models) below |
    | Model | The model's name at that provider, for example `deepseek/deepseek-v4.1-flash` on OpenRouter |
    | Thinking | `off` is fastest and cheapest; `low`–`high` for models that reason |
    | Prices | Optional: what the provider charges per million tokens, so the world can show and limit what agents spend |
@@ -32,7 +32,7 @@ again.
 1. In the **Team** panel (right side), click **➕ New agent** and choose **Built-in**.
 2. Give it a name and a look. It moves into town: a home, a desk and a routine.
 3. Its **Agent Studio** opens. On the **Brain** tab, pick the connection you added and a model.
-4. Click the agent (or 💬) to chat. It lives in the city — a home, a job, money, memories, the people it knows — and
+4. Click the agent (or 💬) to chat. It lives in the city (a home, a job, money, memories, the people it knows) and
    works for you from its **PC** (files, a task board, a calendar, a browser). Its Studio tabs (Work, Personality, Plans,
    Memories, Money…) show and shape all of it.
 
@@ -40,14 +40,14 @@ In demo mode (no License Key) a world has up to **3 agents** in all.
 
 ## 3. Let them live on their own (optional)
 
-- **Free Will** — agents choose what to do with their day. Add a decision service: **Settings → 🔌 Connections → OpenAI
+- **Free Will**: agents choose what to do with their day. Add a decision service: **Settings → 🔌 Connections → OpenAI
   Decisions** (an OpenAI key), then turn it on in **Settings → 🧠 Free Will & Mind**.
-- **The Mind** — each agent plans its day, reflects at night and handles its problems (rent, a job, money) with the
+- **The Mind**: each agent plans its day, reflects at night and handles its problems (rent, a job, money) with the
   brain you gave it. Turn it on in **Settings → 🧠 Free Will & Mind**; an agent's Studio → **Plans** shows its day.
   Spending limits are in **Settings → 🛡️ Agent limits**.
-- **Voice** — agents speak and listen: add a **Voice service** connection (OpenAI, OpenRouter, ElevenLabs, Groq, Google
+- **Voice**: agents speak and listen: add a **Voice service** connection (OpenAI, OpenRouter, ElevenLabs, Groq, Google
   Cloud, Deepgram, xAI, Qwen or any OpenAI-compatible server), or use your browser's own voice.
-- **Phone** — give an agent a real phone number: a **Phone service (Twilio)** connection
+- **Phone**: give an agent a real phone number: a **Phone service (Twilio)** connection
   ([agents' phones](../features/phone.md)).
 
 ## Local models

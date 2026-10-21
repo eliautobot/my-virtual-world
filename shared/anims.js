@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Animation clip ids shared by server (plans) and client (baked GPU clips).
 export const ANIMS = [
   'idle', 'walk', 'run', 'jog', 'sit', 'sit_type', 'sit_talk', 'sit_eat', 'sit_relax', 'sit_high',

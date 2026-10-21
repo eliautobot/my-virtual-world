@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // OpenClaw's sub-menu in Agent Providers (docs/features/agent-providers.md): its gateway, agents, models, tools and
-// plugins, skills, automations, approvals, sessions and every setting it has — what OpenClaw's own Control UI offers, through its gateway.
+// plugins, skills, automations, approvals, sessions and every setting it has - what OpenClaw's own Control UI offers, through its gateway.
 // Every call goes through the server (POST /api/agent-providers/call: the connection's managers only, a fixed list of
-// calls, no secret's value ever comes back); every change is shown first — what it changes, from what to what — and waits
+// calls, no secret's value ever comes back); every change is shown first - what it changes, from what to what - and waits
 // for the person's OK. The Settings page is drawn from OpenClaw's own description of its settings (config.schema.lookup:
 // labels, help, which change needs a restart, which values are secret), so a newer OpenClaw's settings show by themselves.
 import { h, esc } from '../../core/util.js';
@@ -135,8 +135,8 @@ async function models(el, ctx) {
 
 // ------------------------------------------------------------------ Tools and plugins
 // An agent's tools as OpenClaw has them in effect in its main session (built in, from plugins, channels and MCP servers,
-// with their risk; an older gateway without tools.effective: its catalogue), its tool profile — all agents' and this one's
-// own, each offered only where the gateway's settings have it — and the plugins installed on the gateway. Switching a
+// with their risk; an older gateway without tools.effective: its catalogue), its tool profile - all agents' and this one's
+// own, each offered only where the gateway's settings have it - and the plugins installed on the gateway. Switching a
 // plugin on shows what it declares first and sends OpenClaw's review token of exactly that (its own consent step).
 const SOURCE = { core: 'Built in', plugin: 'From plugins', channel: 'From channels', mcp: 'From MCP servers' };
 const PLUGIN_STATE = { enabled: ['On', ' set'], disabled: ['Off', ''], 'needs-setup': ['Needs setup', ' warn'] };
@@ -224,7 +224,7 @@ async function tools(el, ctx) {
         note: on ? (details.length ? 'What it declares: switching it on agrees to exactly this.' : 'It declares no tools, providers, channels or hooks.') : 'Its tools leave every agent.' })) return;
       let restart = false;
       if (await act(ctx, b, async () => { const r = await ctx.call('plugins.setEnabled', { pluginId: p.id, enabled: on, ...(on && token ? { acknowledgeCapabilities: { reviewToken: token } } : {}) }); restart = !!(r && r.restartRequired); }, null)) {
-        ctx.toast(`${p.name || p.id}: ${on ? 'on' : 'off'}${restart ? ' — it takes effect when the gateway restarts' : ''}`, 'good');
+        ctx.toast(`${p.name || p.id}: ${on ? 'on' : 'off'}${restart ? ' - it takes effect when the gateway restarts' : ''}`, 'good');
         render('tools', el, ctx);
       }
     },
@@ -265,7 +265,7 @@ const scheduleText = s => {
   if (s.kind === 'at') return `once, ${new Date(s.at).toLocaleString()}`;
   return s.kind || '';
 };
-const managed = new Set();   // automations OpenClaw refused a change to (its own: it says so) — offered no switch again
+const managed = new Set();   // automations OpenClaw refused a change to (its own: it says so) - offered no switch again
 async function automations(el, ctx) {
   const r = await ctx.call('cron.list', { includeDisabled: true });   // (switched-off ones too: to be switched on again)
   const jobs = r.jobs || [];
@@ -286,7 +286,7 @@ async function automations(el, ctx) {
         try { await send(j.configRevision); }
         catch (e) {
           if (/system-owned|cannot be edited/i.test(e.message)) managed.add(j.id);
-          // (its definition moved on since the list was read — a change just made: read again and send the same change once more)
+          // (its definition moved on since the list was read - a change just made: read again and send the same change once more)
           if (/no longer matches/i.test(e.message)) { const now = ((await ctx.call('cron.list', { includeDisabled: true })).jobs || []).find(x => x.id === j.id); if (now && now.enabled === j.enabled) { await send(now.configRevision); return; } }
           throw e;
         }
@@ -418,7 +418,7 @@ async function settings(el, ctx) {
       let stale = false;
       const ok = await act(ctx, b, async () => {
         try { await ctx.call('config.patch', { raw: JSON.stringify(patch), baseHash: S.cfg.hash, note: 'My Virtual World', ...(replace.length ? { replacePaths: replace } : {}) }); }
-        catch (e) { if (/changed since/i.test(e.message)) { stale = true; throw new Error('OpenClaw\'s settings were changed elsewhere meanwhile: they are read again — check your changes and save again.'); } throw e; }
+        catch (e) { if (/changed since/i.test(e.message)) { stale = true; throw new Error('OpenClaw\'s settings were changed elsewhere meanwhile: they are read again - check your changes and save again.'); } throw e; }
       }, 'Saved to OpenClaw');
       S.cfg = await ctx.call('config.get').catch(() => S.cfg);
       if (ok) S.pending.clear();
@@ -453,7 +453,7 @@ const words = key => String(key).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(
 function fieldHtml(k, leaf, S) {
   const hint = k.hint || {}, label = hint.label || words(k.key), help = hint.help || (leaf && leaf.schema && leaf.schema.description) || '';
   const adv = hint.advanced ? ' adv' : '';
-  // (a secret is a field however OpenClaw shapes it — a value, or a reference to its secret store)
+  // (a secret is a field however OpenClaw shapes it - a value, or a reference to its secret store)
   if (k.hasChildren && !hint.sensitive) return `<div class="op-field op-sub${adv}"><button type="button" class="op-into" data-do="into" data-path="${esc(k.path)}"><span class="op-fl"><b>${esc(label)}</b>${help ? `<small>${esc(help)}</small>` : ''}</span><span class="op-go" aria-hidden="true">›</span></button></div>`;
   const sc = (leaf && leaf.schema) || {}, cur = S.pending.has(k.path) ? S.pending.get(k.path).value : at(S.cfg.config, k.path);
   const secret = hint.sensitive || (cur && typeof cur === 'object' && cur.secret);
@@ -463,7 +463,7 @@ function fieldHtml(k, leaf, S) {
   const restart = (leaf && leaf.reloadKind || k.reloadKind) === 'restart' ? ' <span class="tag" title="Takes effect when the gateway restarts">restart</span>' : '';
   const head = `<span class="op-fl"><b>${esc(label)}</b>${restart}${help ? `<small>${esc(help)}</small>` : ''}</span>`;
   let input;
-  if (secret) input = `<input class="input" type="password" autocomplete="new-password" placeholder="${cur && cur.set ? 'Set — type a new value to change it' : 'Not set'}">`;
+  if (secret) input = `<input class="input" type="password" autocomplete="new-password" placeholder="${cur && cur.set ? 'Set - type a new value to change it' : 'Not set'}">`;
   else if (type === 'boolean') input = `<label class="check"><input type="checkbox"${cur === true || (cur === undefined && sc.default === true) ? ' checked' : ''}> ${cur === undefined ? '(default)' : ''}</label>`;
   else if (type === 'enum') input = `<select class="input">${cur === undefined ? '<option value="" selected>(default)</option>' : ''}${choices.map(v => `<option value="${esc(String(v))}"${String(cur) === String(v) ? ' selected' : ''}>${esc(String(v))}</option>`).join('')}</select>`;
   else if (type === 'number' || type === 'integer') input = `<input class="input" type="number"${Number.isFinite(sc.minimum) ? ` min="${sc.minimum}"` : ''}${Number.isFinite(sc.maximum) ? ` max="${sc.maximum}"` : ''} value="${cur === undefined ? '' : esc(String(cur))}" placeholder="${sc.default !== undefined ? esc(String(sc.default)) : '(default)'}">`;

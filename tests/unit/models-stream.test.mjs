@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat window's model calls (server/providers/models.js, docs/features/CHAT.md §1): an answer streamed as it is
 // written (OpenAI-compatible and Anthropic server-sent events), the reasoning a model shows, what it used and cost;
 // Stop ends the stream at once with what was written; a stream that fails part-way keeps what came; images and PDFs
@@ -10,7 +10,7 @@ import adapter, { BASE } from '../../server/providers/models.js';
 
 let srv, url;
 const reqs = [];
-let script = null;          // (req, res, body) => void — how the fake answers the next call
+let script = null;          // (req, res, body) => void - how the fake answers the next call
 let closed = 0;             // calls the client broke off
 before(async () => {
   srv = http.createServer((req, res) => {

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Building-local <-> world transforms and rectangle helpers.
 // Building local frame: origin at footprint centre, +z = front (entrance side), +x = local right-hand of the facade
 // when looking at it from the street (three.js convention: world = rotateY(rot) * local + centre).
@@ -46,7 +46,7 @@ export function inFootprint(b, x, z, pad = 0) {
   return Math.abs(l.x) <= b.w / 2 + pad && Math.abs(l.z) <= b.d / 2 + pad;
 }
 const _l = {};
-/** Whether two buildings' footprints (grown by pad each) overlap — separating axes over both rectangles. */
+/** Whether two buildings' footprints (grown by pad each) overlap - separating axes over both rectangles. */
 export function footprintsOverlap(a, b, pad = 0) {
   const A = corners(a, pad), Bc = corners(b, pad);
   for (const P of [A, Bc]) for (let k = 0; k < 2; k++) {

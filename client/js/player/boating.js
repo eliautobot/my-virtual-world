@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Taking a boat out from a fishing dock (docs/features/fishing.md §Boats). Walk down the dock in Play mode to a free boat
 // and press E; the server gives it to you (server/world/boats.js) and this page drives it with the shared boat model
 // (shared/boat-model.js) at 60 Hz, floating on the waves the screen shows (render/sea-probe.js), your character at the
@@ -7,17 +7,17 @@
 // drawn here too (one instanced mesh per type, smoothed between the server's five updates a second).
 //
 // Leave the wheel (F) and walk about the deck (shared/boat-model.js deck: its floors, up a step on to a casting deck,
-// round the console — never over the side) to a fishing spot (a ring on the deck) and fish from it (E); the lever goes
+// round the console - never over the side) to a fishing spot (a ring on the deck) and fish from it (E); the lever goes
 // to neutral as you leave the wheel (the boat drifts, or lies to its anchor). Where you stand and what you're doing
 // go to the server with the boat's pose, so everyone sees you there.
 //
-//   At the wheel — W / S (↑ ↓): the throttle lever forward / back (through neutral to reverse) · A / D (← →): the
+//   At the wheel - W / S (↑ ↓): the throttle lever forward / back (through neutral to reverse) · A / D (← →): the
 //   wheel · Space: the lever to neutral · Q: drop or raise the anchor · E: step off (stopped, alongside) · F: walk
-//   On deck — WASD: walk · E: fish here / take the wheel / stand up · Q: the anchor · F: back to the wheel
+//   On deck - WASD: walk · E: fish here / take the wheel / stand up · Q: the anchor · F: back to the wheel
 //   Esc: leave. Phone: the wheel on the left (slide), the lever on the right (slide; a notch at neutral), Anchor,
 //   Neutral, Walk, Off; on deck the stick walks, Fish / Wheel, Anchor.
 //
-// app.boating: { active, state(), type, module, id, frame, walking, fishing, deckToWorld, act } — the fishing game uses it.
+// app.boating: { active, state(), type, module, id, frame, walking, fishing, deckToWorld, act } - the fishing game uses it.
 import * as THREE from 'three';
 import { S, bus } from '../core/state.js';
 import { h, esc, isTouch } from '../core/util.js';
@@ -103,7 +103,7 @@ function board(c) {
   if (B.pending || B.active) return;
   B.pending = true;
   app.net.send({ t: 'bboard', id: c.id });
-  setTimeout(() => { if (B.pending) { B.pending = false; app.toast('No answer from the dock — try again', 'bad', 3000); } }, 5000);
+  setTimeout(() => { if (B.pending) { B.pending = false; app.toast('No answer from the dock - try again', 'bad', 3000); } }, 5000);
 }
 function onState(m) {
   B.pending = false;
@@ -164,7 +164,7 @@ function input() {
   const out = { lever: Math.sign(lever), steer, neutral: pressed.neutral || T.neutral, anchor: pressed.anchor || T.anchor };
   if (T.lever !== null && !B.cruise) out.leverTo = T.lever;
   if (B.cruise) {   // a hand on the wheel or the lever takes over
-    if (lever || Math.abs(steer) > 0.05 || out.neutral || (T.lever !== null && T.lever !== B.cruiseLever)) { B.cruise = null; app.toast('Cruise off — you have the wheel', '', 1800); bus.emit('boat-cruise', { on: false }); }
+    if (lever || Math.abs(steer) > 0.05 || out.neutral || (T.lever !== null && T.lever !== B.cruiseLever)) { B.cruise = null; app.toast('Cruise off - you have the wheel', '', 1800); bus.emit('boat-cruise', { on: false }); }
     else Object.assign(out, autopilot(B.s));
   }
   pressed.neutral = pressed.anchor = false; T.neutral = T.anchor = false;
@@ -178,7 +178,7 @@ function input() {
 function autopilot(s) {
   const C = B.cruise, dx = C.x - s.x, dz = C.z - s.z, d = Math.hypot(dx, dz), T = app.terrain;
   const stop = (text, kind = 'good') => { B.cruise = null; B.touch.lever = null; E.setLever?.(0); app.toast(text, kind, 2600); bus.emit('boat-cruise', { on: false, arrived: kind === 'good' }); return { leverTo: 0 }; };
-  if (s.aground) return stop('⚠️ Aground — the cruise is off: back her off (S)', 'bad');
+  if (s.aground) return stop('⚠️ Aground - the cruise is off: back her off (S)', 'bad');
   if (d < Math.max(20, C.r || 0)) return stop(`⚓ Arrived${C.label ? `: ${C.label}` : ''}`);
   const depthAt = (x, z) => { const w = T?.ground?.water(x, z); return w ? w.level - T.pointHeight(x, z) : 0; }, safe = s.S.draft + 0.9, floor = s.S.draft + 0.35;
   const deep = (h, far) => { for (const r of [12, 28, 45, 70]) { if (r > far + 10) break; if (depthAt(s.x + Math.sin(h) * r, s.z + Math.cos(h) * r) < safe) return false; } return true; };
@@ -252,7 +252,7 @@ function frame(P, dt, t) {
     const fx = Math.sin(s.heading), fz = Math.cos(s.heading);
     cam.follow = () => ({ x: R.p.x + fx * 2, y: R.p.y + 1.6, z: R.p.z + fz * 2 });
     cam.goalYaw = cam.yaw + angDiff(cam.yaw, s.heading + Math.PI);
-  } else {   // on deck: following you, free to look about — and swinging round with the boat as it turns
+  } else {   // on deck: following you, free to look about - and swinging round with the boat as it turns
     cam.follow = () => ({ x: hm.x, y: hm.y + 1.15, z: hm.z });
     const dh = angDiff(B.camH ?? s.heading, s.heading); cam.goalYaw += dh; cam.yaw += dh;
   }
@@ -269,7 +269,7 @@ function frame(P, dt, t) {
 }
 const angDiff = (a, b) => { let d = (b - a) % (2 * Math.PI); if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; return d; };
 function onEvent(ev) {
-  if (ev === 'aground') app.toast('⚠️ Aground — back off (S) into deeper water', 'bad', 2600);
+  if (ev === 'aground') app.toast('⚠️ Aground - back off (S) into deeper water', 'bad', 2600);
   else if (ev === 'bump') app.toast('Bump!', '', 1200);
   else if (ev === 'anchor-down') app.toast('⚓ Anchor down', 'good', 1800);
   else if (ev === 'anchor-up') app.toast('⚓ Anchor up', '', 1500);
@@ -305,12 +305,12 @@ function setWalk(on) {
   if (!B.active || !B.s || B.leaving || !!B.walk === !!on) return;
   const Sx = B.s.S, narrow = innerWidth < 760;
   if (on) {
-    // the lever to neutral (and the phone's slider with it — but only if the slider was in use: a slider value overrides
+    // the lever to neutral (and the phone's slider with it - but only if the slider was in use: a slider value overrides
     // the keys, so a computer's W/S would do nothing back at the wheel)
     B.s.lever = 0; if (B.touch.lever !== null) B.touch.lever = 0; E.setLever?.(0); B.cruise = null;
     B.walk = { x: Sx.helm[0], y: Sx.helm[1], z: Sx.helm[2], yaw: 0, fish: -1, dist: 0, moving: false, pose: null };
     Object.assign(app.cam, { goalDist: DECK_CAM[B.type].dist * (narrow ? 1.25 : 1), goalPitch: DECK_CAM[B.type].pitch });
-    if (Math.abs(B.s.u) > 1.5) app.toast('Off the wheel — the lever is in neutral; she\'ll slow and drift', '', 2600);
+    if (Math.abs(B.s.u) > 1.5) app.toast('Off the wheel - the lever is in neutral; she\'ll slow and drift', '', 2600);
   } else {
     B.walk = null;
     Object.assign(app.cam, { goalDist: CAM[B.type].dist * (narrow ? 1.3 : 1), goalPitch: CAM[B.type].pitch });

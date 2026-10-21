@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Finding the fish on a trip (docs/features/fishing.md §Finding fish): the grounds as they show on the water
-// (render/fishing-grounds.js), the chart (C, 🗺️) — the water round the dock with the grounds you can see or have found,
-// the legend when it's sighted, the dock and you — a course set to any of them (an arrow at the top of the screen
+// (render/fishing-grounds.js), the chart (C, 🗺️) - the water round the dock with the grounds you can see or have found,
+// the legend when it's sighted, the dock and you - a course set to any of them (an arrow at the top of the screen
 // with its distance, a buoy and a beam on the water), auto-cruise there (player/boating.js cruise), and the fish
-// finder: the sonar's picture under the boat, scrolling — the bottom, fish marks over a ground, more as you get into
+// finder: the sonar's picture under the boat, scrolling - the bottom, fish marks over a ground, more as you get into
 // it; a hidden ground (a reef, a wreck, the deep) within its range goes on the chart. The trip's marks are drawn on
 // the map and the radar too (ui/worldmap.js app.mapMarks).
 import * as THREE from 'three';
@@ -67,7 +67,7 @@ export class TripNav {
     if (!this.trip || this.revealed.has(id)) return;
     this.revealed.add(id);
     const g = this.trip.plan.grounds.find(x => x.id === id);
-    if (g) this.app.toast(`${why === 'note' ? '🍾' : '📡'} ${why === 'note' ? 'The note marks' : 'Sonar:'} a ${GROUNDS[g.kind].label.toLowerCase()}${why === 'note' ? '' : ' under you'} — it's on your chart`, 'good', 3200);
+    if (g) this.app.toast(`${why === 'note' ? '🍾' : '📡'} ${why === 'note' ? 'The note marks' : 'Sonar:'} a ${GROUNDS[g.kind].label.toLowerCase()}${why === 'note' ? '' : ' under you'} - it's on your chart`, 'good', 3200);
   }
   /** The marks a chart shows: the grounds you can see or have found, the legend while it's about, the dock. */
   visibleMarks() {
@@ -77,7 +77,7 @@ export class TripNav {
       const seen = !g.hidden || this.revealed.has(g.id), legend = legendOn && lg.ground === g.id;
       if (!seen && !legend) continue;
       const p = groundPos(g, min, T.plan.water), G = GROUNDS[g.kind];
-      out.push({ id: g.id, x: p.x, z: p.z, r: g.r, icon: legend ? '👑' : G.icon, label: legend ? `${G.label} — a legend sighted!` : G.label, kind: g.kind, found: g.hidden && this.revealed.has(g.id), legend, ground: g });
+      out.push({ id: g.id, x: p.x, z: p.z, r: g.r, icon: legend ? '👑' : G.icon, label: legend ? `${G.label} - a legend sighted!` : G.label, kind: g.kind, found: g.hidden && this.revealed.has(g.id), legend, ground: g });
     }
     const d = T.data.dock; out.push({ id: 'dock', x: d.x, z: d.z, r: 0, icon: '⚓', label: 'The dock', kind: 'dock' });
     return out;
@@ -99,7 +99,7 @@ export class TripNav {
     const b = this.app.boating; if (!b?.active || !this.nav) return;
     if (!on) { b.cruise(null); return; }
     b.cruise({ x: this.nav.x, z: this.nav.z, label: this.nav.label, r: this.nav.r });
-    this.app.toast(`▶ Cruising to ${this.nav.label} — touch the wheel or the lever to take over`, '', 2600);
+    this.app.toast(`▶ Cruising to ${this.nav.label} - touch the wheel or the lever to take over`, '', 2600);
   }
   // ---------------------------------------------------------------- the chart
   openChart() {

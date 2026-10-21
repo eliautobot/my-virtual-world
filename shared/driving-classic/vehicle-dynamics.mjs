@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 import RAPIER from '@dimforge/rapier3d-compat';
 import {PHYSICS_GROUPS} from './physics-collision-groups.mjs';
 import {vehicleControls} from './vehicle-gameplay.mjs';

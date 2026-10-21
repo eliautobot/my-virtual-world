@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Using an agent's PC on its screen in the world (docs/features/agent-pc.md §2): the camera glides up to the monitor (or
-// the laptop) until it fills the view, square on, the agent's body set aside (render/agents.js hideFn) — and the PC
+// the laptop) until it fills the view, square on, the agent's body set aside (render/agents.js hideFn) - and the PC
 // (./pc-app.js) is put exactly on the screen, live and usable, the world still drawing around it. On a narrow screen (a
 // phone) it fills the screen instead, once the camera is there. Escape, its ✕, or a click on the world beside it leaves:
 // the camera glides back to where it was. Only the agent's own account ever gets here (the screens are drawn for it alone,

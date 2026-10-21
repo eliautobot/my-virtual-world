@@ -1,9 +1,9 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Propellers and rotors that really turn (2026-10-14, the product owner: "the helicopter's propeller remains visible and still when
-// flying, and a faded shape represents it spinning — is there any way to make it actually spin? Same for the smaller
+// flying, and a faded shape represents it spinning - is there any way to make it actually spin? Same for the smaller
 // plane"). The blades are their own geometry, turned about the hub every frame (render/aircraft-models.js says where
 // each hub is; player/flight.js, render/promo-aircraft.js turn them), with a faint motion-blur disc over them that
-// thickens as they speed up — darker towards the hub, a ring where the painted tips sweep.
+// thickens as they speed up - darker towards the hub, a ring where the painted tips sweep.
 //
 // Blades are lofted, tapered and twisted (more pitch at the root than at the tip), their tips painted. Built about +y
 // (blades out along x and round), then laid on the hub's axis: 'y' a helicopter's main rotor, 'x' its tail rotor, 'z' a
@@ -15,7 +15,7 @@ import { FB } from './furniture.js';
 const TAU = Math.PI * 2;
 
 /**
- * A rotor's blades drawn into a furniture builder f at its current place, about +y (bladesInto) — or as one geometry
+ * A rotor's blades drawn into a furniture builder f at its current place, about +y (bladesInto) - or as one geometry
  * of their own, centred on the hub and laid on its axis (rotorBlades). o: { blades, r0 (root, m from the axis), R (tip),
  * chord (at the root), tipChord, thick, twist0 / twist1 (pitch at root / tip, radians), color, tip (the painted tip's
  * colour), tipLen (m), grip (the hub with its blade grips: its colour), axis 'x' | 'y' | 'z' }.

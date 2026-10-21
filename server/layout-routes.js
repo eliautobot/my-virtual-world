@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Saved floor layouts over HTTP (floor layouts, 2026-10-04; server/world/floor-library.js): the caller's own layouts
 // and the ones shared with them, saving the floor being furnished (furnishing rights on it), renaming, deleting, and
 // sharing with a player by username. Laying a saved layout onto a floor is an edit (op lvl.apply through

@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The city on lots (WP4, DECISIONS E25 (8c)/(9)): today's street grid rebuilt so every block holds whole 100 × 100 ft
-// lots — by default 3 lots along the avenue side and 2 deep, every lot fronting a street (corner lots front two).
+// lots - by default 3 lots along the avenue side and 2 deep, every lot fronting a street (corner lots front two).
 // Buildings are planned lot by lot: each stands inside its lot (or a merged group of lots) with front, side and rear
 // setbacks, its entrance facing its own street, so residents walk straight from the door to the sidewalk.
 // Towers and large apartments sit on 2-lot groups, the headquarters on a 2 × 2 group with a forecourt, parks on whole

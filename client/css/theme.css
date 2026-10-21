@@ -1,6 +1,6 @@
-/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
 /* Themes (PLAN WP1.9, DECISIONS C39, C117): every colour of the interface is a design token here, and a theme is one set
-   of values for those tokens. Three themes ship: Dark (the default — exactly the values the shell was built with, so the
+   of values for those tokens. Three themes ship: Dark (the default - exactly the values the shell was built with, so the
    dark look does not change), Light and High contrast.
 
    A theme is chosen in Settings → Display (C117: a row there, not a tab of its own and not a top-bar button), saved with
@@ -14,8 +14,8 @@
    Names: --text/--dim/--accent are the older set the shell was written with; --vw-* are the shell's own aliases; the rest
    are the surfaces, washes and status colours that used to be literal values in app.css.
 
-   Transparency (Settings → Display, under Theme; 2026-10-08): the backgrounds of windows, panels and buttons — --bg,
-   --bg2, --panel-strong, --btn, --btn-hover, --thead — are each theme's base value (--bg-0 …) with a share of its
+   Transparency (Settings → Display, under Theme; 2026-10-08): the backgrounds of windows, panels and buttons - --bg,
+   --bg2, --panel-strong, --btn, --btn-hover, --thead - are each theme's base value (--bg-0 …) with a share of its
    opacity kept, --ui-a (100 %: as the theme draws them; at most 60 % see-through). js/core/theme.js sets --ui-a on
    <html> (index.html before the first paint). High contrast stays solid. */
 :root {
@@ -32,7 +32,7 @@
   --topbar-height: 56px;
   --dock-lw: 320px;
   --dock-rw: 330px;
-  /* the big windows — the Agent Studio, the Map, Settings — one size and place (2026-10-08): under the top bar */
+  /* the big windows - the Agent Studio, the Map, Settings - one size and place (2026-10-08): under the top bar */
   --win-w: min(1260px, calc(100vw - 24px));
   --win-h: min(840px, calc(100dvh - var(--topbar-height, 56px) - 20px));
 

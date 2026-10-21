@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Voice in the window, the parts without a page (client/js/ui/voice-core.js; docs/features/CHAT.md §9.4): an answer
-// being written is cut into whole pieces to speak at once — sentences, list lines, whole code blocks and tables — however
+// being written is cut into whole pieces to speak at once - sentences, list lines, whole code blocks and tables - however
 // the text arrives; the requests group them; the end of someone's talking is found from the microphone's loudness.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -87,7 +87,7 @@ test('the end of talking: after a second of quiet that followed real words, in a
   assert.deepEqual(run(new Vad({ silenceMs: 600 }), [[0.002, 200], [0.1, 600], [0.002, 650]]), ['speech', 'end']);
 });
 
-test('the end of talking in a real room: the microphone turning the room up in the pause, the world\'s sounds, birdsong — never mid-sentence', () => {
+test('the end of talking in a real room: the microphone turning the room up in the pause, the world\'s sounds, birdsong - never mid-sentence', () => {
   const run = (vad, seq) => { const ev = []; for (const [rms, ms] of seq) for (let t = 0; t < ms; t += 50) { const e = vad.step(rms, 50); if (e) ev.push(e); } return ev; };
   // the browser's automatic gain turns a quiet room up as soon as the person stops (0.002 → 0.016): still a pause
   assert.deepEqual(run(new Vad(), [[0.002, 600], [0.08, 1500], [0.016, 1100]]), ['speech', 'end']);
@@ -104,7 +104,7 @@ test('the end of talking in a real room: the microphone turning the room up in t
   // a quiet talker in a quiet room still ends
   assert.deepEqual(run(new Vad(), [[0.001, 600], [0.02, 1500], [0.002, 1100]]), ['speech', 'end']);
   // talking with a dip between every syllable (a fifth of a second of voice, a twentieth of a dip): one turn, ended by
-  // the pause after it — not cut, and never taken for a blip (it is words: 'end', not 'noise')
+  // the pause after it - not cut, and never taken for a blip (it is words: 'end', not 'noise')
   const syllables = Array.from({ length: 12 }, () => [[0.1, 200], [0.015, 50]]).flat();
   assert.deepEqual(run(new Vad(), [[0.002, 600], ...syllables, [0.016, 1100]]), ['speech', 'end']);
   // … and after a real pause (half a second), the same talking goes on: the pause starts over, nothing ends mid-sentence

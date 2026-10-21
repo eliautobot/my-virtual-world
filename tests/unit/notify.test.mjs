@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Notifications and Web Push (server/notify/; docs/features/CHAT.md §8): the message is encrypted so that only the
-// browser can read it (RFC 8291 — decrypted here the way a browser does), the VAPID token is signed by the server's key
-// for the push service's origin (RFC 8292 — verified here), only https addresses on the public internet are taken, and
+// browser can read it (RFC 8291 - decrypted here the way a browser does), the VAPID token is signed by the server's key
+// for the push service's origin (RFC 8292 - verified here), only https addresses on the public internet are taken, and
 // the store keeps, shows, pushes when nobody is looking, marks read, and drops a device the service says is gone.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -78,7 +78,7 @@ test('the store: kept, shown at once, pushed only when no page is open, read, an
   assert.ok(!JSON.stringify(dbs.db.prepare("SELECT value FROM settings WHERE key = 'secret:push.vapid'").get()).includes('PRIVATE KEY'), 'never in the clear');
   const b = browser();
   assert.equal(N.subscribe(7, { endpoint: 'http://127.0.0.1:9/push/1', keys: b.sub }, 'Chrome on Android').devices, 1);
-  N.create(7, { kind: 'approval', title: 'an agent asks for your OK', body: 'Buy a coffee — 3 VC', link: { approval: 'ap1', agent: 3 } });
+  N.create(7, { kind: 'approval', title: 'an agent asks for your OK', body: 'Buy a coffee - 3 VC', link: { approval: 'ap1', agent: 3 } });
   assert.equal(frames.at(-1)[1].n.title, 'an agent asks for your OK'); assert.equal(frames.at(-1)[1].unread, 1);
   assert.equal(pushes.length, 0, 'a page is open: not pushed');
   online = false;

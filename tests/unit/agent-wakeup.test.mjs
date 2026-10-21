@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent's wake-up link (server/agent-wakeup.js; 2026-10-11): only its owner sets it; only https on the public
 // internet; sealed at rest and never shown again (only the host); the call carries nothing but { type, reason, waiting, at }
 // with its key in its header; a burst is one call; not while it is at work; what wakes it and how often are its owner's
@@ -69,7 +69,7 @@ test('only https on the public internet, no password in the address; a header ne
   } finally { r.close(); }
 });
 
-test('only its owner sets it; it is sealed and never shown again — only the host; its owner hears of every change', () => {
+test('only its owner sets it; it is sealed and never shown again - only the host; its owner hears of every change', () => {
   const r = rig();
   try {
     const { id } = agentFor(r);

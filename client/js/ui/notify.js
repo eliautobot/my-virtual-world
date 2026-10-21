@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The bell (docs/features/CHAT.md §8): what this account is told — an agent asking for its OK (Approve and Decline
-// right in the list), a note from an agent, an answer that came while it was away — with the number not yet read in the
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The bell (docs/features/CHAT.md §8): what this account is told - an agent asking for its OK (Approve and Decline
+// right in the list), a note from an agent, an answer that came while it was away - with the number not yet read in the
 // top bar. A notification that comes while the page is hidden shows as a browser notification too. "Notifications on
 // this device" subscribes this browser to Web Push (the service worker /sw.js shows what is pushed when no page is
 // open; an iPhone needs the site added to its Home Screen first). Links from a notification (?chat=…, ?approval=…)
@@ -114,7 +114,7 @@ function paint() {
   else L.innerHTML = itemsHtml(list);
   paintFoot();
 }
-/** Notifications as the items of a list — the bell's, and one agent's in the chat window's Sidebar (`inChat`: its own
+/** Notifications as the items of a list - the bell's, and one agent's in the chat window's Sidebar (`inChat`: its own
  *  chat is already open, so an approval offers no "Open chat"). */
 export function itemsHtml(items, { inChat = false } = {}) {
   return items.map(n => {
@@ -138,7 +138,7 @@ async function paintFoot() {
     ${on ? '<button type="button" class="btn small bell-test">Send a test</button>' : ''}
     <div class="bell-hint">${denied ? 'Notifications are blocked for this site in the browser\'s settings.' : on ? 'You\'ll be told here and on this device when the page isn\'t open.' : 'Get told on this device even when the page isn\'t open.'}</div>`;
   f.querySelector('.bell-sw')?.addEventListener('change', e => togglePush(e.target.checked));
-  f.querySelector('.bell-test')?.addEventListener('click', async () => { try { const r = await post('/api/notifications/push/test', {}); app.toast?.(r.sent ? 'Sent — it shows on your devices in a moment.' : 'No device took it; turn notifications off and on again.', r.sent ? 'good' : 'bad'); } catch (err) { app.toast?.(err.message, 'bad'); } });
+  f.querySelector('.bell-test')?.addEventListener('click', async () => { try { const r = await post('/api/notifications/push/test', {}); app.toast?.(r.sent ? 'Sent - it shows on your devices in a moment.' : 'No device took it; turn notifications off and on again.', r.sent ? 'good' : 'bad'); } catch (err) { app.toast?.(err.message, 'bad'); } });
 }
 async function onPanelClick(e) {
   const did = await clickItem(e, { beforeOpen: closePanel });
@@ -159,7 +159,7 @@ export async function clickItem(e, { beforeOpen = null } = {}) {
       statuses.set(id, r.approval?.status || (yes ? 'approved' : 'declined'));
       const rr = await post('/api/notifications/read', { approval: id }); setUnread(rr.unread);
       list.forEach(n => { if (n.link?.approval === id) n.read = true; });
-      app.toast?.(yes ? (r.approval?.status === 'failed' ? `Approved, but it failed: ${r.approval?.result?.error || 'unknown'}` : 'Approved — done.') : 'Declined.', r.approval?.status === 'failed' ? 'bad' : 'good');
+      app.toast?.(yes ? (r.approval?.status === 'failed' ? `Approved, but it failed: ${r.approval?.result?.error || 'unknown'}` : 'Approved - done.') : 'Declined.', r.approval?.status === 'failed' ? 'bad' : 'good');
     } catch (err) { statuses.set(id, /no longer waiting/i.test(err.message) ? 'expired' : 'pending'); app.toast?.(err.message, 'bad'); }
     bus.emit('approval:answered', id);
     return 'approval';

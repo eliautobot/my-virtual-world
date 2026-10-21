@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's own screen, live (docs/features/agent-pc.md §4.2): /api/providers/screen/ws carries a provider's screen
-// stream — Hermes' Bot Desktop, raw RFB over WebSocket — between the person's viewer (noVNC, in their PC or chat window)
+// stream - Hermes' Bot Desktop, raw RFB over WebSocket - between the person's viewer (noVNC, in their PC or chat window)
 // and the provider, byte for byte. The person is signed in here and may manage the agent's provider (the chat service's
 // screenOf); the provider hands a single-use ticket for its own stream (display.observe) on the connection's own address,
 // and nothing else is dialed (a person's own connection: a public address only, resolved and pinned here as its helper
 // checks it). The provider's own gate decides whose keys and clicks reach the screen (Hermes: only the viewer holding its
-// lease — take over / hand back), so watching never types. Closing the viewer hands control back (a clean close, as
+// lease - take over / hand back), so watching never types. Closing the viewer hands control back (a clean close, as
 // Hermes' own viewer closes); a dropped link keeps it, so a person mid-login is not cut off. Ends when the person's
 // session does, or they may no longer see it.
 import { WebSocket, WebSocketServer } from 'ws';
@@ -33,7 +33,7 @@ function refuse(sock, status, text) {
 export class ScreenRelay {
   /**
    * principal(req) → P (the session's person, or a guest); originAllowed(req); ticketFor(P, agentId) → { url, allowPrivate }
-   * (refuses with { status } — chat.screenTicket); allowed(P, agentId) → whether they may still see it; refresh(sid) → P or
+   * (refuses with { status } - chat.screenTicket); allowed(P, agentId) → whether they may still see it; refresh(sid) → P or
    * null (the session again, or ended).
    */
   constructor({ principal, originAllowed, ticketFor, allowed = () => true, refresh = null, log = null, perAccount = PER_ACCOUNT, max = MAX, resolve = resolvePublic, WS = WebSocket }) {
@@ -65,7 +65,7 @@ export class ScreenRelay {
       up = new this.WS(t.url, { perMessageDeflate: false, maxPayload: 4 * 1048576, handshakeTimeout: DIAL_MS, followRedirects: false, lookup: lookupFor(t.allowPrivate, this.resolve) });
       up.binaryType = 'nodebuffer';
       up.on('error', () => {});   // (each error is followed by its close, handled below)
-      // (the provider speaks first — RFB's greeting — the moment it opens: kept until the viewer is there)
+      // (the provider speaks first - RFB's greeting - the moment it opens: kept until the viewer is there)
       up.on('message', hold);
       const ok = await new Promise(resolve => {
         up.once('open', () => resolve(true));

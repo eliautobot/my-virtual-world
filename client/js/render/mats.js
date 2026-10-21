@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Shared materials + GLSL snippets: furniture/object material (per-vertex colour + flags, instanced tint, emissive
 // screens/lamps/neon), floor-zone material (procedural finishes), city ground material (roads + blocks), depth
 // materials for cutaway, and the occluder fade (screen-door dither between the camera and the focused building).

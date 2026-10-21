@@ -1,11 +1,11 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Home View panel in the info dock (PLAN WP1.9, DECISIONS C44, C117).
 // - Everyone can go to their home view, and the camera starts there (main.js). A signed-in account sets and keeps its own,
 //   which follows the account to every device and is changed at any time. Without one: the installation's default
 //   (admins set it), else a view over the whole city (2026-10-09: not the headquarters).
 // - The frame itself is the classic release's home-location.mjs, copied unchanged (X5): position, distance and angle, distance between
 //   4.5 and 120, values rounded to four decimals, and its documented default when nothing is stored anywhere.
-//   core/home-frame.js adds the one thing Next's camera has that the module does not — the tilt.
+//   core/home-frame.js adds the one thing Next's camera has that the module does not - the tilt.
 // - Setting the world default is an installation setting (tier 2, so the server asks for the password again, as for
 //   every other installation-wide change); the panel writes it through /api/settings and reports what the server says.
 import { S, bus, viewGrid } from '../core/state.js';

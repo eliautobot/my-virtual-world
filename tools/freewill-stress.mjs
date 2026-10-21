@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Free Will under load (docs/features/FREE-WILL.md §8): a city of `population` residents, `fw` of them AI agents with Free
 // Will, run in real time like the server does (a 100 ms main loop), with every question going through a real provider
 // helper process to the mock decision service (its latency and failure rate are settings). Reports the main loop's

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Jobs (shared/work.js, server/economy/jobs.js; docs/features/ECONOMY.md §8): orders made deterministically from a seed,
 // scored from raw inputs only (a needle stopped too soon to be human scores nothing); a shift started at a venue, served
 // order by order at a human pace, paid from the venue for the time worked × the stars, with tips and income tax; the
@@ -41,7 +41,7 @@ test('work games: deterministic orders, answers kept from the browser, scores fr
   assert.equal(levelOf(0), 1); assert.equal(levelOf(50), 2); assert.equal(levelOf(200), 3);
 });
 
-test('jobs: a shift — start, a human pace, scored orders, pay with tax, XP, trust, reviews, covered residents', () => {
+test('jobs: a shift - start, a human pace, scored orders, pay with tax, XP, trust, reviews, covered residents', () => {
   let clock = 1_000_000_000_000;
   const m = economyModel({ population: 600, seed: 'econ-jobs', jobs: true, now: () => clock });
   try {

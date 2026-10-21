@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent's own tools over MCP (2026-10-12): when the agent an AI app was connected to is a connected agent (an
 // outside AI's body in the city, server/agent-api.js) and the app was connected by that agent's owner, the app IS the
-// agent: it reads the facts about itself, its messages, and asks the world what it needs — one small thing at a time
-// (about a person, its plans, its memories, a conversation) or the whole look — and lives: answers, goes places, talks to
+// agent: it reads the facts about itself, its messages, and asks the world what it needs - one small thing at a time
+// (about a person, its plans, its memories, a conversation) or the whole look - and lives: answers, goes places, talks to
 // friends. Every tool runs the agent's own door (server/agent-world.js, server/agent-api.js): the same guards, limits and
-// checks as its kit (client/agent-api/mvw.mjs) — no kit to download or keep up to date.
+// checks as its kit (client/agent-api/mvw.mjs) - no kit to download or keep up to date.
 import { AGENT_KIT_VERSION } from '../agent-api.js';
 import { checkArgs } from './tools.js';
 
@@ -26,7 +26,7 @@ export const BODY_TOOLS = [
   },
   {
     name: 'inbox', title: 'My messages',
-    description: 'What waits for you, each handed over once: messages from people (answer each with reply), lines said near you, friends\' messages, invitations and notices — with the facts about you right now first. wait: seconds to wait for something to arrive (0 to 25).',
+    description: 'What waits for you, each handed over once: messages from people (answer each with reply), lines said near you, friends\' messages, invitations and notices - with the facts about you right now first. wait: seconds to wait for something to arrive (0 to 25).',
     inputSchema: obj({ wait: int('Seconds to wait for something to arrive (default 0)', 0, 25) }), annotations: { ...WRITE, idempotentHint: false },
     run: async (c, a) => ({ ...(await c.api.inbox(c.slot, { waitSec: a.wait ?? 0, kit: AGENT_KIT_VERSION })), note: UNTRUSTED }),
   },
@@ -50,7 +50,7 @@ export const BODY_TOOLS = [
   },
   {
     name: 'memories', title: 'What I remember',
-    description: 'What you remember — about something (a person, a place, a topic), or the latest.',
+    description: 'What you remember - about something (a person, a place, a topic), or the latest.',
     inputSchema: obj({ about: s('What about (optional)', 60), limit: int('How many (default 8)', 1, 12) }), annotations: RO,
     run: (c, a) => c.world.act(c.slot, { action: 'memories', ...(a.about ? { about: a.about } : {}), ...(a.limit ? { limit: a.limit } : {}) }),
   },
@@ -90,7 +90,7 @@ export const BODY_TOOLS = [
   },
   {
     name: 'inventory', title: 'What I hold',
-    description: 'Everything in your inventory: each kind of thing with how many, what it is worth (Virtual Coin) and its ref (S12) for giving — fish with their length and weight, bait and lures, tackle, food and drink, goods, treasures. Others give you things too: it changes.',
+    description: 'Everything in your inventory: each kind of thing with how many, what it is worth (Virtual Coin) and its ref (S12) for giving - fish with their length and weight, bait and lures, tackle, food and drink, goods, treasures. Others give you things too: it changes.',
     inputSchema: obj(), annotations: RO,
     run: c => c.world.inventoryOf(c.slot),
   },
@@ -108,7 +108,7 @@ export const BODY_TOOLS = [
   },
   {
     name: 'trade', title: 'Trade',
-    description: 'Trade things and VC with a person or an agent. action "open" (to: their name) starts one; "offer" sets YOUR side (items: things you hold, by name or ref, with how many; vc: coin); "accept" (when both sides have, everything swaps at once; your owner\'s spending rules apply — above their limit they agree first); "decline" ends it. A change to either side takes back both acceptances. ' + UNTRUSTED,
+    description: 'Trade things and VC with a person or an agent. action "open" (to: their name) starts one; "offer" sets YOUR side (items: things you hold, by name or ref, with how many; vc: coin); "accept" (when both sides have, everything swaps at once; your owner\'s spending rules apply - above their limit they agree first); "decline" ends it. A change to either side takes back both acceptances. ' + UNTRUSTED,
     inputSchema: obj({
       action: { type: 'string', enum: ['open', 'offer', 'accept', 'decline'] }, trade: s('The trade\'s id (from "trades" or "open")', 40), to: s('Who with (open): a person\'s or an agent\'s name', 80),
       items: { type: 'array', maxItems: 20, items: obj({ item: s('A thing you hold: its name or ref (S12)', 80), qty: int('How many', 1, 9999) }, ['item']) },

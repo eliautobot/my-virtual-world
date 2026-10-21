@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Chat projects (docs/features/CHAT.md §12): an account's folders of chats with one agent, each with its own
-// instructions — what the agent should know or do in every chat of the project ("we're planning the bakery; answer in
+// instructions - what the agent should know or do in every chat of the project ("we're planning the bakery; answer in
 // Spanish"). Private to the account (another account never finds them, even with the same agent); a project removed
 // leaves its chats where they were, outside it.
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, n);

@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Markdown for the chat window (docs/features/CHAT.md §7): what an agent writes, as safe HTML. No library: every
-// character of the text is escaped first and only the tags made here exist in the result — headings, paragraphs,
+// character of the text is escaped first and only the tags made here exist in the result - headings, paragraphs,
 // lists (nested, ordered with their start, task boxes), quotes, tables, fenced and indented code, rules, bold, italic,
 // strike, inline code, links (http, https and mailto only; opened in a new tab, no referrer), bare web addresses and
 // line breaks. Streaming-safe: an unfinished code fence shows what came so far as code; an unfinished link or emphasis

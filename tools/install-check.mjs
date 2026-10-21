@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Clean installs of the official packages to first sign-in, following docs/INSTALL.md (CHECKLIST I14.21, X9).
 //
 //   docker  Builds the image from a clean export of the repository and runs compose.yaml as a throwaway Compose project

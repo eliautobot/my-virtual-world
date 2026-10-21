@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Virtual Coin ledger (docs/features/ECONOMY.md §2): wallets, double-entry transactions, holds, reversals, the
 // signed chain and reconciliation. Every movement of VC in the world goes through Ledger.post().
 //
@@ -30,7 +30,7 @@ const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 const cleanMemo = s => String(s ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 200);
 /** Formats hundredths of a VC for people: 1234 → "12.34 VC", 1200 → "12 VC". */
 export function vc(n) {
-  if (!Number.isFinite(n)) return '—';
+  if (!Number.isFinite(n)) return '-';
   const neg = n < 0, a = Math.abs(Math.trunc(n)), whole = Math.floor(a / SCALE), cents = a % SCALE;
   return `${neg ? '−' : ''}${whole.toLocaleString('en-US')}${cents ? `.${String(cents).padStart(2, '0')}` : ''} VC`;
 }

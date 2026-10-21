@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Boot + frame loop. Modules register here; everything else talks through core/state.js (S + bus).
 import * as THREE from 'three';
 import { S, bus, setWorld, setFocus, select, viewGrid } from './core/state.js';
@@ -83,7 +83,7 @@ async function boot() {
     get: () => S.world.buildings.find(b => b && !b.gone && b.type === 'hq') || S.world.buildings.find(b => b && !b.gone) || S.world.buildings[0],
   });
   // The camera starts at this account's own home view (this device's copy of it; ui/home.js follows the account's stored
-  // one when it differs), else the city's default, else a view over the whole city — not at the headquarters (2026-10-09).
+  // one when it differs), else the city's default, else a view over the whole city - not at the headquarters (2026-10-09).
   applyFrame(cam, homeEnvelope({ own: readEnvelope(pref('home')), world: S.world.home, grid: g, cam }), { jump: true });
   app.startView = { x: cam.goal.x, z: cam.goal.z, d: cam.goalDist };   // (still here: nobody has moved the camera yet)
   if (Q.get('cam')) {
@@ -147,7 +147,7 @@ async function boot() {
   }
   // The world and its people arrive with the live stream's first patches, which is before these modules load, so the
   // 'world' event has already fired by now. Emit both once here (after the modules exist) so the dock lists, the
-  // minimap and the panels come up filled — found 2026-09-28: the Buildings list was empty at boot.
+  // minimap and the panels come up filled - found 2026-09-28: the Buildings list was empty at boot.
   bus.emit('world', { levels: new Set(), blds: new Set() });
   bus.emit('people');
   if (Q.get('focus')) { const [b, f] = Q.get('focus').split(',').map(Number); setFocus(b, f || 0); }
@@ -164,12 +164,12 @@ async function boot() {
     S.hour = hourOverride ?? (net.clock ? hourAt(net.clock, sim) : 12);
     S.day = net.clock ? dayAt(net.clock, sim) : 0;
     bus.emit('preframe', dt, now);
-    // The camera rides on the ground over the island's hills — except while looking inside a building, where it sits at
+    // The camera rides on the ground over the island's hills - except while looking inside a building, where it sits at
     // the floor being looked at (riding the ground pulled it back down to the street: broken since the island arrived).
     if (app.terrain && !app.player?.active && S.focus.b < 0) app.terrain.followGround(cam, dt);
     cam.update(dt);
     if (app.terrain) app.terrain.keepCameraAbove(stage.camera, cam);
-    // the camera under water (diving, in first person — any other camera stays over the water): the water's look
+    // the camera under water (diving, in first person - any other camera stays over the water): the water's look
     // (scene.js Stage.under, render/underwater-fx.js)
     { const cp = stage.camera.position, wq = cam.fpK > 0 && app.terrain?.ground ? app.terrain.ground.water(cp.x, cp.z) : null;
       stage.under = wq && cp.y < wq.level - 0.04 ? { kind: wq.kind, depth: wq.level - cp.y } : null; uwfx.update(cp, !!stage.under); }
@@ -221,7 +221,7 @@ async function boot() {
   // How often the sun's shadows are redrawn. Phones drawing 60 a second: every other frame (the sun barely moves; a
   // person's shadow a frame behind is not seen); at 30, every frame. Adaptive shadows (render flag 'shadows', from the
   // reference renderer's far cascade): zoomed out so far that a shadow texel is over 0.35 m, people, cars, lamps, bins,
-  // signals and decor (userData.smallCaster) leave the shadow pass — their shadows would be a pixel's smudge — and what
+  // signals and decor (userData.smallCaster) leave the shadow pass - their shadows would be a pixel's smudge - and what
   // is left (buildings, trees, bridges, rock) is redrawn every third frame.
   let shadowTick = 0, smallSeen = -1e9, smallOff = false;
   const smallDisabled = new Set();
@@ -237,12 +237,12 @@ async function boot() {
     const every = far ? 3 : pace.battery && !(pace.idle || pace.mode === '30') ? 2 : 1;
     r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = shadowTick++ % every === 0;
   });
-  // (a window over the whole world: core/framepace.js cover — live lists, so the look every frame costs next to nothing)
+  // (a window over the whole world: core/framepace.js cover - live lists, so the look every frame costs next to nothing)
   const modals = document.getElementsByClassName('modal-back'), chats = document.getElementsByClassName('chat-back');
   const covered = () => {
     for (const m of modals) if (!m.classList.contains('peek')) return true;   // (the Studio stepped aside shows the world)
     for (const c of chats) if (!c.classList.contains('floating') && !c.classList.contains('min')) return true;   // (a chat full screen; floating or put away, the world goes on)
-    return false;   // (the Map draws on the world's frames — render/worldmap.js 'preframe' — and keeps them all)
+    return false;   // (the Map draws on the world's frames - render/worldmap.js 'preframe' - and keeps them all)
   };
   const loop = (now) => { requestAnimationFrame(loop); pace.cover(covered(), now); if (!app.hold && pace.due(now, camBusy())) step(now); };
   requestAnimationFrame(loop);

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Walking beyond the city (WP4.5, wp4-world-spec.md §9): a footpath along each side of every road beyond the city (on
 // its sidewalk, or along the outer edge of a country road's shoulder), joined across every junction, across the road
 // every CROSS_EVERY m and round dead ends, and linked to the city's street network where roads leave the city.

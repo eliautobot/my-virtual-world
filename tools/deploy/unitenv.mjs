@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The environment a systemd unit gives its service (its Environment= settings), for the deploy tools that must check or
 // use the same key as that service (DECISIONS C98, C99): Environment= settings, then EnvironmentFile= files, which
 // override them as in systemd. Values are never printed.

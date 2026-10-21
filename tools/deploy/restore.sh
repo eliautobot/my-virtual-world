@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 # Restores the live data folder from a backup: stop → keep the current data as a backup → copy the backup in →
 # start → smoke test against the backup's counts.
 # Usage: tools/deploy/restore.sh <backup folder>        (backups are in $MVW_LIVE_ROOT/backups)

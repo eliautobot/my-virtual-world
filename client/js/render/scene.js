@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Renderer, scene, sky dome, sun/moon, fog, environment map, time of day, post-processing.
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -16,7 +16,7 @@ import { SNOW_LINE } from '/shared/terrain.js';
  * distances, but a bit hazy so that details like waterfalls don't get made out from farther distances. Also around
  * mountains there should be a mist around those heights with snow ... and around very tall mountains fog/mist"), for
  * every material that takes fog (three's fog chunks, replaced once here):
- * - haze: aerial perspective — the view fades toward the horizon's colour with distance, a fifth at 1 km, two fifths at
+ * - haze: aerial perspective - the view fades toward the horizon's colour with distance, a fifth at 1 km, two fifths at
  *   2.5 km (halved since: a tenth at 1 km, a fifth at 2.5 km), thinner where the line of sight runs high;
  * - mountain mist: a patchy band from a little under the snowline (shared/terrain.js SNOW_LINE) up past the peaks,
  *   seen more the farther off it is, a little brighter than the haze by day;
@@ -87,7 +87,7 @@ if (mvwMap > 0.0) {
 #endif`;
 /**
  * The mist's drift reaches every material: three gives each material its own copy of the fog uniforms, so one shared
- * value is handed to each material's uniforms as its shader is built — every material's onBeforeCompile (its own, if it
+ * value is handed to each material's uniforms as its shader is built - every material's onBeforeCompile (its own, if it
  * sets one, runs first) adds GU.uMistOff. The program cache key stays the material's own hook's text.
  */
 const mistHook = (sh) => { if (sh.uniforms) { sh.uniforms.mvwMistOff = GU.uMistOff; sh.uniforms.mvwMap = GU.uMap; } };
@@ -146,7 +146,7 @@ export const GU = {
 /**
  * Send only the first `count` items of an instance attribute to the GPU this frame (none when it is empty). three.js
  * otherwise sends the whole buffer: the traffic sent ~0.9 MB a frame, mostly unused room, and the scatter pools whole
- * when the camera moved on — a busy phone's GPU process could not take that in without holding the page up for
+ * when the camera moved on - a busy phone's GPU process could not take that in without holding the page up for
  * 100-200 ms (2026-10-04: driving jittery with big stalls).
  */
 export function uploadUsed(attr, count) {
@@ -260,14 +260,14 @@ export class Stage {
     r.setPixelRatio(this.q.pr);
     r.setSize(window.innerWidth, window.innerHeight, false);
     r.outputColorSpace = THREE.SRGBColorSpace;
-    // ACES filmic (2026-10-03: Neutral made the city "way too over colorful ... saturated" — back to what it was)
+    // ACES filmic (2026-10-03: Neutral made the city "way too over colorful ... saturated" - back to what it was)
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.0;
     r.shadowMap.enabled = this.q.shadows;
     r.shadowMap.type = THREE.PCFShadowMap;
     r.info.autoReset = false;
     // three.js asks the driver about every shader once it is first used (link status and logs: a wait on the GPU each,
-    // ~1.8 s of the phone's loading screen, 2026-10-04); phones skip that unless ?glcheck — desktops and tests keep it
+    // ~1.8 s of the phone's loading screen, 2026-10-04); phones skip that unless ?glcheck - desktops and tests keep it
     r.debug.checkShaderErrors = !matchMedia('(pointer: coarse)').matches || new URLSearchParams(location.search).has('glcheck');
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.5, 5000);
@@ -330,7 +330,7 @@ export class Stage {
   /**
    * Medium and Low with sharp upscaling, while drawing fewer pixels: the scene is drawn straight into a corner of the
    * canvas at pr × scale, copied into a texture and drawn back over the whole canvas through the sharpen. (It used to be
-   * drawn into a render target, which needs every material's other shader variant — linear, not tone-mapped: the first
+   * drawn into a render target, which needs every material's other shader variant - linear, not tone-mapped: the first
    * time the resolution dropped, the phone froze 3.7 s compiling them all, 2026-10-04. Drawn to the canvas, the
    * materials keep the one variant they were compiled in at load.)
    */
@@ -365,7 +365,7 @@ export class Stage {
   }
   /**
    * Compile the scene's shaders for how this quality draws them (main.js, under the loading screen): High draws through
-   * the bloom's render target — linear, not tone-mapped — so its materials compile with that target bound (compiled for
+   * the bloom's render target - linear, not tone-mapped - so its materials compile with that target bound (compiled for
    * the canvas, every one of them was built again in the first frame: 4.6 s on the phone, 2026-10-04); the passes after
    * the scene (bloom, output, sharpen) and Medium's upscale compile here too, so none waits for the first time
    * automatic resolution drops.
@@ -431,7 +431,7 @@ export class Stage {
     this.scene.fog.color.copy(U.uHorizon.value).lerp(this._fogGrey.setRGB(0.55, 0.58, 0.62).multiplyScalar((1 - 0.85 * night) * (1 - 0.45 * W.storm)), Math.max(gloom * 0.7, W.fog * 0.8));
     if (this.bigWorld) {
       // The island (WP4.2): see the mountains and the coast; the view distance grows with the camera's height.
-      // (the haze above carries the middle distance; this only closes the far horizon — 2026-10-04: not fog)
+      // (the haze above carries the middle distance; this only closes the far horizon - 2026-10-04: not fog)
       this.scene.fog.near = Math.max(2600, camDist * 3.5);
       this.scene.fog.far = this.scene.fog.near + 6500 + camDist * 5;
     } else {
@@ -449,7 +449,7 @@ export class Stage {
     this.sky.visible = !uw;
     { const f = this.scene.fog; this._air.col.copy(f.color); this._air.near = f.near; this._air.far = f.far; }   // (the air's, for the world above)
     if (uw) {
-      // (clear water, 2026-10-06: "a bit too foggy" — some 60 m in the sea by day, 35 in a lake, closer at night)
+      // (clear water, 2026-10-06: "a bit too foggy" - some 60 m in the sea by day, 35 in a lake, closer at night)
       const light = (0.16 + 0.84 * day) * (1 - 0.35 * W.storm), deep = Math.exp(-uw.depth / 22), base = this._uwCol[uw.kind] || this._uwCol.sea, f = this.scene.fog;
       f.color.copy(base).multiplyScalar(light * (0.55 + 0.45 * deep));
       f.near = uw.kind === 'sea' ? 3 : 2; f.far = (uw.kind === 'sea' ? 62 : 35) * (0.55 + 0.45 * day) * (1 - 0.4 * W.storm);
@@ -491,8 +491,8 @@ export class Stage {
   }
   /**
    * Under water, looking up (2026-10-06: "I should see the outside, through the water ... distorted through its
-   * waves"): the world above the surface drawn once more from the same eye, as through air — the sky, the air's haze, the
-   * water's surface left out — through a wider lens than the eye's, since the surface bends the whole sky down to the
+   * waves"): the world above the surface drawn once more from the same eye, as through air - the sky, the air's haze, the
+   * water's surface left out - through a wider lens than the eye's, since the surface bends the whole sky down to the
    * horizon into its window overhead; into an image the surface's underside looks up through (render/water.js
    * withUnderside). The shadows are the main pass's from the frame before.
    */

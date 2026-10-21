@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Signs' faces (shared/signs.js; their frames are the decorations', the buildings' and the interiors' own geometry):
 // - the Marketing tools' billboards and street signs, and a panel on every metro station: the sign's own content, else
 //   the world's name;
@@ -206,7 +206,7 @@ function onClick(e) {
   return true;
 }
 /**
- * Player mode (player/player.js asks every provider): the sign in reach — one walked up to (2.6 m, in front of a face)
+ * Player mode (player/player.js asks every provider): the sign in reach - one walked up to (2.6 m, in front of a face)
  * or a big one looked at (the screen's centre, within 200 m). E opens its link (or its panel when it has none).
  */
 function playerTarget(P) {

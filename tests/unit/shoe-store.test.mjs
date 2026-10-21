@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A shoe store's furniture (2026-10-15): the Shoe Wall and the Shoe Plinth are Retail items people browse (a shop's
 // visitors use browse slots: server/sim/agents.js shopVisit), the wall hangs on a wall, both take the owner's colour.
 import test from 'node:test';

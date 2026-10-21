@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Flats (2026-10-05; op flat.set / flat.invite / flat.uninvite): the building's owner holds every flat and assigns,
 // rents or sells it; tenants are characters, AI agents' characters or players, and the characters among them live there;
 // the buyer or a tenant who is a player locks the door and invites visitors; others may not; one undo puts it back.
@@ -48,7 +48,7 @@ test('flats: rent to residents (they move in), sell to a player, lock, invite a 
   } finally { await s.stop(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('flats: split one in two, take one away — the others stay as they were, records and tenants follow, one undo', async () => {
+test('flats: split one in two, take one away - the others stay as they were, records and tenants follow, one undo', async () => {
   const dir = tempDir('mvw-flats2-');
   const s = await startServer({ data: dir, population: 120 });
   try {

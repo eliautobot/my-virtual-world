@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The normalized provider event bus (PLAN WP2.2; DECISIONS A8; the one lifecycle every provider feeds).
 // Every adapter, whatever it talks to, reports the same few events. Each event is rebuilt from a whitelist, so nothing a
 // provider sends beyond the listed fields (tokens, raw payloads) can travel further, and text is length-limited.
@@ -17,7 +17,7 @@ export const EVENT_SPEC = Object.freeze({
   'provider.connected': {},
   'provider.disconnected': { reason: 't' },
   // an agent of the provider working or not, whatever started it (its other channels, its schedules): live presence
-  // (waiting: those of its sessions waiting for the person — an approval, a question)
+  // (waiting: those of its sessions waiting for the person - an approval, a question)
   'agent.activity': { agentKey: 's!', active: 'b!', sessions: 'n', task: 't', keys: 'S', waiting: 'S' },
   // a session's progress card changed with no run of this installation's there (a refresh, another channel, a job)
   'session.card': { sessionKey: 's!', steps: 'P', markdown: 'T', revision: 'n', updatedAt: 'n' },
@@ -33,7 +33,7 @@ export const EVENT_SPEC = Object.freeze({
   // what the run is doing before (or between) its words, in the person's words: "Reading the conversation" (Agent Providers)
   'run.status': { runId: 's!', phase: 't' },
   // the answer as it is written (a piece of it; the client joins them) and, where the model shows it, its reasoning;
-  // replace: the provider rewrote the answer so far — text is the whole of it
+  // replace: the provider rewrote the answer so far - text is the whole of it
   'run.delta': { runId: 's!', text: 't', thinking: 't', replace: 'b' },
   // … and what it took, where the adapter knows (model, effort, tokens, cost in millionths of a US$, ms, the reasoning
   // shown) and a short title for a new chat
@@ -41,7 +41,7 @@ export const EVENT_SPEC = Object.freeze({
   // one step (a tool call), following the Agent Client Protocol's tool calls: its title and kind (the icon), its input (a
   // command, a path), its output as it comes (update text: a piece; replace: the whole so far), how it ended (exit code,
   // time, the folder it ran in). (The event's own kind is the provider's: a step's is toolKind, an approval's approvalKind.)
-  // (raw: its arguments whole, as JSON — what its PC's screens read to see what it works on: server/pc/recognize.js)
+  // (raw: its arguments whole, as JSON - what its PC's screens read to see what it works on: server/pc/recognize.js)
   'tool.start': { runId: 's!', toolId: 's!', name: 's!', input: 't', title: 't', toolKind: 'e:read|edit|delete|move|search|execute|think|fetch|other', raw: 't' },
   'tool.update': { runId: 's!', toolId: 's!', text: 't', input: 't', status: 's', replace: 'b', raw: 't' },
   'tool.end': { runId: 's!', toolId: 's!', ok: 'b', text: 't', name: 's', title: 't', status: 's', exitCode: 'n', ms: 'n', cwd: 't', tab: 'W' },
@@ -51,7 +51,7 @@ export const EVENT_SPEC = Object.freeze({
   'approval.resolved': { runId: 's!', approvalId: 's!', approved: 'b!', decision: 's' },
   // the context meter: tokens in the conversation now, of the model's window; cost in millionths of a US$
   'usage.update': { runId: 's', used: 'n', size: 'n', cost: 'n' },
-  // the agent asks the person (up to 5 questions, each with its options; multiSelect, a free answer — other — or a
+  // the agent asks the person (up to 5 questions, each with its options; multiSelect, a free answer - other - or a
   // secret one); resolved: answered, cancelled or expired, with the answers (never a secret one's)
   'question.requested': { runId: 's!', questionId: 's!', questions: 'Q!', expiresAt: 'n' },
   'question.resolved': { runId: 's!', questionId: 's!', status: 's', answers: 'A' },
@@ -61,7 +61,7 @@ export const EVENT_SPEC = Object.freeze({
   // one operation at a time, rebuilt by that provider's own whitelist (NATIVE below)
   'native': { runId: 's!', ev: 'N!' },
   // … and one of a session's own, outside any turn (Hermes: a side question or a background task the chat started,
-  // answered) — to whoever started it and whoever has that session open
+  // answered) - to whoever started it and whoever has that session open
   'session.native': { sessionKey: 's!', ev: 'N!' },
 });
 /** Each provider's whitelist for its own stream ('native'): kind → (operation) => the rebuilt operation, or null. */
@@ -111,7 +111,7 @@ function coerce(name, spec, v) {
   throw new BusError(`${name}: unknown spec`);
 }
 
-/** An agent's questions, rebuilt field by field (OpenClaw's question shape — Hermes' clarify asks up to five: an id, a short header, the question, up to
+/** An agent's questions, rebuilt field by field (OpenClaw's question shape - Hermes' clarify asks up to five: an id, a short header, the question, up to
  *  four options with a description each, and whether several may be chosen, a free answer given, or it is a secret). */
 function questions(name, v) {
   if (!Array.isArray(v) || !v.length || v.length > 5) throw new BusError(`${name} must be one to five questions`);
@@ -124,7 +124,7 @@ function questions(name, v) {
 }
 
 /** What an answer carries (images, video, audio, files), rebuilt field by field: a kind, a name, its type and size, and
- *  the provider's own reference to it (an artifact id or the path or address the agent gave) — never its content. */
+ *  the provider's own reference to it (an artifact id or the path or address the agent gave) - never its content. */
 export function media(name, v) {
   if (!Array.isArray(v)) throw new BusError(`${name} must be a list of media`);
   return v.slice(0, 24).filter(m => m && m.ref && (typeof m.ref.artifactId === 'string' || typeof m.ref.source === 'string')).map(m => ({
@@ -139,7 +139,7 @@ const WAIT_KINDS = ['children', 'external', 'agent_messages', 'approval', 'user_
 const DELIVERY = ['pending', 'delivered', 'session_queued', 'failed', 'dismissed', 'parent_missing', 'not_applicable'];
 const when = v => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v) : undefined);
 /** A background task (OpenClaw's task ledger: a subagent, a scheduled job, a CLI or ACP run), rebuilt field by field:
- *  what it is, how it stands, what it is doing or waiting for, and how it ended — its prompt and result only when asked
+ *  what it is, how it stands, what it is doing or waiting for, and how it ended - its prompt and result only when asked
  *  for one task. Never the provider's session keys. */
 export function task(name, v) {
   if (!v || typeof v !== 'object' || typeof v.id !== 'string' || !v.id || !TASK_STATUS.includes(v.status)) throw new BusError(`${name} must be a task`);

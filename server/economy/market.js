@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Markets (docs/features/ECONOMY.md §7): the Global Market's commodity prices (what venues pay for their stock), the
 // export demand index that keeps the money supply growing with activity and no faster, and the VC price index (spec
 // 12): a basket at the median prices actually charged.

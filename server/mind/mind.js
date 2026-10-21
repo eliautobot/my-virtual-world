@@ -1,10 +1,10 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Mind (docs/features/FREE-WILL.md §3–4): an agent whose brain is a model provider (its connection's kind is 'models')
-// thinks — it plans its day when it wakes, reflects on it at bedtime, and answers its chats. An agent without a brain of
+// thinks - it plans its day when it wakes, reflects on it at bedtime, and answers its chats. An agent without a brain of
 // its own still gets the evening reflection from the installation's brain (setting mind.reflectConnection).
 //
-// - One model call per thought. The world gives the agent its context — who it is, where and when it is, its job, home
-//   and money, its open plans, what it remembers, the people it knows, today's activity, real places near it — and the
+// - One model call per thought. The world gives the agent its context - who it is, where and when it is, its job, home
+//   and money, its open plans, what it remembers, the people it knows, today's activity, real places near it - and the
 //   model answers with one JSON object (./prompt.js); what that answer may do is checked and carried out through the
 //   agent's life as the Mind (./actions.js): plans, memories, notes on people, a small change of character, a reply.
 //   No tools that reach outside the world, no free-form commands.
@@ -14,7 +14,7 @@
 //   MAX_IN_FLIGHT at a time; the routine and Free Will go on whatever happens to a thought.
 // - Bounded spending: thoughts per agent per day, US$ per agent per month, US$ per day for the installation; a brain that
 //   keeps failing is left alone for a while (a circuit breaker per connection). Every thought is recorded (mind_jobs):
-//   what it did, its tokens and cost — never the prompt or the model's text.
+//   what it did, its tokens and cost - never the prompt or the model's text.
 // - Who may use what: an agent thinks with its own connection only if its owner may use that connection; the
 //   installation's reflection brain is the installation's (its cost is the installation's too).
 import { evalPlan } from '../sim/plan.js';
@@ -40,7 +40,7 @@ const LEVELS = Object.keys(THINK_MS);
 /** Whether a completion stopped at its length limit (OpenAI-compatible 'length', Anthropic 'max_tokens'). */
 const cutOff = res => res?.finish === 'length' || res?.finish === 'max_tokens';
 const TICK_MS = 1000;
-const SCAN_PER_TICK = 250;              // agents looked at per pass (1,000 agents: each every 4 s — a world minute)
+const SCAN_PER_TICK = 250;              // agents looked at per pass (1,000 agents: each every 4 s - a world minute)
 const RETRY_MS = 90000;                 // a failed plan or reflection is tried again after this, within its window
 const MAX_TRIES = 3;                    // … at most this often for one world day
 const THINK_NOW_MS = 60000;             // an owner's "plan now" / "reflect now": each once a minute per agent
@@ -233,12 +233,12 @@ export class Mind {
   dayOf(i) {
     const sim = this.sim, a = sim.agents[i], p = sim.people[i], B = sim.brain, t = sim.now();
     const h = B.hour(t), d = B.day(t), wake = p.sched?.wake ?? 7, bed = (p.sched?.bed ?? 23) % 24;
-    // (on post it is up around the clock — its needs wait, server/sim/agents.js postDuty: never asleep by its usual hours,
+    // (on post it is up around the clock - its needs wait, server/sim/agents.js postDuty: never asleep by its usual hours,
     // so a friend's message and someone talking to it are answered at night too)
     return { lifeDay: h >= wake ? d : d - 1, h, asleep: !!(a && !p.post && B.sleepTime(a, h)), toBed: mod(bed - h, 24) };
   }
   /** One pass of the scheduler: up to SCAN_PER_TICK agents (in turn, so every agent is looked at every few seconds
-   *  however many there are) — whose day starts get a plan, whose bedtime came a reflection. */
+   *  however many there are) - whose day starts get a plan, whose bedtime came a reflection. */
   tick() {
     if (this.stopped) return;
     const cfg = this.config(), sim = this.sim;
@@ -258,7 +258,7 @@ export class Mind {
       const b = this.brainOf(agent, memo);
       if (!b.connection) continue;
       const { lifeDay, asleep, toBed } = this.dayOf(i);
-      // on post (its owner posted it at a desk or counter around the clock — server/agent-posts/): no plan for a day it
+      // on post (its owner posted it at a desk or counter around the clock - server/agent-posts/): no plan for a day it
       // can't live and no evening reflection on it (2026-10-14, the product owner); its money problems still get a
       // thought. Let go, it plans and reflects again from that day on.
       const posted = !!sim.people[i].post;
@@ -293,9 +293,9 @@ export class Mind {
   // ------------------------------------------------------------------------------------------- thinking
   /**
    * One thought of agent `agent`: plan, reflect, chat or problem (o.chat: { from, isOwner, knows, history, message, work? }:
-   * work — a visitor, whom its owner gave its job (CHAT.md §14.3): { brief, docs, zone }; it keeps nothing then).
-   * A problem, and a chat with its owner, may use tools (./tools.js): the thought then runs in rounds — the model asks
-   * for tools, gets their results, and answers — at most MAX_ROUNDS model calls. Resolves { ok, done, reply, cost, used }
+   * work - a visitor, whom its owner gave its job (CHAT.md §14.3): { brief, docs, zone }; it keeps nothing then).
+   * A problem, and a chat with its owner, may use tools (./tools.js): the thought then runs in rounds - the model asks
+   * for tools, gets their results, and answers - at most MAX_ROUNDS model calls. Resolves { ok, done, reply, cost, used }
    * or rejects with a MindError; always recorded.
    */
   async think(agent, kind, brain, { lifeDay = null, chat = null, speech = null, friend = null, force = false } = {}) {
@@ -315,7 +315,7 @@ export class Mind {
         tools = toolbox({ agent, kind, ctx, money, wallet: ctx.wallet, people: this.sim.people, idem: `mind:${agent.id}:${t0}` });
         if (!tools.names.length) tools = null;
       }
-      // (someone from another account: its PC is closed, but for its Public folder — offered when there is something in it)
+      // (someone from another account: its PC is closed, but for its Public folder - offered when there is something in it)
       const visitorPc = kind === 'chat' && !chat?.isOwner && this.pcTools ? this.pcTools(agent, 'visitor', { tz: chat?.work?.zone }) : null;
       if (visitorPc) tools = visitorPc;
       const pcMenu = visitorPc ? visitorPc.menuText() : [];
@@ -327,7 +327,7 @@ export class Mind {
       const system = atWork ? workVisitorSystem(ctx, { owner: ctx.ownerName || '', work: chat.work, now: realTime(this.now(), chat.work.zone), zone: chat.work.zone, pc: pcMenu }) : systemText(ctx);
       const turns = [{ role: 'user', text: user }];
       let o = null;
-      // (a paused brain: held back — a person's chat may be the trial at once when the fault was no credit or a key)
+      // (a paused brain: held back - a person's chat may be the trial at once when the fault was no credit or a key)
       if (!this.breakerAllow(c.id, { person: kind === 'chat', force })) throw new MindError(503, 'brain_paused', this.pausedText(agent, c.id) || 'Its brain is not answering at the moment');
       trial = true;
       let level = kind === 'speech' || kind === 'friend' ? 'off' : LEVELS.includes(c.config?.thinking) ? c.config.thinking : 'off';
@@ -370,7 +370,7 @@ export class Mind {
       if (kind === 'reflect' && act.unfriend && this.social) {
         try { const u = this.social.unfriend(agent.id, act.unfriend, { by: 'mind' }); if (u.ended) done.unfriended = u.ended; } catch (e) { done.skipped.push(`unfriend: ${e.code || e.message}`); }
       }
-      // (its morning plan may start something with a friend: a message, an invitation — the same rule, limits and checks)
+      // (its morning plan may start something with a friend: a message, an invitation - the same rule, limits and checks)
       if (kind === 'plan' && act.start && this.social) {
         try { done.started = await this.social.startByMind(agent.id, act.start, ctx.places); } catch (e) { done.skipped.push(`start: ${e.code || e.message}`); }
       }
@@ -415,7 +415,7 @@ export class Mind {
     return c && c.kind === 'models' && c.enabled && c.scope === 'installation' && MODERATORS.has(c.config.provider || 'openrouter') && this.registry.implemented('models') ? c : null;
   }
   /**
-   * The agent says something out loud in its own words — s: { kind: 'greet' (a player talks to it) | 'meet' (it started
+   * The agent says something out loud in its own words - s: { kind: 'greet' (a player talks to it) | 'meet' (it started
    * chatting with someone) | 'reply' (they spoke to it), to: { name, how }, heard? }. Only with a brain of its own, awake,
    * within its limits and SPEECH_GAP_MS since its last line, mind.speechPerDay a world day, and a moderation service.
    * Resolves { shown, text?, moderation, … } or { why } (nothing was tried); never rejects.
@@ -455,7 +455,7 @@ export class Mind {
   /**
    * Words on their way to someone (a line out loud, a message to a friend): the world's checks (./speech.js localCheck),
    * then the moderation service. { ok: true, text } or { ok: false, moderation: 'local'|'unchecked'|'blocked', reason,
-   * categories } — nothing that fails, or can't be checked, goes out.
+   * categories } - nothing that fails, or can't be checked, goes out.
    */
   async screen(text, maxChars = Number(this.config().speechMaxChars) || undefined) {
     const L = localCheck(text, maxChars);
@@ -467,7 +467,7 @@ export class Mind {
     if (!m || m.flagged !== false) { this.speechStats.blocked++; return { ok: false, moderation: 'blocked', categories: (m?.categories || []).slice(0, 6) }; }
     return { ok: true, text: L.text };
   }
-  /** A line on its way out: the world's checks, then the moderation service, then its bubble — or it is not said. */
+  /** A line on its way out: the world's checks, then the moderation service, then its bubble - or it is not said. */
   async voice(agent, text) {
     const L = await this.screen(text);
     if (!L.ok) return L.moderation === 'blocked' ? { shown: false, moderation: 'blocked', categories: L.categories } : { shown: false, moderation: L.moderation, reason: L.reason };
@@ -504,7 +504,7 @@ export class Mind {
       const how = (id, p) => { const r = this.life.relations(id, 50).find(x => x.kind === (p.vip && p.agentId ? 'agent' : 'resident') && String(x.id) === String(p.id)); return r ? HOW(r) : 'someone I don\'t know'; };
       const b = this.brainOf(agent);
       if (!b.connection || !b.own) return;
-      // (another agent its owner blocked — or whose owner blocked it — is not spoken to: server/agent-talk/)
+      // (another agent its owner blocked - or whose owner blocked it - is not spoken to: server/agent-talk/)
       const them0 = other.vip && other.agentId ? this.agents.byKey?.(other.agentId) : null;
       if (them0 && this.talk) {
         const ownerOf = a => a.ownerId ?? this.principalFor(null)?.account?.id ?? null;
@@ -593,7 +593,7 @@ export class Mind {
     const long = this.life.memories(agent.id, { term: 'long', limit: 60 }).sort((a, b) => (b.importance - a.importance) || (b.id - a.id)).slice(0, 6);
     const short = this.life.memories(agent.id, { term: 'short', limit: 12 }).slice(0, kind === 'reflect' ? 6 : 8);
     const rel = this.life.relations(agent.id, 30).sort((a, b) => (b.interactions - a.interactions) || (b.affinity - a.affinity)).slice(0, 8);
-    // (what it did today: the evening's reflection all of it, a chat the last few — what it really did, to say)
+    // (what it did today: the evening's reflection all of it, a chat the last few - what it really did, to say)
     const today = kind === 'reflect' || kind === 'chat' ? this.life.activity(agent.id, { limit: 120 }).filter(e => e.day === lifeDay || (e.day === lifeDay + 1 && kind === 'reflect')).reverse()
       .filter(e => e.kind !== 'sleep').slice(kind === 'chat' ? -8 : -30).map(e => ({ when: String(e.when || '').split(' ').slice(1).join(' '), label: `${e.label}${e.with ? ` with ${e.with}` : ''}${e.minutes ? ` (${e.minutes} min)` : ''}` })) : [];
     // real places: near where it is, near home and near work (a café's floors and a chain's branches named once), with the
@@ -612,14 +612,14 @@ export class Mind {
     places.sort((a, b) => a.minutes - b.minutes).splice(12);
     const traits = prof.traits;
     const awake = mod(h - (p.sched?.wake ?? 7), 24);
-    // (its morning plan: the friends it may reach and what it may still start by itself today — server/agent-social/)
+    // (its morning plan: the friends it may reach and what it may still start by itself today - server/agent-social/)
     let reach = null;
     if (kind === 'plan' && this.social) { try { reach = this.social.startsFor(agent.id); } catch (e) { this.log?.warn?.('[mind] friends to reach:', e.message); } }   // hours since it woke (a first plan made late plans the rest of the day)
     return {
       lifeDay, awake, name: agent.name, role: agent.role || '', personality: wordsOf(traits, flagsOf(p)),
       bio: prof.bio, purpose: prof.purpose, aspirations: prof.aspirations, likes: prof.likes, dislikes: prof.dislikes,
       now: { weekday: DAY_NAMES[mod(day, 7)], clock: formatClock(h), day }, where, atHome, job, home: info.home ? info.home.place : null, money,
-      // (a plan its owner gave — by hand or in a chat — is marked: it may be done, never dropped by the agent itself)
+      // (a plan its owner gave - by hand or in a chat - is marked: it may be done, never dropped by the agent itself)
       plans: plans.map(x => ({ id: x.id, kind: x.kind, text: x.text, today: x.today, asked: x.source === 'owner' })),
       planRefs: plans.map(x => ({ id: x.id, text: x.text, asked: x.source === 'owner' })),
       memoriesLong: long.map(m => m.text), memoriesShort: short.map(m => ({ text: m.text, when: m.when ? String(m.when).split(' ')[0] : '' })),
@@ -629,7 +629,7 @@ export class Mind {
     };
   }
 
-  /** What its body is doing in the city this moment — { use, label, place, onTheWay, until (a clock), asleep } — or
+  /** What its body is doing in the city this moment - { use, label, place, onTheWay, until (a clock), asleep } - or
    *  null (no body). A chat reads it as the message arrives, before the message wakes it (docs/features/CHAT.md §13.3). */
   actNow(agent) {
     const sim = this.sim, i = sim ? this.life.byAgent.get(agent.id) : undefined;
@@ -706,7 +706,7 @@ export class Mind {
     const emit = e => { try { this.bus?.emit({ ...base, ...e }); } catch (err) { this.log?.warn?.('[mind] a chat event was refused:', err.message); } };
     const run = { stopped: false };
     this.chats.set(runId, run);
-    // what it was doing as the message came — read before the message reaches its body (run.start: an asleep agent is
+    // what it was doing as the message came - read before the message reaches its body (run.start: an asleep agent is
     // woken to work on it, server/sim/agents.js REFLEXES 'task'), so its answer knows it was woken
     const before = isOwner ? this.actNow(agent) : null;
     emit({ type: 'run.start' });
@@ -731,7 +731,7 @@ export class Mind {
         emit({ type: 'run.progress', text: 'Thinking' });
         const hist = Array.isArray(params.history) ? params.history.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string') : [];
         if (hist.length && hist[hist.length - 1].role === 'user' && hist[hist.length - 1].text.trim() === String(params.input).trim()) hist.pop();
-        // what its owner gives others (CHAT.md §14.3): its job (the brief and what it knows — never its work notes), its
+        // what its owner gives others (CHAT.md §14.3): its job (the brief and what it knows - never its work notes), its
         // life in the city, or only a greeting
         const brief = this.work ? this.work.brief(agent.id) : null;
         if (brief?.publicMode === 'greet') throw new MindError(409, 'greets_only', `${agent.name} only greets passers-by`);
@@ -779,7 +779,7 @@ export class Mind {
     if (st && (st.trial || !st.fixable)) return { reason: 'brain_paused', message: pausedWords(agent.name, st) };   // (no credit or a refused key: the person may try at once)
     return null;
   }
-  /** A slot to answer an owner's chat in: at once when one is free and nobody waits, else in line — first come, first
+  /** A slot to answer an owner's chat in: at once when one is free and nobody waits, else in line - first come, first
    *  served (a slot that frees goes to the oldest waiting chat, never to a newcomer), at most CHAT_QUEUE_MS; Stop leaves
    *  the line. Resolves holding the slot (chatSlotFree gives it back). */
   chatSlot(run, emit) {
@@ -812,7 +812,7 @@ export class Mind {
   /**
    * Its owner's chat in the chat window (./assistant.js): the agent answers as a capable assistant that also lives in
    * the city, its answer streamed as it is written (run.delta), with the city's tools when it needs them (in rounds, like
-   * a thought: at most MAX_ROUNDS model calls) and what it keeps — plans, memories, the chat's title — read from the end.
+   * a thought: at most MAX_ROUNDS model calls) and what it keeps - plans, memories, the chat's title - read from the end.
    * params: { runId, input, history (the conversation, the message being answered last, with its files), model, effort }.
    */
   async assistantRun(agent, c, params, emit, run) {
@@ -848,8 +848,8 @@ export class Mind {
       let ctx;
       try { ctx = this.contextOf(agent, 'chat'); lifeDay = ctx.lifeDay; }
       catch (e) { if (e.code !== 'no_body') throw e; ctx = { name: agent.name, role: agent.role || '', personality: [], planRefs: [], peopleRefs: [], traits: {}, locked: [], aspirations: [] }; }
-      // Work or Life (docs/features/CHAT.md §13): the chat's own mode, else the agent's default. At work there is no city —
-      // no city tools, no plans or memories kept — but its job brief, what it knows, its work notes and the real date and
+      // Work or Life (docs/features/CHAT.md §13): the chat's own mode, else the agent's default. At work there is no city -
+      // no city tools, no plans or memories kept - but its job brief, what it knows, its work notes and the real date and
       // time where it works (the brief's time zone, else the one of whoever writes, else the server's)
       const W = this.work ? this.work.forRun(agent.id) : null;
       const mode = W ? (MODES.includes(params.mode) ? params.mode : W.brief.defaultMode) : 'life';
@@ -860,7 +860,7 @@ export class Mind {
         tools = toolbox({ agent, kind: 'chat', ctx, money, wallet: ctx.wallet, people: this.sim.people, idem: `chat:${agent.id}:${t0}` });
         if (!tools.names.length) tools = null;
       }
-      // its PC (server/pc/): in Work and in Life — the commands, then what is on its plate; more steps when it is used
+      // its PC (server/pc/): in Work and in Life - the commands, then what is on its plate; more steps when it is used
       const zone = (W && W.brief.timezone) || (validZone(params.tz) ? params.tz : '') || serverZone();
       const pcBox = this.pcTools ? this.pcTools(agent, 'owner', { tz: zone }) : null;
       const pcMenu = pcBox ? pcBox.menuText() : [];
@@ -869,7 +869,7 @@ export class Mind {
       const hist = Array.isArray(params.history) ? params.history : [];
       const first = !hist.some(m => m && m.role === 'assistant');
       const owner = params.sender?.name || ctx.ownerName || '';
-      // (its job's PDFs go with every work message — what the chat's own files may take is what is left — when its brain
+      // (its job's PDFs go with every work message - what the chat's own files may take is what is left - when its brain
       // reads PDFs; one that doesn't is told they are there and that it can't read them)
       const readsPdf = PDF_PROVIDERS.has(c.config?.provider), pdfs = mode === 'work' && readsPdf ? W.pdfs : [];
       let system;
@@ -928,7 +928,7 @@ export class Mind {
           continue;
         }
         reply = r.reply;
-        // what it keeps: plans its owner asked for and memories (as an owner's chat would), and a new chat's title — or a
+        // what it keeps: plans its owner asked for and memories (as an owner's chat would), and a new chat's title - or a
         // model that answered the old way, one JSON object with its reply in it
         let o = parseActions(r.actions);
         if (!o && /^\s*\{[\s\S]*"reply"\s*:/.test(reply)) { const old = parseAnswer(reply); if (old && typeof old.reply === 'string' && old.reply.trim()) { o = old; reply = old.reply.trim(); } }

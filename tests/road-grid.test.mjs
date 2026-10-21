@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The road tools' 2026-10-13 round (the product owner): dead ends simply stop (no turning circle) and traffic still turns
 // round there; a road joined by another is re-graded where its heights moved, not only round the new road; a batch of
 // road changes asked for atomically (the grid layout tool) is built whole or not at all.

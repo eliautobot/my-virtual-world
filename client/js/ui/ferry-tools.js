@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Ferry lines in the Roads section (WP4.15, shared/ferries.js): administrators draw a line over the water — the first
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Ferry lines in the Roads section (WP4.15, shared/ferries.js): administrators draw a line over the water - the first
 // click is the first dock (a short way off the shore), each next click a turn, a double-click (or Enter) the second
-// dock — pick how many boats run it, and open it. The ghost is green, or red with the reason (the same rules the server
+// dock - pick how many boats run it, and open it. The ghost is green, or red with the reason (the same rules the server
 // checks). Lines are listed with their crossing time and how often a boat leaves; each can get more boats or be closed.
 // Every change goes through /api/edit and can be undone.
 import * as THREE from 'three';
@@ -20,7 +20,7 @@ export function init(a) {
   const slot = a.docks && a.docks.slot('l:roads');
   if (!slot || !S.world.terrain) return;
   slot.appendChild(h(`<div class="ferries"><div class="sep"></div><h5>⛴️ Ferries</h5>
-    <p class="hint">Boats on a timetable between two docks. Docks go a short way off the shore with a road near it — on the main island at a growth coast.</p>
+    <p class="hint">Boats on a timetable between two docks. Docks go a short way off the shore with a road near it - on the main island at a growth coast.</p>
     <div class="row"><button type="button" class="btn fdraw">✏️ Draw a ferry line</button> <button type="button" class="btn ffinish hidden">✔ Open it</button> <button type="button" class="btn fcancel hidden">✕ Cancel</button></div>
     <div class="row fopts hidden"><input class="input fname" maxlength="40" placeholder="Name" value="Island Ferry" style="flex:1"> <label>Boats <select class="input fboats"><option>1</option><option selected>2</option><option>3</option></select></label></div>
     <div class="flist"></div>

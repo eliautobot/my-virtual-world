@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Approvals in the chat and notifications on a real server (docs/features/CHAT.md §8): its owner asks the agent to buy
-// something above the "ask me above" limit — the chat shows the approval (an event while it writes, kept with the
+// something above the "ask me above" limit - the chat shows the approval (an event while it writes, kept with the
 // answer), the bell keeps a notification, the owner approves it through the economy and the purchase happens; an answer
 // that comes while the owner has no page open is kept and pushed (encrypted for its browser, decrypted here) to a push
 // service on this machine; with a page open it isn't; a device the service says is gone is dropped.
@@ -25,7 +25,7 @@ function answer(j) {
     const where = /(?:café|restaurant) «([^»]+)»/.exec(sys)?.[1];
     if (rounds === 0) return JSON.stringify({ use: [{ tool: 'menu', place: where }] });
     if (rounds === 1) return JSON.stringify({ use: [{ tool: 'buy', place: where, items: [{ item: 'I1', n: 1 }] }] });
-    return /waiting: my owner must agree/.test(users.at(-1)) ? 'I asked you first — it\'s above your limit.' : 'Bought it.';
+    return /waiting: my owner must agree/.test(users.at(-1)) ? 'I asked you first - it\'s above your limit.' : 'Bought it.';
   }
   return `Echo: ${msg}`;
 }
@@ -62,7 +62,7 @@ before(async () => {
   assert.equal((await owner.post('/api/economy/admin/switch', { name: 'enabled', on: true })).status, 200);
   const agents = (await owner.get('/api/agents')).json.agents;
   for (const a of agents) await owner.post('/api/mind/agent', { agent: a.id, cadence: 'off' });
-  // (buying in the city is its city self's: its owner's chats here are in Life — docs/features/CHAT.md §13)
+  // (buying in the city is its city self's: its owner's chats here are in Life - docs/features/CHAT.md §13)
   for (const a of agents) assert.equal((await owner.post('/api/agent-work', { agent: a.id, defaultMode: 'life' })).status, 200);
   const brain = (await owner.post('/api/connections', { kind: 'models', label: 'Brain', scope: 'installation', config: { provider: 'custom', baseUrl: `http://127.0.0.1:${fake.address().port}/v1`, model: 'fake' }, secrets: { apiKey: 'k' } })).json.id;
   A = agents[0];
@@ -86,7 +86,7 @@ test('a purchase above its owner\'s limit: an approval in the chat and in the be
   const ap = ev.find(e => e.type === 'approval.requested');
   assert.ok(ap && /^econ:/.test(ap.approvalId), JSON.stringify(ev.map(e => e.type)));
   assert.match(ap.summary, /^Wants to buy .+ \([\d.]+ VC\)$/);
-  assert.equal(ev.find(e => e.type === 'run.end').text, 'I asked you first — it\'s above your limit.');
+  assert.equal(ev.find(e => e.type === 'run.end').text, 'I asked you first - it\'s above your limit.');
   const h = (await owner.get(`/api/providers/history?agent=${A.id}&session=${sess.id}`)).json.messages;
   assert.deepEqual(h.at(-1).meta.approvals.map(a => a.id), [ap.approvalId], 'kept with the answer');
   const id = ap.approvalId.slice(5);

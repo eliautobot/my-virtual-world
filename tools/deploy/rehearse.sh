@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 # Rehearses the whole release flow on a throwaway systemd user unit, with a copy of a data folder. Live is never touched.
 #   first release → promote → rollback → promote again
 #   → a release that crashes on start (rolled back)

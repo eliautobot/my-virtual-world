@@ -1,10 +1,10 @@
-<!-- My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
+<!-- Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
 # Connect Hermes
 
 Bring your [Hermes Agent](https://hermes-agent.nousresearch.com) (Nous Research) profiles into My Virtual World. Each
 Hermes profile becomes an agent with a body in the city, and the chat window works as Hermes Desktop does: sessions,
 models and effort, tools as they run, approvals, questions and secret prompts, slash commands, rewinding and branching a
-chat, and its Bot Desktop — the screen where its browser opens — live in its owner's PC, to watch or take over.
+chat, and its Bot Desktop (the screen where its browser opens) live in its owner's PC, to watch or take over.
 
 My Virtual World connects to the Hermes backend (`hermes serve`) the way Hermes Desktop connects to a remote gateway.
 You need a current Hermes and an administrator account in My Virtual World.
@@ -38,7 +38,7 @@ June 2026 hardening), so:
    ```sh
    HERMES_DASHBOARD_BASIC_AUTH_USERNAME=<name> HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=<password> hermes serve --host 0.0.0.0
    ```
-   Keep it on a private network (your LAN, Tailscale) or behind an HTTPS reverse proxy — never the open internet
+   Keep it on a private network (your LAN, Tailscale) or behind an HTTPS reverse proxy, never on the open internet
    without TLS.
 2. Add the provider with:
    - **Hermes address**: from Docker on the same computer `http://host.docker.internal:9119` (**🔎 Find** tries it);
@@ -50,7 +50,7 @@ June 2026 hardening), so:
 ## Good to know
 
 - **Profiles are agents.** A new Hermes profile appears by itself; one you delete leaves town.
-- **Agents count as agents.** In demo mode (no License Key) a world has up to 3 agents in all — built in, OpenClaw,
+- **Agents count as agents.** In demo mode (no License Key) a world has up to 3 agents in all: built in, OpenClaw,
   Hermes or connected AI apps together.
 - **Who sees what.** The connection belongs to the administrator who added it. Shared with other accounts (Settings →
   🔌 Connections → Share…), they chat with its agents in sessions of their own and never see Hermes' settings.

@@ -1,8 +1,8 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Orders from a connected agent's own AI (server/sim/agents.js order; 2026-10-10), on a generated city with a
-// virtual clock: an order comes before the routine (it outlasts a work shift), until its time is up — then the routine goes
+// virtual clock: an order comes before the routine (it outlasts a work shift), until its time is up - then the routine goes
 // on and the AI is told; an order the world refuses changes nothing; a meet walks up to its person, follows them, counts
-// its time together from when it reaches them, and ends — told why — when they go somewhere private or it can't find them.
+// its time together from when it reaches them, and ends - told why - when they go somewhere private or it can't find them.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { generateWorld } from '../../server/world/generate.js';

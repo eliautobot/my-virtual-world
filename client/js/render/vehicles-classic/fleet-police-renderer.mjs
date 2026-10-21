@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Original full-size patrol cruiser: lower roof, revised end panels, twin
 // headlamps, push bumper, patrol livery, radio/terminal and emergency lightbar.
 // Uses the same authoring primitives, not the legacy police cuboid model.

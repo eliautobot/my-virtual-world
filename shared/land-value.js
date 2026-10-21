@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Land value for the property map (WP4.14; 2026-10-04: "a realty value map that is colour coded and directly
-// viewed in the world"): a score from 0 to 100 for where a lot is — close to downtown, near the water, next to a park,
-// near a subway station, on higher ground — with the factors that made it, in words. Weights and reaches are data
+// viewed in the world"): a score from 0 to 100 for where a lot is - close to downtown, near the water, next to a park,
+// near a subway station, on higher ground - with the factors that made it, in words. Weights and reaches are data
 // (shared/world-config/land-value.json), the same for every browser and, when land is sold later, the server. It is an
 // estimate of how wanted a place is, not a price: prices come with the land-sales package (wp4-world-spec.md §5.8).
 

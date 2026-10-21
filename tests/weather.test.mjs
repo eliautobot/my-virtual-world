@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.18 weather: one deterministic timeline per region (the server and every browser agree), spells that blend, fog
 // mostly around dawn, wind that turns slowly and blows harder in storms, and an administrator's override that fades in
 // and out; the server sends the seed and override, and only administrators set it.

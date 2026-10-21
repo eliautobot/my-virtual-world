@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A flat's window (2026-10-05; server/world/edit.js flatOp): who holds it and the deal (the owner's, assigned,
-// rented, sold), who lives there — characters, AI agents' characters and players —, visitors invited until a time, and
+// rented, sold), who lives there - characters, AI agents' characters and players -, visitors invited until a time, and
 // the lock on its door. What may be changed follows who is looking: the building's owner deals and chooses tenants, the
 // buyer chooses tenants and keeps the door, a tenant who is a player keeps the door and invites visitors.
 import { post } from '../core/net.js';
@@ -17,7 +17,7 @@ export function initFlats(a) { app = a; bus.on('flats', () => cur?.render()); bu
 const me = () => (auth.account ? String(auth.account.id) : null);
 const same = (a, b) => a.kind === b.kind && String(a.id) === String(b.id);
 export function flatRecord(b, f, u) { return S.world.flats?.[`${b}:${f}:${u}`] || null; }
-/** 'own' | 'keep' | 'live' | null — what the signed-in person may do with flat (b, f, u), as the server decides it. */
+/** 'own' | 'keep' | 'live' | null - what the signed-in person may do with flat (b, f, u), as the server decides it. */
 export function flatPower(B, rec) {
   if (mayOn(B, 'build')) return 'own';
   if (me() && rec?.owner?.kind === 'account' && String(rec.owner.id) === me()) return 'keep';

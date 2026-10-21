@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The key for stored secrets and the encrypted-field service (PLAN WP1.5; DECISIONS C85–C88, C93, C95, C97).
 // The key comes from MVW_SECRET_KEY or from the key file named by MVW_KEY_FILE, exactly one of them, never from inside
 // the data folder, so backups and copies of the data do not carry it. Every place that keeps sealed values registers

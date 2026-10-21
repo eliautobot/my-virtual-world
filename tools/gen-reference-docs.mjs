@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Writes docs/reference/{capabilities,settings,routes}.md from the code itself, so the reference never drifts:
 // capabilities from server/auth/permissions.js, settings from server/settings.js, routes from a throwaway server's own
 // GET /api/routes. Run before a release: node tools/gen-reference-docs.mjs
@@ -13,7 +13,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const { CAPS } = await import(path.join(ROOT, 'server/auth/permissions.js'));
 const { SETTINGS } = await import(path.join(ROOT, 'server/settings.js'));
 const cell = v => String(v ?? '').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
-const HEAD = title => `# ${title}\n\nGenerated from the code by \`tools/gen-reference-docs.mjs\` — do not edit by hand. Proprietary — see [LICENSE](../../LICENSE).\n\n`;
+const HEAD = title => `# ${title}\n\nGenerated from the code by \`tools/gen-reference-docs.mjs\` - do not edit by hand. Proprietary - see [LICENSE](../../LICENSE).\n\n`;
 
 // capabilities
 let caps = HEAD('Capabilities') + 'Roles, low to high: guest, member, admin, owner. *Fixed*: the owner cannot change its lowest role. *Identity*: needs a signed-in account.\n\n| Capability | Lowest role | Fixed | Identity | What it allows |\n|---|---|---|---|---|\n';
@@ -24,7 +24,7 @@ fs.writeFileSync(path.join(OUT, 'capabilities.md'), caps);
 let st = HEAD('Settings') + 'Changed in Settings by an account holding the capability named; *install* settings are the installation\'s, *account* settings each account\'s own.\n\n| Setting | Scope | Type | Default | Who may change it | What it is |\n|---|---|---|---|---|---|\n';
 for (const s of SETTINGS) {
   const def = s.secret ? '(secret)' : typeof s.default === 'object' ? JSON.stringify(s.default) : s.default;
-  st += `| \`${s.path}\` | ${s.scope} | ${s.type}${s.options ? ` (${s.options.map(o => o.value ?? o).join(', ')})` : ''} | ${cell(def)} | \`${s.cap || ''}\` | ${cell(s.label)}${s.help ? ` — ${cell(s.help)}` : ''} |\n`;
+  st += `| \`${s.path}\` | ${s.scope} | ${s.type}${s.options ? ` (${s.options.map(o => o.value ?? o).join(', ')})` : ''} | ${cell(def)} | \`${s.cap || ''}\` | ${cell(s.label)}${s.help ? ` - ${cell(s.help)}` : ''} |\n`;
 }
 fs.writeFileSync(path.join(OUT, 'settings.md'), st);
 

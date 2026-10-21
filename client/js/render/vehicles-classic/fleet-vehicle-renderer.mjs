@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 import { buildBusTemplates } from './fleet-bus-renderer.mjs';
 import { buildAmbulanceTemplates } from './fleet-ambulance-renderer.mjs';
 import { buildTruckTemplates } from './fleet-truck-renderer.mjs';

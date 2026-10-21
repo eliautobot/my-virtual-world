@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Third-party agents (PLAN WP2.14, CHECKLIST I8.14, I8.15; DECISIONS E22, E23, C122 to C130; 2026-10-12 the product owner:
 // make it simple, start it from ➕ New agent, everything about one agent in its Studio).
 // · mountSlotControls: one third-party agent's own settings, shown in its Studio (Brain → Its connection): who sees it,

@@ -1,4 +1,4 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Play modules over HTTP on a real server (docs/features/play-modules.md): anyone sees the modules and the leaderboards;
 // a member sees profiles and edits only the own; a run starts only where its module lives (an airport); guests play nothing.
 import assert from 'node:assert/strict';

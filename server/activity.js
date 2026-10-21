@@ -1,6 +1,6 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The activity log (PLAN WP1.8, DECISIONS C116): world edits from the journal (kept) and live events — residents
-// arriving, AI agents starting and stopping work, players joining and leaving, undos and redos — of which the latest
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The activity log (PLAN WP1.8, DECISIONS C116): world edits from the journal (kept) and live events - residents
+// arriving, AI agents starting and stopping work, players joining and leaving, undos and redos - of which the latest
 // 200 stay in memory for pages opened later. Readers need activity.read; an agent's task text only goes to accounts
 // with agents.view_tasks.
 export class Activity {

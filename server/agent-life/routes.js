@@ -1,7 +1,7 @@
-// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's life over HTTP (docs/features/FREE-WILL.md §5, §9): its profile, plans, memories, the people it knows and
 // what it did. Only the agent's owner, or an account it is shared with to manage, may read or change any of it
-// (agents.profile); everyone else gets 404 — memories and the activity log are private. Every route goes through the
+// (agents.profile); everyone else gets 404 - memories and the activity log are private. Every route goes through the
 // server's pipeline (session, capability, Origin, CSRF, JSON).
 import { LifeError } from './life.js';
 
