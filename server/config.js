@@ -19,7 +19,7 @@ export const SERVER_SETTINGS = Object.freeze([
   'PORT', 'HOST', 'MVW_DATA', 'MVW_POPULATION', 'MVW_SEED', 'MVW_HQ_NAME', 'MVW_PUBLIC_URL', 'MVW_TRUSTED_PROXIES',
   'MVW_COOKIE_NAME', 'MVW_KEY_FILE', 'MVW_SECRET_KEY', 'MVW_SECRET_KEY_PREVIOUS', 'MVW_KEY_POLL_MS',
   'MVW_WS_PER_ADDRESS', 'MVW_WS_MAX', 'MVW_PROVIDER_MEDIA_CACHE_MB', 'MVW_GATEWAY_IS_LOCAL',
-  'MVW_PROVIDER_TEST', 'MVW_PROVIDER_RUN_TIMEOUT_MS', 'MVW_TWILIO_TEST_URL', 'MVW_PROBLEM_SCAN_MS', 'MVW_CHROME', 'MVW_HOUSING', 'MVW_STARTER_MAP',
+  'MVW_PROVIDER_TEST', 'MVW_PROVIDER_RUN_TIMEOUT_MS', 'MVW_TWILIO_TEST_URL', 'MVW_PROBLEM_SCAN_MS', 'MVW_CHROME', 'MVW_HOUSING', 'MVW_STARTER_MAP', 'MVW_SOUNDTRACK',
 ]);
 /** Older names that still work, with a warning (C102): none at present. */
 export const LEGACY_SETTINGS = Object.freeze({});
@@ -117,6 +117,9 @@ export function loadConfig({ env = process.env, root, release = null, routeTable
   // A new world opens with the starting map built for new installations (server/world/starter.js); off: a generated city
   // of MVW_POPULATION's size and MVW_SEED (the tests use that).
   cfg.starterMap = !/^(0|off|false|no)$/i.test(String(raw('MVW_STARTER_MAP') ?? '').trim());
+  // The game's own soundtrack (server/music/soundtrack.js): its songs go into the music library at start, each once. off:
+  // the library is left alone (the tests use that).
+  cfg.soundtrack = !/^(0|off|false|no)$/i.test(String(raw('MVW_SOUNDTRACK') ?? '').trim());
   // Tests only (WP2.2): load the mock agent provider into the provider helper, and shorten how long a run submission may go unanswered.
   cfg.providerTest = bool('MVW_PROVIDER_TEST');
   cfg.providerRunTimeoutMs = int('MVW_PROVIDER_RUN_TIMEOUT_MS', 0, 0, 600000);

@@ -21,6 +21,7 @@ listed in [reference/settings.md](reference/settings.md)). `.env.example` has ev
 | `MVW_POPULATION` | `1000` | How big a generated city is built (its housing); with `MVW_HOUSING=off`, the residents a new world starts with (1–20,000) |
 | `MVW_HOUSING` | `on` | `on`: the residents follow the homes: they fill Settings → Residents → Homes filled of the beds, moving in and away by themselves. `off`: the number stays as it is |
 | `MVW_STARTER_MAP` | `on` | `on`: a new world opens with the starting map built for new installations (a hand-built city with metro, parks, an airport, a marina and lake docks). `off`: a city generated from `MVW_SEED`, sized by `MVW_POPULATION` |
+| `MVW_SOUNDTRACK` | `on` | `on`: the game's soundtrack (`server/music/soundtrack/`) goes into the music library when the server starts, each song once (one an administrator deletes stays deleted). `off`: the library is left alone |
 | `MVW_SEED` | `next-city` | The seed a new world is generated from |
 | `MVW_HQ_NAME` | `Headquarters` | The headquarters' rooftop sign (at most 28 characters) |
 | `MVW_PROBLEM_SCAN_MS` | `15000` | How often agents' problems (rent, money, home, job) are looked for |

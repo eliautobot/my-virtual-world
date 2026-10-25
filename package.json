@@ -1,6 +1,6 @@
 {
   "name": "my-virtual-world",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "type": "module",
   "description": "My Virtual World: a self-hosted 3D city where people and AI agents live, work and trade. Source-available under the PolyForm Noncommercial License 1.0.0.",

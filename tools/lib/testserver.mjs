@@ -162,7 +162,7 @@ export async function startServer({ root = ROOT, data = null, copyFrom = null, p
   const keyFile = keyEnv.MVW_KEY_FILE || env.MVW_KEY_FILE || null;
   const child = spawn(process.execPath, ['server/index.mjs'], {
     cwd: root,
-    env: { ...inherited, PORT: '0', HOST: '127.0.0.1', MVW_DATA: dir, MVW_POPULATION: String(population), MVW_HOUSING: 'off', MVW_STARTER_MAP: 'off', ...keyEnv, ...env },   // (a test's residents stay as many as it asked for; MVW_HOUSING: 'on' to see them follow the homes)
+    env: { ...inherited, PORT: '0', HOST: '127.0.0.1', MVW_DATA: dir, MVW_POPULATION: String(population), MVW_HOUSING: 'off', MVW_STARTER_MAP: 'off', MVW_SOUNDTRACK: 'off', ...keyEnv, ...env },   // (a test's residents stay as many as it asked for; MVW_HOUSING: 'on' to see them follow the homes; MVW_SOUNDTRACK: 'on' for the soundtrack in the music library)
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';

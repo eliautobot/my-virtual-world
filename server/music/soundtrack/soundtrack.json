@@ -1,0 +1,384 @@
+{
+ "name": "MVW Originals, soundtrack 1",
+ "license": "LICENSE.md",
+ "tracks": [
+  {
+   "file": "lounge/lounge-velvet-hour.mp3",
+   "title": "Velvet Hour",
+   "artist": "MVW Originals",
+   "genre": "jazz",
+   "bpm": 112,
+   "key": "mvw-soundtrack-1/lounge-velvet-hour",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:26:10.455Z"
+   }
+  },
+  {
+   "file": "lounge/lounge-midnight-terrazzo.mp3",
+   "title": "Midnight Terrazzo",
+   "artist": "MVW Originals",
+   "genre": "lounge",
+   "bpm": 88,
+   "key": "mvw-soundtrack-1/lounge-midnight-terrazzo",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:26:36.194Z"
+   }
+  },
+  {
+   "file": "lounge/lounge-rio-lanterns.mp3",
+   "title": "Rio Lanterns",
+   "artist": "MVW Originals",
+   "genre": "bossa",
+   "bpm": 128,
+   "key": "mvw-soundtrack-1/lounge-rio-lanterns",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:26:38.602Z"
+   }
+  },
+  {
+   "file": "lounge/lounge-copper-moon.mp3",
+   "title": "Copper Moon",
+   "artist": "MVW Originals",
+   "genre": "piano",
+   "bpm": 70,
+   "key": "mvw-soundtrack-1/lounge-copper-moon",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:26:58.927Z"
+   }
+  },
+  {
+   "file": "club/club-house-neon-tide.mp3",
+   "title": "Neon Tide",
+   "artist": "MVW Originals",
+   "genre": "house",
+   "bpm": 124,
+   "key": "mvw-soundtrack-1/club-house-neon-tide",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:27:01.496Z"
+   }
+  },
+  {
+   "file": "club/club-house-ocean-drive.mp3",
+   "title": "Ocean Drive Nights",
+   "artist": "MVW Originals",
+   "genre": "house",
+   "bpm": 124,
+   "key": "mvw-soundtrack-1/club-house-ocean-drive",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:27:12.227Z"
+   }
+  },
+  {
+   "file": "club/club-techno-concrete-pulse.mp3",
+   "title": "Concrete Pulse",
+   "artist": "MVW Originals",
+   "genre": "techno",
+   "bpm": 130,
+   "key": "mvw-soundtrack-1/club-techno-concrete-pulse",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:27:16.108Z"
+   }
+  },
+  {
+   "file": "club/club-techno-night-shift.mp3",
+   "title": "Night Shift",
+   "artist": "MVW Originals",
+   "genre": "techno",
+   "bpm": 126,
+   "key": "mvw-soundtrack-1/club-techno-night-shift",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:27:25.195Z"
+   }
+  },
+  {
+   "file": "club/club-trance-skyline-euphoria.mp3",
+   "title": "Skyline Euphoria",
+   "artist": "MVW Originals",
+   "genre": "trance",
+   "bpm": 138,
+   "key": "mvw-soundtrack-1/club-trance-skyline-euphoria",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:27:29.050Z"
+   }
+  },
+  {
+   "file": "club/club-trance-afterglow.mp3",
+   "title": "Afterglow",
+   "artist": "MVW Originals",
+   "genre": "trance",
+   "bpm": 134,
+   "key": "mvw-soundtrack-1/club-trance-afterglow",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:27:38.384Z"
+   }
+  },
+  {
+   "file": "club/club-dubstep-bass-cathedral.mp3",
+   "title": "Bass Cathedral",
+   "artist": "MVW Originals",
+   "genre": "dubstep",
+   "bpm": 140,
+   "key": "mvw-soundtrack-1/club-dubstep-bass-cathedral",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:27:41.543Z"
+   }
+  },
+  {
+   "file": "club/club-dubstep-neon-wobble.mp3",
+   "title": "Neon Wobble",
+   "artist": "MVW Originals",
+   "genre": "dubstep",
+   "bpm": 140,
+   "key": "mvw-soundtrack-1/club-dubstep-neon-wobble",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:27:51.350Z"
+   }
+  },
+  {
+   "file": "club/club-reggaeton-calle-luna.mp3",
+   "title": "Calle Luna",
+   "artist": "MVW Originals",
+   "genre": "reggaeton",
+   "bpm": 95,
+   "key": "mvw-soundtrack-1/club-reggaeton-calle-luna",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:27:58.591Z"
+   }
+  },
+  {
+   "file": "club/club-reggaeton-fuego-lento.mp3",
+   "title": "Fuego Lento",
+   "artist": "MVW Originals",
+   "genre": "reggaeton",
+   "bpm": 92,
+   "key": "mvw-soundtrack-1/club-reggaeton-fuego-lento",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:28:04.786Z"
+   }
+  },
+  {
+   "file": "club/club-hiphop-penthouse-bounce.mp3",
+   "title": "Penthouse Bounce",
+   "artist": "MVW Originals",
+   "genre": "hiphop",
+   "bpm": 96,
+   "key": "mvw-soundtrack-1/club-hiphop-penthouse-bounce",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:28:13.270Z"
+   }
+  },
+  {
+   "file": "club/club-hiphop-gold-chain-strut.mp3",
+   "title": "Gold Chain Strut",
+   "artist": "MVW Originals",
+   "genre": "hiphop",
+   "bpm": 90,
+   "key": "mvw-soundtrack-1/club-hiphop-gold-chain-strut",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:28:18.191Z"
+   }
+  },
+  {
+   "file": "club/club-dance-velvet-rope.mp3",
+   "title": "Velvet Rope",
+   "artist": "MVW Originals",
+   "genre": "dance",
+   "bpm": 126,
+   "key": "mvw-soundtrack-1/club-dance-velvet-rope",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:28:27.542Z"
+   }
+  },
+  {
+   "file": "club/club-dance-sunset-strobe.mp3",
+   "title": "Sunset Strobe",
+   "artist": "MVW Originals",
+   "genre": "dance",
+   "bpm": 122,
+   "key": "mvw-soundtrack-1/club-dance-sunset-strobe",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:28:31.092Z"
+   }
+  },
+  {
+   "file": "game/game-sidewalk-cafe-v2.loop.mp3",
+   "title": "Sidewalk Café",
+   "artist": "MVW Originals",
+   "genre": "score",
+   "mood": "day",
+   "bpm": 75.8,
+   "loop": [
+    0.5,
+    76.484333
+   ],
+   "key": "mvw-soundtrack-1/game-sidewalk-cafe-v2",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:53:29.031Z"
+   }
+  },
+  {
+   "file": "game/game-first-light.loop.mp3",
+   "title": "First Light",
+   "artist": "MVW Originals",
+   "genre": "score",
+   "mood": "day",
+   "bpm": 72.02,
+   "loop": [
+    0.5,
+    70.496
+   ],
+   "key": "mvw-soundtrack-1/game-first-light",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:53:30.437Z"
+   }
+  },
+  {
+   "file": "game/game-avenues-v2.loop.mp3",
+   "title": "Soft Avenues",
+   "artist": "MVW Originals",
+   "genre": "score",
+   "mood": "day",
+   "bpm": 80.01,
+   "loop": [
+    0.5,
+    72.503167
+   ],
+   "key": "mvw-soundtrack-1/game-avenues-v2",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:53:38.330Z"
+   }
+  },
+  {
+   "file": "game/game-blueprints-v2.loop.mp3",
+   "title": "Blueprints",
+   "artist": "MVW Originals",
+   "genre": "score",
+   "mood": "build",
+   "bpm": 77.98,
+   "loop": [
+    0.5,
+    62.03425
+   ],
+   "key": "mvw-soundtrack-1/game-blueprints-v2",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:53:41.104Z"
+   }
+  },
+  {
+   "file": "game/game-golden-hour-v2.loop.mp3",
+   "title": "Golden Hour",
+   "artist": "MVW Originals",
+   "genre": "score",
+   "mood": "evening",
+   "bpm": 69.8,
+   "loop": [
+    0.5,
+    89.920083
+   ],
+   "key": "mvw-soundtrack-1/game-golden-hour-v2",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:53:47.745Z"
+   }
+  },
+  {
+   "file": "game/game-lanterns-v2.loop.mp3",
+   "title": "Lanterns on the Bay",
+   "artist": "MVW Originals",
+   "genre": "score",
+   "mood": "evening",
+   "bpm": 65.01,
+   "loop": [
+    0.5,
+    59.595917
+   ],
+   "key": "mvw-soundtrack-1/game-lanterns-v2",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:53:51.126Z"
+   }
+  },
+  {
+   "file": "game/game-city-lights-v2.loop.mp3",
+   "title": "City Lights",
+   "artist": "MVW Originals",
+   "genre": "score",
+   "mood": "night",
+   "bpm": 63.98,
+   "loop": [
+    0.5,
+    79.254917
+   ],
+   "key": "mvw-soundtrack-1/game-city-lights-v2",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:53:56.906Z"
+   }
+  },
+  {
+   "file": "game/game-quiet-hours-v2.loop.mp3",
+   "title": "Quiet Hours",
+   "artist": "MVW Originals",
+   "genre": "score",
+   "mood": "night",
+   "bpm": 57.93,
+   "loop": [
+    0.5,
+    83.321
+   ],
+   "key": "mvw-soundtrack-1/game-quiet-hours-v2",
+   "meta": {
+    "source": "elevenlabs",
+    "model": "music_v2_5",
+    "made": "2026-10-24T02:54:00.235Z"
+   }
+  }
+ ]
+}

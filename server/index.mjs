@@ -31,6 +31,7 @@ import { FishMarket } from './play/fish-market.js';
 import { Angler } from './play/angler.js';
 import { addSignRoutes } from './signs-routes.js';
 import { Music } from './music/music.js';
+import { seedSoundtrack } from './music/soundtrack.js';
 import { addMusicRoutes } from './music/routes.js';
 import { addWeatherRoutes } from './weather-routes.js';
 import { FreeWill } from './free-will/free-will.js';
@@ -1481,6 +1482,8 @@ addSignRoutes(router, { world: () => world, dataDir: DATA, readStream: (req, lim
 const music = new Music({ dbs, dataDir: DATA, sim: () => sim, world: () => world, broadcast: o => broadcast(o), log,
   nameOf: id => visitorNameQ.get(dbs.worldId, Number(id))?.display_name || '' });
 addMusicRoutes(router, { music, perms, audit, readStream: (req, limit) => readStream(req, limit) });
+// (the game's own soundtrack, each song once: server/music/soundtrack.js)
+if (CFG.soundtrack) { try { seedSoundtrack(music, { log }); } catch (e) { log.error('[music] the soundtrack could not be added', e.message); } }
 music.start();
 addWorldAdminRoutes(router, { world: () => world, people: () => people, lots: () => property.all(), worldId: dbs.worldId, audit,
   readStream: (req, limit) => readStream(req, limit),

@@ -33,7 +33,13 @@ converted to one MP3 (192 kbit/s, 48 kHz, no tags or pictures) at the library's 
 Without ffmpeg (the official Docker image has none) MP3 files are taken as they are, their length read from the file and
 their loudness as the uploader's browser measured it (applied when played).
 
-**Importing a set of songs** on the host (a soundtrack, an owner's own music): `node tools/music-import.mjs <list.json>
+**The game's soundtrack** (`server/music/soundtrack/`, listed in its `soundtrack.json`) goes into the library when the
+server starts (`server/music/soundtrack.js`): each song once, approved, as it is (already at the library's loudness, so
+the game music's loop points stay exact), marked `source: 'import'` with `meta.soundtrack`. What a world has taken is kept in its settings
+(`music.soundtrack`): a song an administrator deletes stays deleted, a song already imported under the same key is not
+added twice, and a later version's new songs come with the next start. `MVW_SOUNDTRACK=off` leaves the library alone.
+
+**Importing a set of songs** on the host (an owner's own music): `node tools/music-import.mjs <list.json>
 --data <data folder> [--as-is]` while the server is stopped (docs in the tool). The host backup (`tools/admin.mjs
 backup`) includes the songs.
 
@@ -112,10 +118,11 @@ For now administrators run every stage; floor owners running their own stages co
 
 ## Music made with ElevenLabs
 
-The first MVW soundtrack (the lounge's and the club's songs, the game's own music) was made with ElevenLabs on the
-product owner's own account and is not part of this repository. Songs made that way may only be played inside My
-Virtual World: never offered for download or as a music library for others to use. Players never generate music through
-the world's account.
+The game's soundtrack (26 songs: the lounge's, the club's, the game's own music) was made with ElevenLabs on the
+product owner's own account and ships with the game in `server/music/soundtrack/` under
+[its own license](../../server/music/soundtrack/LICENSE.md), not the assets' CC BY-NC-SA: the songs may be played only
+inside My Virtual World, never offered on their own, as a music library for others to use, remixed, or resold. Players
+never generate music through the world's account.
 
 ## Checks
 
@@ -126,6 +133,10 @@ the world's account.
 - `tests/music-http.test.mjs`: uploads (an administrator's approved, a player's reviewed, the rights, junk refused, a WAV
   converted), who sees and streams what (byte ranges), the review, deleting; a lounge's deck, requests and taking them
   back, running a stage (administrators only).
+- `tests/soundtrack.test.mjs`: every soundtrack song is there (an MP3 of a library song's length, a known genre, its own
+  key, loop points inside it) with its license; the songs go in once, approved, as they are; a deleted one stays
+  deleted; one already imported is not added twice; a broken file is skipped; a later version's new songs come next
+  start; the server adds them at start (`MVW_SOUNDTRACK` on), the tests' servers leave the library alone.
 - Lab `tools-bin/music-panel-check.mjs`: on a throwaway server with the soundtrack's songs, at a lounge and a club in the
   evening: the 🎵 moves, the page streams the deck's recording at the server's second, the panel shows it, a request
   goes in line and plays after a skip; the phone's sheet.

@@ -10,6 +10,7 @@ sharing while reserving commercial rights.
 | --- | --- |
 | Software source code and related technical documentation | [PolyForm Noncommercial 1.0.0](../LICENSE) |
 | Project-owned artwork, screenshots, maps, world layouts, models, textures, audio, and similar creative assets | [CC BY-NC-SA 4.0](../ASSETS-LICENSE.md) |
+| The game's soundtrack (`server/music/soundtrack/`) | [Its own license](../server/music/soundtrack/LICENSE.md): played only inside My Virtual World, never on its own, remixed, or resold |
 | My Virtual World name, logos, wordmarks, and other brand identifiers | All rights reserved; see [TRADEMARKS.md](../TRADEMARKS.md) |
 | Third-party components or material | Their respective licenses and notices |
 

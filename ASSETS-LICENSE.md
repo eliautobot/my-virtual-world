@@ -23,6 +23,9 @@ Commercial use is not permitted without a separate written license.
 This asset license does not apply to:
 
 - software or technical documentation covered by [LICENSE](LICENSE);
+- the game's soundtrack in `server/music/soundtrack/`, which has its own
+  license ([server/music/soundtrack/LICENSE.md](server/music/soundtrack/LICENSE.md)):
+  it may be played only inside My Virtual World;
 - the My Virtual World name, logos, wordmarks, or other brand identifiers
   covered by [TRADEMARKS.md](TRADEMARKS.md);
 - third-party material, which remains under its original license; or

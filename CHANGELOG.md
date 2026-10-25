@@ -2,6 +2,14 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.1.1 (2026-10-25)
+
+- **The game's own soundtrack**: 26 original songs come with the game (the lounge's jazz, piano and bossa nova, the
+  club's house, techno, trance, dubstep, reggaeton, hip hop and dance, and the game's own music) and go into the music
+  library on the first start, ready for the Lounge Stages and DJ Stages. Each song goes in once; one an administrator
+  deletes stays deleted; `MVW_SOUNDTRACK=off` leaves the library alone. The songs have a license of their own: they may
+  be played only inside My Virtual World (server/music/soundtrack/LICENSE.md).
+
 ## v2.1.0 (2026-10-25)
 
 The arcade (cabinets and machines you play), Floor Themes, nights out with live music and a music library, and
