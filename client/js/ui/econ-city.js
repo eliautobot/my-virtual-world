@@ -4,11 +4,21 @@
 // residents' wealth, the top businesses), the budget (income and expenses per line with history; for administrators the
 // tax rates by bracket, ordinances, public works and bonds), every business, the Global Market, the price index, and
 // the treasury's public ledger. Everyone may read it; administrators change it (server/economy/routes.js).
+// Layers, from macro to micro (2026-10-23, the product owner: "the ecomopmy should be overall the world economy, but then
+// have layers, like town/vities...so form macro to micro"): a switch at the top — 🌍 World, or one of its towns
+// (shared/towns.js). The World's overview lists every town with what it needs; a town's shows its people, homes and
+// work, what it needs (server/town-needs.js: homes, jobs, shops, fun, transit, its businesses) and its issues in plain
+// words, and its businesses; Businesses and Jobs keep to the town. Money, taxes and the treasury stay the world's.
 import { auth } from '../core/auth.js';
 import { getJSON, post } from '../core/net.js';
 import { h, esc } from '../core/util.js';
 import { lineChart, hover, paint, barList, demandBars, tile, sparkline, compact } from './econ-charts.js';
 import { vc } from './economy.js';
+import { MAIN_TOWN } from '/shared/towns.js';
+const NEEDS = [['homes', '🏠', 'Homes'], ['jobs', '💼', 'Jobs'], ['shops', '🏪', 'Shops & food'], ['fun', '🌳', 'Fun & green'], ['transit', '🚇', 'Transit'], ['prosperity', '💰', 'Its businesses']];
+const scoreColor = v => (v === null ? 'var(--line)' : v < 40 ? 'var(--bad)' : v < 70 ? 'var(--gold)' : 'var(--good)');
+/** Each need as a bar of 0–100 (higher: better; — where it doesn't apply). */
+const meters = sc => `<div class="ec-bars ec-needs">${NEEDS.map(([k, i, l]) => `<div class="ec-bar"><span class="ec-bl">${i} ${esc(l)}</span><span class="ec-bt"><i style="width:${sc[k] ?? 0}%;background:${scoreColor(sc[k])}"></i></span><b>${sc[k] ?? '—'}</b></div>`).join('')}</div>`;
 
 const TABS = [['overview', '🏙️ Overview'], ['budget', '🏛️ Budget'], ['businesses', '🏪 Businesses'], ['jobs', '💼 Jobs'], ['market', '🌐 Market'], ['prices', '🏷️ Prices'], ['ledger', '📜 Treasury']];
 const v0 = n => vc(n, false);
@@ -16,12 +26,17 @@ let dlg = null;
 
 export function open(app, want = 'overview') {
   dlg?.close();
-  let tab = TABS.some(t => t[0] === want) ? want : 'overview', data = {}, sort = 'sales';
+  let tab = TABS.some(t => t[0] === want) ? want : 'overview', data = {}, sort = 'sales', scope = 'world';   // (scope: 'world' or a town's id)
   const el = document.body.appendChild(h(`<div class="modal-back lib-back ec-back"><div class="panel libdlg ec-city" role="dialog" aria-modal="true" aria-label="The city's economy"></div></div>`));
   const box = el.querySelector('.ec-city');
   const admin = () => auth.can?.('economy.admin');
+  /** The town of building b (its lot's: the data map's lots, ui/property.js). */
+  const townOfB = b => { if (!data.bt) { data.bt = new Map(); for (const L of app.property?.lots?.() || []) for (const x of L.buildings || []) data.bt.set(x, L.town || MAIN_TOWN); } return data.bt.get(b) || MAIN_TOWN; };
+  const inScope = b => scope === 'world' || townOfB(b) === scope;
   const load = async () => {
     try {
+      if (!data.needs || Date.now() - data.needsAt > 20000) { data.needs = await getJSON('/api/towns/needs').catch(() => null); data.needsAt = Date.now(); data.bt = null; }
+      if (scope !== 'world' && tab === 'overview' && !data.biz) data.biz = await getJSON('/api/economy/businesses');
       if (tab === 'overview') data.ov = await getJSON('/api/economy/overview');
       if (tab === 'budget') data.budget = await getJSON('/api/economy/budget');
       if (tab === 'businesses') data.biz = await getJSON('/api/economy/businesses');
@@ -35,14 +50,46 @@ export function open(app, want = 'overview') {
   const render = () => {
     let body = '';
     try { body = { overview, budget, businesses, jobs, market, prices, ledger }[tab](); } catch (e) { body = `<p class="hint bad">${esc(e.message)}</p>`; }
-    box.innerHTML = `<h3><span>📊 The city's economy</span><button type="button" class="btn small" data-c="close" aria-label="Close">✕</button></h3>
+    const towns = data.needs?.towns || [], tn = towns.find(t => t.id === scope);
+    box.innerHTML = `<h3><span>📊 ${scope === 'world' ? 'The economy' : esc(tn?.name || 'A town')}</span><span class="row"><select class="input ec-scope" aria-label="World or town">${[['world', '🌍 World'], ...towns.map(t => [t.id, `🏙️ ${t.name}`])].map(([k, l]) => `<option value="${esc(k)}"${k === scope ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select><button type="button" class="btn small" data-c="close" aria-label="Close">✕</button></span></h3>
       <div class="seg ec-tabs" role="tablist">${TABS.map(([k, t]) => `<button type="button" class="btn small${tab === k ? ' on' : ''}" data-tab="${k}" role="tab">${t}</button>`).join('')}</div>
       <div class="ec-body">${body}</div><p class="hint bad ec-err" role="alert"></p>`;
     paint(box); hover(box);
   };
 
+  // ------------------------------------------------------------------ a town's overview
+  function townView() {
+    const t = (data.needs?.towns || []).find(x => x.id === scope); if (!t) return '<p class="hint">Loading…</p>';
+    const biz = (data.biz?.businesses || []).filter(b => inScope(b.b)).sort((a, b) => (b.yesterday?.sales || 0) - (a.yesterday?.sales || 0));
+    return `<div class="ec-tiles">
+        ${tile('Residents', String(t.residents), { note: 'People whose home is in this town' })}
+        ${tile('Free homes', `${t.freeBeds} of ${t.beds}`, { note: 'Free beds in its blocks of flats' })}
+        ${tile('Open jobs', `${t.freeJobs} of ${t.jobs}`, { note: 'Free desks at its companies and places at its venues' })}
+        ${tile('Looking for work', String(t.unemployed), { note: `${t.employed} of its residents in work` })}
+        ${tile('Commute out', String(t.commutersOut), { note: t.topOut ? `Most to ${t.topOut.name} (${t.topOut.n})` : 'Living here, working in another town' })}
+        ${tile('Commute in', String(t.commutersIn), { note: 'Working here, living in another town' })}
+        ${tile('Moved today', `+${t.moved?.in || 0} · −${t.moved?.out || 0}`, { note: 'People who moved here and away today: to live where they work, for work, for a better town' })}
+      </div>
+      <div class="ec-two">
+        <div><div class="tier-head">🏙️ How it's doing <small class="dim">overall ${t.scores.overall ?? '—'} of 100</small></div>${meters(t.scores)}</div>
+        <div><div class="tier-head">📈 What it needs</div>${demandBars(NEEDS.slice(0, 4).map(([k, i, l]) => ({ label: l, icon: i, value: t.demand[k] ?? 0 })))}</div>
+      </div>
+      <div class="tier-head">⚠️ Issues</div>
+      ${t.issues.length ? `<div class="lib-list ec-issues">${t.issues.map(x => `<div class="lib-row ec-line"><div class="lib-main"><b>${x.icon} ${esc(x.text)}</b></div></div>`).join('')}</div>` : '<p class="hint">Nothing pressing: it has what its people need.</p>'}
+      <div class="tier-head">🏆 Its busiest businesses yesterday</div>
+      <div class="lib-list">${biz.length ? biz.slice(0, 6).map(b => `<button type="button" class="lib-row ec-brow" data-biz="${esc(b.id)}"><span class="lib-main"><b>${esc(b.name)}</b><span class="dim">${esc(b.kind)} · ${b.yesterday?.customers || 0} customers · profit ${vc(b.yesterday?.profit || 0)}</span></span><b>${vc(b.yesterday?.sales || 0)}</b></button>`).join('') : '<p class="hint">No businesses here yet.</p>'}</div>
+      <p class="hint">Of its own: ${t.venues} cafés, restaurants and shops, ${t.funPlaces} parks and gyms (a park or a station just across the town line counts for the homes near it), ${t.businesses} businesses with books yesterday. Money, taxes and the treasury are the world's: switch to 🌍 World.</p>`;
+  }
+  /** The World's overview: its towns, each with how it is doing and what troubles it most. */
+  function townsList() {
+    const towns = data.needs?.towns || [], w = data.needs?.world;
+    if (!w) return '';
+    return `<div class="tier-head">🏙️ Its towns <small class="dim">the world overall ${w.scores.overall ?? '—'} of 100</small></div>
+      <div class="lib-list">${towns.map(t => `<button type="button" class="lib-row ec-brow" data-town="${esc(t.id)}"><span class="lib-main"><b>${esc(t.name)}</b><span class="dim">${t.residents} residents · ${t.freeBeds} free homes · ${t.freeJobs} open jobs${t.issues[0] ? ` · ${t.issues[0].icon} ${esc(t.issues[0].text)}` : ''}</span></span><b style="color:${scoreColor(t.scores.overall)}">${t.scores.overall ?? '—'}</b></button>`).join('')}</div>`;
+  }
   // ------------------------------------------------------------------ overview
   function overview() {
+    if (scope !== 'world') return townView();
     const o = data.ov; if (!o) return '<p class="hint">Loading…</p>';
     const y = o.yesterday || {}, S = o.series || {}, last = k => (S[k] || []).map(p => p[1]);
     const ch = k => { const s = last(k); return s.length > 1 && s[s.length - 2] ? Math.round((s[s.length - 1] - s[s.length - 2]) / Math.abs(s[s.length - 2]) * 1000) / 10 : null; };
@@ -66,6 +113,7 @@ export function open(app, want = 'overview') {
           <div class="ec-legend">${['$ under 2 days\' pay', '$$ up to 15 days', '$$$ more'].map((t, k) => `<span><i style="background:var(--ec-seq${k + 1})"></i>${t}: ${Math.round((w.tiers[k] || 0) / wt * 100)}%</span>`).join('')}</div>
           <p class="hint">On average ${vc(w.average)} each, ${w.residents} residents.</p></div>
       </div>
+      ${townsList()}
       <div class="tier-head">💰 Money over the last 30 days</div>
       ${lineChart([{ label: 'Money supply', points: S.supply || [] }, { label: 'Treasury', points: S.treasury || [] }], { fmt: 'vc' })}
       <div class="tier-head">🔄 Yesterday's flows</div>
@@ -116,7 +164,8 @@ export function open(app, want = 'overview') {
 
   // ------------------------------------------------------------------ businesses
   function businesses() {
-    const list = data.biz?.businesses; if (!list) return '<p class="hint">Loading…</p>';
+    const all = data.biz?.businesses; if (!all) return '<p class="hint">Loading…</p>';
+    const list = all.filter(b => inScope(b.b));
     const key = { sales: b => b.yesterday?.sales || 0, profit: b => b.yesterday?.profit || 0, rating: b => b.rating, name: b => b.name };
     const rows = [...list].sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : key[sort](b) - key[sort](a)));
     const venues = list.filter(b => b.kind !== 'office'), losing = venues.filter(b => (b.yesterday?.profit || 0) < 0).length;
@@ -132,7 +181,7 @@ export function open(app, want = 'overview') {
     const mine = me ? `<div class="ec-tiles">${tile('Your trust', T ? (T.events < 5 ? 'New' : `${T.stars.toFixed(1)} ★`) : '—', { note: T ? `${T.word}: paying ${T.dims.pay}, working ${T.dims.work} (of 1000)` : '' })}${(me.xp || []).slice(0, 4).map(x => tile(`${x.icon} ${x.label}`, `Level ${x.level}`, { note: `${x.xp} XP · ${x.units} served` })).join('')}</div>
       ${me.active ? `<p class="hint">You are working: ${esc(me.active.roleLabel)} at ${esc(me.active.business?.name || '')}.</p>` : ''}
       ${me.history?.length ? `<details><summary class="hint">Your last shifts</summary><div class="lib-list">${me.history.slice(0, 8).map(s => `<div class="lib-row ec-line"><div class="lib-main"><b>${esc(s.roleLabel)} at ${esc(s.business?.name || '')}</b><span class="dim">${s.served} ${esc(s.units)}${s.avgStars ? ` · ${s.avgStars} ★` : ''} · ${new Date(s.started).toLocaleString()}</span></div><b>${vc(s.pay)}</b></div>`).join('')}</div></details>` : ''}` : '';
-    const rows = J.board.map(v => `<div class="lib-row ec-shift${v.open ? '' : ' closed'}"><div class="lib-main"><b>${esc(v.business.name)}</b><span class="dim">${esc(v.business.kind)} · ★ ${(v.business.rating / 100).toFixed(1)} · ${v.open ? 'open now' : 'closed now'}${v.waiting ? ` · <b>🧾 ${v.waiting} customer${v.waiting === 1 ? '' : 's'} waiting</b>` : ''}${v.residents.length ? ` · on staff: ${esc(v.residents.slice(0, 3).join(', '))}${v.residents.length > 3 ? '…' : ''}` : ''}</span></div>
+    const rows = J.board.filter(v => inScope(v.business.b)).map(v => `<div class="lib-row ec-shift${v.open ? '' : ' closed'}"><div class="lib-main"><b>${esc(v.business.name)}</b><span class="dim">${esc(v.business.kind)} · ★ ${(v.business.rating / 100).toFixed(1)} · ${v.open ? 'open now' : 'closed now'}${v.waiting ? ` · <b>🧾 ${v.waiting} customer${v.waiting === 1 ? '' : 's'} waiting</b>` : ''}${v.residents.length ? ` · on staff: ${esc(v.residents.slice(0, 3).join(', '))}${v.residents.length > 3 ? '…' : ''}` : ''}</span></div>
       <div class="lib-acts">${v.roles.map(r => `<button type="button" class="btn small${r.free && v.open ? '' : ' off'}" data-job="${esc(v.business.id)}" data-role="${esc(r.role)}" ${r.free && v.open && auth.account ? '' : 'disabled'} title="${r.taken.length ? `Working: ${esc(r.taken.map(t => t.name).join(', '))}` : 'Residents work it now'}">${r.icon} ${esc(r.label)} · ${r.free}/${r.slots} free · ${vc(r.wage)}/h</button>`).join('')}</div></div>`).join('');
     return `${mine}<p class="hint">Work a shift in place of a venue's own staff: users first, then agents, then the residents whose job it is. Pay is the wage for the time worked (at the world's usual pace) times your stars; customers who ordered tip good service. Busy venues have customers waiting. You work where you stand: go there first.</p>
       <div class="lib-list">${rows || '<p class="hint">No venues.</p>'}</div>`;
@@ -164,10 +213,12 @@ export function open(app, want = 'overview') {
   const close = () => { el.remove(); document.removeEventListener('keydown', onKey, true); clearInterval(timer); window.removeEventListener('resize', onResize); if (dlg?.el === el) dlg = null; };
   const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
   document.addEventListener('keydown', onKey, true);
+  el.addEventListener('change', async e => { if (e.target.matches('.ec-scope')) { scope = e.target.value; render(); await load(); } });
   el.addEventListener('input', e => { const r = e.target.closest('[data-tax]'); if (r) r.parentElement.querySelector('.ec-pct').textContent = `${r.value / 100}%`; });
   el.addEventListener('click', async e => {
     if (e.target === el) return close();
     const t = e.target.closest('[data-tab]'); if (t) { tab = t.dataset.tab; render(); await load(); return; }
+    const tw = e.target.closest('[data-town]'); if (tw) { scope = tw.dataset.town; render(); await load(); return; }
     const s = e.target.closest('[data-sort]'); if (s) { sort = s.dataset.sort; render(); return; }
     const bz = e.target.closest('[data-biz]'); if (bz) { app.econ?.openBusiness(bz.dataset.biz); return; }
     const jb = e.target.closest('[data-job]'); if (jb) { const s = await app.work?.start(jb.dataset.job, jb.dataset.role); if (s) close(); return; }

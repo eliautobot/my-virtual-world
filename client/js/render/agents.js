@@ -19,6 +19,11 @@ const LOOK_AT_PHONE = new Set([USE_ID.task_phone]);   // (working on a task by p
 const GAIT_V = new Float32Array(64);
 GAIT_V[CLIP.walk] = GAIT_V[CLIP.walk_hold] = GAIT_V[CLIP.walk_phone] = 1.35; GAIT_V[CLIP.run] = 3.4; GAIT_V[CLIP.jog] = 2.6;
 const FADE = 0.28, TAU = Math.PI * 2;
+// A bartender makes a drink when someone orders (2026-10-24, the product owner: "bar tenders should be mixing drinks only
+// when ordered"): someone sitting down at a bar (a stool: sit_high) orders; the nearest bartender within ORDER_R on that
+// floor shakes and pours it (act_shake, MAKE cycles of it), one order after another; waiting, they stand at the counter
+// (bar_idle: hands on it, wiping it now and then).
+const ORDER_R = 3.2, MAKE = 2, ORDER_SEEN = 25;
 const _v = new THREE.Vector3(), _e = { k: 0, u: 0, x: 0, y: 0, z: 0 };
 
 /** Position of plan p at sim time t: the shared evaluator (shared/proto.js evalDecoded), unit-tested against the server. */
@@ -27,6 +32,8 @@ export { evalPlan };
 export class Agents {
   constructor(net, stage) {
     this.net = net; this.stage = stage;
+    this.orders = []; this.bartenders = []; this.serve = new Map();   // (drinks ordered at bars: made by the nearest bartender)
+    this.forced = new Map();   // (lab checks only: pose(i, …) puts someone somewhere doing something, at a moment of it)
     // Phones (2026-10-04, the phone slowed right down after loading): characters' colour maps at most 1024 square (a
     // person fills a few hundred pixels of a phone's screen at most), normal maps half that, two downloading at a time
     // (each is a worker decoding and a GPU upload) — 2048 maps were a quarter of a gigabyte of the phone's memory per 10.
@@ -85,6 +92,34 @@ export class Agents {
     B.forEach((b, i) => { if (b && !b.gone && b.type === 'park') this.parkB[i] = 1; });
   }
   setAppearance(i, arr) { if (i < PLAYER_APP) this.ensure(i + 1); this.chars.setAppearance(i, Array.isArray(arr) ? arrToApp(arr) : arr); }
+  /** Lab checks: person i drawn at (x, y, z) on floor ctx, facing yaw, playing clip (anim.js CLIP) at phase ph (0..1;
+   *  null: as time goes), whatever their plan says; pose(i, null) lets them go. */
+  pose(i, o) { if (o) this.forced.set(i, o); else this.forced.delete(i); }
+  /** The drinks ordered this frame, each to the nearest bartender on its floor (made next frame on: making). */
+  assignOrders() {
+    const o = this.orders, b = this.bartenders;
+    this.serve.clear();
+    for (let n = 0; n < o.length; n += 4) {
+      let best = -1, bd = ORDER_R;
+      for (let m = 0; m < b.length; m += 4) if (b[m + 3] === o[n + 2]) { const d = Math.hypot(b[m + 1] - o[n], b[m + 2] - o[n + 1]); if (d < bd) { bd = d; best = b[m]; } }
+      if (best >= 0) { let l = this.serve.get(best); if (!l) this.serve.set(best, l = []); l.push(o[n + 3]); }
+    }
+    for (const l of this.serve.values()) l.sort((x, y) => x - y);
+    this.barStats = { orders: o.length / 4, bartenders: b.length / 4, serving: this.serve.size };   // (lab checks)
+    o.length = 0; b.length = 0;
+  }
+  /** Where bartender i is in making a drink at time t (its clip's phase), or -1: no order being made. */
+  making(i, t) {
+    const l = this.serve.get(i); if (!l) return -1;
+    const d = Math.max(0.3, CLIP_DUR[CLIP.bartend]);
+    let free = -Infinity;
+    for (const t0 of l) {
+      const s = Math.max(t0 + 0.6, free), e = s + MAKE * d;
+      if (t >= s && t < e) return ((t - s) / d) % 1;
+      free = e;
+    }
+    return -1;
+  }
   onNewPlan(i, p, t) {
     this.ver[i] = this.net.planVer[i];
     evalPlan(p, t, _e);
@@ -138,7 +173,9 @@ export class Agents {
         x = ax + (p.x[k] - ax) * u; y = ay + (p.y[k] - ay) * u; z = az + (p.z[k] - az) * u;
       }
       this.k[i] = k;
-      const fl = p.flags[k], c = p.ctx[k];
+      const F = this.forced.size ? this.forced.get(i) : null;
+      let fl = p.flags[k], c = p.ctx[k];
+      if (F) { x = F.x; y = F.y; z = F.z; c = F.ctx; fl &= ~F_HIDDEN; }
       let ox = this.ox[i], oy = this.oy[i], oz = this.oz[i];
       if (ox !== 0 || oy !== 0 || oz !== 0) {
         ox *= ko; oy *= ko; oz *= ko;
@@ -174,24 +211,27 @@ export class Agents {
       const lod = d2 < L0 ? 0 : d2 < L1 ? 1 : d2 < L2 ? 2 : -1;
       if (lod < 0) continue;
       // yaw
-      const target = p.yaw[k];
+      const target = F ? F.yaw : p.yaw[k];
       let yw;
       if (this.last[i] !== frame - 1) yw = target;
       else { yw = this.yaw[i]; let d = target - yw; d -= Math.round(d / TAU) * TAU; yw += d * ky; }
       const wasDrawn = this.last[i] === frame - 1;
       this.yaw[i] = yw; this.last[i] = frame;
       // clip
-      let a = p.anim[k];
-      const prop = p.prop[k];
+      let a = F ? F.clip : p.anim[k], phAt = F && F.ph != null ? F.ph : -1;
+      const prop = F ? 0 : p.prop[k];
+      // at a bar: a bartender makes the drinks ordered there, else waits; someone just sat down on a stool has ordered
+      if (indoor && a === CLIP.bartend) { this.bartenders.push(i, x, z, c); phAt = this.making(i, t); if (phAt < 0) a = CLIP.bar_idle; }
+      else if (indoor && a === CLIP.sit_high && !mv && t - (p.base + T[k]) < ORDER_SEEN) this.orders.push(x, z, c, p.base + T[k]);
       // what they ordered or made (shared/food.js): a visible segment's last byte (shared/proto.js)
-      const item = fl & F_HIDDEN ? 0 : p.veh[k];
+      const item = F || fl & F_HIDDEN ? 0 : p.veh[k];
       if (a === CLIP.use && p.use[k] === USE_ID.work) a = CLIP.stand_work;   // standing desk: type while standing
       else if (a === CLIP.use && p.use[k] === USE_ID.prep) a = CLIP.prep;   // making something cold on a counter's board: chopping
       else a = eatClip(holdClip(a, prop, p.use[k], i, LOOK_AT_PHONE), item);   // holding something: walk or stand holding it, look at a phone, sip, read; a dish at a table: eaten its way
       let ph;
       const stride = CLIP_STRIDE[a];
       if (stride > 0) ph = (segLen > 0.02 && u < 1 ? (p.d0[k] + segLen * u) / stride : t * GAIT_V[a] / stride) + (i * 0.618034) % 1;
-      else ph = t / Math.max(0.3, CLIP_DUR[a]) + (i * 0.381966) % 1;
+      else ph = phAt >= 0 ? phAt : t / Math.max(0.3, CLIP_DUR[a]) + (i * 0.381966) % 1;
       ph -= Math.floor(ph);
       if (a !== this.clip[i]) {
         if (this.clip[i] >= 0 && wasDrawn && !(fl & F_SNAP)) { this.pclip[i] = this.clip[i]; this.pph[i] = this.lph[i]; this.fadeT[i] = now; }
@@ -211,6 +251,7 @@ export class Agents {
       }
       this.drawn[nd++] = i;
     }
+    this.assignOrders();
     for (const e of this.extra) {
       const dx = e.x - cp.x, dy = e.y + 0.9 - cp.y, dz = e.z - cp.z, d2 = dx * dx + dy * dy + dz * dz;
       const lod = d2 < L0 ? 0 : d2 < L1 ? 1 : 2;

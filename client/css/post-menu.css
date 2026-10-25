@@ -1,0 +1,47 @@
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* A counter's or a desk's own ⋯ and its menu (js/ui/post-menu.js): over the piece, under the side panels; it pulses
+   while no agent is on post there. */
+#postpins { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
+.pp-pin { position: absolute; left: 0; top: 0; width: 32px; height: 32px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  pointer-events: auto; cursor: pointer; color: var(--text); background: var(--bg-0); border: 1px solid var(--line);
+  box-shadow: var(--shadow); transition: background .15s, border-color .15s; }   /* (no backdrop blur: see css/music.css .mp-pin) */
+.pp-pin[hidden] { display: none; }
+.pp-pin:hover, .pp-pin.on { background: var(--btn-hover); border-color: var(--gold); }
+.pp-pin:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: 2px; }
+.pp-dots { display: flex; gap: 3px; }
+.pp-dots i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.pp-pin.pp-pulse { border-color: var(--gold); color: var(--gold); }
+.pp-pin.pp-pulse::before, .pp-pin.pp-pulse::after { content: ''; position: absolute; inset: -1px; border-radius: 50%; border: 2px solid var(--gold);
+  pointer-events: none; animation: pp-ring 1.8s ease-out infinite; }
+.pp-pin.pp-pulse::after { animation-delay: .9s; }
+.pp-pin.pp-pulse .pp-dots { animation: pp-bob 1.8s ease-in-out infinite; }
+@keyframes pp-ring { from { transform: scale(1); opacity: .85; } to { transform: scale(1.9); opacity: 0; } }
+@keyframes pp-bob { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+@media (pointer: coarse) { .pp-pin { width: 38px; height: 38px; } .pp-dots i { width: 5px; height: 5px; } }
+@media (prefers-reduced-motion: reduce) { .pp-pin.pp-pulse::before, .pp-pin.pp-pulse::after, .pp-pin.pp-pulse .pp-dots { animation: none; } .pp-pin.pp-pulse::after { display: none; } .pp-pin.pp-pulse::before { transform: scale(1.25); opacity: .6; } }
+
+.pp-menu { position: fixed; left: 0; top: 0; z-index: 4; width: 252px; max-width: calc(100vw - 16px); padding: 8px; display: flex; flex-direction: column; gap: 4px;
+  pointer-events: auto; max-height: min(420px, calc(100vh - 16px)); overflow: auto; }
+.pp-h { display: flex; align-items: center; gap: 8px; padding: 2px 2px 6px; border-bottom: 1px solid var(--line); margin-bottom: 2px; }
+.pp-h > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pp-h b { font-size: 13px; }
+.pp-h small, .pp-ag small { font-size: 11px; opacity: .72; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-ic { font-size: 20px; }
+.pp-x { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 14px; opacity: .7; padding: 4px; }
+.pp-item, .pp-ag, .pp-back { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; border-radius: 8px; padding: 9px 8px;
+  background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 13px; }
+.pp-item:hover, .pp-ag:hover:not(:disabled), .pp-back:hover { background: var(--btn-hover); }
+.pp-item:focus-visible, .pp-ag:focus-visible, .pp-back:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: -2px; }
+.pp-more { margin-left: auto; opacity: .6; }
+.pp-back { padding: 5px 8px; font-size: 12px; opacity: .8; }
+.pp-list { display: flex; flex-direction: column; gap: 2px; }
+.pp-ag > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.pp-ag:disabled { cursor: default; opacity: .55; }
+.pp-ag.here { opacity: 1; background: var(--gold-soft); }
+.pp-em { font-size: 18px; width: 24px; text-align: center; }
+.pp-none, .pp-note { margin: 4px 6px; font-size: 12px; opacity: .75; line-height: 1.35; }
+.pp-note { font-size: 11px; opacity: .6; }
+.pp-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 2px 0 4px; }
+.pp-mode { border: 1px solid var(--line); border-radius: 8px; padding: 6px 4px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 11.5px; }
+.pp-mode.on { background: var(--gold-soft); border-color: var(--gold); }
+.pp-mode:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: 1px; }

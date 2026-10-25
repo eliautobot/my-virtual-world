@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). -->
+<!-- The arcade's sealed game box (docs/features/arcade.md): one game, run in a sandboxed frame with no access to the page,
+     the account or the network. It hears the controller and the seed from the cabinet (client/js/play/arcade.js) and
+     answers with sounds and the finished run. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MVW Arcade</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="screen"></canvas>
+<script type="module" src="/arcade/kit.js"></script>
+</body>
+</html>

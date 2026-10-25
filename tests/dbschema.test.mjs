@@ -17,7 +17,7 @@ test('the current database goes back to schema 2 with nothing lost, takes an old
   const dir = tempDir('mvw-schema-');
   try {
     let s = openDb(dir);
-    assert.equal(SCHEMA_VERSION, 54);
+    assert.equal(SCHEMA_VERSION, 55);
     assert.ok(MIGRATION_INFO.slice(1).every(m => m.additive), 'every migration after the first only adds things');
     const now = Date.now();
     s.db.prepare(`INSERT INTO accounts (world_id, login, display_name, display_key, role, password_hash, password_changed, created, updated)
@@ -58,6 +58,9 @@ test('the current database goes back to schema 2 with nothing lost, takes an old
     s.db.prepare("INSERT INTO phone_lines (world_id, agent_id, connection_id, number, number_sid, created, updated) VALUES (?, 1, 1, '+18885550100', 'PNx', ?, ?)").run(s.worldId, now, now);
     s.db.prepare("INSERT INTO phone_takeovers (world_id, line_id, peer, since) VALUES (?, 1, '+15552010042', ?)").run(s.worldId, now);
     s.db.prepare("INSERT INTO mind_jobs (world_id, agent_id, kind, at, status) VALUES (?, 1, 'work', ?, 'ok')").run(s.worldId, now);
+    s.db.prepare("INSERT INTO music_tracks (id, world_id, title, artist, genre, seconds, file, bytes, source, status, created, updated) VALUES ('t1', ?, 'Velvet Hour', 'MVW Originals', 'jazz', 154, 'a.mp3', 100, 'import', 'approved', ?, ?)").run(s.worldId, now, now);
+    s.db.prepare("INSERT INTO music_decks (world_id, place, state_json, updated) VALUES (?, '1:1:7', '{\"family\":\"lounge\"}', ?)").run(s.worldId, now);
+    assert.deepEqual(downgradeSchema(s.db, 54), { ok: true, from: 55, to: 54, changed: true }, 'what releases before the city\'s music need');
     assert.deepEqual(downgradeSchema(s.db, 53), { ok: true, from: 54, to: 53, changed: true }, 'what releases before agents\' work sessions on their PC need');
     assert.deepEqual(downgradeSchema(s.db, 52), { ok: true, from: 53, to: 52, changed: true }, 'what releases before the person takes over a phone need');
     assert.deepEqual(downgradeSchema(s.db, 51), { ok: true, from: 52, to: 51, changed: true }, 'what releases before agents\' phones need');
@@ -111,8 +114,9 @@ test('the current database goes back to schema 2 with nothing lost, takes an old
       VALUES ((SELECT value FROM meta WHERE key = 'world_id'), 'h1', 1, 'c', ?, ?, ?, NULL, 'old release')`).run(now, now, now);
     assert.equal(raw.prepare('SELECT needs_twofa FROM sessions').get().needs_twofa, 0, 'the added column has a default');
     raw.close();
-    s = openDb(dir);   // the newer release again: migrates 2 -> 54 over the tables that already exist
-    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 54);
+    s = openDb(dir);   // the newer release again: migrates 2 -> 55 over the tables that already exist
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 55);
+    assert.equal(s.db.prepare('SELECT title FROM music_tracks').get().title, 'Velvet Hour', 'the music library survived');
     assert.equal(s.db.prepare('SELECT peer FROM phone_takeovers').get().peer, '+15552010042', 'a take-over survived');
     assert.equal(s.db.prepare('SELECT number FROM phone_lines').get().number, '+18885550100', 'a phone survived');
     assert.equal(s.db.prepare('SELECT n FROM fish_dex').get().n, 2, 'the Fishdex survived');
@@ -154,8 +158,8 @@ test('a migration that changed existing data blocks the downgrade', () => {
     const r = downgradeSchema(s.db, 2, info);
     assert.equal(r.ok, false);
     assert.match(r.why, /migration 3 changed existing data/);
-    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 54, 'nothing changed');
-    assert.deepEqual(downgradeSchema(s.db, 54), { ok: true, from: 54, to: 54, changed: false });
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 55, 'nothing changed');
+    assert.deepEqual(downgradeSchema(s.db, 55), { ok: true, from: 55, to: 55, changed: false });
     s.db.exec('PRAGMA user_version = 99');
     assert.match(downgradeSchema(s.db, 2).why, /newer than this tool knows/);
     s.db.exec('PRAGMA user_version = 42');

@@ -328,6 +328,56 @@ export class FreeWill {
       .finally(() => { this.inFlight--; if (this.pending.get(a.i) === job) this.pending.delete(a.i); });
   }
 
+  /**
+   * Its own brain chooses its job (step 7, 2026-10-23, the product owner: where an agent works "should be kindoff random,
+   * maybe based on what the agent decides to work at (based on availability and their own preference unless specified by
+   * the owner)"): one request to its decision service with the jobs open to it ([{ id, label }]: server/sim/placement.js
+   * jobOptions), within the same daily limits as its other decisions; logged in its why-log as a 'job' choice. → the
+   * option it picked, or null (no answer, a limit, Free Will off: the world places it, server/index.mjs).
+   */
+  async chooseJob(i, options) {
+    const sim = this.sim, a = sim?.agents[i], e = this.byPerson.get(i), cfg = this.config();
+    if (!a || !e || !cfg.enabled || !Array.isArray(options) || options.length < 2) return null;
+    const conn = e.connection;
+    if (this.breakerOpen(conn.id)) return null;
+    this.rollDay();
+    if (this.dayCalls >= cfg.dailyDecisions || (this.agentCalls.get(e.agentId) || 0) >= cfg.agentDailyDecisions || this.inFlight >= MAX_IN_FLIGHT) return null;
+    if (!this.br.allow(conn.id)) return null;
+    const brain = sim.brain, now = sim.now(), h = brain.hour(now), day = brain.day(now), econ = this.econOf();
+    const ctx = this.contextFn ? this.contextFn(e.agentId) : null, P = a.plan;
+    const home = a.p.home, atHome = !!(home && P && P.ctx === ctxOf(home.b, home.f));
+    const snap = {
+      name: e.name || a.p.name, role: e.role, tr: a.p.tr, needs: brain.needsAt(a, now, {}), h, day, place: P ? placeOf(brain, P.ctx) : 'outside', atHome, job: null,
+      money: econ && econ.money ? econ.money(a.p) : null, recent: ctx ? ctx.earlier : e.recent.filter(r => r.day === day).slice(-RECENT_PER_AGENT),
+      ...(ctx ? { personality: ctx.personality, bio: ctx.bio, purpose: ctx.purpose, aspirations: ctx.aspirations, likes: ctx.likes, dislikes: ctx.dislikes, plans: ctx.plans, memories: ctx.memories, worries: ctx.worries } : {}),
+      type: 'job',
+    };
+    const opts = options.map(o => ({ id: o.id, kind: 'job', label: o.label, w: 1 }));
+    const request = decisionRequest(snap, opts), t0 = this.now();
+    const row = { agentId: e.agentId, type: 'job', when: `${WEEKDAYS[mod(day, 7)]} ${formatClock(h)}`, place: snap.place, options: opts, connId: conn.id };
+    this.inFlight++; this.dayCalls++; this.agentCalls.set(e.agentId, (this.agentCalls.get(e.agentId) || 0) + 1); this.stats.asked++;
+    try {
+      const res = await this.decideFn(conn, request, 20000);
+      const ms = this.now() - t0, { tok, micro } = this.cost({ price: e.price }, res);
+      this.breakerOk(conn.id); this.stats.answered++;
+      if (micro) this.dayCost += micro;
+      const answer = (res?.answers || []).find(x => x && x.name === 'next_action'), allowed = new Set(opts.map(o => o.id));
+      const rand = this.rand || (() => e.rng.next());
+      const pick = answer && answer.type !== 'refusal' ? drawChoice(answer, allowed, (e.spontaneity ?? 0.5) * 0.4, rand) : null;
+      const probs = (answer?.probabilities || []).filter(x => allowed.has(x.value)).map(x => ({ id: x.value, p: r3(Number(x.probability) || 0) }));
+      const chosen = pick ? options.find(o => o.id === pick.value) : null;
+      this.record({ ...row, outcome: chosen ? 'chosen' : 'routine', reason: chosen ? null : 'invalid_answer', chosen: chosen?.id ?? null, label: chosen?.label ?? null,
+        probs, conf: Number.isFinite(answer?.confidence) ? answer.confidence : null, ms, tok, micro });
+      if (chosen) this.stats.chosen++;
+      return chosen;
+    } catch (err) {
+      const code = (err && err.code) || 'provider_error';
+      if (code !== 'bad_request') this.breakerFail(conn.id, code);
+      this.record({ ...row, outcome: 'routine', reason: code === 'timeout' ? 'timeout' : `service_${code}`, ms: this.now() - t0 });
+      return null;
+    } finally { this.inFlight--; }
+  }
+
   cost(job, res) {
     const tok = Number.isFinite(res?.usage?.inputTokens) ? res.usage.inputTokens : null;
     return { tok, micro: tok === null ? null : Math.round(tok * job.price) };

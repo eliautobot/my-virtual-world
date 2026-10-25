@@ -92,6 +92,7 @@ const SOUNDS = [
   ['volAircraft', 'Aircraft and games', 'Engines and wind while you fly, the ring game\'s chimes.'],
   ['volVoices', 'Agents\' voices', 'Voice conversations and 🔊 read aloud.'],
   ['volMedia', 'Videos and recordings', 'Voicemail, and audio and video in chats and on the PC.'],
+  ['volMusic', 'Live music', 'The lounge\'s band and the club\'s DJ, when you are on their floor.'],
 ];
 function soundTab(d, body) {
   const paint = () => {

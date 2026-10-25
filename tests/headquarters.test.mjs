@@ -48,7 +48,8 @@ test('admins rename and demolish the headquarters; its AI agents move to office 
     assert.equal(w1.buildings[hq].name, 'Town Hall');
     assert.ok(w1.buildings[hq].gone, 'demolished');
     for (const a of roster) {
-      const j = await job(a.i);
+      let j = await job(a.i);   // (an agent's next work: from the settling that follows the edit, near its owner, server/index.mjs)
+      for (let k = 0; k < 40 && j.kind === 'free'; k++) { await new Promise(res => setTimeout(res, 250)); j = await job(a.i); }
       assert.notEqual(j.b, hq, `${a.name} no longer works at the demolished headquarters`);
       assert.equal(j.kind, 'vip');
       assert.equal(w1.buildings[j.b].type, 'office', `${a.name} works at an office desk`);

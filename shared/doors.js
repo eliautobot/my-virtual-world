@@ -28,7 +28,7 @@ export function wallDoorways(walls) {
     for (let i = 0; i + 1 < segs.length; i++) {
       const g0 = segs[i][1], g1 = segs[i + 1][0], g = g1 - g0;
       if (g < DOOR_MIN || g > DOOR_MAX) continue;
-      const m = (g0 + g1) / 2, glass = !!(segs[i][2] && segs[i + 1][2]);
+      const m = (g0 + g1) / 2, glass = segs[i][2] === 1 && segs[i + 1][2] === 1;
       out.push(axis === 'x' ? { x: m, z: c, w: g, axis, glass } : { x: c, z: m, w: g, axis, glass });
     }
   }

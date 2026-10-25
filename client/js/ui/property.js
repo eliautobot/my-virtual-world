@@ -10,6 +10,9 @@
 //   why, what stands on it, and the actions this account may take — build here, merge, split back — with the holder's
 //   settings (name and note, who may enter, who it's shared with) and the city's (for sale, zoning, hold, transfer).
 // - Merging happens in the world: the holder's own lots next to it get a ＋ pin; tap them, then Merge.
+// - Towns (2026-10-23, shared/towns.js): the Town lens colours every lot by its town; administrators paint lots into a
+//   town (a new name makes one) or rename it there, or set one lot's town on its card. A holder makes one of their lots
+//   their home base on its card (where their agents live and work: server/towns.js); "My properties" marks it 🏠.
 // Everything goes through /api/property (server-checked); the card only offers what the server would allow.
 import * as THREE from 'three';
 import { S, bus, selectBuilding } from '../core/state.js';
@@ -25,13 +28,14 @@ import { landValue } from '/shared/land-value.js';
 import { DEFAULT_ENVELOPES, ENVELOPE_FALLBACK, DEFAULT_LOT_POLICY } from '/shared/lots.js';
 import { LotGround } from '../render/lot-ground.js';
 import { GROUND_Y, FLOOR_H } from '/shared/constants.js';
+import { MAIN_TOWN, townName, townColor } from '/shared/towns.js';
 
 const FT = 0.3048, ft = m => Math.round(m / FT), sq = n => `${Math.round(n).toLocaleString('en-US')} sq ft`;
 const key = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 const KINDS = { grant: 'Created', transfer: 'Transferred', merge: 'Merged', split: 'Split back', custodial_hold: 'Put on hold', release_hold: 'Hold released', surrender: 'Surrendered', correction: 'Corrected', retire: 'Retired' };
 const ACCESS = [['public', 'Everyone'], ['friends', 'Friends'], ['private', 'Only me']];
 const RIGHTS = [['build', 'build'], ['furnish', 'furnish'], ['decorate', 'decorate']];
-const LENSES = [['status', '🏷️ Status'], ['value', '💎 Value'], ['zoning', '🧭 Zoning']];
+const LENSES = [['status', '🏷️ Status'], ['value', '💎 Value'], ['zoning', '🧭 Zoning'], ['town', '🏙️ Town']];
 // The economy's lenses (server/economy/views.js lens(); docs/features/ECONOMY.md §10), when the economy is on: a value
 // per building, summed (takings, jobs) or averaged (rent, savings) over a lot's buildings, in five quantile bins of one
 // blue ramp (light: little, dark: much); lots without any are grey.
@@ -42,6 +46,8 @@ const phone = () => matchMedia('(max-width: 760px)').matches;
 
 let app, layer, cam, lens = 'status', only = null, sel = null, detail = null, merging = null, cfg = null, shared = new Set();
 let mapOn = false, labT = 0, ground = null;
+let homeBase = null;                                        // this account's (GET /api/property/mine)
+const brush = { on: false, town: MAIN_TOWN, fresh: '' };    // painting lots into a town (administrators, the Town lens)
 const E = {}, pins = [], _v = new THREE.Vector3();
 
 export async function init(a) {
@@ -72,7 +78,15 @@ export async function init(a) {
   E.lenses = E.bar.querySelector('.lenses'); E.legend = E.bar.querySelector('.legend');
   E.lenses.onclick = e => { const b = e.target.closest('[data-lens]'); if (b) setLens(b.dataset.lens); };
   E.bar.querySelector('.pclose').onclick = () => setMap(false);
-  E.legend.onclick = e => { const c = e.target.closest('[data-k]'); if (!c) return; only = only === c.dataset.k ? null : c.dataset.k; paint(); };
+  E.legend.onclick = e => {
+    if (e.target.closest('.lg-paint')) { brushSet(!brush.on); return; }
+    if (e.target.closest('.lg-rename')) { renameTown(); return; }
+    const c = e.target.closest('[data-k]'); if (!c) return; only = only === c.dataset.k ? null : c.dataset.k; paint();
+  };
+  E.legend.addEventListener('change', e => {
+    if (e.target.matches('.lg-tsel')) { brush.town = e.target.value; paint(); if (brush.town === '__new') E.legend.querySelector('.lg-tnew')?.focus(); }
+  });
+  E.legend.addEventListener('input', e => { if (e.target.matches('.lg-tnew')) brush.fresh = e.target.value; });
   E.card = root.appendChild(h('<div id="lotcard" class="panel hidden" role="dialog" aria-label="Lot"></div>'));
   E.card.addEventListener('click', onCardClick);
   E.merge = root.appendChild(h(`<div id="mergebar" class="panel hidden" role="dialog" aria-label="Merge lots">
@@ -89,7 +103,7 @@ export async function init(a) {
   bus.on('frame', frame);
   bus.on('mode', m => { if (m === 'play' && mapOn) setMap(false); });
   app.property = { open: id => { setMap(true); open(id, true); }, toggle: () => setMap(!mapOn), show: on => setMap(on), active: () => mapOn, merge: id => { setMap(true); startMerge(id); }, split: id => split(id),
-    valueOf: id => { const L = layer.byId.get(id); return L ? valueOf(L) : null; }, lots: () => layer.lots };
+    valueOf: id => { const L = layer.byId.get(id); return L ? valueOf(L) : null; }, lots: () => layer.lots, homeBase: () => homeBase };
   app.lotsReload = () => reload();
   bus.on('econ:listings', () => { labT = 0; if (mapOn) paint(); });
   getJSON('/shared/world-config/land-value.json').then(c => { cfg = c; for (const L of layer.lots) L.value = null; if (mapOn) paint(); }).catch(() => {});
@@ -116,9 +130,10 @@ async function loadMine() {
   if (!can) { setShared([]); shared = new Set(); return; }
   const r = await getJSON('/api/property/mine').catch(() => ({ lots: [], shared: [] }));
   setShared(r.shared); shared = new Set((r.shared || []).map(d => d.id));
+  homeBase = r.homeBase || null;
   if (!E.mylist) return;
   const mine = r.lots || [];
-  E.mylist.innerHTML = mine.length ? mine.map(l => `<button type="button" class="btn sm mylot" data-lot="${esc(l.id)}">⭐ ${esc(l.name || l.id)} · ${sq(l.sqft)}${l.origins > 1 ? ` · ${l.origins} lots` : ''}</button>`).join(' ') : 'You don\'t hold any lots yet. Open the data map (the layers button, or <kbd>O</kbd>) and tap a lot marked For sale to buy it.';
+  E.mylist.innerHTML = mine.length ? mine.map(l => `<button type="button" class="btn sm mylot" data-lot="${esc(l.id)}"${homeBase?.lot === l.id ? ' title="Your home base: your agents live and work in its town"' : ''}>${homeBase?.lot === l.id ? '🏠' : '⭐'} ${esc(l.name || l.id)} · ${sq(l.sqft)}${l.origins > 1 ? ` · ${l.origins} lots` : ''}${l.town && l.town !== MAIN_TOWN ? ` · ${esc(l.town)}` : ''}</button>`).join(' ') : 'You don\'t hold any lots yet. Open the data map (the layers button, or <kbd>O</kbd>) and tap a lot marked For sale to buy it.';
   E.sharedlist.innerHTML = r.shared?.length ? `<h4>Shared with me</h4>${r.shared.map(d => `<button type="button" class="btn sm" data-lot="${esc(d.id)}">🤝 ${esc(layer.byId.get(d.id)?.name || d.id)} · ${esc(d.rights.join(', '))}</button>`).join(' ')}` : '';
 }
 /** The highest roof on a lot (for its pin), or its ground. */
@@ -150,8 +165,11 @@ const statusKey = L => { const k = statusOf(L, me(), shared); return k === 'owne
 const tierOf = L => valueOf(L)?.tier || '';
 const isEcon = () => ECON_LENSES.some(x => x[0] === lens);
 const econBin = L => { const v = econ?.byLot.get(L.id); if (!(v > 0)) return -1; let k = 0; while (k < 4 && v > econ.cuts[k]) k++; return k; };
-function keyOf(L) { return lens === 'status' ? statusKey(L) : lens === 'value' ? tierOf(L) : isEcon() ? String(econBin(L)) : L.zoning; }
+const townOf = L => L.town || MAIN_TOWN;
+const tName = id => townName(id, S.world?.name);
+function keyOf(L) { return lens === 'status' ? statusKey(L) : lens === 'value' ? tierOf(L) : lens === 'town' ? townOf(L) : isEcon() ? String(econBin(L)) : L.zoning; }
 function colorOf(L) {
+  if (lens === 'town') return townColor(townOf(L));
   if (isEcon()) { const k = econBin(L); return k < 0 ? NODATA : RAMP[k]; }
   if (lens === 'value') { const v = valueOf(L); return v ? valueColor(v.score) : '#666666'; }
   if (lens === 'zoning') return ZONES[L.zoning]?.color || '#888888';
@@ -167,9 +185,9 @@ function setMap(on) {
   E.bar.classList.toggle('hidden', !on); E.fab?.classList.toggle('on', on);
   if (E.dockMap) E.dockMap.innerHTML = `${icon('layers')} ${on ? 'Close the data map' : 'Open the data map'}`;
   if (on) { paint(); layer.show(true); if (phone() && app.docks) { app.docks.open('left', false); app.docks.open('right', false); } }
-  else { layer.show(false); stopMerge(); closeCard(); hidePins(); only = null; }
+  else { layer.show(false); stopMerge(); closeCard(); hidePins(); only = null; brush.on = false; }
 }
-function setLens(l) { lens = l; only = null; paint(); if (isEcon()) loadEcon(); }
+function setLens(l) { lens = l; only = null; if (l !== 'town') brush.on = false; paint(); if (isEcon()) loadEcon(); }
 /** The economy's values for the lens, per lot (kept for ten seconds). */
 async function loadEcon(force = false) {
   const kind = lens, def = ECON_LENSES.find(x => x[0] === kind);
@@ -199,6 +217,7 @@ function paint() {
   let items;
   if (lens === 'status') items = Object.entries(STATUS).filter(([k]) => count.get(k)).map(([k, s]) => [k, s.color, s.label]);
   else if (lens === 'zoning') items = Object.entries(ZONES).filter(([k]) => count.get(k)).map(([k, z]) => [k, z.color, z.label]);
+  else if (lens === 'town') items = [...count.keys()].sort((a, b) => (a === MAIN_TOWN ? -1 : b === MAIN_TOWN ? 1 : tName(a).localeCompare(tName(b)))).map(k => [k, townColor(k), tName(k)]);
   else if (isEcon()) {
     const c = econ.cuts, rng = k => (k === 0 ? `up to ${econText(c[0], econ.unit)}` : k === 4 ? `over ${econText(c[3], econ.unit)}` : `${econText(c[k - 1], econ.unit)}–${econText(c[k], econ.unit)}`);
     items = [0, 1, 2, 3, 4].filter(k => count.get(String(k))).map(k => [String(k), RAMP[k], rng(k)]);
@@ -206,9 +225,49 @@ function paint() {
   } else items = (cfg?.tiers || []).map((t, i, a) => [t.name, valueColor(Math.min(99, (t.below + (a[i - 1]?.below ?? 0)) / 2)), t.name]).filter(([k]) => count.get(k));
   E.legend.innerHTML = items.map(([k, c, t]) => `<button type="button" class="lg${only === k ? ' on' : ''}${only !== null && only !== k ? ' off' : ''}" data-k="${esc(k)}" role="listitem" title="Show only these (tap again for all)"><i style="background:${c}"></i>${esc(t)} <span class="n">${count.get(k)}</span></button>`).join('')
     + (lens === 'value' ? '<span class="lg-note">Low → high: how wanted a place is (not a price)</span>' : '')
+    + (lens === 'town' ? townTools() : '')
     + (isEcon() ? `<span class="lg-note">${{ revenue: 'What its businesses took yesterday', rent: 'A night\'s rent, on average', wealth: 'Its residents\' savings, on average', jobs: 'People working there' }[lens]}</span>` : '');
   labT = 0;
 }
+// ------------------------------------------------------------------ towns: the brush (administrators)
+const isAdmin = () => !!auth.can?.('property.admin');
+const allTowns = () => [...new Set([MAIN_TOWN, ...layer.lots.map(townOf)])].sort((a, b) => (a === MAIN_TOWN ? -1 : b === MAIN_TOWN ? 1 : tName(a).localeCompare(tName(b))));
+function townTools() {
+  if (!isAdmin()) return '<span class="lg-note">Each town is its own place to live and work</span>';
+  const opts = allTowns().map(t => `<option value="${esc(t)}"${brush.town === t ? ' selected' : ''}>${esc(tName(t))}</option>`).join('');
+  return `<span class="lg-tools"><select class="input lg-tsel" aria-label="Town to paint">${opts}<option value="__new"${brush.town === '__new' ? ' selected' : ''}>＋ New town…</option></select>`
+    + `${brush.town === '__new' ? `<input class="input lg-tnew" maxlength="32" placeholder="New town's name" value="${esc(brush.fresh)}">` : ''}`
+    + `<button type="button" class="btn small lg-paint${brush.on ? ' primary' : ''}" title="Tap lots to put them in this town">${brush.on ? '✓ Done' : '✏️ Paint lots'}</button>`
+    + `${brush.town !== MAIN_TOWN && brush.town !== '__new' ? '<button type="button" class="btn small lg-rename">Rename</button>' : ''}`
+    + `${brush.on ? `<span class="lg-note">Tap lots to put them in ${esc(brushName())}</span>` : ''}</span>`;
+}
+const brushTown = () => (brush.town === '__new' ? brush.fresh.trim() : brush.town);
+const brushName = () => (brush.town === '__new' ? brush.fresh.trim() || 'the new town' : tName(brush.town));
+function brushSet(on) {
+  if (on && !brushTown()) { app.toast('Name the new town first', 'bad', 2200); E.legend.querySelector('.lg-tnew')?.focus(); return; }
+  brush.on = on;
+  if (on) closeCard();
+  paint();
+}
+/** Puts lot L in the brush's town (at once on the map; the server's word follows: msg:lots). */
+async function brushLot(L) {
+  const town = brushTown(); if (!town) return;
+  const was = L.town, want = brush.town === '__new' ? town : brush.town;
+  if ((was || MAIN_TOWN) === want) return;
+  L.town = want; paint();
+  try {
+    const r = await post('/api/property/town', { ids: [L.id], town, key: key() });
+    if (brush.town === '__new' && r?.town) { brush.town = r.town; brush.fresh = ''; L.town = r.town; paint(); }
+  } catch (e) { L.town = was; paint(); app.toast(e.message || 'That did not work', 'bad', 2600); }
+}
+async function renameTown() {
+  const from = brush.town; if (!from || from === MAIN_TOWN || from === '__new') return;
+  const to = prompt(`A new name for ${tName(from)}:`, tName(from));
+  if (!to || to.trim() === from) return;
+  try { const r = await post('/api/property/town-rename', { from, to, key: key() }); brush.town = r.town; await reload(); app.toast(`${tName(from)} is now ${r.name}`, 'good', 2200); }
+  catch (e) { app.toast(e.message || 'That did not work', 'bad', 2600); }
+}
+
 function frame() {
   const goal = mapOn ? 1 : 0, u = GU.uMap;
   if (u.value !== goal) u.value = goal > u.value ? Math.min(goal, u.value + 0.06) : Math.max(goal, u.value - 0.08);
@@ -237,12 +296,27 @@ function pinFor(L) {
   if (isEcon()) { const v = econ?.byLot.get(L.id), k = econBin(L); return v > 0 ? { text: econText(v, econ.unit), cls: 'val', bg: RAMP[k], fg: k >= 2 ? '#ffffff' : '#0b0b0b' } : null; }
   return { text: ZONES[L.zoning]?.label || L.zoning, cls: 'zone' };
 }
+/** The Town lens names each town once, over the lot nearest its middle: { lot id → town }. */
+function townLabels() {
+  const by = new Map();
+  for (const L of layer.lots) { const t = townOf(L); let g = by.get(t); if (!g) by.set(t, g = { x: 0, z: 0, n: 0, list: [] }); g.x += L.c.x; g.z += L.c.z; g.n++; g.list.push(L); }
+  const out = new Map();
+  for (const [t, g] of by) {
+    const cx = g.x / g.n, cz = g.z / g.n;
+    let best = null, bd = Infinity;
+    for (const L of g.list) { const d = Math.hypot(L.c.x - cx, L.c.z - cz); if (d < bd) { bd = d; best = L; } }
+    if (best) out.set(best.id, t);
+  }
+  return out;
+}
 function placePins() {
   const W = innerWidth, H = innerHeight, t = cam.target, reach = Math.max(260, (cam.dist || 200) * 2.4), list = [];
+  const named = lens === 'town' && !merging ? townLabels() : null;
   for (const L of layer.lots) {
     if (only !== null && keyOf(L) !== only && L.id !== sel) continue;
-    if (Math.hypot(L.c.x - t.x, L.c.z - t.z) > reach) continue;
-    const p = pinFor(L); if (!p) continue;
+    if (!named && Math.hypot(L.c.x - t.x, L.c.z - t.z) > reach) continue;
+    const p = named ? (named.has(L.id) ? { text: `🏙️ ${tName(named.get(L.id))}`, cls: 'val', bg: townColor(named.get(L.id)), fg: '#ffffff' } : L.id === sel ? pinFor(L) : null) : pinFor(L);
+    if (!p) continue;
     _v.set(L.c.x, L.top ?? GROUND_Y, L.c.z).project(cam.cam);
     if (_v.z > 1 || _v.x < -1.05 || _v.x > 1.05 || _v.y < -1.05 || _v.y > 1.05) continue;
     list.push({ L, p, x: (_v.x + 1) / 2 * W, y: (1 - _v.y) / 2 * H, d: Math.abs(_v.x) + Math.abs(_v.y) });
@@ -256,6 +330,7 @@ function placePins() {
     if (el._t !== it.p.text) { el.textContent = it.p.text; el._t = it.p.text; }
     el.className = `lotpin ${it.p.cls}`; el.dataset.lot = it.L.id;
     el.style.background = it.p.bg || ''; el.style.color = it.p.fg || ''; el.style.display = '';
+    el.style.pointerEvents = brush.on ? 'none' : '';   // (painting: a tap goes to the lot under it, never a label's)
     el.style.transform = `translate(${Math.round(it.x)}px, ${Math.round(it.y)}px) translate(-50%, -100%)`;
     k++;
   }
@@ -264,7 +339,7 @@ function placePins() {
 function hidePins() { for (const p of pins) p.style.display = 'none'; }
 function onPin(e) {
   const id = e.currentTarget.dataset.lot; if (!id) return;
-  if (merging) togglePick(id); else open(id, false);
+  if (brush.on) { const L = layer.byId.get(id); if (L) brushLot(L); } else if (merging) togglePick(id); else open(id, false);
 }
 
 // ------------------------------------------------------------------ choosing a lot in the world
@@ -279,6 +354,7 @@ function lotUnder(e) {
 function onWorldClick(e) {
   if (!mapOn || S.mode === 'play' || app.place?.active()) return false;
   const L = lotUnder(e);
+  if (brush.on) { if (L) brushLot(L); return true; }
   if (merging) { if (L) togglePick(L.id); return true; }
   if (!L) { closeCard(); return true; }
   open(L.id, false);
@@ -286,7 +362,7 @@ function onWorldClick(e) {
 }
 function onKey(e) {
   if (e.key === 'o' || e.key === 'O') { if (S.mode === 'play') return false; setMap(!mapOn); return true; }   // O for ownership (M opens the world map, ui/worldmap.js)
-  if (e.key === 'Escape' && mapOn) { if (merging) stopMerge(); else if (!E.card.classList.contains('hidden')) closeCard(); else setMap(false); return true; }
+  if (e.key === 'Escape' && mapOn) { if (brush.on) brushSet(false); else if (merging) stopMerge(); else if (!E.card.classList.contains('hidden')) closeCard(); else setMap(false); return true; }
   return false;
 }
 
@@ -314,6 +390,7 @@ function render() {
   if (r.has('build')) acts.push('<button type="button" class="btn primary" data-a="build">🏗️ Build here</button>');
   if (r.has('merge') && myNeighbours.length) acts.push(`<button type="button" class="btn" data-a="merge">➕ Merge with ${isMine(L) ? 'my' : 'the city\'s'} lots next to it</button>`);
   if (r.has('merge') && l.origins > 1) acts.push(`<button type="button" class="btn" data-a="split">✂️ Split back into ${l.origins} lots</button>`);
+  if (isMine(L) && homeBase?.lot !== l.id) acts.push('<button type="button" class="btn" data-a="home" title="Your agents live and work in your home base\'s town">🏠 Make it my home base</button>');
   acts.push('<button type="button" class="btn" data-a="fly">🎯 Go there</button>');
   const vcSale = app.econ?.status()?.enabled;   // with the economy on: land for Virtual Coin
   const sale = vcSale ? '<div class="lc-econ"></div>' : st === 'forSale' && !can.admin ? '<p class="hint">Buying land arrives with the world\'s economy.</p>' : '';
@@ -326,6 +403,7 @@ function render() {
       <div><span>Zoning</span><b>${esc(ZONES[l.zoning]?.label || l.zoning)}</b><small>up to ${env.maxFloors} floor${env.maxFloors > 1 ? 's' : ''} · ${ft(env.setback)} ft from the lines</small></div>
       <div><span>Value</span>${v ? `<b style="color:${valueColor(v.score)}">${v.score} · ${esc(v.tier)}</b><small>${v.factors.slice(0, 2).map(f => esc(f.label)).join(' · ') || 'Out of the way'}</small>` : '<b>—</b>'}</div>
       <div><span>On it</span><b>${blds.length ? blds.map(B => `<a href="#" data-b="${B.idx}">${esc(B.name)}</a>`).join(', ') : 'Nothing yet'}</b><small>${{ public: 'Everyone may enter', friends: 'Friends may enter', private: 'Only the holder enters' }[l.access] || ''}</small></div>
+      <div class="lc-town"><span>Town</span><b><i class="dot" style="background:${townColor(l.town || MAIN_TOWN)}"></i> ${esc(tName(l.town || MAIN_TOWN))}</b><small>${isMine(L) && homeBase?.lot === l.id ? '🏠 Your home base: your agents live and work in this town' : isMine(L) ? 'One of your lots' : ''}</small></div>
     </div>
     <div class="lc-acts">${acts.join('')}</div>${sale}
     ${can.manage ? `<details class="lc-sec"${isMine(L) ? ' open' : ''}><summary>⚙️ Lot settings</summary>
@@ -339,6 +417,7 @@ function render() {
     ${can.admin ? `<details class="lc-sec"><summary>🏛️ City</summary>
       ${city ? `<div class="row"><button type="button" class="btn small${st === 'forSale' ? '' : ' primary'}" data-a="${st === 'forSale' ? 'withdraw' : 'offer'}">${st === 'forSale' ? 'Take off sale' : '🏷️ Put up for sale'}</button></div>` : ''}
       <div class="row"><select class="input lc-zone">${Object.entries(ZONES).map(([k, z]) => `<option value="${k}"${k === l.zoning ? ' selected' : ''}>${z.label}</option>`).join('')}</select><button type="button" class="btn small" data-a="zone">Set zoning</button></div>
+      <div class="row"><select class="input lc-tsel" aria-label="Town">${allTowns().map(t => `<option value="${esc(t)}"${t === (l.town || MAIN_TOWN) ? ' selected' : ''}>${esc(tName(t))}</option>`).join('')}</select><input class="input lc-tnew" maxlength="32" placeholder="or a new town's name" size="14"><button type="button" class="btn small" data-a="town">Set town</button></div>
       <div class="row"><input class="input lc-hreason" placeholder="Reason (kept in the history)" size="18"><button type="button" class="btn small" data-a="hold">${l.lifecycle === 'custodial' ? 'Release the hold' : 'Put on hold'}</button></div>
       <div class="row"><input class="input lc-tlogin" placeholder="Username, or city" size="12"><input class="input lc-treason" placeholder="Reason" size="12"><button type="button" class="btn small" data-a="transfer">Transfer</button></div>
       ${retirable ? '<div class="row"><button type="button" class="btn small danger" data-a="retire" title="Remove this lot from the map: the land goes back to plain city land">🗑️ Retire lot</button></div>' : `<p class="hint">${blds.length ? 'A building stands on it: it can\'t be retired.' : 'Only unused city land can be retired.'}</p>`}
@@ -370,6 +449,8 @@ async function onCardClick(e) {
     case 'offer': await act('/api/property/offer', { id: l.id, revision: l.revision }, 'Up for sale.'); break;
     case 'withdraw': await act('/api/property/withdraw', { id: l.id, revision: l.revision }, 'Taken off sale.'); break;
     case 'zone': await act('/api/property/zoning', { id: l.id, zoning: q('.lc-zone').value, revision: l.revision }, 'Zoning set.'); break;
+    case 'town': { const t = q('.lc-tnew').value.trim() || q('.lc-tsel').value; await act('/api/property/town', { ids: [l.id], town: t }, `In ${tName(t)} now.`); break; }
+    case 'home': await act('/api/property/home-base', { lot: l.id }, '🏠 Your home base now: your agents live and work in its town.'); break;
     case 'hold': await act(l.lifecycle === 'custodial' ? '/api/property/release' : '/api/property/hold', { id: l.id, reason: q('.lc-hreason').value, revision: l.revision }, 'Done.'); break;
     case 'retire': {
       if (!confirm(`Retire ${l.name || `lot ${l.id}`}? It leaves the map and its land goes back to plain city land. This can't be undone (make a new lot there instead).`)) break;

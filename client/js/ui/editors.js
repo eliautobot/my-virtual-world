@@ -21,6 +21,8 @@ import { doorReason } from '/shared/door-access.js';
 import { pointAt as pointAtS } from '/shared/roads.js';
 import { furnitureGeometry } from '../render/furniture.js';
 import { initLibrary, saveLayout, openLibrary } from './floor-library.js';
+import { initFloorThemes, openThemes, nameFloor } from './floor-themes.js';
+import { themeOf, themeWhy } from '/shared/floor-themes.js';
 
 export const ICON = {
   sign_stand: '🪧', sign_stand_wide: '🪧', sign_wall: '🖼️', sign_wall_tall: '🖼️',
@@ -30,10 +32,21 @@ export const ICON = {
   water_cooler: '💧', vending: '🥤', dining_table: '🍽️', cafe_table: '🪑', cafe_table4: '🪑', bar_counter: '🍸', cafe_counter: '🧁',
   shop_shelf: '🛒', clothes_rack: '👗', checkout: '💳', display: '🏷️', shoe_wall: '👟', shoe_plinth: '✨', treadmill: '🏃', weights: '🏋️', yoga_mat: '🧘', lockers: '🔒',
   bed_double: '🛏️', bed_single: '🛏️', nightstand: '💡', wardrobe: '👔', shower: '🚿', sink: '🚰', toilet: '🚽', bathtub: '🛁', desk_home: '💻', mailboxes: '📬',
-  pingpong: '🏓', arcade: '🕹️', piano: '🎹', dance_floor: '💃', plant: '🌿', plant_tall: '🌱', floor_lamp: '💡', bench: '🪑',
+  pingpong: '🏓', arcade: '🕹️', piano: '🎹', dance_floor: '💃',
+  pool_table: '🎱', bowling_lane: '🎳', mech_bull: '🐂', air_hockey: '🏓', claw_machine: '🧸', skeeball: '🎯', hoop_shot: '🏀', pinball: '👾',
+  racing_sim: '🏎️', dance_machine: '💃', whack_mole: '🎮', boxer: '🥊', foosball: '🎮', photo_booth: '📷', prize_case: '🎁', prize_wall: '🧸',
+  token_machine: '🪙', snack_bar: '🍿', neon_booth: '🛋️', hightop_table: '🍸', gaming_chair: '🪑', giant_joystick: '🕹️', led_pillar: '💡',
+  curve_sofa: '🛋️', serp_sofa: '🛋️', boucle_chair: '💺', shell_chair: '💺', pouf: '🟤', stone_table: '☕', side_lamp_table: '💡', fire_table: '🔥', organic_rug: '🟫', chaise: '🛋️', floor_lantern: '💡', planter_box: '🌿', slat_screen: '🟫',
+  arc_lamp: '💡', twist_sculpture: '✨', stone_stack: '✨', ring_sculpture: '⭕', vase_set: '🌿', planter_palm: '🌱', wall_niche: '✨', wall_slats: '🟫', wall_sconce: '💡',
+  art_panel: '🖼️', cove_light: '✨', lounge_bar: '🍸', back_bar: '🍸', lounge_stage: '🎤',
+  island_bar: '🍸', round_bar: '🍷', table_two: '☕', table_four: '🍽', highboy: '🍸', loveseat: '🛋️', sofa_lounge: '🛋️', club_chair: '💺', booth_round: '🍽',
+  banquette_table: '🍽', drink_ledge: '🍷', fireplace: '🔥', bookcase: '📚', olive_tree: '🌳',
+  dj_stage: '🎧', dance_ring: '💃', dance_ring_s: '💃', club_bar: '🍸', vip_booth: '🍾', party_table: '🍾', speaker_stack: '🔊', light_tower: '💡', laser_bar: '✨',
+  led_wall: '📺', go_go_podium: '💃', neon_palm: '✨', neon_vip: '✨', royal_palm: '🌱', velvet_rope: '🎉',
+  floor_neon: '✨', neon_arcade: '✨', neon_gameon: '✨', neon_prizes: '✨', neon_snacks: '✨', neon_joystick: '✨', neon_invader: '👾', pixel_mural: '👾', pixel_mural_maze: '👾', plant: '🌿', plant_tall: '🌱', floor_lamp: '💡', bench: '🪑',
   picnic_table: '🧺', tree: '🌳', tree_pine: '🌲', bush: '🌿', flowers: '🌷', fountain: '⛲',
 };
-const CAT_ICON = { Office: '💼', Lounge: '🛋️', Kitchen: '🍳', Retail: '🛍️', Gym: '🏋️', Home: '🏠', Fun: '🎲', Decor: '🌿', Signs: '🪧', Outdoor: '🌳' };
+const CAT_ICON = { Office: '💼', Lounge: '🛋️', Kitchen: '🍳', Retail: '🛍️', Gym: '🏋️', Home: '🏠', Fun: '🎲', Arcade: '🕹️', Club: '🎧', Decor: '🌿', Signs: '🪧', Outdoor: '🌳' };
 const TINTS = ['#f1f0ec', '#d8d2c4', '#b08560', '#6e4a31', '#3b3f45', '#6d7b8f', '#1f2a44', '#3d6fb6', '#2a9d8f', '#4f8a3c', '#e9c46a', '#e76f51', '#c0392b', '#8e44ad', '#e84393'];
 const TYPE_CAT = { office: 'Office', hq: 'Office', apartment: 'Home', cafe: 'Kitchen', restaurant: 'Kitchen', shop: 'Retail', gym: 'Gym', park: 'Outdoor' };
 const STYLE_NAME = { glass: 'Glass', brick: 'Brick', concrete: 'Concrete', modern: 'Modern', classic: 'Classic', stucco: 'Stucco' };
@@ -104,7 +117,7 @@ class ItemGhost {
   setType(t) {
     if (t === this.type) return;
     this.type = t;
-    this.mesh.geometry = (t && furnitureGeometry(t).geo) || new THREE.BufferGeometry();
+    this.mesh.geometry = (t && (furnitureGeometry(t).whole?.() || furnitureGeometry(t).geo)) || new THREE.BufferGeometry();   // (with its moving parts at rest)
   }
   show(tg, it, ok) {
     const [x0, z0, x1, z1] = itemRect(it, CATALOG[it.t].rect), cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;   // (a sign's geometry is made at its size)
@@ -160,8 +173,8 @@ export function init(a) {
   bus.on('focus', refresh); bus.on('selectB', refresh);
   bus.on('world', onWorld);
   bus.on('frame', frame);
-  app.editors = { F, BS, ICON, target, newType: setNewType };
-  initLibrary(app);
+  app.editors = { F, BS, ICON, target, newType: setNewType, editItem };
+  initLibrary(app); initFloorThemes(app, edit);
 }
 function refresh() {
   if (S.mode === 'furnish') refreshFurnish();
@@ -266,6 +279,13 @@ function setType(t) {
   renderSel();
 }
 function selEntry() { return F.sel ? inter.findEntry(F.sel.b, F.sel.f, F.sel.id) : null; }
+/** Piece id on floor f of building b, selected in the furniture editor (a piece's own ⋯ menu, Edit: ui/post-menu.js). */
+function editItem(b, f, id) {
+  if (S.focus.b !== b || S.focus.f !== f) app.lookInside(b, f);
+  if (S.mode !== 'furnish') app.setMode('furnish');
+  const e = inter.findEntry(b, f, id);
+  if (e && ownItem(target(), e)) { setType(null); selectItem(e); }
+}
 function selectItem(e) {
   F.sel = e ? { b: e.b, f: e.f, id: e.id } : null;
   inter.highlight(e || null);
@@ -334,13 +354,17 @@ const FMODE = {
 function renderFloorBar(tg) {
   let html = '';
   if (tg) {
-    const L = levelOf(tg.b, tg.f), m = levelMode(L), [ic, nm, tip] = FMODE[m], park = tg.B.type === 'park';
+    const L = levelOf(tg.b, tg.f), m = levelMode(L), [ic, nm, tip] = FMODE[m], park = tg.B.type === 'park', th = themeOf(L?.theme);
+    // Floor Themes (a floor without flats, on a lot I may build on) and the floor's own name (furnishing rights)
+    const themes = !park && mayOn(tg.B, 'build') && !themeWhy(tg.B, tg.f, L) ? `<button type="button" class="btn small ft-open" data-lop="themes" title="Lay this floor out as an arcade, a lounge, a club, a café…">🎨 Floor Themes</button>` : '';
+    const naming = !park && mayOn(tg.B, 'furnish') ? `<button type="button" class="btn small" data-lop="name" title="Give this floor its own name (shown on the floor buttons and when you point at it)">✏️ Name</button>` : '';
     const acts = mayOn(tg.B, 'build') ? `<span class="fm-acts">
       <button type="button" class="btn small" data-lop="clear"${m === 'empty' ? ' disabled' : ''} title="Take out all furniture and inner walls (the elevator stays)">${park ? 'Clear park' : 'Clear floor'}</button>
       <button type="button" class="btn small" data-lop="regen" title="A new arrangement of the same kind of ${park ? 'park' : 'floor'}">🎲 Regenerate</button>
       ${m !== 'auto' ? '<button type="button" class="btn small" data-lop="reset" title="Back to the layout made for this building">↺ Reset to auto</button>' : ''}</span>` : '';
     const lib = `<span class="fm-acts"><button type="button" class="btn small" data-lop="save" title="Keep this layout in your layouts">💾 Save layout</button><button type="button" class="btn small" data-lop="lib" title="Your saved layouts and the ones shared with you">📂 Layouts</button></span>`;
-    html = `<span class="fmode fm-${m}" title="${esc(tip)}">${ic} ${nm}</span><span class="fm-tip">${esc(tip)}</span>${acts}${lib}`;
+    const named = L?.name && !park ? `<span class="ft-name" title="This floor's name">${th ? `${th.icon} ` : ''}${esc(L.name)}</span>` : '';
+    html = `<span class="fmode fm-${m}" title="${esc(tip)}">${ic} ${nm}</span>${named}<span class="fm-tip">${esc(th ? `${tip}. Theme: ${th.name} (🎲 Regenerate rolls it again)` : tip)}</span>${themes || naming ? `<span class="fm-acts">${themes}${naming}</span>` : ''}${acts}${lib}`;
   }
   if (E.ffloor._h !== html) { E.ffloor.innerHTML = html; E.ffloor._h = html; }
 }
@@ -351,6 +375,8 @@ async function floorOp(btn) {
   const op = btn.dataset.lop, L = levelOf(tg.b, tg.f), custom = levelMode(L) === 'custom';
   if (op === 'save') return saveLayout(tg);
   if (op === 'lib') return openLibrary(tg, scopeOp(tg));
+  if (op === 'themes') return openThemes(tg, scopeOp(tg), scopeOp(tg).scope ? shared(tg) : 1);
+  if (op === 'name') return nameFloor(tg, scopeOp(tg));
   if (custom && !btn.dataset.armed) {
     btn.dataset.armed = '1'; btn.dataset.label = btn.textContent; btn.classList.add('danger');
     btn.textContent = op === 'clear' ? 'Tap again: clear your changes' : op === 'regen' ? 'Tap again: replace your changes' : 'Tap again: undo your changes';
@@ -694,22 +720,23 @@ function renderEdit() {
   if (!mayOn(B, 'build')) { E.tedit.innerHTML = `<div class="hint">${esc(whyNot(B, 'build'))}. You can change buildings on your own lots.</div>`; return; }
   const park = B.type === 'park', cap = floorsCap(B.type), TI = app.TYPE_ICON || {}, TN = app.TYPE_NAME || {};
   const sub = [TN[B.type] || B.type, park ? '' : `${B.floors} floor${B.floors > 1 ? 's' : ''}`, park ? '' : STYLE_NAME[B.style] || ''].filter(Boolean).join(' · ');
-  // Laid out in sections (2026-10-06: "too messy"): who it is, its size and place, how it looks, its billboards, and
-  // what to do with it — labels above their fields, choices in even grids.
+  // Laid out in sections (2026-10-06: "too messy"): who it is, its billboards (right under the name, 2026-10-23: no
+  // scrolling to find them), its size and place, how it looks, and what to do with it — labels above their fields,
+  // choices in even grids.
   E.tedit.innerHTML = `<div class="be">
   <div class="be-head"><span class="be-ic">${TI[B.type] || '🏢'}</span><div class="be-id"><b>${esc(B.name)}</b><small>${esc(sub)}</small></div></div>
   <section class="be-sec"><h5>${park ? 'Name' : 'Name and sign'}</h5>
     <label class="be-f"><span>Name</span><input class="input bname" maxlength="40" value="${esc(B.name)}" spellcheck="false"></label>
     ${park ? '' : `<label class="be-f"><span>Sign over the entrance</span><input class="input bsign" maxlength="28" placeholder="No sign" value="${esc(B.sign || '')}" spellcheck="false"></label>`}</section>
+  ${park ? '' : `<section class="be-sec"><h5>Rooftop billboards</h5>
+    <button type="button" class="btn wide" data-a="roofsigns" title="Your own billboards on the roof (never paid ads)">🪧 ${B.roofSigns?.length ? `${B.roofSigns.length} on the roof · edit them` : 'Put one up'}</button></section>`}
   <section class="be-sec"><h5>${park ? 'Place' : 'Size and place'}</h5>
     ${park ? '' : `<div class="be-row"><span class="be-lbl">Floors</span><div class="be-step"><button type="button" class="btn small" data-a="fl-" title="Remove the top floor" aria-label="Remove the top floor">−</button><input type="number" class="input bfl" min="1" max="${cap}" value="${B.floors}" aria-label="Floors"><button type="button" class="btn small" data-a="fl+" title="Add a floor" aria-label="Add a floor">+</button></div><small class="dim">up to ${cap}</small></div>`}
     <button type="button" class="btn wide" data-a="place" title="Handles on the building: move, resize, turn${park ? '' : ', floors'}">✥ Move, resize or turn</button></section>
   ${park ? '' : `<section class="be-sec"><h5>Look</h5>
     <div class="be-f"><span>Style</span><div class="be-chips">${BUILD_STYLES.map(s => `<span class="chip${B.style === s ? ' on' : ''}" data-a="style" data-v="${s}">${STYLE_NAME[s]}</span>`).join('')}</div></div>
     <div class="be-f"><span>Roof</span><div class="be-chips">${ROOF_KINDS.map(s => `<span class="chip${(B.roofKind || 'hvac') === s ? ' on' : ''}" data-a="roof" data-v="${s}">${ROOF_NAME[s]}</span>`).join('')}</div></div>
-    <div class="be-f"><span>Colours</span><div class="be-colors">${COLOR_KEYS.map(([k, n]) => `<label class="be-color" title="${n}"><input type="color" data-k="${k}" value="${(B.colors && B.colors[k]) || '#888888'}"><span>${n}</span></label>`).join('')}</div></div></section>
-  <section class="be-sec"><h5>Rooftop billboards</h5>
-    <button type="button" class="btn wide" data-a="roofsigns" title="Your own billboards on the roof (never paid ads)">🪧 ${B.roofSigns?.length ? `${B.roofSigns.length} on the roof · edit them` : 'Put one up'}</button></section>`}
+    <div class="be-f"><span>Colours</span><div class="be-colors">${COLOR_KEYS.map(([k, n]) => `<label class="be-color" title="${n}"><input type="color" data-k="${k}" value="${(B.colors && B.colors[k]) || '#888888'}"><span>${n}</span></label>`).join('')}</div></div></section>`}
   <div class="be-acts"><button type="button" class="btn" data-a="look">🔍 ${park ? 'Visit' : 'Look inside'}</button><button type="button" class="btn" data-a="furn">🛋️ Furnish</button>${B.type === 'hq' ? '' : '<button type="button" class="btn danger" data-a="del">🗑 Demolish</button>'}</div></div>`;
 }
 async function setFloors(n) {

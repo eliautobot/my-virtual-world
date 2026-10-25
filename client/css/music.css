@@ -1,0 +1,85 @@
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* A stage's 🎵 and its music panel (js/ui/music-panel.js): the 🎵 over each Lounge Stage and DJ Stage (its bars move
+   while music plays); the panel on the right, a sheet from the bottom on a phone. */
+#musicpins { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
+.mp-pin { position: absolute; left: 0; top: 0; width: 34px; height: 34px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  pointer-events: auto; cursor: pointer; color: var(--gold); background: var(--bg-0); border: 1px solid var(--gold);
+  box-shadow: var(--shadow); transition: background .15s; }   /* (no backdrop blur: on some Android GPUs a blur behind a moved pin covered the whole screen) */
+.mp-pin[hidden] { display: none; }
+.mp-pin:hover, .mp-pin.on { background: var(--btn-hover); }
+.mp-pin:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: 2px; }
+.mp-bars { display: none; align-items: flex-end; gap: 2px; height: 14px; }
+.mp-bars i { width: 3px; height: 100%; border-radius: 1px; background: currentColor; transform-origin: bottom; animation: mp-eq 0.9s ease-in-out infinite; }
+.mp-bars i:nth-child(2) { animation-delay: -.3s; animation-duration: .7s; }
+.mp-bars i:nth-child(3) { animation-delay: -.55s; animation-duration: 1.1s; }
+.mp-pin.playing .mp-bars { display: flex; }
+.mp-pin.playing .mp-note { display: none; }
+.mp-pin.playing::after { content: ''; position: absolute; inset: -1px; border-radius: 50%; border: 2px solid var(--gold); pointer-events: none; animation: mp-ring 2.4s ease-out infinite; }
+@keyframes mp-eq { 0%, 100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }
+@keyframes mp-ring { from { transform: scale(1); opacity: .7; } to { transform: scale(1.8); opacity: 0; } }
+@media (pointer: coarse) { .mp-pin { width: 40px; height: 40px; } }
+@media (prefers-reduced-motion: reduce) { .mp-bars i, .mp-pin.playing::after { animation: none; } .mp-bars i { transform: scaleY(.7); } }
+
+.mp { position: fixed; right: 12px; top: 64px; z-index: 5; width: 360px; max-width: calc(100vw - 24px); max-height: calc(100vh - 84px);
+  display: flex; flex-direction: column; padding: 10px; gap: 8px; font-size: 13px; }
+.mp-h { display: flex; align-items: center; gap: 9px; }
+.mp-h > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mp-h b { font-size: 14px; }
+.mp-h small, .mp-ti small, .mp-np small { font-size: 11.5px; opacity: .72; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-ic { font-size: 22px; }
+.mp-x { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 15px; opacity: .7; padding: 4px 6px; }
+.mp-now { border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; background: var(--gold-soft); }
+.mp-now.idle { background: transparent; }
+.mp-np { display: flex; flex-direction: column; min-width: 0; }
+.mp-np b { font-size: 14px; }
+.mp-by { color: var(--gold); opacity: 1 !important; }
+.mp-prog { display: flex; align-items: center; gap: 8px; font-size: 11px; font-variant-numeric: tabular-nums; opacity: .85; }
+.mp-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.mp-bar i { display: block; height: 100%; width: 0; background: var(--gold); border-radius: 2px; }
+.mp-live { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11.5px; opacity: .85; }
+.mp-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.mp-tab { border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 12.5px; padding: 6px 9px; border-bottom: 2px solid transparent; opacity: .75; white-space: nowrap; }
+.mp-tab.on { border-bottom-color: var(--gold); opacity: 1; font-weight: 600; }
+.mp-tab:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: -2px; }
+.mp-body { overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 4px; min-height: 80px; padding-right: 2px; }
+.mp-body h4 { margin: 8px 0 2px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; opacity: .65; }
+.mp-row { display: flex; align-items: center; gap: 8px; padding: 6px 6px; border-radius: 8px; }
+.mp-row:hover { background: var(--btn-hover); }
+.mp-row.mine { background: var(--gold-soft); }
+.mp-ti { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mp-ti b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-who { font-size: 11px; opacity: .7; white-space: nowrap; }
+.mp-e { display: inline-block; padding: 0 3px; border: 1px solid currentColor; border-radius: 3px; font-size: 9px; line-height: 12px; font-weight: 700; }
+.mp-dim { opacity: .65; font-size: 12px; margin: 4px 2px; line-height: 1.35; }
+.mp-note { margin: 2px; padding: 7px 9px; border-radius: 8px; background: var(--btn); font-size: 12px; line-height: 1.35; }
+.mp-find { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 4px; }
+.mp-q { width: 100%; }
+.mp-chips, .mp-modes { display: flex; flex-wrap: wrap; gap: 4px; }
+.mp-chip { border: 1px solid var(--line); border-radius: 14px; padding: 3px 9px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 11.5px; }
+.mp-chip.on { background: var(--gold-soft); border-color: var(--gold); }
+.mp-chip:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: 1px; }
+.mp-list { display: flex; flex-direction: column; gap: 1px; }
+.mp-ord { display: inline-flex; gap: 2px; }
+.mp-up { display: flex; flex-direction: column; gap: 6px; }
+.mp-up input:not([type=checkbox]):not([type=file]), .mp-up select { width: 100%; }
+.mp-file { position: relative; display: block; border: 1px dashed var(--line); border-radius: 8px; padding: 10px; text-align: center; cursor: pointer; font-size: 12px; opacity: .9; }
+.mp-file:hover { background: var(--btn-hover); }
+.mp-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.mp-chk { display: flex; gap: 7px; align-items: flex-start; font-size: 12px; line-height: 1.35; cursor: pointer; }
+.mp-chk input { margin-top: 2px; }
+.mp-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.mp-set { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 4px 2px; }
+.mp-set .mp-line { width: 100%; }
+.mp-st { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.mp-st.approved { color: var(--good, #3c9); }
+.mp-st.pending { color: var(--gold); }
+.mp-st.rejected { color: var(--bad, #e66); }
+.mp-rev { border: 1px solid var(--line); border-radius: 9px; padding: 4px 6px 7px; display: flex; flex-direction: column; gap: 5px; }
+.mp-rev audio { width: 100%; height: 32px; }
+.mp-rej { display: flex; gap: 4px; }
+.mp-rej input { flex: 1; min-width: 0; }
+
+@media (max-width: 640px) {
+  .mp { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; max-height: 72vh; border-radius: 14px 14px 0 0; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  .mp-row { padding: 8px 6px; }
+}

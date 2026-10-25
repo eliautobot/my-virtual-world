@@ -31,7 +31,7 @@
 //                     imports a release 1 licence, validated with Lemon Squeezy (no new activation; WP1.11, C109)
 //   backup [--out <file>]
 //                     a .tar.gz of the world files, a consistent copy of the accounts database and of the agents' PC
-//                     (pc/pc.db and its file store pc/blobs), made while the server runs (DECISIONS C111), written as it
+//                     (pc/pc.db and its file store pc/blobs), the city's songs (music/), made while the server runs (DECISIONS C111), written as it
 //                     goes (never held in memory whole), to standard output unless --out names a new file. It leaves out
 //                     the key (back it up separately) and the first owner's temporary password, and never migrates.
 // Every change is recorded in the audit log as a host action.
@@ -215,10 +215,14 @@ async function backup(data, out) {
         for (const f of fs.readdirSync(path.join(store, d.name))) if (/^[0-9a-f]{64}$/.test(f)) { files.push({ name: `pc/blobs/${d.name}/${f}`, file: path.join(store, d.name, f) }); pcFiles++; }
       }
     }
+    // the city's music (docs/features/music.md): its songs' files (the library itself is in next.db)
+    const songs = path.join(data, 'music');
+    let musicFiles = 0;
+    for (const f of fs.existsSync(songs) ? fs.readdirSync(songs) : []) if (/^[0-9a-f]{18}\.mp3$/.test(f)) { files.push({ name: `music/${f}`, file: path.join(songs, f) }); musicFiles++; }
     const out = dest ? fs.createWriteStream(dest, { mode: 0o600, flags: 'wx' }) : process.stdout;
     const size = await writeTarGz(files, out, Date.now());
-    const named = files.filter(f => !f.name.startsWith('pc/blobs/')).map(f => f.name);
-    console.error(`backup of ${data}: ${named.join(', ')}${pcFiles ? ` and ${pcFiles} PC files` : ''} (${(size / 1048576).toFixed(1)} MB)${dest ? ` in ${dest}` : ''}. `
+    const named = files.filter(f => !f.name.startsWith('pc/blobs/') && !f.name.startsWith('music/')).map(f => f.name);
+    console.error(`backup of ${data}: ${named.join(', ')}${pcFiles ? ` and ${pcFiles} PC files` : ''}${musicFiles ? ` and ${musicFiles} songs` : ''} (${(size / 1048576).toFixed(1)} MB)${dest ? ` in ${dest}` : ''}. `
       + 'The key for stored secrets is not in it: back it up separately (docs/SECRETS.md).');
     return 0;
   } finally {

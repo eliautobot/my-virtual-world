@@ -114,6 +114,8 @@ async function boot() {
   stage.scene.add(inter.group);
   const doors = app.doors = new Doors(stage.scene, app);   // the focused floor's doors, opening as people come near
   bus.on('focus:applied', () => doors.build());
+  // the floor being looked at changed (a theme, a re-roll, walls drawn or erased): its doors follow, none left behind
+  bus.on('world', ({ levels } = {}) => { const B = S.focus.b >= 0 ? S.world.buildings[S.focus.b] : null; if (B && levels && [...levels].includes(B.lv?.[S.focus.f])) doors.build(); });
   bus.on('doors', () => doors.sync());
   bus.on('frame', dt => app.blds?.doorsTick?.(app, Math.min(0.1, dt)));   // the facades' entrance doors
   bus.on('frame', dt => doors.update(Math.min(0.1, dt)));
@@ -141,7 +143,7 @@ async function boot() {
   await new Promise(res => { if (net.synced) res(); else { const off = bus.on('synced', () => { off(); res(); }); setTimeout(res, 5000); } });
   // optional UI / feature modules (loaded after the core so a failure there never blocks the world)
   progress(0.8, 'Waking the city…', 'waking');
-  const MODS = ['./core/sync.js', './core/agents.js', './core/prefs.js', './core/theme.js', './render/traffic.js', './render/weather.js', './render/wildlife.js', './audio/mixer.js', './audio/ambience.js', './render/labels.js', './ui/docks.js', './ui/ui.js', './render/promo-aircraft.js', './render/ferries.js', './render/airport.js', './render/docks.js', './render/sea-probe.js', './render/resident-cars.js', './render/boats.js', './render/fountains.js', './ui/perfhud.js', './ui/chat.js', './ui/talk-bar.js', './ui/notify.js', './ui/account.js', './ui/editors.js', './ui/place-tool.js', './ui/world-menu.js', './ui/walls-tool.js', './ui/home.js', './ui/activity.js', './ui/customizer.js', './ui/profile.js', './ui/property.js', './ui/economy.js', './ui/inventory.js', './ui/free-will.js', './ui/mind.js', './ui/agent-studio.js', './ui/sel-feeds.js', './ui/work.js', './ui/roads.js', './ui/lot-tools.js', './ui/ferry-tools.js', './ui/world-modules.js', './ui/terrain-tools.js', './ui/coast-tools.js', './ui/decor-tools.js', './ui/marketing.js', './render/signs.js', './player/vehicles.js', './player/flight.js', './player/boating.js', './play/airport-game.js', './play/fishing-game.js', './audio/aircraft-sound.js', './player/player.js', './player/remote.js', './ui/worldmap.js', './ui/social.js', './ui/licence.js', './ui/agent-providers.js', './ui/guide.js', './render/pc-screens.js'];
+  const MODS = ['./core/sync.js', './core/agents.js', './core/prefs.js', './core/theme.js', './render/traffic.js', './render/weather.js', './render/wildlife.js', './audio/mixer.js', './audio/ambience.js', './core/music.js', './audio/nightlife-music.js', './render/venue-motion.js', './render/labels.js', './ui/docks.js', './ui/ui.js', './render/promo-aircraft.js', './render/ferries.js', './render/airport.js', './render/docks.js', './render/sea-probe.js', './render/resident-cars.js', './render/boats.js', './render/fountains.js', './ui/perfhud.js', './ui/chat.js', './ui/talk-bar.js', './ui/notify.js', './ui/account.js', './ui/editors.js', './ui/place-tool.js', './ui/world-menu.js', './ui/walls-tool.js', './ui/home.js', './ui/activity.js', './ui/customizer.js', './ui/profile.js', './ui/property.js', './ui/economy.js', './ui/inventory.js', './ui/free-will.js', './ui/mind.js', './ui/agent-studio.js', './ui/sel-feeds.js', './ui/work.js', './ui/roads.js', './ui/lot-tools.js', './ui/ferry-tools.js', './ui/world-modules.js', './ui/terrain-tools.js', './ui/coast-tools.js', './ui/decor-tools.js', './ui/marketing.js', './render/signs.js', './player/vehicles.js', './player/flight.js', './player/boating.js', './play/airport-game.js', './play/fishing-game.js', './audio/aircraft-sound.js', './player/player.js', './player/remote.js', './ui/worldmap.js', './ui/social.js', './ui/licence.js', './ui/agent-providers.js', './ui/guide.js', './render/pc-screens.js', './play/machine-play.js', './play/arcade.js', './ui/post-menu.js', './ui/music-panel.js'];
   for (const [mi, mod] of MODS.entries()) {
     progress(0.8 + 0.12 * mi / MODS.length);
     try { const m = await import(mod); if (m.init) await m.init(app); }
@@ -200,7 +202,8 @@ async function boot() {
   // Frame pacing (core/framepace.js): phones draw 30 a second once still and untouched, never more than 60
   const pace = app.pace = new FramePace({ battery: matchMedia('(pointer: coarse)').matches });
   for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']) addEventListener(ev, () => pace.input(performance.now()), { capture: true, passive: true });
-  const camBusy = () => !!(cam.follow || app.player?.active || app.drive?.active || cam.drag || cam.pointers?.size
+  // (a game played on a machine counts as moving: its puck, ball and arrows want every frame up to 60, finger resting or not)
+  const camBusy = () => !!(cam.follow || app.player?.active || app.drive?.active || app.machinePlay?.active || cam.drag || cam.pointers?.size
     || cam.goal.distanceToSquared(cam.target) > 0.01 || Math.abs(cam.goalDist - cam.dist) > 0.05 || Math.abs(cam.goalYaw - cam.yaw) > 0.002 || Math.abs(cam.goalPitch - cam.pitch) > 0.002);
   bus.on('postframe', (dt, now) => { if (pace.idle || pace.mode === '30' || pace.covered) AR.rest(now); else AR.frame(now); });   // (slowed on purpose: not a GPU falling behind)
   // Compile the scene's shaders and draw one frame while the loading screen still covers it, so the first visible frame
@@ -240,13 +243,25 @@ async function boot() {
     r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = shadowTick++ % every === 0;
   });
   // (a window over the whole world: core/framepace.js cover — live lists, so the look every frame costs next to nothing)
-  const modals = document.getElementsByClassName('modal-back'), chats = document.getElementsByClassName('chat-back');
+  const modals = document.getElementsByClassName('modal-back'), chats = document.getElementsByClassName('chat-back'), arcades = document.getElementsByClassName('arc-cover');
   const covered = () => {
+    if (arcades.length) return true;   // (an arcade cabinet in use: the world round its screen at the covered pace, the game at its own)
     for (const m of modals) if (!m.classList.contains('peek')) return true;   // (the Studio stepped aside shows the world)
     for (const c of chats) if (!c.classList.contains('floating') && !c.classList.contains('min')) return true;   // (a chat full screen; floating or put away, the world goes on)
     return false;   // (the Map draws on the world's frames — render/worldmap.js 'preframe' — and keeps them all)
   };
-  const loop = (now) => { requestAnimationFrame(loop); pace.cover(covered(), now); if (!app.hold && pace.due(now, camBusy())) step(now); };
+  // (whether a window covers the world, looked at ten times a second, not at every display frame: 120 a second on some phones)
+  let coverAt = -1e9, coverNow = false;
+  const loop = (now) => { requestAnimationFrame(loop); if (now - coverAt > 100) { coverAt = now; coverNow = covered(); } pace.cover(coverNow, now); if (!app.hold && pace.due(now, camBusy())) step(now); };
+  // A transparent material seen from both sides is drawn by three.js in two passes, back then front, and each pass marks it
+  // changed: its program is looked up again twice an object, every frame (on a phone, a tenth of the frame's JavaScript).
+  // The see-through things here are flat (water, banners, glows, beams): one pass draws them alike. A sweep every two
+  // seconds catches those made since; userData.twoPass keeps a material's two passes.
+  let passAt = 0;
+  bus.on('postframe', (dt, now) => {
+    if (now - passAt < 2000) return; passAt = now;
+    stage.scene.traverse(o => { const m = o.material; if (!m) return; for (const x of Array.isArray(m) ? m : [m]) if (x.transparent && x.side === THREE.DoubleSide && !x.forceSinglePass && !x.userData.twoPass) x.forceSinglePass = true; });
+  });
   requestAnimationFrame(loop);
   app.ready = true;
   bus.emit('ready');   // (a link from a notification opens what it is about: ui/notify.js)

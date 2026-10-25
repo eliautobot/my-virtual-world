@@ -1,13 +1,14 @@
 // My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // AI agents on post around the clock on a real server (server/agent-posts/, 2026-10-08): its owner sees the spots
-// they may post it at (where they could furnish), posts it — it goes there, "On duty", its needs waiting, everyone told
-// it is on post — one agent to a spot and never on another's desk or a bed; only its owner or a manager, and only where
-// they could furnish; it goes back to its day when let go, and its post ends when its furniture is taken away.
+// they may post it at (their own property: 2026-10-23), posts it — it goes there, "On duty", its needs waiting, everyone
+// told it is on post — one agent to a spot and never on another's desk or a bed; only its owner or a manager, and only
+// on their own property — not even an administrator on the city's land or another player's lot; it goes back to its
+// day when let go, and its post ends when its furniture is taken away.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { startServer, ownerSession, userSession } from './helpers/server.mjs';
 
-let s, owner, ann, annId, A, B, C, iA, iB, desk;
+let s, owner, ann, annId, adm, A, B, C, iA, iB, desk;
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const waitFor = async (fn, ms = 20000) => { const t0 = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t0 > ms) return null; await wait(150); } };
 const info = async i => (await owner.get(`/api/agent/${i}`)).json;
@@ -20,15 +21,16 @@ before(async () => {
   annId = (await ann.get('/api/auth/me')).json.account.id;
   [A, B, C] = (await owner.get('/api/agents')).json.agents;
   [iA, iB] = [A.i, B.i];
+  adm = await userSession(s, owner, { login: 'adm', displayName: 'Adm', role: 'admin' });
 });
 after(async () => { await s?.stop(); });
 
-test('the spots: where its owner could furnish — desks, counters, kitchens; never a bed', async () => {
+test('the spots: on its owner\'s own property — desks, counters, kitchens; never a bed', async () => {
   const r = await owner.get(`/api/agent-posts/spots?agent=${A.id}`);
   assert.equal(r.status, 200, r.text);
   assert.equal(r.json.post, null, 'not on post yet');
   const all = r.json.buildings.flatMap(b => b.floors.flatMap(f => f.items.flatMap(it => it.slots.map(sl => ({ b: b.b, f: f.f, item: it.id, slot: sl.k, use: sl.use, holder: sl.holder, name: it.name })))));
-  assert.ok(all.length > 0, 'its workplace, at least (an administrator may furnish anywhere)');
+  assert.ok(all.length > 0, 'a world without lots is its owner\'s: anywhere (a world with lots: agent-posts-property-http.test.mjs)');
   assert.ok(all.every(x => ['staff', 'work', 'computer', 'cook', 'prep'].includes(x.use)), 'only where an agent serves or works');
   desk = all.find(x => x.use === 'work' && !x.holder);
   assert.ok(desk, 'a free desk');
@@ -77,6 +79,15 @@ test('only its owner or a manager, only where they could furnish', async () => {
   assert.ok(['not_yours', 'taken'].includes(r.json.code), r.text);
   const spots = (await ann.get(`/api/agent-posts/spots?agent=${C.id}`)).json;
   assert.deepEqual(spots.buildings, [], 'nowhere she could furnish');
+});
+
+test('a world without lots is its owner\'s alone: not even another administrator posts there (2026-10-23)', async () => {
+  const mine = await adm.post('/api/agents', { name: 'Ada', emoji: '🛠️', role: 'Admin aide' });
+  assert.equal(mine.status, 200, mine.text);
+  const id = mine.json.agent?.id ?? mine.json.id;
+  assert.deepEqual((await adm.get(`/api/agent-posts/spots?agent=${id}`)).json.buildings, [], 'nowhere for an administrator');
+  const r = await adm.post('/api/agent-posts', { agent: id, b: desk.b, f: desk.f, item: desk.item, slot: desk.slot });
+  assert.deepEqual([r.status, r.json.code], [403, 'not_yours'], r.text);
 });
 
 test('the world warmed again (a restart, a clock skip) at night or by day: it starts at its post, on duty (2026-10-15)', async () => {

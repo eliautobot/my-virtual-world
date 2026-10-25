@@ -1,9 +1,13 @@
 // My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Furniture / object geometry library. Item-local frame: +z = front, y up, origin = item centre on the floor.
 // Dimensions match shared/catalog.js rects and seat slots (seat tops 0.46 m, bar stools 0.74 m, mattress 0.56 m).
-// Vertex attribute aC = (linear rgb, flags) where flags = tint(1) + emit*2 (emit 1 screen, 2 night lamp, 3 neon, 4 disco).
+// Vertex attribute aC = (linear rgb, flags) where flags = tint(1) + emit*2 (emit 1 screen, 2 night lamp, 3 neon, 4 disco,
+// 5 chase: marquee bulbs running, 6 cycle: slowly through the colours).
 import * as THREE from 'three';
 import { AD_ASSETS, INDOOR_SIGNS, stylesOf, parseSignGeoKey } from '/shared/signs.js';
+import { addArcadeFurniture } from './furniture-arcade.js';
+import { addLoungeFurniture } from './furniture-lounge.js';
+import { addClubFurniture } from './furniture-club.js';
 
 const TAU = Math.PI * 2, P = Math.PI, H = Math.PI / 2;
 const s2l = c => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
@@ -25,6 +29,16 @@ export class FB {
     return this;
   }
   pop() { this.m.copy(this.stack.pop()); return this; }
+  /** What is drawn from here to endPart() is a part that moves on its own (render/venue-motion.js: a moving light, a
+   *  mirror ball, the bull): drawn in the item's frame as usual, kept apart, and turned about its pivot (item-local). */
+  part(name, pivot = [0, 0, 0], info = null) {
+    if (this.main) this.endPart();
+    const p = { name, pivot, info, o: new Buf(), g: new Buf() };
+    (this.parts || (this.parts = [])).push(p);
+    this.main = { o: this.o, g: this.g }; this.o = p.o; this.g = p.g;
+    return this;
+  }
+  endPart() { if (this.main) { this.o = this.main.o; this.g = this.main.g; this.main = null; } return this; }
   buf() { return this.gl ? this.g : this.o; }
   vert(x, y, z, nx, ny, nz, shade = 1) {
     const b = this.buf();
@@ -131,8 +145,34 @@ export class FB {
       g.computeBoundingSphere(); g.computeBoundingBox();
       return g;
     };
-    return { geo: mk(this.o), glass: mk(this.g) };
+    this.endPart();
+    const out = { geo: mk(this.o), glass: mk(this.g) };
+    if (this.parts) {
+      // each part about its own pivot: its geometry moved so that the pivot is its origin
+      const at = (B, [px, py, pz]) => { const P = B.P; for (let k = 0; k < P.length; k += 3) { P[k] -= px; P[k + 1] -= py; P[k + 2] -= pz; } return B; };
+      out.parts = this.parts.map(p => ({ name: p.name, pivot: p.pivot, info: p.info, geo: mk(at(p.o, p.pivot)), glass: mk(at(p.g, p.pivot)) }));
+      // the whole piece at rest, in one (a ghost being placed, a preview)
+      let whole = null;
+      out.whole = () => whole || (whole = mergeAll([out.geo, ...out.parts.map(q => q.geo && q.geo.clone().translate(...q.pivot))].filter(Boolean)));
+    }
+    return out;
   }
+}
+/** One geometry of several with the same attributes (a piece and its moving parts at rest). */
+function mergeAll(list) {
+  if (list.length === 1) return list[0];
+  const g = new THREE.BufferGeometry(), keys = Object.keys(list[0].attributes);
+  let nv = 0, ni = 0;
+  for (const q of list) { nv += q.attributes.position.count; ni += q.index.count; }
+  for (const k of keys) {
+    const sz = list[0].attributes[k].itemSize, a = new Float32Array(nv * sz);
+    let o = 0; for (const q of list) { const src = q.attributes[k]; if (src) a.set(src.array, o); o += q.attributes.position.count * sz; }
+    g.setAttribute(k, new THREE.BufferAttribute(a, sz));
+  }
+  const I = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  let o = 0, base = 0; for (const q of list) { for (let i = 0; i < q.index.count; i++) I[o++] = q.index.array[i] + base; base += q.attributes.position.count; }
+  g.setIndex(new THREE.BufferAttribute(I, 1)); g.computeBoundingSphere(); g.computeBoundingBox();
+  return g;
 }
 
 // ------------------------------------------------------------------ palette + reusable parts
@@ -399,14 +439,72 @@ D.pingpong = f => {
   f.col('#e8e8e8'); f.box(-0.83, 0.76, -0.005, 0.83, 0.915, 0.005); f.col(C.dark); f.box(-0.84, 0.76, -0.02, -0.8, 0.93, 0.02); f.box(0.8, 0.76, -0.02, 0.84, 0.93, 0.02);
   f.col(C.dark); for (const [x, z] of [[-0.6, -1.1], [0.6, -1.1], [-0.6, 1.1], [0.6, 1.1]]) f.box(x - 0.03, 0, z - 0.03, x + 0.03, 0.72, z + 0.03);
 };
+// The arcade cabinet (2026-10-22, the arcade: docs/features/arcade.md): a classic upright — side panels with black
+// T-molding and a lit strip, the control panel with a stick and buttons, the screen recessed and leaning back between the
+// panels (ARCADE_SCREEN: where client/js/play/arcade.js draws its attract screen and puts the game), the lit marquee, the
+// coin door. The instance tint colours the side panels.
+const ARC_SIDE = [[-0.40, 0], [0.36, 0], [0.36, 0.78], [0.40, 0.84], [0.40, 0.98], [0.15, 1.05], [0.21, 1.62], [0.21, 1.88], [-0.40, 1.88]];
+const ARC_BEZEL = [[0.15, 1.05], [0.03, 1.60]];   // the screen's slope, bottom to top (z, y)
+const arcLen = Math.hypot(ARC_BEZEL[1][0] - ARC_BEZEL[0][0], ARC_BEZEL[1][1] - ARC_BEZEL[0][1]);
+const arcN = [(ARC_BEZEL[1][1] - ARC_BEZEL[0][1]) / arcLen, -(ARC_BEZEL[1][0] - ARC_BEZEL[0][0]) / arcLen];   // (z, y) out of the screen
+/** The cabinet's screen in its own frame: centre (0, cy, cz), leaning back by `lean` (radians), w × h metres (3:4). */
+export const ARCADE_SCREEN = Object.freeze({
+  cz: (ARC_BEZEL[0][0] + ARC_BEZEL[1][0]) / 2 + arcN[0] * 0.006, cy: (ARC_BEZEL[0][1] + ARC_BEZEL[1][1]) / 2 + arcN[1] * 0.006,
+  lean: Math.atan2(ARC_BEZEL[0][0] - ARC_BEZEL[1][0], ARC_BEZEL[1][1] - ARC_BEZEL[0][1]), w: 0.36, h: 0.48, n: arcN,
+});
+/** A strip along edge a → b of a (z, y) outline, from x0 to x1, facing out of the outline (it runs anticlockwise). */
+function arcEdge(f, a, b, x0, x1) {
+  const dz = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dz, dy) || 1;
+  f.quad([[x0, a[1], a[0]], [x1, a[1], a[0]], [x1, b[1], b[0]], [x0, b[1], b[0]]], [0, -dz / L, dy / L]);
+}
 D.arcade = f => {
-  f.tint(); f.box(-0.4, 0, -0.4, 0.4, 1.8, 0.2); f.box(-0.4, 0, 0.2, 0.4, 0.9, 0.4);
-  f.col(C.black); f.push(0, 1.3, 0.22, 0); f.m.multiply(new THREE.Matrix4().makeRotationX(-0.25)); f.box(-0.34, -0.25, -0.02, 0.34, 0.25, 0.0);
-  f.col('#7b2ff7', 0, 1); f.box(-0.3, -0.21, 0.0, 0.3, 0.21, 0.005); f.col('#ffd166', 0, 1); f.box(-0.1, -0.05, 0.005, 0.12, 0.08, 0.008); f.pop();
-  f.col(C.dark); f.push(0, 0.95, 0.3, 0); f.m.multiply(new THREE.Matrix4().makeRotationX(0.35)); f.box(-0.4, -0.05, -0.12, 0.4, 0.02, 0.12);
-  f.col('#ef476f'); f.cyl(0.08, 0, 0.025, 0.02, 0.04, 8); f.col('#06d6a0'); f.cyl(0.16, 0.03, 0.025, 0.02, 0.04, 8); f.col('#ffd166'); f.cyl(0.24, -0.02, 0.025, 0.02, 0.04, 8);
-  f.col(C.black); f.cyl(-0.18, 0, 0.012, 0.02, 0.1, 6); f.col('#e63946'); f.sph(-0.18, 0.11, 0, 0.03, 0.03, 0.03, 8, 5); f.pop();
-  f.col('#ff9f1c', 0, 3); f.box(-0.38, 1.62, 0.2, 0.38, 1.78, 0.22);
+  const P = ARC_SIDE, c = [-0.15, 0.9];
+  // the side panels: tinted faces, black edges (T-molding)
+  for (const [x0, x1] of [[-0.40, -0.365], [0.365, 0.40]]) {
+    f.tint();
+    for (const [x, n] of [[x0, -1], [x1, 1]]) for (let i = 0; i < P.length; i++) {
+      const a = P[i], b = P[(i + 1) % P.length];
+      f.tri(f.vert(x, c[1], c[0], n, 0, 0), f.vert(x, a[1], a[0], n, 0, 0), f.vert(x, b[1], b[0], n, 0, 0));
+    }
+    f.col('#0e0f12');
+    for (let i = 0; i < P.length; i++) arcEdge(f, P[i], P[(i + 1) % P.length], x0, x1);
+    // a lit strip along the front edge, up from the control panel
+    f.col('#22d3ee', 0, 1);
+    const xs = x0 < 0 ? [x0 - 0.004, x0 + 0.002] : [x1 - 0.002, x1 + 0.004];
+    arcEdge(f, [P[5][0] + 0.003, P[5][1] + 0.02], [P[6][0] + 0.003, P[6][1] - 0.02], xs[0], xs[1]);
+  }
+  const X0 = -0.365, X1 = 0.365;
+  // the body between the panels: the kick panel, the control panel (underside, lip, top), the screen's slope, the speaker
+  // under the marquee, the marquee, the top and the back
+  f.col('#17181d'); arcEdge(f, [0.34, 0], [0.34, 0.78], X0, X1);
+  f.col('#101116'); arcEdge(f, [0.34, 0.78], [0.40, 0.84], X0, X1);
+  f.col('#0e0f12'); arcEdge(f, [0.40, 0.84], [0.40, 0.98], X0, X1);
+  f.col('#1d2030'); arcEdge(f, [0.40, 0.98], [0.15, 1.05], X0, X1);
+  f.col('#0a0b0f'); arcEdge(f, ARC_BEZEL[0], ARC_BEZEL[1], X0, X1);
+  f.col('#15161b'); arcEdge(f, [0.03, 1.60], [0.21, 1.62], X0, X1);
+  f.col('#fff1c2', 0, 1); arcEdge(f, [0.21, 1.62], [0.21, 1.88], X0 + 0.01, X1 - 0.01);
+  f.tint('#6b6f78'); arcEdge(f, [0.21, 1.88], [-0.40, 1.88], X0, X1); arcEdge(f, [-0.40, 1.88], [-0.40, 0], X0, X1);
+  // the marquee's frame and bands of colour
+  f.col('#0e0f12'); f.box(X0, 1.615, 0.205, X1, 1.635, 0.222); f.box(X0, 1.865, 0.205, X1, 1.885, 0.222);
+  f.col('#f472b6', 0, 1); f.box(X0 + 0.02, 1.66, 0.211, X1 - 0.02, 1.675, 0.214);
+  f.col('#22d3ee', 0, 1); f.box(X0 + 0.02, 1.82, 0.211, X1 - 0.02, 1.835, 0.214);
+  f.col('#8b5cf6', 0, 1); f.box(-0.12, 1.705, 0.211, 0.12, 1.79, 0.214);
+  // the screen: dark glass with a faint glow, in a bezel (the attract screen and the game go over it)
+  const S = ARCADE_SCREEN;
+  f.push(0, S.cy, S.cz); f.m.multiply(new THREE.Matrix4().makeRotationX(-S.lean));
+  f.col('#05060a'); f.box(-0.205, -0.27, -0.008, 0.205, 0.27, -0.002);
+  f.col('#0a1a36', 0, 1); f.box(-S.w / 2, -S.h / 2, -0.004, S.w / 2, S.h / 2, -0.001);
+  f.pop();
+  // the controls on the panel's slope: a stick with a red ball, three big buttons, two small start buttons
+  const slope = Math.atan2(0.07, 0.25), on = t => [0.40 - 0.25 * t, 0.98 + 0.07 * t];
+  const at = (x, t, fn) => { const [z, y] = on(t); f.push(x, y, z); f.m.multiply(new THREE.Matrix4().makeRotationX(slope)); fn(); f.pop(); };
+  at(-0.17, 0.45, () => { f.col('#0e0f12'); f.cyl(0, 0, 0.035, 0, 0.006, 12); f.col(C.chrome); f.cyl(0, 0, 0.007, 0, 0.075, 6); f.col('#e11d48'); f.sph(0, 0.09, 0, 0.026, 0.026, 0.026, 10, 6); });
+  [['#ef476f', 0.03], ['#06d6a0', 0.12], ['#ffd166', 0.21]].forEach(([col, x]) => at(x, 0.5, () => { f.col('#0e0f12'); f.cyl(0, 0, 0.03, 0, 0.004, 12); f.col(col, 0, 1); f.cyl(0, 0, 0.022, 0.004, 0.018, 12); }));
+  for (const x of [-0.04, 0.04]) at(x, 0.86, () => { f.col('#e2e8f0', 0, 1); f.cyl(0, 0, 0.012, 0, 0.01, 8); });
+  // the coin door: two lit coin slots and the return
+  f.col('#2b2e36'); f.box(-0.13, 0.40, 0.34, 0.13, 0.70, 0.355);
+  f.col('#ff4d4d', 0, 1); f.box(-0.075, 0.6, 0.355, -0.035, 0.64, 0.36); f.box(0.035, 0.6, 0.355, 0.075, 0.64, 0.36);
+  f.col('#0e0f12'); f.box(-0.05, 0.46, 0.355, 0.05, 0.5, 0.36);
 };
 D.piano = f => {
   f.col('#111215'); f.box(-0.75, 0, -0.35, 0.75, 1.3, 0.05); f.box(-0.78, 0.66, 0.05, 0.78, 0.72, 0.3);
@@ -893,10 +991,11 @@ D.mailboxes = f => {
   f.col('#8c6a3c'); f.box(-0.9, 0.45, -0.15, 0.9, 1.5, 0.02);
   f.col('#c9a45a'); for (let r = 0; r < 4; r++) for (let c = 0; c < 8; c++) { const x = -0.86 + c * 0.215, y = 0.5 + r * 0.25; f.box(x, y, 0.02, x + 0.2, y + 0.22, 0.035); }
 };
-D.dance_floor = f => {
+D.dance_floor = f => {   // (raised 9 cm, so it holds its own over the floor's finish from any height)
   const n = 5, s = 4.4 / n, cols = ['#ff006e', '#3a86ff', '#ffbe0b', '#8338ec', '#06d6a0', '#fb5607'];
-  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { f.col(cols[(i * 3 + j * 2) % cols.length], 0, 4); f.box(-2.2 + i * s + 0.02, 0, -2.2 + j * s + 0.02, -2.2 + (i + 1) * s - 0.02, 0.025, -2.2 + (j + 1) * s - 0.02, 'b'); }
-  f.col(C.dark); f.box(-2.2, 0, -2.2, 2.2, 0.018, 2.2, 'b');
+  f.col(C.dark); f.box(-2.2, 0, -2.2, 2.2, 0.08, 2.2, 'b');
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { f.col(cols[(i * 3 + j * 2) % cols.length], 0, 4); f.box(-2.2 + i * s + 0.02, 0.08, -2.2 + j * s + 0.02, -2.2 + (i + 1) * s - 0.02, 0.09, -2.2 + (j + 1) * s - 0.02, 'b'); }
+  f.col('#d2d6dc'); f.box(-2.23, 0, -2.23, 2.23, 0.07, -2.2, 'b'); f.box(-2.23, 0, 2.2, 2.23, 0.07, 2.23, 'b'); f.box(-2.23, 0, -2.2, -2.2, 0.07, 2.2, 'b'); f.box(2.2, 0, -2.2, 2.23, 0.07, 2.2, 'b');
 };
 D.reception = f => {
   f.tint(); f.box(-1.5, 0, 0.25, 1.5, 1.15, 0.45); f.box(-1.5, 0, -0.45, -1.35, 1.15, 0.25); f.box(1.35, 0, -0.45, 1.5, 1.15, 0.25);
@@ -936,6 +1035,9 @@ D.baggage_belt = f => {
 D.door = f => {
   f.col('#8a7a66'); f.box(-0.62, 0, -0.08, -0.52, 2.22, 0.08); f.box(0.52, 0, -0.08, 0.62, 2.22, 0.08); f.box(-0.62, 2.12, -0.08, 0.62, 2.22, 0.08);
 };
+addArcadeFurniture(D);   // the arcade's pieces (render/furniture-arcade.js)
+addLoungeFurniture(D);   // the lounge's pieces (render/furniture-lounge.js)
+addClubFurniture(D);   // the night club's pieces (render/furniture-club.js)
 export const FURN_DEF = D;
 
 const cache = new Map();

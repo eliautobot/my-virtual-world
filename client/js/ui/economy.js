@@ -324,7 +324,7 @@ async function openWallet(tab = 'activity') {
   render();
   await reload();
 }
-const bizIcon = k => ({ cafe: '☕', restaurant: '🍽️', shop: '🛍️', gym: '🏋️', office: '🏢' }[k] || '🏪');
+const bizIcon = k => ({ cafe: '☕', restaurant: '🍽️', shop: '🛍️', gym: '🏋️', office: '🏢', arcade: '🕹️', lounge_bar: '🍸', club: '🎧' }[k] || '🏪');
 
 // ------------------------------------------------------------------ a venue: the menu, buying
 /** Buys from a business (the player must be there; the server checks). */

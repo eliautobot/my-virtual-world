@@ -339,7 +339,8 @@ export class Realty {
     const vl = B.type === 'apartment' ? null : this.venueLeases(B);
     if (vl?.size) {
       switch (o.op) {
-        case 'lvl.clear': case 'lvl.regen': case 'lvl.reset': case 'lvl.apply': return vl.has(o.f | 0) ? `${vl.get(o.f | 0)} is let for Virtual Coin: its floor can't be re-laid while the lease runs` : null;
+        case 'lvl.clear': case 'lvl.regen': case 'lvl.reset': case 'lvl.apply': case 'lvl.theme': return vl.has(o.f | 0) ? `${vl.get(o.f | 0)} is let for Virtual Coin: its floor can't be re-laid while the lease runs` : null;
+        case 'lvl.name': return vl.has(o.f | 0) ? `${vl.get(o.f | 0)} is let for Virtual Coin: it keeps its name while the lease runs` : null;
         case 'bld.del': case 'bld.floors': case 'bld.place': return `${[...vl.values()][0]} is let for Virtual Coin: end the lease first`;
         default: return null;
       }
@@ -353,7 +354,7 @@ export class Realty {
     switch (o.op) {
       case 'flat.set': { const why = onFlat(o.f | 0, o.u | 0); return why && (o.deal !== undefined || o.tenants !== undefined || o.owner !== undefined || o.rent !== undefined) ? `This flat is ${why}: its deal changes through the economy` : null; }
       case 'flat.add': case 'flat.del': { const why = onFlat(o.f | 0, o.u | 0); return why ? `This flat is ${why}` : null; }
-      case 'lvl.clear': case 'lvl.regen': case 'lvl.reset': case 'lvl.apply': { for (const [ref, why] of mineHere) if (ref.startsWith(`${B.id}/${o.f | 0}/`)) return `A flat on this floor is ${why}`; return null; }
+      case 'lvl.clear': case 'lvl.regen': case 'lvl.reset': case 'lvl.apply': case 'lvl.theme': { for (const [ref, why] of mineHere) if (ref.startsWith(`${B.id}/${o.f | 0}/`)) return `A flat on this floor is ${why}`; return null; }
       case 'bld.del': case 'bld.floors': case 'bld.place': return `A flat in this building is ${mineHere[0][1]}`;
       default: void ed; return null;
     }

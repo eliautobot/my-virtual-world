@@ -2,7 +2,9 @@
 // The Agent Studio's world tabs (ui/agent-studio.js):
 // - Home & Work: which flat is its home — the building's floors with its floor lit, the floor's plan with its flat lit
 //   and its door, who lives with it, the rent — and "Show me", which looks inside that floor and marks the flat in the
-//   world (render/flat-marker.js); its job, workplace and hours on a day bar.
+//   world (render/flat-marker.js); its job, workplace and hours on a day bar. The town each is in (shared/towns.js), and
+//   whether its owner chose its workplace (a desk's or a counter's ⋯ menu: ui/post-menu.js) — "Let it choose" lifts
+//   that — or it chose it itself near its owner's home base (server/sim/placement.js).
 // - Money (its owner): its wallet, giving and taking back, what it may use money for (the spending rules the economy
 //   checks before every spend: server/economy/agents.js), approvals waiting, and its statement.
 // - Settings: its name, badge and role; who it is shared with; removing it. (Its look: the Customize tab, studio-look.js.)
@@ -14,6 +16,8 @@ import { isExt } from '../core/agent-view.js';
 import { load as reloadAgents } from '../core/agents.js';
 import { formatClock } from '/shared/constants.js';
 import { flatRecord, openFlat } from './flats.js';
+import { post } from '../core/net.js';
+import { MAIN_TOWN, townName } from '/shared/towns.js';
 import { vc, coin } from './economy.js';
 
 const KIND = { studio: 'Studio', one: 'One-bedroom', two: 'Two-bedroom' };
@@ -56,11 +60,16 @@ function stackHtml(home) {
   return `<div class="hs" aria-hidden="true"><div class="hs-roof"></div>${rows.join('')}<div class="hs-ground"></div></div>`;
 }
 
+/** The town building b stands in, by name. */
+function townOfB(C, b) {
+  const B = S.world?.buildings?.[b], L = B?.lot ? C.app.lots?.byId?.get(B.lot) : null;
+  return townName(L?.town || MAIN_TOWN, S.world?.name);
+}
 export async function placeTab(C, body, live) {
-  const [info, res, pst] = await Promise.all([C.get('info', true), C.get('resident'), C.get('post')]);
+  const [info, res, pst, wk] = await Promise.all([C.get('info', true), C.get('resident'), C.get('post'), C.get('job', true)]);
   if (!live()) return;
   if (!info || info.error) { body.innerHTML = `<p class="hint">${esc(info?.error || 'It has no body in the city right now.')}</p>`; return; }
-  const home = homeOf(info), j = info.job || {}, sc = info.sched || {};
+  const home = homeOf(info), j = info.job || {}, sc = info.sched || {}, unpaid = wk?.work?.unpaid || pst?.post?.unpaid || null;
   const mates = home ? S.people.map((p, k) => (p && !p.x && k !== C.i && p.hb === home.b && p.hf === home.f && p.hu === home.u ? p : null)).filter(Boolean) : [];
   const onFloor = home ? S.people.filter(p => p && !p.x && p.hb === home.b && p.hf === home.f).length : 0;
   const rec = home && home.u >= 0 ? flatRecord(home.b, home.f, home.u) : null;
@@ -72,6 +81,7 @@ export async function placeTab(C, body, live) {
         <div class="hw-tiles"><div><b>${home.f + 1}</b><span>floor</span></div>${home.u >= 0 ? `<div><b>${home.u + 1}</b><span>flat</span></div>` : ''}${home.kind ? `<div><b>${esc(home.kind)}</b><span>size</span></div>` : ''}<div><b>${onFloor}</b><span>on this floor</span></div></div>
         <div class="kv">${r?.rent ? `<span class="k">Rent</span><span>${coin()} ${vc(r.rent)} a night${r.landlord ? ` to ${esc(r.landlord)}` : ''}</span>` : ''}
           ${deal ? `<span class="k">The flat</span><span>${deal}${rec.locked ? ' · 🔒 door locked' : ''}</span>` : rec?.locked ? '<span class="k">Door</span><span>🔒 locked</span>' : ''}
+          <span class="k">Town</span><span>🏙️ ${esc(townOfB(C, home.b))}</span>
           <span class="k">Lives with</span><span>${mates.length ? mates.map(p => esc(p.n)).join(', ') : 'Nobody — it lives alone'}</span></div>
         <div class="row wrap"><button type="button" class="btn primary" data-c="show">📍 Show me in the world</button>${home.u >= 0 ? '<button type="button" class="btn" data-c="flat">🚪 The flat</button>' : ''}</div></div></div>`
     : '<div class="st-sec"><p class="hint">It has no home yet: residents look for a free flat on their own.</p></div>';
@@ -82,7 +92,9 @@ export async function placeTab(C, body, live) {
   };
   const hour = ((S.hour ?? 12) % 24 + 24) % 24;
   const workHtml = `<div class="st-sec hw-work"><div class="st-sec-h"><h4>💼 Work</h4></div>
-    ${j.b >= 0 ? `<div class="hw-job"><div><b>${esc(j.title || 'Works')}</b><small>${esc(j.place || '')}</small></div><button type="button" class="btn small" data-c="work">📍 Show workplace</button></div>` : '<p class="hint">Between jobs.</p>'}
+    ${j.b >= 0 ? `<div class="hw-job"><div><b>${esc(j.title || 'Works')}</b><small>${esc(j.place || '')} · 🏙️ ${esc(townOfB(C, j.b))}</small></div><button type="button" class="btn small" data-c="work">📍 Show workplace</button></div>` : '<p class="hint">Between jobs.</p>'}
+    ${unpaid ? `<p class="hint hw-unpaid">⚠️ Not paid for ${unpaid.days} day${unpaid.days === 1 ? '' : 's'}${unpaid.name ? ` by ${esc(unpaid.name)}` : ''}: its employer's wallet is short. ${wk?.work?.chosen || pst?.post ? 'It stays at the work you gave it: add money to the business so it can pay its wages.' : 'If this goes on, it quits and looks for work elsewhere.'}</p>` : ''}
+    ${C.owner ? `<p class="hint">${wk?.work?.chosen ? '📌 You chose this workplace. <button type="button" class="linkish" data-c="auto">Let it choose</button>' : wk?.work?.by === 'brain' ? '🧠 Its brain chose this job from the ones open to it (Free Will): on your property first, else near your home base.' : 'It chose its workplace itself: on your property first, else near your home base.'} To give it a desk or a counter, look inside your building, tap the piece and choose <b>⋯ → Assign agent → Works here</b>; a home: open one of your flats and <b>Move in</b>.</p>` : ''}
     <div class="hw-day"><div class="hw-bar">${bar(sc.bed % 24, sc.wake, 'sleep', 'Asleep')}${j.b >= 0 ? bar(j.start, j.end, 'work', 'At work') : ''}${sc.lunch != null ? `<i class="lunch" style="left:${(sc.lunch / 24 * 100).toFixed(2)}%" title="Lunch"></i>` : ''}<b class="now" style="left:${(hour / 24 * 100).toFixed(2)}%"></b></div>
       <div class="hw-hours"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
       <div class="hw-legend"><span class="sleep">Asleep ${sc.bed != null ? `${formatClock(sc.bed)}–${formatClock(sc.wake)}` : ''}</span>${j.b >= 0 && j.start != null ? `<span class="work">Work ${formatClock(j.start)}–${formatClock(j.end)}</span>` : ''}${sc.lunch != null ? `<span class="lunch">Lunch ${formatClock(sc.lunch)}</span>` : ''}</div></div></div>`;
@@ -92,12 +104,17 @@ export async function placeTab(C, body, live) {
   if (q('[data-c="show"]')) q('[data-c="show"]').onclick = () => (home.u >= 0 ? C.showFlat(home.b, home.f, home.u) : C.peek(() => C.app.lookInside?.(home.b, home.f)));
   if (q('[data-c="flat"]')) q('[data-c="flat"]').onclick = () => openFlat(home.b, home.f, home.u);
   if (q('[data-c="work"]')) q('[data-c="work"]').onclick = () => C.peek(() => C.app.lookInside?.(j.b, j.f >= 0 ? j.f : 0));
+  if (q('[data-c="auto"]')) q('[data-c="auto"]').onclick = async () => {
+    try { await post('/api/agent-posts/work/auto', { agent: C.id }); C.toast(`${C.name} will find its own work`); C.drop('job', 'info'); C.repaint(); }
+    catch (e) { C.toast(e.message || 'That did not work', 'bad'); }
+  };
 }
 
 // ------------------------------------------------------------------------------------------------ its post
 // On post around the clock (server/agent-posts/, 2026-10-08: "assign agents to be permanent occupants of certain
 // spots, like the reception desk … restaurants … 24/7"): where it is, or the spots its owner may choose — the serving side
-// of a reception desk, a counter or a checkout, a desk, a kitchen, where they could furnish.
+// of a reception desk, a counter or a checkout, a desk, a kitchen, on their own property only (2026-10-23: a building on
+// a lot their account holds, a flat it owns; not even an administrator elsewhere).
 const POST_USE = { staff: 'serving side', work: 'desk', computer: 'desk', cook: 'stove', prep: 'counter' };
 function postHtml(C, d) {
   if (!d || d.error) return '';
@@ -111,14 +128,14 @@ function postHtml(C, d) {
       ${st.choosing ? spotsHtml(d) : ''}</div>`;
   }
   return `<div class="st-sec pt">${head}
-    <p class="hint">Post ${esc(C.name)} around the clock at a reception desk, a counter, a checkout, a desk or a kitchen in a place you hold — anyone who walks up there talks with it, day and night.</p>
+    <p class="hint">Post ${esc(C.name)} around the clock at a reception desk, a counter, a checkout, a desk or a kitchen on your own property (a building on a lot you hold, or a flat you own). Anyone who walks up there talks with it, day and night.</p>
     ${st.choosing ? spotsHtml(d) : `<button type="button" class="btn small primary" data-pt="choose">Choose a post</button>`}</div>`;
 }
 /** The spots by building and floor; on a floor, alike pieces (a row of desks) are one line — the first free one is taken —
  *  and a piece of its own (a reception desk, a counter) a line of its own, with who is there. */
 function spotsHtml(d) {
   const bs = d.buildings || [];
-  if (!bs.length) return '<p class="hint dim">Nowhere yet: you can post an agent where you could furnish — a building on a lot you hold, or a flat you own or rent.</p>';
+  if (!bs.length) return '<p class="hint dim">Nowhere yet: you can post your agents only on your own property, a building on a lot you hold or a flat you own.</p>';
   const isMine = (b, f, it, s) => d.post && d.post.b === b && d.post.f === f && d.post.item === it.id && d.post.slot === s.k;
   const floorRows = (b, f) => {
     const groups = new Map();

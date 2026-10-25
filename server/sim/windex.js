@@ -6,6 +6,9 @@ import { animId, SEATED, PROP } from '../../shared/anims.js';
 
 const PUBLIC_TYPES = new Set(['cafe', 'restaurant', 'shop', 'gym', 'park']);
 
+/** Themed floors the city goes out to (Floor Themes: arcades, lounges, clubs), on whatever floor they are. */
+export const NIGHTLIFE = new Set(['arcade', 'lounge_bar', 'club']);
+
 export class WorldIndex {
   constructor(world) {
     this.world = world;
@@ -50,11 +53,11 @@ export class WorldIndex {
     if (!B || B.gone) return false;
     if (PUBLIC_TYPES.has(B.type)) return true;
     if (f === 0) { const v = this.world.levels[B.lv[0]].venue; if (v && v !== 'lounge') return true; }
-    return false;
+    return NIGHTLIFE.has(this.world.levels[B.lv[f]]?.venue);   // (an arcade, a lounge, a club: open to the city on any floor)
   }
   rebuild() {
     this.pub = new Map();
-    this.venues = { cafe: [], restaurant: [], shop: [], gym: [], park: [], lounge: [] };
+    this.venues = { cafe: [], restaurant: [], shop: [], gym: [], park: [], lounge: [], arcade: [], lounge_bar: [], club: [] };
     for (const B of this.world.buildings) {
       if (B.gone) continue;
       for (let f = 0; f < B.floors; f++) {

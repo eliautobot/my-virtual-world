@@ -14,7 +14,7 @@ import { FOOD_VENUES, foodBase } from './policy.js';
 // the items of the menus before shared/food.js (books and stats of those days still name them)
 const LEGACY_INPUTS = { pastry: { baked: 1 }, cafe_lunch: { food: 1, coffee: 1 }, meal: { food: 3 }, drink: { drinks: 1 }, dessert: { baked: 1, food: 1 } };
 
-const VENUES = new Set(['cafe', 'restaurant', 'shop', 'gym']);
+const VENUES = new Set(['cafe', 'restaurant', 'shop', 'gym', 'arcade', 'lounge_bar', 'club']);
 const rid = () => `biz_${crypto.randomBytes(9).toString('base64url')}`;
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
 

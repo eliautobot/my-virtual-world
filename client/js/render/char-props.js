@@ -26,8 +26,9 @@ import { SKIN_GLSL, APP_GLSL } from './char-glsl.js';
 import { FOOD, FOOD_BY_N } from '/shared/food.js';
 import { EAT_CLIP, BOTH_R, BOTH_LIFT, HELD_SCALE, BITE_TIP, TOOL_Z, TOOL_LEN, toolDir } from '/shared/eating.js';
 import { lin } from './furniture.js';
+import { PHONES } from '/shared/stage.js';
 
-const HAND_R = 0, HAND_L = 1, DESK = 2, HANG = 3;
+const HAND_R = 0, HAND_L = 1, DESK = 2, HANG = 3, HEAD = 4;
 const SCREEN = '#8cc6ff';
 const basis = (x, y, z, o) => new THREE.Matrix4().makeBasis(new THREE.Vector3(...x), new THREE.Vector3(...y), new THREE.Vector3(...z)).setPosition(...o);
 /** Draws fn in a frame m (inside FB's current one). */
@@ -105,6 +106,29 @@ function rod(f) {
   f.col('#c8ccd2'); f.rod([0.05, 0.065, 0.013], [0.06, 0.088, 0.04], 0.0018, 3); f.rod([0.06, 0.088, 0.04], [0.05, 0.11, 0.013], 0.0018, 3);   // the bail
   f.col('#2a2d33'); f.rod([-0.02, 0.088, 0.013], [-0.02, 0.088, 0.075], 0.003, 4);  // the handle's arm
   f.col('#e9e4d8'); f.rod([-0.02, 0.088, 0.075], [-0.02, 0.118, 0.075], 0.006, 6);  // its knob
+}
+/** A pool cue through the right fist (along the grip's x, as the rod): the butt behind the hand, the tip ahead. */
+function cue(f) {
+  within(f, ALONG_X(), () => {
+    f.col('#1c1d20'); f.cyl(0, 0, 0.0155, -0.42, -0.4, 8);
+    f.col('#3b1f12'); f.cyl(0, 0, 0.0152, -0.4, -0.12, 8, 0.0138);              // the butt, dark wood
+    f.col('#22252b'); f.cyl(0, 0, 0.0142, -0.12, 0.1, 8, 0.013);                // the wrap
+    f.col('#e2c48e'); f.cyl(0, 0, 0.0128, 0.1, 0.96, 8, 0.0062, false);          // the shaft, tapering
+    f.col('#f4f1ea'); f.cyl(0, 0, 0.0063, 0.96, 0.985, 8);                       // the ferrule
+    f.col('#2f6fd6'); f.cyl(0, 0, 0.006, 0.985, 0.995, 8);                       // the chalked tip
+  });
+}
+/** An air hockey striker held under the palm: its knob against the palm, its base out of it (down on the table). */
+function striker(f) {
+  within(f, basis([1, 0, 0], [0, 0, 1], [0, -1, 0], [0, 0, 0]), () => {
+    f.col('#ef4444'); f.lathe(0, 0, [[0, 0], [0.018, 0.002], [0.022, 0.02], [0.012, 0.035], [0.014, 0.05], [0.048, 0.056], [0.05, 0.085], [0, 0.085]], 14);
+  });
+}
+/** A whack-a-mole mallet through the right fist: the handle along the grip's x, its head at the end, striking toward the
+ *  fingers' side (down as it comes down on a mole). */
+function mallet(f) {
+  within(f, ALONG_X(), () => { f.col('#7c2d12'); f.cyl(0, 0, 0.014, -0.08, 0.3, 8); });
+  within(f, new THREE.Matrix4().setPosition(0.3, 0, 0.013), () => { f.col('#ef4444'); f.cyl(0, 0, 0.05, -0.02, 0.11, 14); f.col('#fca5a5'); f.cyl(0, 0, 0.051, 0.1, 0.11, 14); });
 }
 function net(f) {
   within(f, ALONG_X(0.014), () => {
@@ -363,6 +387,14 @@ const SHAPES = [
   // fishing (a set of its own: drawn only for someone out fishing)
   { name: 'rod', set: 2, at: HAND_R, build: rod },
   { name: 'net', set: 2, at: HAND_R, build: net },
+  // a bartender's cocktail shaker (nights out: the clip act_shake shakes it, then pours from it)
+  { name: 'shaker', set: 2, at: HAND_R, build: f => within(f, upright(0.042, 0.205), () => shaker(f)) },
+  // the arcade's: a pool cue, an air hockey striker, the whack-a-mole mallet (their clips bring them)
+  { name: 'cue', set: 2, at: HAND_R, build: cue },
+  { name: 'striker', set: 2, at: HAND_R, build: striker },
+  { name: 'mallet', set: 2, at: HAND_R, build: mallet },
+  // the DJ's headphones, worn (the clip act_dj presses a cup of them to the ear)
+  { name: 'headphones', set: 2, at: HEAD, build: headphones },
 ];
 // which mesh draws a shape: every instance runs every vertex of its mesh's shapes (the unused ones collapsed), so the
 // things held all day and the food at meals are kept apart
@@ -375,8 +407,8 @@ export const onTable = sh => SHAPES[Math.floor(sh)]?.at === DESK;
 const TYPING = new Set([CLIP.sit_type, CLIP.stand_work].filter(c => c !== undefined));
 // hands busy or nothing held: talking at a table puts a drink down; lying, swimming, dancing hold nothing
 const TALKING = new Set([CLIP.sit_talk, CLIP.talk].filter(c => c !== undefined));
-const EMPTY = new Set(['lie', 'swim', 'swim_idle', 'swim_under', 'dance', 'cheer', 'clap', 'wave', 'yoga', 'jump', 'run', 'jog'].map(n => CLIP[n]).filter(c => c !== undefined));
-const SEATED = new Set(['sit', 'sit_type', 'sit_talk', 'sit_eat', 'sit_relax', 'sit_high', 'sit_play', 'sit_phone', 'sit_read', 'sit_drink'].map(n => CLIP[n]).filter(c => c !== undefined));
+const EMPTY = new Set(['lie', 'swim', 'swim_idle', 'swim_under', 'dance', 'cheer', 'clap', 'wave', 'yoga', 'jump', 'run', 'jog', 'dj'].map(n => CLIP[n]).filter(c => c !== undefined));
+const SEATED = new Set(['sit', 'sit_type', 'sit_talk', 'sit_eat', 'sit_relax', 'sit_high', 'sit_play', 'sit_phone', 'sit_read', 'sit_drink', 'piano', 'drive'].map(n => CLIP[n]).filter(c => c !== undefined));
 const SHAPE_OF = new Uint8Array(256 * 16);
 for (let c = 0; c < 256; c++) for (let p = 0; p < 16; p++) SHAPE_OF[c * 16 + p] = pick(c, p);
 function pick(c, p) {
@@ -397,10 +429,28 @@ function pick(c, p) {
   }
 }
 const HAND_DRINK = new Set([SHAPE.mug, SHAPE.coffee]);
+/** Headphones in the head's frame (the character's venue-clips.json heads: x its left, y up, z ahead, origin between its
+ *  ears; stretched to fit its head: shared/stage.js PHONES): a band over the crown from cup to cup, the cups over the ears. */
+function headphones(f) {
+  const { in: a, out: b, r, top } = PHONES, n = 14, pts = [];
+  for (let i = 0; i <= n; i++) { const t = -Math.PI / 2 + i / n * Math.PI; pts.push([(b - 0.014) * Math.sin(t), r * 0.7 + (top - r * 0.7) * Math.cos(t), -0.004]); }
+  f.col('#1a1a1e'); for (let i = 0; i < n; i++) f.rod(pts[i], pts[i + 1], 0.008, 5);
+  for (const s of [-1, 1]) {
+    f.col('#1a1a1e'); f.rod([s * a, 0, 0], [s * b, 0, 0], r, 14);
+    f.col('#2c2c33'); f.rod([s * (a - 0.006), 0, 0], [s * a, 0, 0], r * 0.92, 14);   // (the pad against the ear)
+    f.col('#b8bec6'); f.rod([s * b, 0, 0], [s * (b + 0.004), 0, 0], r * 0.62, 12);   // (a metal disc outside)
+  }
+}
+/** A chrome cobbler shaker: its tin, the lid and its cap (FB's lathe runs up y). */
+function shaker(f) {
+  f.col('#d9dee4'); f.lathe(0, 0, [[0, 0], [0.034, 0], [0.042, 0.11], [0.043, 0.118]], 12);
+  f.col('#aeb5bd'); f.cyl(0, 0, 0.0436, 0.116, 0.126, 12);
+  f.col('#d9dee4'); f.lathe(0, 0, [[0.042, 0.126], [0.03, 0.16], [0.028, 0.172], [0.018, 0.186], [0.016, 0.196], [0, 0.205]], 12);
+}
 const ROD = new Set(['fish_idle', 'fish_cast', 'fish_reel', 'fish_fight'].map(n => CLIP[n]));
 /** The clips that bring their own thing to hold, whatever the person carries (fishing: the rod, the net), by clip. */
 export const GEAR_CLIP = new Uint8Array(256);
-for (const c of [...ROD, CLIP.fish_net]) GEAR_CLIP[c] = 1;
+for (const c of [...ROD, CLIP.fish_net, CLIP.bartend, CLIP.pool, CLIP.hockey, CLIP.whack, CLIP.dj]) GEAR_CLIP[c] = 1;
 /**
  * The shape drawn for someone in MVW clip c holding prop p (0: nothing); item: the food or drink their plan carries
  * (shared/food.js number) — a drink in the hand is its own glass and colour (a fraction on the shape number); a drink
@@ -413,6 +463,11 @@ export function shapeFor(c, p, item = 0) {
   if (c === CLIP.cook) return SHAPE['u-spoon'] + (it && !it.v ? item / TINT_STEP : 0);
   if (c === CLIP.prep) return SHAPE['u-knife'];
   if (ROD.has(c)) return SHAPE.rod;
+  if (c === CLIP.bartend) return SHAPE.shaker;
+  if (c === CLIP.pool) return SHAPE.cue;
+  if (c === CLIP.hockey) return SHAPE.striker;
+  if (c === CLIP.whack) return SHAPE.mallet;
+  if (c === CLIP.dj) return SHAPE.headphones;
   if (c === CLIP.fish_net) return SHAPE.net;
   const sh = c >= 0 && c < 256 && p > 0 && p < 16 ? SHAPE_OF[c * 16 + p] : 0;
   if (!sh || !it?.v) return sh;
@@ -507,9 +562,10 @@ attribute vec4 iPos;
 attribute vec4 iAnim;
 attribute vec4 iMisc;
 uniform vec3 uRig;
-uniform mat4 uGrip[2];
+uniform mat4 uGrip[3];   // the right hand's grip, the left's, the head's frame (worn)
 uniform vec3 uDesk;
 uniform vec3 uBones;   // right hand, left hand, chest (Spine2)
+uniform float uHead;   // the head's bone
 uniform sampler2D uTint;   // every item's colour (linear; a drink's, a held dish's), by the item number in the shape number's fraction
 ${APP_GLSL}
 ${SKIN_GLSL}
@@ -532,6 +588,7 @@ void propCompute() {
   prOff = vec3(0.0);
   prDesk = 0.0;
   if (prHide > 0.5) { prM = mat4(1.0); }
+  else if (aProp.y > 3.5) { prM = prBone(int(uHead + 0.5)) * uGrip[2]; }   // worn on the head
   else if (aProp.y < 1.5 || aProp.y > 2.5) {
     int side = aProp.y < 0.5 ? 0 : aProp.y < 1.5 ? 1 : 0;
     prM = prBone(int((side == 0 ? uBones.x : uBones.y) + 0.5)) * uGrip[side];
@@ -589,8 +646,9 @@ export class CharProps {
     const m4 = r => new THREE.Matrix4().set(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], 0, 0, 0, 1);
     const U = {
       uAnim: { value: d.tex }, uClip: { value: d.clip }, uRig: rigU,
-      uGrip: { value: [m4(gr.R), m4(gr.L)] }, uDesk: { value: new THREE.Vector3(...(gr.desk || [0, 0.755, 0.55])) },
-      uBones: { value: new THREE.Vector3(bone('RightHand'), bone('LeftHand'), bone('Spine2')) },
+      // (the head's frame: from the nights out's clips, venue-clips.json; without it what is worn shrinks to nothing)
+      uGrip: { value: [m4(gr.R), m4(gr.L), gr.H ? m4(gr.H) : new THREE.Matrix4().makeScale(0, 0, 0)] }, uDesk: { value: new THREE.Vector3(...(gr.desk || [0, 0.755, 0.55])) },
+      uBones: { value: new THREE.Vector3(bone('RightHand'), bone('LeftHand'), bone('Spine2')) }, uHead: { value: bone('Head') },
       uApp: this.shared.uApp, uIndoor: this.shared.uIndoor, uNight: this.shared.uNight, uTint: TINT_U,
     };
     this.desks[k] = U.uDesk.value;

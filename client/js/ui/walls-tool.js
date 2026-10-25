@@ -168,7 +168,7 @@ function select(i) {
   const w = Fl?.L.walls?.[i];
   E.sel.classList.toggle('hidden', !w);
   if (!w) return;
-  E.sel.querySelector('[data-a="kind"]').textContent = w[4] ? 'Make solid' : 'Make glass';
+  E.sel.querySelector('[data-a="kind"]').textContent = w[4] === 1 ? 'Make solid' : 'Make glass';   // (a lounge's panelled wall, kind 2, counts as solid)
   const ang = ((Math.atan2(w[3] - w[1], w[2] - w[0]) * 180 / Math.PI) + 360) % 180;
   E.len.textContent = `${lenText(w)} · ${ang.toFixed(0)}°`;
   say(isTouch() ? 'Drag an end to move the corner, the blue handle to slide the wall.' : 'Drag an end to move the corner, the blue handle to slide the wall. Delete removes it, Esc lets go.');
@@ -176,7 +176,7 @@ function select(i) {
 function selAction(a) {
   const Fl = floor(), w = Fl?.L.walls?.[T.sel]; if (!w) return;
   if (a === 'del') { send({ op: 'wall.del', b: Fl.b, f: Fl.f, i: T.sel, ...scope() }, 'Taken down. Ctrl+Z puts it back.'); T.sel = -1; E.sel.classList.add('hidden'); clearGhost(); tags(); return; }
-  if (a === 'kind') { edit(Fl, { set: [[T.sel, [w[0], w[1], w[2], w[3], w[4] ? 0 : 1]]] }, w[4] ? 'Made solid.' : 'Made glass.'); return; }
+  if (a === 'kind') { edit(Fl, { set: [[T.sel, [w[0], w[1], w[2], w[3], w[4] === 1 ? 0 : 1]]] }, w[4] === 1 ? 'Made solid.' : 'Made glass.'); return; }
   if (a === 'split') {
     const mx = (w[0] + w[2]) / 2, mz = (w[1] + w[3]) / 2, g = v => Math.round(v * 4) / 4;
     const p = Math.abs(w[0] - w[2]) < 0.01 ? { x: w[0], z: g(mz) } : Math.abs(w[1] - w[3]) < 0.01 ? { x: g(mx), z: w[1] } : { x: mx, z: mz };

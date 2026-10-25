@@ -6,7 +6,7 @@ import { Router, evalPlan, continuePlan } from './plan.js';
 import { WorldIndex } from './windex.js';
 import { Brain, makeAgent } from './agents.js';
 import { dialogLine } from './dialog.js';
-import { validatePerson } from './population.js';
+import { validatePerson, reassign } from './population.js';
 import { encodePlans } from '../../shared/proto.js';
 import { simAt, hourAt, dayAt, worldSeconds, DEFAULT_DAY_SCALE, clamp, ctxB, ctxF, WEEKDAYS, mod } from '../../shared/constants.js';
 import { hashStr, RNG } from '../../shared/rng.js';
@@ -130,7 +130,7 @@ export class Sim {
     const now = this.now();
     this.heap = new MinHeap();
     this.brain.res.clear(); this.brain.at.clear(); this.brain.joinable.clear();
-    for (const a of this.agents) { a.res = null; a.act = null; a.actCtx = null; a.joinKey = null; a.queue.length = 0; a.busyUntil = 0; }
+    for (const a of this.agents) { a.res = null; a.resv = null; a.act = null; a.actCtx = null; a.joinKey = null; a.queue.length = 0; a.busyUntil = 0; }
     for (const a of this.agents) this.brain.warm(a, now);
   }
 
@@ -207,14 +207,38 @@ export class Sim {
   /** How its last order ended (until its next order), or null. */
   orderEndedOf(i) { const a = this.agents[i]; if (a) this.brain.liveOrder(a, this.now()); return a?.orderEnded || null; }
   /** Posts AI agent i at a piece of furniture around the clock ({ b, f, id, k, since }), or lets it go (null): it goes
-   *  there, or back to its day, at once; everyone sees it (server/agent-posts/). */
-  setPost(i, post) {
+   *  there, or back to its day, at once; everyone sees it (server/agent-posts/). o.now: it is there this moment instead
+   *  of walking there (posted from the furniture itself: Brain.postNow). */
+  setPost(i, post, o = {}) {
     const a = this.agents[i]; if (!a) return false;
     if (post) a.p.post = { b: post.b, f: post.f, id: post.id, k: post.k, since: post.since }; else delete a.p.post;
     a.resume = null;
-    this.brain.interruptSoon(a);
+    if (!(post && o.now && this.brain.postNow(a))) this.brain.interruptSoon(a);
     this.emit({ t: 'person', i, person: this.publicPerson(a.p, i) });
     return true;
+  }
+  /** AI agent i's work changed by its owner (posts.js work): re-planned, at its desk or counter at once when its shift is
+   *  on (o.now: Brain.workNow); everyone sees its new work. */
+  setJob(i, o = {}) {
+    const a = this.agents[i]; if (!a) return false;
+    a.resume = null;
+    if (!(o.now && this.brain.workNow(a))) this.brain.interruptSoon(a);
+    this.emit({ t: 'person', i, person: this.publicPerson(a.p, i) });
+    return true;
+  }
+  /** Resident i gives its place at work up to an AI agent its owner posts there (server/agent-posts/ here): between jobs,
+   *  hired at a free place elsewhere when there is one (population.js reassign), and on its way; everyone sees it.
+   *  → the indices of everyone changed (others the re-hiring placed too). */
+  leaveWork(i) {
+    const p = this.people[i]; if (!p || !p.job) return [];
+    p.job = { kind: 'free', title: 'Between jobs', lost: 1, prev: p.job.kind };
+    const changed = new Set([i, ...reassign(this.world, this.index, this.people, new RNG(`post:${i}:${Date.now()}`)).changed]);
+    for (const k of changed) {
+      const a = this.agents[k];
+      if (a?.plan) this.brain.interruptSoon(a);
+      this.emit({ t: 'person', i: k, person: this.publicPerson(this.people[k], k) });
+    }
+    return [...changed];
   }
 
   // ------------------------------------------------------------------ world edits support
@@ -252,7 +276,7 @@ export class Sim {
         for (const c of list) {
           const act = a.act;
           if (act && act.b === c.b && act.f === c.f && act.id === c.id) hit = true;
-          else if (a.res && a.res.startsWith(`${c.b}:${c.f}:${c.id}:`)) hit = true;
+          else if (a.resv?.some(key => key.startsWith(`${c.b}:${c.f}:${c.id}:`))) hit = true;   // (any stop of its plan: brain.reserve)
           else if (e.ctx === ctx && c.pts.some(p => Math.hypot(e.x - p.x, e.z - p.z) < p.r)) hit = true;
           else if (e.ctx === ctx && e.s && !e.s.h) hit = true;   // walking there: a new way round the furniture
           if (hit) break;

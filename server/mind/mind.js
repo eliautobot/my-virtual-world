@@ -58,8 +58,8 @@ const SPEECH_ROOM = 4;                  // thoughts at once kept free of speech 
 const SPEECH_WAIT_MS = 6000;            // someone spoke to it while it was thinking: it answers when it is done, if that is soon
 const MODERATORS = new Set(['openai', 'custom']);
 const PROBLEM_THOUGHTS = 3;             // thoughts about its problems per agent per world day (a new problem may bring another)
-const PLACE_KINDS = ['cafe', 'restaurant', 'park', 'shop', 'gym'];
-const PRICE_ITEM = { cafe: 'cafe_lunch', restaurant: 'meal' };
+const PLACE_KINDS = ['cafe', 'restaurant', 'park', 'shop', 'gym', 'arcade', 'lounge_bar', 'club'];   // (nights out: shared/nightlife.js)
+const PRICE_ITEM = { cafe: 'cafe_lunch', restaurant: 'meal', arcade: 'game_tokens', lounge_bar: 'martini', club: 'cover' };
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const HOW = r => closenessWords(r.affinity, { ended: !!r.ended });   // (shared/closeness.js: one scale for the server and the pages)
 

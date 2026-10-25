@@ -2,8 +2,9 @@
 // Agent brain: needs, daily schedules, work, meals, leisure, sleep, meetings and chats.
 // Every decision produces one motion plan (travel + activity) that starts where the previous plan ends.
 import { RNG, hashStr } from '../../shared/rng.js';
-import { A, PROP } from '../../shared/anims.js';
+import { A, PROP, SEATED } from '../../shared/anims.js';
 import { USES, USE_ID } from '../../shared/catalog.js';
+import { machineGame } from '../../shared/arcade/catalog.js';
 import { GROUND_Y, floorAt, ctxOf, ctxB, ctxF, hourAt, dayAt, worldMin, worldSeconds, mod, clamp, RUN_SPEED, JOG_SPEED } from '../../shared/constants.js';
 import { F_FACE, F_HIDDEN, CTX_OUT, CTX_UNDER } from '../../shared/proto.js';
 import { toWorld, toLocal, bRot } from '../../shared/geom.js';
@@ -13,11 +14,12 @@ import { cellCenter } from '../../shared/navgrid.js';
 import { Plan, truncatePlan, safeCutTime, evalPlan, continuePlan } from './plan.js';
 import { SUBWAY_SPEED } from './nav.js';
 import { pickOrder, courses as serveCourses, homeMeal as homeDish, onStove, deskLunch, picnic as picnicFood, guessCuisine, menuIds, FOOD_BY_ID } from '../../shared/food.js';
+import { NIGHTLIFE_OPEN, DRINKS, roleAt, ROLE_TITLE, ROLE_USE } from '../../shared/nightlife.js';
 
 const U = USE_ID;
 const NEEDS = ['hunger', 'energy', 'social', 'fun', 'hygiene'];
 const DECAY = { hunger: 0.066, energy: 0.052, social: 0.045, fun: 0.05, hygiene: 0.034 };
-const OPEN = { cafe: [6.5, 21], restaurant: [11, 23.5], shop: [9, 21], gym: [6, 22], park: [6, 22.5] };
+const OPEN = { cafe: [6.5, 21], restaurant: [11, 23.5], shop: [9, 21], gym: [6, 22], park: [6, 22.5], ...NIGHTLIFE_OPEN };
 export const isOpen = (kind, h) => { const o = OPEN[kind]; return !o || (h >= o[0] && h < o[1]); };
 const inHours = (h, a, b) => (a <= b ? h >= a && h < b : h >= a || h < b);
 const hyp = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
@@ -50,6 +52,10 @@ const LOUNGE_USES = LOUNGE_OPTS.map(o => o[0]);
 const RESUME_SKIP_KINDS = new Set(['work', 'sleep', 'idle', 'talk', 'meet', 'chat']);
 const RESUME_SKIP_USES = new Set(['phone', 'task', 'task_phone', 'greet', 'sleep', 'nap']);
 const MEET_SEARCH_MIN = 180;   // world minutes an AI's "meet" keeps looking for its person before it gives up (the default; the admin's connected.meetSearchMinutes)
+// the night's performers (shared/nightlife.js roles): there before their set (onShift: SHOW_EARLY hours more than the
+// way there), no breaks during it (2026-10-24, the product owner: "the dj left and there was no music playing yet people
+// kept dancing in the nightclub ... why would a dj leave?": a phone break mid-set, and a trip to the gym before it)
+const SHOW_ROLES = new Set(['dj', 'musician']), SHOW_EARLY = 1.25;
 const REFLEXES = Object.freeze([
   // an AI agent its owner posted at a piece of furniture stays there around the clock (server/agent-posts/): before
   // anything else, and never a Free Will choice
@@ -57,7 +63,8 @@ const REFLEXES = Object.freeze([
   { id: 'task', when: (B, a) => !!a.p.vip && B.sim.presence.isWorking(a.p.agentId), act: (B, a, P, h, day) => B.taskWork(a, P, h, day) },
   { id: 'morning', when: (B, a, P, h) => a.queue.length > 0 && !(B.sleepTime(a, h) && B.justFinishedTask(a, P.t)), act: (B, a, P, h, day) => { while (a.queue.length) { const q = a.queue.shift(); if (B.task(a, P, q, h, day)) return true; } return false; } },
   { id: 'sleep', when: (B, a, P, h) => B.sleepTime(a, h), act: (B, a, P, h) => (B.sleep(a, P, h), true) },
-  { id: 'starving', when: (B, a, P, h, day, n) => n.hunger < 0.2, act: (B, a, P, h, day) => B.eat(a, P, h, day) },
+  // (a performer in the middle of a set holds out till it ends unless there is nothing left: the show goes on)
+  { id: 'starving', when: (B, a, P, h, day, n) => n.hunger < (B.onStage(a, h, day) ? 0.04 : 0.2), act: (B, a, P, h, day) => B.eat(a, P, h, day) },
   { id: 'filthy', when: (B, a, P, h, day, n) => n.hygiene < 0.18, act: (B, a, P) => !!B.homeUse(a, P, ['shower'], [6, 12]) },
   { id: 'shift', when: (B, a, P, h, day) => B.onShift(a, P, h, day), act: (B, a, P, h, day) => (B.work(a, P, h, day, false), true) },
   { id: 'meal', when: (B, a, P, h, day, n) => B.mealDue(a, h, day, n), act: (B, a, P, h, day) => B.eat(a, P, h, day) },
@@ -76,6 +83,17 @@ export function makeAgent(i, p, seed) {
   };
 }
 
+// Players at furniture (2026-10-24, the product owner: "multiple agents play over each other on the same spot for the
+// same machine ... let's not allow playing on each other"): where players are using something right now, [{ x, z, ctx }]
+// (server/index.mjs: the players' accepted states, PF_USING): a slot a player is at is nobody else's for the next
+// PLAYER_HOLD world minutes, and agents on their way to it go elsewhere (playerTook).
+let playerSpots = () => [];
+export function setPlayerSpots(fn) { playerSpots = typeof fn === 'function' ? fn : () => []; }
+const PLAYER_HOLD = 30, PLAYER_NEAR = 0.45;
+/** Where a plan being made stands, to come back to (a seat that turns out taken when they would get there: useAt);
+ *  the routes only add to a plan's own segments. */
+const planMark = P => ({ n: P.segs.length, t: P.t, x: P.x, y: P.y, z: P.z, yaw: P.yaw, ctx: P.ctx, seat: P.seat, tele: P.tele, dest: P.meta.dest });
+function planBack(P, m) { P.segs.length = m.n; P.t = m.t; P.x = m.x; P.y = m.y; P.z = m.z; P.yaw = m.yaw; P.ctx = m.ctx; P.seat = m.seat; P.tele = m.tele; P.meta.dest = m.dest; }
 export class Brain {
   constructor(sim) { this.sim = sim; this.res = new Map(); this.at = new Map(); this.joinable = new Map(); }
   get W() { return this.sim.world; }
@@ -117,16 +135,105 @@ export class Brain {
   }
 
   // ------------------------------------------------------------------ bookkeeping
+  // A slot is held by whoever is to be in it, for the time they are to be in it (2026-10-24, the product owner: "a lot of
+  // agents are sitting on the same seat"): a plan with several stops (a drink at the bar, then the dance floor, then a
+  // booth) keeps each of them, each for its stay (from the arrival to the end of its hold: act), so nobody planning
+  // meanwhile is given a seat someone will be in then, and a seat someone will only get to later is free until then. It
+  // held one slot a resident: choosing the next stop let go of the last, which they had yet to get to, and a club's bar
+  // filled its first stool with a dozen people at once. res: slot key → [[who, from, until], …], a stay each (until:
+  // Infinity while the stay is being planned; several games in a row at one machine: several stays); a.resv: the keys a
+  // resident's plan holds; a.res: the last of them.
   key(b, f, id, k) { return b + ':' + f + ':' + id + ':' + k; }
-  taken(b, f, id, k, who) { const v = this.res.get(this.key(b, f, id, k)); return v !== undefined && v !== who; }
-  reserve(a, b, f, id, k) {
-    const key = this.key(b, f, id, k), v = this.res.get(key);
-    if (v !== undefined && v !== a.i) return false;
-    this.release(a);
-    this.res.set(key, a.i); a.res = key;
+  /** Is the slot held by someone else at any time in [t0, t1) (by default, right now)? */
+  heldBy(key, who, win = null) {
+    const l = this.res.get(key); if (!l) return false;
+    const t0 = win ? win[0] : this.sim.now(), t1 = win ? win[1] : t0 + 1;
+    return l.some(r => r[0] !== who && r[2] > t0 && r[1] < t1);
+  }
+  taken(b, f, id, k, who, win = null) { return this.heldBy(this.key(b, f, id, k), who, win) || this.playerOn(b, f, id, k, win); }
+  /** Where slot k of item id on floor f of building b is in the world: { x, z }, or null. */
+  slotAt(b, f, id, k) { const B = this.W.buildings[b], s = this.index.entry(b, f, id)?.slots[k]; return B && s ? toWorld(B, s.lx, s.lz) : null; }
+  /** A player at that slot now, for a stay starting within PLAYER_HOLD world minutes (win: by default now). */
+  playerOn(b, f, id, k, win = null) {
+    const ps = playerSpots(); if (!ps.length) return false;
+    const now = this.sim.now(); if (win && win[0] > now + this.wm(PLAYER_HOLD)) return false;
+    const ctx = ctxOf(b, f); let at = null;
+    for (const p of ps) {
+      if (p.ctx !== ctx) continue;
+      at = at || this.slotAt(b, f, id, k);
+      if (at && Math.hypot(p.x - at.x, p.z - at.z) < PLAYER_NEAR) return true;
+    }
+    // a table played against the computer (air hockey, foosball): a player at either end holds all of it
+    const e = at !== null ? this.index.entry(b, f, id) : null;
+    if (e && e.slots.length > 1 && machineGame(e.it?.t)?.cpu) {
+      for (let j = 0; j < e.slots.length; j++) {
+        const o = j === k ? null : this.slotAt(b, f, id, j);
+        if (o && ps.some(p => p.ctx === ctx && Math.hypot(p.x - o.x, p.z - o.z) < PLAYER_NEAR)) return true;
+      }
+    }
+    return false;
+  }
+  /** A player sat down or started playing at (x, z) on floor ctx: whoever was to be in that slot soon goes elsewhere. */
+  playerTook(x, z, ctx) {
+    if (!(ctx >= 0)) return 0;
+    const b = ctxB(ctx), f = ctxF(ctx), B = this.W.buildings[b], L = B && !B.gone ? this.W.levels[B.lv[f]] : null;
+    if (!L) return 0;
+    const now = this.sim.now(), soon = now + this.wm(PLAYER_HOLD);
+    let n = 0;
+    for (const it of L.items || []) {
+      const e = this.index.entry(b, f, it.id); if (!e) continue;
+      // (a table played against the computer is all the player's: those bound for its other end go elsewhere too)
+      const whole = e.slots.length > 1 && machineGame(it.t)?.cpu && e.slots.some(s => { const w = toWorld(B, s.lx, s.lz); return Math.hypot(w.x - x, w.z - z) <= PLAYER_NEAR; });
+      e.slots.forEach((s, k) => {
+        const w = toWorld(B, s.lx, s.lz);
+        if (!whole && Math.hypot(w.x - x, w.z - z) > PLAYER_NEAR) return;
+        for (const r of [...(this.res.get(this.key(b, f, it.id, k)) || [])]) {
+          const a = r[2] > now && r[1] < soon ? this.sim.agents[r[0]] : null;
+          if (a?.plan) { this.interruptSoon(a); n++; }
+        }
+      });
+    }
+    return n;
+  }
+  /** Hold a slot for resident a over win ([from, until]; by default from now on) if nobody else has it then. */
+  reserve(a, b, f, id, k, win = null) {
+    const key = this.key(b, f, id, k), now = this.sim.now(), w = win || [now, Infinity];
+    let l = this.res.get(key);
+    if (l) { l = l.filter(r => r[2] > now); if (l.some(r => r[0] !== a.i && r[2] > w[0] && r[1] < w[1])) return false; }
+    else l = [];
+    if (this.playerOn(b, f, id, k, w)) return false;
+    l.push([a.i, w[0], Infinity]);
+    this.res.set(key, l);
+    if (!a.resv) a.resv = [];
+    if (!a.resv.includes(key)) a.resv.push(key);
+    a.res = key;
     return true;
   }
-  release(a) { if (a.res && this.res.get(a.res) === a.i) this.res.delete(a.res); a.res = null; }
+  /** Undo the reservation of slot key just made (its stay still being planned). */
+  unreserve(a, key) {
+    const l = this.res.get(key); if (!l) return;
+    const r = l.findLast(q => q[0] === a.i && q[2] === Infinity); if (!r) return;
+    l.splice(l.indexOf(r), 1); if (!l.length) this.res.delete(key);
+    if (!l.some(q => q[0] === a.i)) { a.resv = (a.resv || []).filter(k => k !== key); a.res = a.resv.length ? a.resv[a.resv.length - 1] : null; }
+  }
+  /** Its stay at slot key (the one being planned) is from t0 to t1 (act): before and after it the slot is free to others. */
+  holdFor(a, key, t0, t1) { const r = this.res.get(key)?.findLast(q => q[0] === a.i && q[2] === Infinity); if (r) { r[1] = t0; r[2] = t1; } }
+  /** When a stop on floor f of building b would surely have them there: from their arrival (the router's estimate, give
+   *  or take) through the shortest stay of dur (world minutes: [min, max], or a time) — a slot not free then is no
+   *  choice; the stay as planned is checked to the second after (useAt). */
+  stayWindow(P, b, f, dur) {
+    const B = this.W.buildings[b], est = B ? this.router.estimate(P.ctx, P.x, P.z, { ctx: ctxOf(b, f), x: B.x, z: B.z }) : 0;
+    const d = typeof dur === 'number' ? dur : this.wm(dur[0]);
+    return [P.t + est * 0.9, P.t + est * 1.1 + d];
+  }
+  release(a) {
+    for (const key of a.resv || []) {
+      const l = this.res.get(key); if (!l) continue;
+      const m = l.filter(r => r[0] !== a.i);
+      if (m.length) this.res.set(key, m); else this.res.delete(key);
+    }
+    a.resv = []; a.res = null;
+  }
   setAct(a, act) {
     if (a.actCtx !== null) { const s = this.at.get(a.actCtx); if (s) { s.delete(a.i); if (!s.size) this.at.delete(a.actCtx); } }
     a.act = act; a.actCtx = null;
@@ -151,6 +258,7 @@ export class Brain {
     if (info.order) act.order = info.order;   // what they ordered or made (shared/food.js ids): the bill, the activity's words
     if (Number.isInteger(info.talkWith)) act.talkWith = info.talkWith;   // whom it talks with (an AI's meet or say --to): its life's log
     this.setAct(a, act);
+    if (act.id >= 0 && act.k >= 0) this.holdFor(a, this.key(act.b, act.f, act.id, act.k), Math.min(act.travelEnd, act.holdStart), act.holdEnd);   // (its seat: held from its arrival until it gets up)
     if (this.sim.onAct) this.sim.onAct(a, act);   // the economy: purchases at venues, hours at work (server/economy/households.js)
     for (const fn of this.sim.actObservers) fn(a, act);   // observers only (an agent's activity log and memories: server/agent-life/)
     return act;
@@ -158,6 +266,7 @@ export class Brain {
   placeName(b, f) {
     const B = this.W.buildings[b]; if (!B) return '';
     const L = this.W.levels[B.lv[f]];
+    if (L && NIGHTLIFE_OPEN[L.venue] && L.name && !L.named) return `${B.name} ${L.name}`;   // (a night out with its theme's name: whose it is)
     if (L && L.venue && L.venue !== 'lounge' && L.name) return L.name;
     if (B.type === 'park' || f === 0) return B.name;
     if (L && L.venue === 'lounge') return `${B.name} ${L.name}`;
@@ -216,10 +325,10 @@ export class Brain {
   }
 
   // ------------------------------------------------------------------ furniture use primitives
-  freeSlots(b, f, uses, who) {
+  freeSlots(b, f, uses, who, win = null) {
     const B = this.W.buildings[b]; if (!B || B.gone || f < 0 || f >= B.floors) return [];
     const list = this.index.findUsesCached(B.lv[f], uses), out = [];
-    for (const e of list) if (!this.taken(b, f, e[0], e[1], who)) out.push(e);
+    for (const e of list) if (!this.taken(b, f, e[0], e[1], who, win)) out.push(e);
     return out;
   }
   pickNear(a, list, x, z, B) {
@@ -238,7 +347,7 @@ export class Brain {
   slotBegin(a, P, b, f, id, k, o = {}) {
     const B = this.W.buildings[b], e = this.index.entry(b, f, id);
     if (!B || !e || !e.slots[k]) return null;
-    if (!o.noReserve && !this.reserve(a, b, f, id, k)) return null;
+    if (!o.noReserve && !this.reserve(a, b, f, id, k, o.win || [P.t, Infinity])) return null;
     const s = e.slots[k], ctx = ctxOf(b, f), y = floorAt(this.W.buildings[b], f);
     // Normally the approach point; nav.approach moves it when no entrance reaches it or a wall separates it from the slot.
     const ap = this.nav.approach(B.lv[f], s);
@@ -254,7 +363,7 @@ export class Brain {
     }
     if (P.tele) {
       P.tele = false;
-      P.place(sw.x, y + s.y, sw.z, ctx, yaw);
+      if (!P.place(sw.x, y + s.y, sw.z, ctx, yaw)) P.jump(sw.x, y + s.y, sw.z, ctx, yaw);   // (mid-plan: posted this moment, postNow)
       P.meta.dest = ctx;
       return { b, f, id, k, s, aw, sw, y, yaw, ctx, use, anim, prop, arrive: P.t, B, sk };
     }
@@ -292,14 +401,27 @@ export class Brain {
   slotInfo(st) { return { b: st.b, f: st.f, id: st.id, k: st.k, ctx: st.ctx, arrive: st.arrive }; }
   /** Pick a free slot with one of `uses` on (b, f) and use it for dur world minutes ([min, max] or number). */
   useAt(a, P, b, f, uses, dur, o = {}) {
-    const list = this.freeSlots(b, f, uses, a.i);
-    if (!list.length) return null;
-    const B = this.W.buildings[b];
-    const e = o.pick ? o.pick(list) : this.pickNear(a, list, P.x, P.z, B);
-    const st = this.slotBegin(a, P, b, f, e[0], e[1], o);
+    const win = this.stayWindow(P, b, f, dur);
+    let list = this.freeSlots(b, f, uses, a.i, win), st = null, hs = null;
+    const B = this.W.buildings[b], snap = planMark(P);
+    for (let tries = 0; tries < 4 && list.length; tries++) {
+      const e = o.pick ? o.pick(list) : this.pickNear(a, list, P.x, P.z, B);
+      if (!e) return null;   // (a pick that wanted one kind of piece and found none free)
+      const key = this.key(b, f, e[0], e[1]);
+      st = this.slotBegin(a, P, b, f, e[0], e[1], { ...o, win });
+      if (!st) { list = list.filter(x => x !== e); continue; }   // (held then after all: the next)
+      const d = typeof dur === 'number' ? dur : this.wm(a.rng.float(dur[0], dur[1]));
+      hs = this.slotHold(a, P, st, d, o);
+      // the stay as planned, to the second: someone else in that seat then (the way there took longer or shorter than
+      // reckoned) → back, and another seat; none of a few: not this stop
+      if (this.heldBy(key, a.i, [st.arrive, hs.holdEnd]) || this.playerOn(b, f, e[0], e[1], [st.arrive, hs.holdEnd])) {
+        planBack(P, snap); this.unreserve(a, key);
+        list = list.filter(x => x !== e); st = null;
+        continue;
+      }
+      break;
+    }
     if (!st) return null;
-    const d = typeof dur === 'number' ? dur : this.wm(a.rng.float(dur[0], dur[1]));
-    const hs = this.slotHold(a, P, st, d, o);
     const useName = o.use || st.s.use;
     this.act(a, o.kind || 'visit', useName, P, { ...this.slotInfo(st), ...hs, place: o.place || this.placeName(b, f), ...(this.food && o.order ? { order: o.order } : {}) });
     return { st, hs };
@@ -314,10 +436,11 @@ export class Brain {
   homeUse(a, P, uses, dur, o = {}) {
     const h = a.p.home, lv = this.homeLv(a);
     if (lv < 0) return null;
-    const ids = this.index.unitItems(lv, h.u);
+    const ids = this.index.unitItems(lv, h.u), mine = new Set(ids);
     const list = this.index.findUses(lv, new Set(uses), ids).filter(e => !this.taken(h.b, h.f, e[0], e[1], a.i));
     if (!list.length) return null;
-    return this.useAt(a, P, h.b, h.f, uses, dur, { ...o, place: 'Home', kind: o.kind || 'home', pick: () => list[Math.floor(a.rng.next() * list.length)] });
+    // (of the floor's free slots for the stay, the home's own: someone of the household may be at the table then)
+    return this.useAt(a, P, h.b, h.f, uses, dur, { ...o, place: 'Home', kind: o.kind || 'home', pick: free => { const own = free.filter(e => mine.has(e[0])); return own.length ? own[Math.floor(a.rng.next() * own.length)] : null; } });
   }
   homeMeal(a, P) {
     const k = this.homeKitchen(a);
@@ -534,6 +657,11 @@ export class Brain {
     return null;
   }
   sleepTime(a, h) { const s = a.p.sched; return inHours(h, s.bed % 24, s.wake); }
+  /** A performer (SHOW_ROLES) during their set today. */
+  onStage(a, h, day) {
+    const j = a.p.job;
+    return !!j && SHOW_ROLES.has(j.role) && a.doneDay !== day && !!((j.days ?? 31) & (1 << mod(day, 7))) && h >= j.start && h < j.end - 0.05;
+  }
   onShift(a, P, h, day) {
     const j = a.p.job;
     if (!j || j.kind === 'free' || a.doneDay === day) return false;
@@ -542,7 +670,9 @@ export class Brain {
     if (h >= j.start) return true;
     const dest = this.jobDest(a);
     const est = dest ? this.router.estimate(P.ctx, P.x, P.z, dest) : 0;
-    return h >= j.start - (est * this.clock.dayScale / 3600 + 0.12);
+    // (a performer — the club's DJ, the lounge's band — goes in good time and gets ready there: nothing started an hour
+    // or two before the set (the gym, a meal) makes the show start late: work)
+    return h >= j.start - (est * this.clock.dayScale / 3600 + (SHOW_ROLES.has(j.role) ? SHOW_EARLY : 0.12));
   }
   jobDest(a) {
     const j = a.p.job;
@@ -573,7 +703,7 @@ export class Brain {
         a.lunchDay = day;
         if (this.lunch(a, P, h, day)) return;
       }
-      if (P.t - a.lastBreak > a.breakGap && h < j.end - 0.35 && h > j.start + 0.15) {
+      if (!SHOW_ROLES.has(j.role) && P.t - a.lastBreak > a.breakGap && h < j.end - 0.35 && h > j.start + 0.15) {   // (no breaks in the middle of a set)
         a.lastBreak = P.t;
         a.breakGap = this.wm(j.kind === 'staff' ? a.rng.float(110, 200) : a.rng.float(50, 130));
         if (this.workBreak(a, P, h)) return;
@@ -584,13 +714,23 @@ export class Brain {
     const travel = {};
     if (!atWork && j.kind !== 'staff' && (hashStr(p.id) % 3 === 0)) travel.prop = PROP.briefcase;
     if (!atWork && !live && h > j.start + 0.2) { travel.speed = RUN_SPEED * 0.85; travel.anim = A.run; }
-    const st = this.slotBegin(a, P, j.b, j.f, j.id, j.k, { use: j.kind === 'staff' ? 'staff' : 'work', travel, noReserve: true });
+    // (a bartender, a DJ, a musician, a club dancer: what the piece they work at makes them, seen doing it — shared/nightlife.js)
+    const role = j.kind === 'staff' ? roleAt(this.W, j.b, j.f, j.id, j.k) : null, wuse = role && ROLE_USE[role] ? ROLE_USE[role] : j.kind === 'staff' ? 'staff' : 'work';
+    if (role && j.role !== role) { j.role = role; j.title = `${ROLE_TITLE[role]} at ${this.placeName(j.b, j.f)}`; }
+    const st = this.slotBegin(a, P, j.b, j.f, j.id, j.k, { use: wuse, travel, noReserve: true });
     if (!st) { a.doneDay = day; return this.leisure(a, P, h, day); }
+    // a performer there before the set: getting ready at the stage (a look at the phone, the set list) until it starts —
+    // not playing yet (render: no music till then)
+    const early = SHOW_ROLES.has(role) && !live ? this.hSecs(j.start - this.hour(P.t)) : 0;
+    if (early > this.wm(1)) {
+      const hs0 = this.slotHold(a, P, { ...st, use: U.staff ?? U.idle }, early, { anim: SEATED.has(st.anim) ? A.sit_phone : A.phone, prop: PROP.phone });
+      this.act(a, 'work', 'staff', P, { ...this.slotInfo(st), ...hs0, place: this.placeName(j.b, j.f), label: 'Getting ready', icon: '🎧' });
+    }
     const untilEnd = Math.max(this.wm(3), this.hSecs(j.end - this.hour(P.t)));
     let dur = live ? this.wm(15) : Math.min(untilEnd, this.wm(j.kind === 'staff' ? a.rng.float(60, 150) : a.rng.float(40, 110)));
     if (!live && untilEnd - dur < this.wm(12)) dur = untilEnd;
     const hs = this.slotHold(a, P, st, dur);
-    this.act(a, 'work', j.kind === 'staff' ? 'staff' : 'work', P, { ...this.slotInfo(st), ...hs, place: this.placeName(j.b, j.f) });
+    this.act(a, 'work', wuse === 'work' ? 'work' : wuse, P, { ...this.slotInfo(st), ...hs, place: this.placeName(j.b, j.f) });
   }
   // ------------------------------------------------------------------ tasks (an AI agent working on what its owner asked)
   /**
@@ -929,9 +1069,13 @@ export class Brain {
     const late = h >= 21.25 || h < 6.5;
     const lowFun = 1 - n.fun, lowSoc = 1 - n.social;
     const opts = [];
+    const has = k => (this.index.venues[k] || []).length > 0;   // (nights out: only where the city has one)
     if (late) {
       if (p.tr.night && isOpen('restaurant', h)) opts.push(['bar', 1.2]);
       opts.push(['home', p.home ? 6 : 0], ['wander', p.home ? 0.3 : 2]);
+      if (isOpen('club', h) && h < 23.2 && has('club')) opts.push(['club', (p.tr.night ? 2.2 : 0.5) + (weekend ? 1.4 : 0) + lowFun * 0.8 + lowSoc * 0.5]);
+      if (isOpen('lounge_bar', h) && h < 23 && has('lounge_bar')) opts.push(['lounge_bar', 0.5 + lowSoc * 0.9 + (p.tr.night ? 0.6 : 0)]);
+      if (isOpen('arcade', h) && h < 22.75 && has('arcade')) opts.push(['arcade', 0.25 + lowFun * 0.5]);
     } else {
       opts.push(['home', p.home ? 0.6 + p.tr.home * 1.4 + (h >= 19.5 ? 3 : 0) : 0]);
       if (isOpen('cafe', h)) opts.push(['cafe', 0.8 + lowSoc * 2 + (weekend ? 0.6 : 0)]);
@@ -942,6 +1086,9 @@ export class Brain {
       opts.push(['wander', 0.9]);
       if (h >= 18 && isOpen('restaurant', h)) opts.push(['bar', 0.4 + lowSoc]);
       if (this.loungeFor(a)) opts.push(['lounge', 1.6]);
+      if (isOpen('arcade', h) && h < 22.75 && has('arcade')) opts.push(['arcade', 0.2 + lowFun * 0.9 + (weekend ? 0.5 : 0) + p.tr.act * 0.15]);
+      if (isOpen('lounge_bar', h) && h >= 16.5 && h < 23 && has('lounge_bar')) opts.push(['lounge_bar', 0.35 + lowSoc * 1.3 + (h >= 18.5 ? 0.6 : 0) + (weekend ? 0.3 : 0)]);
+      if (isOpen('club', h) && h < 23 && has('club')) opts.push(['club', 0.3 + lowFun * 0.9 + lowSoc * 0.6 + (weekend ? 1 : 0) + p.tr.night * 1.2]);
       opts.push(['chat', lowSoc * 2.5]);
       if (this.invitation(a)) opts.push(['visit', 3 + lowSoc * 3]);   // invited to someone's flat (server/world/edit.js flat.invite)
     }
@@ -1001,6 +1148,9 @@ export class Brain {
       case 'wander': return this.wander(a, P);
       case 'bar': return this.barVisit(a, P, h, venue);
       case 'lounge': return this.loungeVisit(a, P);
+      case 'arcade': return this.arcadeVisit(a, P, h, venue);
+      case 'lounge_bar': return this.loungeBarVisit(a, P, h, venue);
+      case 'club': return this.clubVisit(a, P, h, venue);
       case 'chat': return this.chat(a, P);
       default: return false;
     }
@@ -1094,6 +1244,48 @@ export class Brain {
     }
     return false;
   }
+  // ------------------------------------------------------------------ nights out (shared/nightlife.js)
+  /** A drink from a place's list (deterministic per resident and time: what they order draws no simulation number). */
+  drinkAt(a, t, kind, tag) { const list = DRINKS[kind] || []; return this.food && list.length ? this.served([list[Math.floor(r01(a.p.id, t, tag) * list.length) % list.length]]) : {}; }
+  /** An arcade: tokens at the prize counter, then a few games (cabinets, pinball, the bull, billiards, air hockey, the
+   *  dance machine …), maybe a soda in a booth. */
+  arcadeVisit(a, P, h, venue = null) {
+    const v = venue || this.pickVenue(a, P, 'arcade'); if (!v) return false;
+    let first = a.rng.chance(0.7) ? this.useAt(a, P, v.b, v.f, 'reception', [1, 2], { anim: A.talk, use: 'buy', kind: 'arcade' }) : null;
+    const n = a.rng.int(2, 4);
+    for (let q = 0; q < n; q++) {
+      const r = this.useAt(a, P, v.b, v.f, a.rng.chance(0.15) ? ['dance', 'play', 'pingpong'] : ['play', 'pingpong'], [6, 18], { kind: 'arcade' });
+      if (r && !first) first = r;
+    }
+    if (!first) return false;
+    if (a.rng.chance(0.3)) this.useAt(a, P, v.b, v.f, ['eat', 'relax'], [8, 15], { kind: 'arcade', use: 'bar', ...this.drinkAt(a, P.t, 'arcade', 's') });
+    return true;
+  }
+  /** A lounge: a cocktail at the bar or with company in the seats while the band plays, perhaps another round. */
+  loungeBarVisit(a, P, h, venue = null) {
+    const v = venue || this.pickVenue(a, P, 'lounge_bar'); if (!v) return false;
+    const atBar = a.rng.chance(0.4);
+    const first = this.useAt(a, P, v.b, v.f, atBar ? ['eat'] : ['relax', 'eat', 'chat'], [25, 55], { kind: 'lounge_bar', use: 'bar', ...this.drinkAt(a, P.t, 'lounge_bar', 'a') });
+    if (!first) return false;
+    if (a.rng.chance(0.4)) this.useAt(a, P, v.b, v.f, ['relax', 'chat', 'eat'], [15, 35], { kind: 'lounge_bar', use: 'bar', ...this.drinkAt(a, P.t, 'lounge_bar', 'b') });
+    return true;
+  }
+  /** A club: the cover at the door, a drink at the bar, the dance floor; a VIP booth for those who can afford a table. */
+  clubVisit(a, P, h, venue = null) {
+    const v = venue || this.pickVenue(a, P, 'club'); if (!v) return false;
+    const econ = this.sim.econ, rich = !econ || (econ.available?.(a.p) ?? 0) > 60000;
+    let first = null;
+    if (a.rng.chance(0.55)) first = this.useAt(a, P, v.b, v.f, 'eat', [10, 20], { kind: 'club', use: 'bar', pick: list => { const bar = list.filter(e => this.itemType(v.b, v.f, e[0]) === 'club_bar'); return bar.length ? this.pickNear(a, bar, P.x, P.z, this.W.buildings[v.b]) : list[0]; }, ...this.drinkAt(a, P.t, 'club', 'a') });   // (a free stool near them, not the bar's first)
+    const n = a.rng.int(1, 3);
+    for (let q = 0; q < n; q++) { const r = this.useAt(a, P, v.b, v.f, 'dance', [12, 30], { kind: 'club' }); if (r && !first) first = r; }
+    if (rich && a.rng.chance(0.35)) {
+      const r = this.useAt(a, P, v.b, v.f, 'eat', [25, 50], { kind: 'club', use: 'vip', pick: list => list.find(e => this.itemType(v.b, v.f, e[0]) === 'vip_booth') || null, ...this.drinkAt(a, P.t, 'club', 'v') });
+      if (r && !first) first = r;
+    }
+    return !!first;
+  }
+  /** The type of item id on floor f of building b (or null). */
+  itemType(b, f, id) { return this.index.entry(b, f, id)?.it?.t ?? this.W.levels[this.W.buildings[b]?.lv?.[f]]?.items?.find(i => i.id === id)?.t ?? null; }
   jog(a, P) {
     if (P.ctx >= 0) {
       const B = this.W.buildings[ctxB(P.ctx)];
@@ -1314,7 +1506,7 @@ export class Brain {
         const e = evalPlan(t.plan, this.sim.now()), me = evalPlan(a.plan, this.sim.now());
         return this.reachable(e.ctx, me.ctx) ? null : 'private';
       }
-      case 'park': case 'cafe': case 'gym': case 'shop': case 'restaurant': {
+      case 'park': case 'cafe': case 'gym': case 'shop': case 'restaurant': case 'arcade': case 'lounge_bar': case 'club': {
         if (econ && !econ.canSpend(a, kind, kind === 'restaurant')) return 'no_money';
         if (venue) return null;
         return (this.index.venues[kind] || []).length ? null : 'nowhere';
@@ -1471,6 +1663,9 @@ export class Brain {
         case 'cafe': ok = this.cafeVisit(a, P, h); break;
         case 'gym': ok = this.gymVisit(a, P); break;
         case 'shop': ok = this.shopVisit(a, P); break;
+        case 'arcade': ok = this.arcadeVisit(a, P, h); break;
+        case 'lounge_bar': ok = this.loungeBarVisit(a, P, h); break;
+        case 'club': ok = this.clubVisit(a, P, h); break;
         case 'jog': ok = this.jog(a, P); break;
         case 'dance': {
           const lounge = this.loungeFor(a);
@@ -1485,10 +1680,11 @@ export class Brain {
     this.sim.commit(a, P);
     return ok;
   }
-  /** Cut the plan at the earliest safe time >= t and return a new plan cursor (standing up first if seated). */
-  cut(a, t) {
+  /** Cut the plan at the earliest safe time >= t and return a new plan cursor (standing up first if seated). anyTime: at t
+   *  itself, even mid-ride or mid-crossing (it is about to be put somewhere else at once: postNow). */
+  cut(a, t, anyTime = false) {
     const now = this.sim.now();
-    const tc = safeCutTime(a.plan, Math.max(t, now));
+    const tc = anyTime ? Math.max(t, now) : safeCutTime(a.plan, Math.max(t, now));
     this.needsAt(a, tc);
     if (a.act) a.act.holdEnd = Math.min(a.act.holdEnd, tc);
     this.release(a); this.leaveJoin(a); this.setAct(a, null);
@@ -1510,6 +1706,42 @@ export class Brain {
     const hs = this.slotHold(a, P, st, this.wm(60));
     this.act(a, 'post', st.s.use, P, { ...this.slotInfo(st), ...hs, place: this.placeName(r.b, r.f), label: 'On duty', icon: '🛎' });
     return true;
+  }
+  /**
+   * Posted this moment from the furniture itself (2026-10-23: "i want the agent to transport right away, not walk there
+   * that way its instant"): it is at its post at once. From then on it is like any post: let go, or its furniture gone,
+   * it walks off to its day. False when its spot is taken right now (it then goes there as usual: interruptSoon).
+   */
+  postNow(a) {
+    const r = a.p.post;
+    if (!r || !a.plan || !this.index.entry(r.b, r.f, r.id)?.slots[r.k]) return false;
+    if (this.heldBy(this.key(r.b, r.f, r.id, r.k), a.i)) return false;
+    const P = this.cut(a, this.sim.now(), true);   // (now, even in a lift or on a crossing: it is put at its post this moment)
+    P.tele = true;
+    let ok = false;
+    try { ok = this.postDuty(a, P) && !P.tele; } catch (e) { this.sim.noteError(e); }
+    P.tele = false;
+    if (!ok) { P.hold(0.5, A.idle, U.idle); this.act(a, 'idle', 'idle', P, { holdStart: P.base, holdEnd: P.t }); }
+    this.sim.commit(a, P);
+    return ok;
+  }
+  /** Given its work from the piece itself during its shift (posts.js work): at its desk or counter at once, like postNow;
+   *  off shift (or someone at that spot right now), false: it goes there when its shift starts. */
+  workNow(a) {
+    const j = a.p.job;
+    if (!j || j.b === undefined || j.id === undefined || !a.plan || a.p.post) return false;
+    const now = this.sim.now(), h = this.hour(now), day = this.day(now);
+    if (!((j.days ?? 127) & (1 << mod(day, 7))) || h < j.start || h >= j.end - 0.05) return false;
+    if (this.heldBy(this.key(j.b, j.f, j.id, j.k), a.i)) return false;
+    if (a.doneDay === day) a.doneDay = null;
+    const P = this.cut(a, now, true);
+    P.tele = true;
+    let ok = false;
+    try { this.work(a, P, h, day, false); ok = !P.tele; } catch (e) { this.sim.noteError(e); }
+    P.tele = false;
+    if (!ok) { P.hold(0.5, A.idle, U.idle); this.act(a, 'idle', 'idle', P, { holdStart: P.base, holdEnd: P.t }); }
+    this.sim.commit(a, P);
+    return ok;
   }
   /** Stop what you are doing and decide again right away (after world edits). */
   interruptSoon(a, jumpTo = null) {

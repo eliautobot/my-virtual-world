@@ -6,6 +6,7 @@
 // Geometry and lot rules come from shared/lots.js (exact integer micrometres, BigInt arithmetic).
 import crypto from 'node:crypto';
 import { normalize, area2, bbox, overlaps, contains, checkMerge, checkUnmerge, checkPartition, DEFAULT_LOT_POLICY } from '../shared/lots.js';
+import { MAIN_TOWN, cleanTownName } from '../shared/towns.js';
 
 export const MUNICIPALITY = Object.freeze({ kind: 'municipality', id: 'city' });
 const SUBJECT_KINDS = new Set(['account', 'agent', 'business', 'municipality']);
@@ -46,6 +47,9 @@ export class Property {
       unretire: db.prepare("UPDATE lots SET lifecycle = $lifecycle, retired = NULL, children_json = NULL, revision = revision + 1 WHERE id = $id AND world_id = $w AND revision = $rev"),
       setAccess: db.prepare('UPDATE lots SET access = $access, revision = revision + 1 WHERE id = $id AND world_id = $w AND revision = $rev'),
       setZoning: db.prepare('UPDATE lots SET zoning = $zoning, revision = revision + 1 WHERE id = $id AND world_id = $w AND revision = $rev'),
+      setRegion: db.prepare("UPDATE lots SET region = $region, revision = revision + 1 WHERE id = $id AND world_id = $w AND lifecycle != 'retired'"),
+      regions: db.prepare("SELECT region, COUNT(*) AS n FROM lots WHERE world_id = ? AND lifecycle != 'retired' GROUP BY region ORDER BY region"),
+      ofRegion: db.prepare("SELECT id FROM lots WHERE world_id = ? AND lifecycle != 'retired' AND region = ?"),
       nameNew: db.prepare('UPDATE lots SET name = $name, note = $note WHERE id = $id AND world_id = $w'),
       setInfo: db.prepare('UPDATE lots SET name = $name, note = $note, revision = revision + 1 WHERE id = $id AND world_id = $w AND revision = $rev'),
       upsertTitle: db.prepare(`INSERT INTO lot_titles (lot_id, world_id, holder_kind, holder_id, event_seq, since) VALUES ($lot, $w, $kind, $hid, $seq, $at)
@@ -308,6 +312,7 @@ export class Property {
       this.q.dropAllDelegations.run(this.w, lot.id);
       for (const o of originals) {
         if (this.q.unretire.run({ lifecycle: lot.lifecycle, id: o.id, w: this.w, rev: o.revision }).changes !== 1) throw new PropertyError('stale', 'An original lot changed meanwhile.', 409);
+        if (o.region !== lot.region) this.q.setRegion.run({ region: lot.region, id: o.id, w: this.w });   // (in the town the merged lot was in)
         const seq = this._event(o.id, 'split', { to: lot.holder, related: { from: lot.id }, actor, reason, key });
         this._setTitle(o.id, lot.holder, seq);
       }
@@ -372,6 +377,41 @@ export class Property {
       return { id: lot.id, zoning: z, revision: lot.revision + 1 };
     });
   }
+  // ------------------------------------------------------------------------------------------------ towns (shared/towns.js)
+  /** The towns there are (a lot's region) and how many lots each has: [{ id, lots }]. */
+  regionCounts() { return this.q.regions.all(this.w).map(r => ({ id: r.region || MAIN_TOWN, lots: r.n })); }
+  /**
+   * Administrators put lots in a town (2026-10-23): ids, and the town — MAIN_TOWN, or a name (a new name makes a new
+   * town). A lot already there is left as it is. → { ids (moved), town }.
+   */
+  setTown(ids, town, { actor, key = null } = {}) {
+    if (!actor?.admin) throw new PropertyError('rights', 'Only administrators decide which town a lot is in.', 403);
+    if (!Array.isArray(ids) || !ids.length || ids.length > 5000) throw new PropertyError('input', 'No lots to put in a town.');
+    const t = town === MAIN_TOWN ? MAIN_TOWN : cleanTownName(town);
+    if (!t) throw new PropertyError('input', 'Give the town a name (up to 32 letters).');
+    return this._op('town', { actor, key, payload: { ids: ids.map(String), t } }, () => {
+      const moved = [];
+      for (const id of ids) {
+        const lot = this.get(id);
+        if (!lot || lot.lifecycle === 'retired') throw new PropertyError('missing', `Lot ${id} doesn't exist.`, 404);
+        if (lot.region === t) continue;
+        this.q.setRegion.run({ region: t, id: lot.id, w: this.w });
+        moved.push(lot.id);
+      }
+      return { ids: moved, town: t };
+    });
+  }
+  /** Administrators rename a town (the world's own is named after the world: Settings). → { ids, town }. */
+  renameTown(from, to, { actor, key = null } = {}) {
+    if (!actor?.admin) throw new PropertyError('rights', 'Only administrators rename towns.', 403);
+    if (from === MAIN_TOWN) throw new PropertyError('input', 'The world\'s own town is named after the world: rename the world in Settings.');
+    const t = cleanTownName(to);
+    if (!t) throw new PropertyError('input', 'Give the town a name (up to 32 letters).');
+    const ids = this.q.ofRegion.all(this.w, String(from || '')).map(r => r.id);
+    if (!ids.length) throw new PropertyError('missing', `There is no town called ${from}.`, 404);
+    return this.setTown(ids, t, { actor, key });
+  }
+
   /** Holders delegate rights on their lot to someone else, or change/revoke them (empty rights). */
   delegate(id, to, rights, { actor, key = null } = {}) {
     const s = subj(to), list = [...new Set((rights || []).map(String))];

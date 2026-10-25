@@ -2,7 +2,7 @@
 
 Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand. Proprietary - see [LICENSE](../../LICENSE).
 
-434 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
+457 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
 
 | Method | Path | Capability | Lowest role | Re-auth |
 |---|---|---|---|---|
@@ -60,8 +60,13 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | POST | `/api/agent-life/profile` | `agents.profile` | member |  |
 | GET | `/api/agent-posts` | `agents.profile` | member |  |
 | POST | `/api/agent-posts` | `agents.profile` | member |  |
+| GET | `/api/agent-posts/floor` | `agents.profile` | member |  |
+| POST | `/api/agent-posts/here` | `agents.profile` | member |  |
 | POST | `/api/agent-posts/leave` | `agents.profile` | member |  |
 | GET | `/api/agent-posts/spots` | `agents.profile` | member |  |
+| GET | `/api/agent-posts/work` | `agents.profile` | member |  |
+| POST | `/api/agent-posts/work` | `agents.profile` | member |  |
+| POST | `/api/agent-posts/work/auto` | `agents.profile` | member |  |
 | GET | `/api/agent-providers` | `connections.use` | member |  |
 | POST | `/api/agent-providers/call` | `connections.use` | member |  |
 | POST | `/api/agent-providers/detect` | `connections.manage` | admin |  |
@@ -258,6 +263,19 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | GET | `/api/mind/problems` | `agents.mind` | member |  |
 | POST | `/api/mind/think` | `agents.mind` | member |  |
 | GET | `/api/mind/thoughts` | `agents.mind` | member |  |
+| POST | `/api/music/clear` | `music.manage` | admin |  |
+| GET | `/api/music/deck` | `world.view` | guest |  |
+| POST | `/api/music/deck` | `music.manage` | admin |  |
+| POST | `/api/music/delete` | `music.upload` | member |  |
+| GET | `/api/music/file/*` | `world.view` | guest |  |
+| GET | `/api/music/library` | `world.view` | guest |  |
+| POST | `/api/music/request` | `music.request` | member |  |
+| POST | `/api/music/request/cancel` | `music.request` | member |  |
+| POST | `/api/music/review` | `music.manage` | admin |  |
+| POST | `/api/music/skip` | `music.manage` | admin |  |
+| GET | `/api/music/state` | `world.view` | guest |  |
+| POST | `/api/music/track` | `music.manage` | admin |  |
+| POST | `/api/music/upload` | `music.upload` | member |  |
 | GET | `/api/notifications` | `account.self` | member |  |
 | GET | `/api/notifications/push/key` | `account.self` | member |  |
 | POST | `/api/notifications/push/subscribe` | `account.self` | member |  |
@@ -363,6 +381,7 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | GET | `/api/property/check` | `property.admin` | admin |  |
 | POST | `/api/property/delegate` | `property.hold` | member |  |
 | POST | `/api/property/hold` | `property.admin` | admin |  |
+| POST | `/api/property/home-base` | `property.hold` | member |  |
 | POST | `/api/property/info` | `property.hold` | member |  |
 | GET | `/api/property/lot/*` | `world.view` | guest |  |
 | GET | `/api/property/lots` | `world.view` | guest |  |
@@ -373,6 +392,8 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | POST | `/api/property/plat-road` | `property.admin` | admin |  |
 | POST | `/api/property/release` | `property.admin` | admin |  |
 | POST | `/api/property/retire` | `property.admin` | admin |  |
+| POST | `/api/property/town` | `property.admin` | admin |  |
+| POST | `/api/property/town-rename` | `property.admin` | admin |  |
 | POST | `/api/property/transfer` | `property.admin` | admin | yes |
 | POST | `/api/property/unmerge` | `property.hold` | member |  |
 | POST | `/api/property/withdraw` | `property.admin` | admin |  |
@@ -420,6 +441,8 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | POST | `/api/settings/world` | `settings.world` | admin | yes |
 | POST | `/api/signs/image` | `property.hold` | member |  |
 | POST | `/api/talk` | `world.interact` | member |  |
+| GET | `/api/towns` | `world.view` | guest |  |
+| GET | `/api/towns/needs` | `world.view` | guest |  |
 | POST | `/api/undo` | `property.hold` | member |  |
 | GET | `/api/users` | `users.manage` | admin |  |
 | POST | `/api/users` | `users.manage` | admin | yes |

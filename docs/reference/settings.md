@@ -17,6 +17,7 @@ Changed in Settings by an account holding the capability named; *install* settin
 | `players.spawn` | install | string |  | `players.spawn` | Where new players appear - Players appear where they last stood; new players, and anyone whose last spot is no longer valid, appear here. Empty: outside the headquarters. |
 | `chat.proximity` | install | boolean | true | `settings.world` | Players can chat with people near them - Messages reach players within 20 m in the same space; nothing is stored on disk. |
 | `world.homesFilled` | install | number | 30 | `world.edit` | Homes filled (%): the share of the city's beds its residents fill - Only homes bring residents; offices, shops and restaurants bring jobs. New homes fill up over a world day or two; when homes go, or the share is lowered, people move away the same way. |
+| `world.townMoves` | install | boolean | true | `world.edit` | Residents move between towns - A few a world hour: to the town where they work, to a town with work when theirs has none, or away from a town that does much worse than another. Agents and residents moved into a flat by its owner stay. |
 | `world.home` | install | string |  | `settings.world` | Default home view - Where guests and new accounts start, and what "Go to home view" uses for them. Set it from the Home view panel in the information dock, which needs the password like the other installation-wide changes. |
 | `chat.attachmentMaxMb` | install | enum | 25 | `settings.world` | Largest chat attachment (MB) - Images, video, audio, PDF, office documents and text or code files may be this large (an agent provider may take less: the chat says so). |
 | `chat.attachmentQuotaMb` | install | enum | 2048 | `settings.world` | Attachment space per account (MB) - What each account may keep in total; it removes some to send more. |
@@ -106,6 +107,7 @@ Changed in Settings by an account holding the capability named; *install* settin
 | `sound.aircraft` | account | number | 70 | `account.self` | Aircraft and games |
 | `sound.voices` | account | number | 100 | `account.self` | Agents' voices |
 | `sound.media` | account | number | 100 | `account.self` | Videos and recordings |
+| `sound.music` | account | number | 80 | `account.self` | Live music |
 | `display.wildlife` | account | enum | normal | `account.self` | Wildlife |
 | `display.weatherFx` | account | enum | on | `account.self` | Rain and lightning |
 | `display.traffic` | account | enum | normal | `account.self` | Traffic |
@@ -122,5 +124,6 @@ Changed in Settings by an account holding the capability named; *install* settin
 | `display.favourites` | account | string |  | `account.self` | Favourite places |
 | `display.seenHelp` | account | boolean | false | `account.self` | The controls tip was shown |
 | `display.guide` | account | string |  | `account.self` | Getting started: the tour and the checklist |
+| `property.homeBase` | account | string |  | `account.self` | My home base (a lot I hold) |
 | `display.selectionWidget` | account | enum | auto | `account.self` | The selection widget |
 | `display.transparency` | account | number | 0 | `account.self` | Transparency |

@@ -43,6 +43,10 @@ export const CAPS = Object.freeze({
   'players.spawn': cap('admin', 'Set where new players appear (the spawn point)', ID),
   // Play modules (docs/features/play-modules.md): the minigames, their runs and badges, and players' profiles.
   'play.use': cap('member', 'Play the modules (minigames such as the airport\'s ring courses), earn levels and badges, see players\' profiles', ID),
+  // The city's music (docs/features/music.md): the lounge's band and the club's DJ play the library's songs.
+  'music.request': cap('member', 'Ask for songs at a lounge\'s stage and a club\'s DJ', ID),
+  'music.upload': cap('member', 'Add your own songs to the city\'s music (an administrator approves them before they play)', ID),
+  'music.manage': cap('admin', 'Run the music: every stage\'s playlist, requests and genre, the library, and the review of players\' songs', ID),
   'connections.use': cap('member', 'Use connected agent providers', ID),
   // WP2.14 (E22, E23): agents that connect outbound with a key they hold: create slots, enrolment codes, visibility, who may chat.
   'agents.connect': cap('member', 'Connect your own agents: keys, who sees them, who may chat with them', ID),

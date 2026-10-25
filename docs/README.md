@@ -36,7 +36,8 @@ Source-available under the PolyForm Noncommercial License 1.0.0; see [LICENSING.
 [work, visitors and posts](features/work-visitors-posts.md) · [the agents' PC](features/agent-pc.md) ·
 [Agent Providers (OpenClaw, Hermes)](features/agent-providers.md) · [AI apps](features/ai-apps.md) ·
 [agents' phones](features/phone.md) · [economy](features/economy.md) · [inventory](features/INVENTORY.md) ·
-[play modules](features/play-modules.md) · [fishing](features/fishing.md)
+[play modules](features/play-modules.md) · [arcade](features/arcade.md) · [floor themes](features/floor-themes.md) ·
+[nights out](features/nightlife.md) · [music](features/music.md) · [fishing](features/fishing.md)
 
 ## For developers
 

@@ -40,9 +40,11 @@ export const ACTIVITIES = Object.freeze({
   park: 'a park: a bench, a stroll, a picnic', cafe: 'a café (costs money)', gym: 'the gym (costs money)', shop: 'shopping (costs money)',
   jog: 'a jog', dance: 'dancing (the lounge at work, or a park)', home: 'home, to relax', work: 'work (if it has a job)',
   eat: 'a meal, once', sleep: 'sleep, once',
+  arcade: 'the arcade: video games, pinball, pool, the bull (costs money)', lounge_bar: 'a lounge: cocktails and live music (costs money)',
+  club: 'a night club: the DJ, the dance floor, drinks, VIP booths (costs money, open from 20:00)',
 });
-const KEEPS = new Set(['park', 'cafe', 'gym', 'shop', 'jog', 'dance', 'home', 'work']);
-const VENUE_KINDS = Object.freeze({ cafe: 'cafe', restaurant: 'restaurant', shop: 'shop', gym: 'gym', park: 'park' });
+const KEEPS = new Set(['park', 'cafe', 'gym', 'shop', 'jog', 'dance', 'home', 'work', 'arcade', 'lounge_bar', 'club']);
+const VENUE_KINDS = Object.freeze({ cafe: 'cafe', restaurant: 'restaurant', shop: 'shop', gym: 'gym', park: 'park', arcade: 'arcade', lounge_bar: 'lounge_bar', club: 'club' });
 const MOVING_USES = new Set(['wander', 'jog', 'run']);   // activities that are themselves a walk (a stroll, a jog): not "on the way"
 const WHY_TEXT = Object.freeze({
   no_money: 'it costs money and you have too little (parks, jogging, dancing and home are free)',

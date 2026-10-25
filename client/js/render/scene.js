@@ -126,6 +126,8 @@ export const GU = {
   uFocusB: { value: -1 }, uCutY: { value: 1e6 }, uIndoor: { value: 0 },
   uFade: { value: new THREE.Vector4(0, 0, 0, 0) }, uCamP: { value: new THREE.Vector3() },
   uInB: { value: -1 },   // the building the camera is inside, all of it hidden (render/buildings.js cameraIn), or -1
+  // the music on the floor looked into (render/venue-motion.js): its beat (beats since the song began) and whether one plays
+  uBeat: { value: 0 }, uBeatOn: { value: 0 },
   // the camera under water (Stage.underwater): 1, and the water's colour there and the light through its surface overhead
   uUnder: { value: 0 }, uUnderCol: { value: new THREE.Color() }, uUnderSky: { value: new THREE.Color() },
   // ... and the world above the surface as seen from there (Stage.renderAbove): its image, the view's matrix, whether drawn

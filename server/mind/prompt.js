@@ -10,7 +10,7 @@
 const q = (s, n = 200) => `«${String(s ?? '').replace(/[\u0000-\u001f«»]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n)}»`;
 const vc = c => `${(c / 100).toFixed(c % 100 ? 2 : 0)} VC`;
 const list = (a, f, sep = '; ') => a.map(f).join(sep);
-const KIND_WORD = { cafe: 'café', restaurant: 'restaurant', park: 'park', shop: 'shop', gym: 'gym' };
+const KIND_WORD = { cafe: 'café', restaurant: 'restaurant', park: 'park', shop: 'shop', gym: 'gym', arcade: 'arcade', lounge_bar: 'lounge (cocktails, live music)', club: 'night club (DJ, dancing)' };
 const SCOPE_WORD = { work: 'work shifts', buy: 'buy things', pay: 'pay people', rent: 'rent a home', business: 'run a business' };
 
 export function systemText(c) {

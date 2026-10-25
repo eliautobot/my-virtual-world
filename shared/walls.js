@@ -4,7 +4,7 @@
 // them. A wall may not run through furniture or the lift and stair core, double an existing wall, or shut anyone or
 // anything off: every entrance and every piece of furniture someone uses must stay reachable (the rule residents need
 // to path around walls). The same rules run in the browser's ghost and on the server. A wall: [x1, z1, x2, z2, kind]
-// in the building's own frame (kind 0 solid, 1 glass).
+// in the building's own frame (kind 0 solid, 1 glass; 2 a lounge's panelled wall, laid out by a floor theme, solid in every rule).
 import { CATALOG } from './catalog.js';
 import { itemAABB } from './geom.js';
 import { interiorBounds } from './edit.js';

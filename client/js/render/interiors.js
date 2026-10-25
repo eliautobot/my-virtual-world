@@ -20,6 +20,7 @@ const CAP = '#6f757d';
 const _sc = new THREE.Vector3(1, 1, 1);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _up = new THREE.Vector3(0, 1, 0), _c = new THREE.Color();
 const _ray = new THREE.Ray(), _box = new THREE.Box3(), _hit = new THREE.Vector3(), _pl = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _pm = new THREE.Matrix4(), _pt = new THREE.Matrix4(), _pv = new THREE.Matrix4();
 
 function mk(geo, mat, cast = true) { const m = new THREE.Mesh(geo, mat); m.matrixAutoUpdate = false; m.castShadow = cast; m.receiveShadow = true; return m; }
 
@@ -44,10 +45,19 @@ export class Interiors {
     this.world = world; this.atlas = atlas;
     this.group = new THREE.Group(); this.group.matrixAutoUpdate = false;
     this.furnMat = makeFurnMat({ lit: true, indoor: true });
+    // rugs and light strips lie a few centimetres over the floor's finish, which is pulled toward the eye (its polygon
+    // offset grows with distance): pulled further, they stay on top when the floor is seen from afar
+    this.flatMat = makeFurnMat({ lit: true, indoor: true }); Object.assign(this.flatMat, { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
     this.glassMat = makeFurnMat({ glass: true });
     this.floorMat = makeFloorMat({ lit: true, indoor: true });
     this.parkMat = makeFurnMat({ lit: true });
     this.parkFloorMat = makeFloorMat({ lit: true });
+    // the floor's own walls, fittings and glass, drawn as single meshes, each with a material of its own: one material drawn
+    // both instanced (the furniture) and not makes three.js look its program up again at every switch between the two,
+    // many times a frame, as it draws them nearest first (the same shader: no program more is made)
+    this.shellMat = makeFurnMat({ lit: true, indoor: true });
+    this.shellGlass = makeFurnMat({ glass: true });
+    this.parkShellMat = makeFurnMat({ lit: true });
     this.park = { meshes: [], entries: [] };
     this.foc = { meshes: [], entries: [] };
     this.focus = { b: -1, f: 0, mode: 'cut' };
@@ -58,7 +68,7 @@ export class Interiors {
   }
   clear(set) {
     for (const m of set.meshes) { this.group.remove(m); if (m.isInstancedMesh) m.dispose(); else m.geometry.dispose(); }
-    set.meshes = []; set.entries = [];
+    set.meshes = []; set.entries = []; set.anim = [];
   }
   entry(B, f, lv, it) {
     const y = B.type === 'park' ? floorAt(B, 0) : floorAt(B, f), w = toWorld(B, it.x, it.z);
@@ -69,7 +79,8 @@ export class Interiors {
     for (const e of list) { const k = signGeoKey(e.it) || e.t; let a = by.get(k); if (!a) by.set(k, a = []); a.push(e); }   // a sign in its style
     for (const [gk, arr] of by) {
       const G = furnitureGeometry(gk);
-      for (const [geo, m2, cast] of [[G.geo, mat, true], [G.glass, this.glassMat, false]]) {
+      const flat = mat === this.furnMat && (CATALOG[arr[0].t]?.h ?? 1) <= 0.13;   // (rugs, light strips, dance floors: floor-hugging)
+      for (const [geo, m2, cast] of [[G.geo, flat ? this.flatMat : mat, !flat], [G.glass, this.glassMat, false]]) {
         if (!geo) continue;
         const im = new THREE.InstancedMesh(geo, m2, arr.length);
         arr.forEach((e, k) => {
@@ -82,8 +93,39 @@ export class Interiors {
         im.computeBoundingSphere();
         this.group.add(im); set.meshes.push(im);
       }
+      // its moving parts (render/venue-motion.js): one instance each, at rest until moved
+      for (const part of G.parts || []) {
+        for (const [geo, m2] of [[part.geo, mat], [part.glass, this.glassMat]]) {
+          if (!geo) continue;
+          const im = new THREE.InstancedMesh(geo, m2, arr.length);
+          arr.forEach((e, k) => {
+            _q.setFromAxisAngle(_up, e.yaw); _p.set(e.x, e.y, e.z);
+            const base = new THREE.Matrix4().compose(_p, _q, _sc.set(1, 1, 1));
+            im.setMatrixAt(k, _m.copy(base).multiply(new THREE.Matrix4().makeTranslation(...part.pivot)));
+            im.setColorAt(k, _c.set(e.c || '#ffffff'));
+            (e.ims || (e.ims = [])).push([im, k]);
+            (set.anim || (set.anim = [])).push({ im, k, e, base, part, glass: m2 === this.glassMat });
+          });
+          im.castShadow = false; im.receiveShadow = m2 !== this.glassMat; im.frustumCulled = false;   // (it moves: its bounds go with it)
+          this.group.add(im); set.meshes.push(im);
+        }
+      }
     }
     for (const e of list) set.entries.push(e);
+  }
+  /** Moves the focused floor's moving parts: move(e, part, out) sets out (a Matrix4 about the part's pivot) or returns
+   *  false to leave it at rest. */
+  animateParts(move) {
+    const list = this.foc.anim; if (!list) return;
+    const touched = new Set(), M = _pm, T = _pt;
+    for (const a of list) {
+      M.identity();
+      if (move(a.e, a.part, M) === false) { if (a.init && !a.moved) continue; M.identity(); a.moved = false; } else a.moved = true;   // (at rest: put back once)
+      a.init = true;
+      a.im.setMatrixAt(a.k, T.copy(a.base).multiply(_pv.makeTranslation(...a.part.pivot)).multiply(M));
+      touched.add(a.im);
+    }
+    for (const im of touched) im.instanceMatrix.needsUpdate = true;
   }
   addMeshes(set, pairs) {
     for (const [geo, mat, cast] of pairs) if (geo) { const m = mk(geo, mat, cast); this.group.add(m); set.meshes.push(m); }
@@ -110,7 +152,7 @@ export class Interiors {
     }
     this.addItems(this.park, items, this.parkMat);
     const G = fb.build();
-    this.addMeshes(this.park, [[fq.build(), this.parkFloorMat, false], [G.geo, this.parkMat, true], [G.glass, this.glassMat, false], [sq.build(), this.atlas.mat, false]]);
+    this.addMeshes(this.park, [[fq.build(), this.parkFloorMat, false], [G.geo, this.parkShellMat, true], [G.glass, this.shellGlass, false], [sq.build(), this.atlas.mat, false]]);
   }
   parkEdge(f, sq, B) {
     const hw = B.w / 2, hd = B.d / 2, e = 0.35, gap = 1.7, th = 0.28, hh = 0.85;
@@ -169,7 +211,7 @@ export class Interiors {
     fb.pop();
     this.addItems(this.foc, items);
     const G = fb.build();
-    this.addMeshes(this.foc, [[fq.build(), this.floorMat, false], [G.geo, this.furnMat, true], [G.glass, this.glassMat, false]]);
+    this.addMeshes(this.foc, [[fq.build(), this.floorMat, false], [G.geo, this.shellMat, true], [G.glass, this.shellGlass, false]]);
     return (this.cutY = y0 + H);
   }
   perimeter(f, B, fl, H) {
@@ -244,6 +286,14 @@ export class Interiors {
         f.boxC(x1, H / 2, z1, 0.03, H / 2, 0.03, yaw); f.boxC(x2, H / 2, z2, 0.03, H / 2, 0.03, yaw);
         f.boxC(cx, H - 0.02, cz, len / 2, 0.02, 0.03, yaw); f.boxC(cx, 0.04, cz, len / 2, 0.04, 0.03, yaw);
         f.glass('#cfe3ec'); f.boxC(cx, H / 2, cz, len / 2, H / 2 - 0.04, 0.012, yaw);
+      } else if (kind === 2) {   // a lounge's panelled wall (layouts.js): walnut, fluted on both faces, a brass cap, a warm light at its foot
+        f.push(cx, 0, cz, yaw);
+        f.col('#3e2a1d'); f.box(-len / 2 - 0.06, 0, -0.06, len / 2 + 0.06, H, 0.06);
+        const n = Math.max(1, Math.floor(len / 0.13));
+        f.col('#5a3d2a'); for (let k = 0; k < n; k++) { const t = -len / 2 + (k + 0.5) * len / n; f.box(t - 0.038, 0.08, 0.06, t + 0.038, H - 0.05, 0.085); f.box(t - 0.038, 0.08, -0.085, t + 0.038, H - 0.05, -0.06); }
+        f.col('#b8924a'); f.box(-len / 2 - 0.07, H, -0.09, len / 2 + 0.07, H + 0.02, 0.09);
+        f.col('#ffc777', 0, 2); f.box(-len / 2, 0, 0.06, len / 2, 0.03, 0.09); f.box(-len / 2, 0, -0.09, len / 2, 0.03, -0.06);
+        f.pop();
       } else {
         f.col('#efece6'); f.boxC(cx, H / 2, cz, len / 2 + 0.06, H / 2, 0.06, yaw);
         f.col(CAP); f.boxC(cx, H + 0.006, cz, len / 2 + 0.06, 0.006, 0.06, yaw);

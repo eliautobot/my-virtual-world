@@ -36,6 +36,7 @@ export class City {
     this.group = new THREE.Group();
     this.group.matrixAutoUpdate = false;
     this.furnMat = makeFurnMat({ lit: true });
+    this.plainMat = makeFurnMat({ lit: true });   // (the same, for what is drawn as single meshes: the instanced furniture's own material is never switched to and fro)
     this.occ = [];
     // A city whose streets are the avenue (shared/city-roads.js): the road kit draws its streets, sidewalks, corners,
     // crosswalks and signals, like every road beyond it; the city draws its lots and everything on them.
@@ -188,7 +189,7 @@ export class City {
       }
     }
     const G = f.build();
-    if (G.geo) this.stationMeshes.push(this.add(mesh(G.geo, this.furnMat, { cast: true })));
+    if (G.geo) this.stationMeshes.push(this.add(mesh(G.geo, this.plainMat, { cast: true })));
     if (G.glass) this.stationMeshes.push(this.add(mesh(G.glass, makeFurnMat({ glass: true }), { receive: false })));
     const sg = sq.build();
     if (sg) this.stationMeshes.push(this.add(mesh(sg, this.atlas.mat, { receive: false })));
@@ -232,7 +233,7 @@ export class City {
       }
     }
     const G = f.build();
-    this.add(mesh(G.geo, this.furnMat, { cast: true }));
+    this.add(mesh(G.geo, this.plainMat, { cast: true }));
     const circ = new THREE.CircleGeometry(0.105, 12), sqr = new THREE.PlaneGeometry(0.26, 0.3);
     const mkDiscs = (geo, list) => {
       const im = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff }), list.length);

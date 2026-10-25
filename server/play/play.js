@@ -11,6 +11,7 @@ import {
 } from '../../shared/play.js';
 import '../../shared/airport.js';   // the built-in modules register themselves
 import '../../shared/fishing.js';
+import '../../shared/arcade.js';
 
 const RUN_TTL_MS = 2 * 3600e3;    // a run not finished within two hours is forgotten
 const START_GAP_MS = 1500;        // one start every 1.5 s per account

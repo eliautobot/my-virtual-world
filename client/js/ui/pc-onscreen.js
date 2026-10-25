@@ -89,7 +89,7 @@ export function leavePc() {
 
 /** The CSS matrix3d (column-major) that takes a w × h box onto the four points P (top-left, top-right, bottom-left,
  *  bottom-right; page pixels): the square-to-quad homography, scaled to the box. */
-function toQuad(w, h, P) {
+export function toQuad(w, h, P) {
   const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = P;
   // unit square (0,0)(1,0)(0,1)(1,1) → P0 P1 P2 P3
   const dx1 = x1 - x3, dx2 = x2 - x3, dy1 = y1 - y3, dy2 = y2 - y3, sx = x0 - x1 - x2 + x3, sy = y0 - y1 - y2 + y3;

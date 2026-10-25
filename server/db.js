@@ -2524,6 +2524,45 @@ const MIGRATIONS = [
       }
     },
   },
+  // v55 (the city's music, 2026-10-23 — docs/features/music.md): the library's tracks (the files are in <data>/music/) and
+  // each stage's deck (its settings, its requests and what plays: server/music/music.js).
+  {
+    additive: true,
+    up: `CREATE TABLE IF NOT EXISTS music_tracks (
+     id TEXT PRIMARY KEY,
+     world_id TEXT NOT NULL,
+     title TEXT NOT NULL,
+     artist TEXT NOT NULL,
+     genre TEXT NOT NULL,
+     mood TEXT,
+     bpm REAL,
+     seconds REAL NOT NULL,
+     file TEXT NOT NULL,
+     bytes INTEGER NOT NULL,
+     gain_db REAL NOT NULL DEFAULT 0,
+     source TEXT NOT NULL CHECK (source IN ('library', 'upload', 'import')),
+     status TEXT NOT NULL CHECK (status IN ('approved', 'pending', 'rejected')),
+     explicit INTEGER NOT NULL DEFAULT 0,
+     uploader INTEGER,
+     rights TEXT,
+     reason TEXT,
+     loop_start REAL,
+     loop_end REAL,
+     meta_json TEXT,
+     plays INTEGER NOT NULL DEFAULT 0,
+     created INTEGER NOT NULL,
+     updated INTEGER NOT NULL
+   );
+   CREATE INDEX IF NOT EXISTS music_tracks_status ON music_tracks (world_id, status, genre);
+   CREATE INDEX IF NOT EXISTS music_tracks_uploader ON music_tracks (world_id, uploader);
+   CREATE TABLE IF NOT EXISTS music_decks (
+     world_id TEXT NOT NULL,
+     place TEXT NOT NULL,
+     state_json TEXT NOT NULL,
+     updated INTEGER NOT NULL,
+     PRIMARY KEY (world_id, place)
+   );`,
+  },
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 export const MIGRATION_INFO = Object.freeze(MIGRATIONS.map((m, i) => Object.freeze({ version: i + 1, additive: !!m.additive })));

@@ -165,6 +165,7 @@ export async function open(id, want = 'overview', { swap = false } = {}) {
     work: () => loadWork(id),
     talks: () => loadTalks(id),
     post: () => getJSON(`/api/agent-posts/spots?agent=${id}`),
+    job: () => getJSON(`/api/agent-posts/work?agent=${id}`),   // (its workplace: its owner's pick or its own; ui/studio-world.js placeTab)
     blocks: () => loadBlocks(id),
     // a third-party agent's connection (its slot; Brain → Its connection): only its owner reads it
     slot: () => (isExt(C.rec()) && auth.can('agents.connect') ? getJSON('/api/agent-slots').then(r => r.agents.find(a => `ext-${a.id}` === C.rec()?.key) || null) : Promise.resolve(null)),

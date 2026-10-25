@@ -12,21 +12,24 @@ import { makeGrid } from '../shared/city.js';
 import { platAlongRoad, SIDES } from '../shared/plat-road.js';
 import { isAdAsset } from '../shared/signs.js';
 import { DEFAULT_ENVELOPES, DEFAULT_LOT_POLICY } from '../shared/lots.js';
+import { MAIN_TOWN, townId } from '../shared/towns.js';
+import { Towns } from './towns.js';
 
 const toPoly = B => corners(B).map(p => ({ x: mToUm(p.x), z: mToUm(p.z) }));   // the footprint in µm (turned ones stay turned)
 
 /**
  * @param {object} router  the API router (server/routes.js)
- * @param {object} d       { dbs, audit, perms, world: () => world, broadcast, log, worldChanged, policy? }
+ * @param {object} d       { dbs, audit, perms, world: () => world, broadcast, log, worldChanged, settings, policy? }
  * @returns {Property}
  */
 export function addPropertyRoutes(router, d) {
   const property = new Property(d.dbs, { audit: d.audit, log: d.log, policy: d.policy || null });
+  const towns = property.towns = new Towns({ property, world: d.world, settings: d.settings });
   const db = d.dbs.db, w = d.dbs.worldId;
   const nameQ = db.prepare('SELECT id, display_name, login FROM accounts WHERE world_id = ? AND id = ?');
   const loginQ = db.prepare('SELECT id, display_name FROM accounts WHERE world_id = ? AND login = ?');
   let version = 1, cache = null;
-  const changed = ids => { version++; cache = null; d.broadcast({ t: 'lots', v: version, ids }); };
+  const changed = ids => { version++; cache = null; d.broadcast({ t: 'lots', v: version, ids }); property.onChange?.(ids); };
   // a building placed, moved or taken down changes which lots are built on: the map's list follows
   property.buildingsChanged = () => changed([]);
   property.lotsChanged = ids => changed(Array.isArray(ids) ? ids : []);   // the shop: a lot sold, reserved or listed
@@ -58,13 +61,22 @@ export function addPropertyRoutes(router, d) {
   const adsOn = id => (d.world()?.decorations || []).filter(x => isAdAsset(x.t) && x.lot === id);
   const adsBlock = id => { const n = adsOn(id).length; return n ? ok({ error: `${n === 1 ? 'A billboard or street sign stands' : `${n} billboards or street signs stand`} on lot ${id}: move ${n === 1 ? 'it' : 'them'} first (Marketing)`, code: 'state' }, 409) : null; };
   const summary = (l, P) => ({
-    id: l.id, block: l.block, poly: l.poly, lifecycle: l.lifecycle, zoning: l.zoning, access: l.access, origins: l.origins, name: l.name, note: l.note,
+    id: l.id, block: l.block, poly: l.poly, lifecycle: l.lifecycle, zoning: l.zoning, access: l.access, origins: l.origins, name: l.name, note: l.note, town: l.region || MAIN_TOWN,
     sqft: Math.round(Number(l.areaTwice) / 2 / 92903040000), revision: l.revision, holder: holderView(l.holder, P),
     buildings: buildingsOn(l.id).map(b => b.idx), frontage: l.frontage.length ? l.frontage : undefined,
   });
   const body = ctx => ctx.body || {};
   const key = ctx => (typeof body(ctx).key === 'string' && body(ctx).key.length <= 100 ? body(ctx).key : null);
   const rev = v => (Number.isInteger(v) ? v : undefined);
+  /** The town new lots join: the one most of the lots around them are in (a road of Claim Town platted further stays in
+   *  Claim Town), else the world's own. */
+  const townAround = lots => {
+    const n = new Map();
+    for (const l of lots || []) if (l && l.lifecycle !== 'retired') n.set(l.region || MAIN_TOWN, (n.get(l.region || MAIN_TOWN) || 0) + 1);
+    let best = MAIN_TOWN, bn = 0;
+    for (const [t, c] of n) if (c > bn) { best = t; bn = c; }
+    return best;
+  };
 
   // ------------------------------------------------------------------------------------------- reading
   router.add({ method: 'GET', path: '/api/property/lots', cap: 'world.view', handler: async ({ P }) => {
@@ -91,7 +103,7 @@ export function addPropertyRoutes(router, d) {
   router.add({ method: 'GET', path: '/api/property/mine', cap: 'property.hold', handler: async ({ P }) => {
     if (!P.account) return ok({ lots: [], shared: [] });
     const me = { kind: 'account', id: String(P.account.id) };
-    return ok({ lots: property.heldBy(me).map(l => summary(l, P)), shared: property.sharedWith(me) });
+    return ok({ lots: property.heldBy(me).map(l => summary(l, P)), shared: property.sharedWith(me), homeBase: towns.homeBase(P.account.id) });
   } });
   router.add({ method: 'GET', path: '/api/property/check', cap: 'property.admin', handler: async () => ok({ problems: property.reconcile(), lots: property.count() }) });
 
@@ -176,7 +188,7 @@ export function addPropertyRoutes(router, d) {
     } catch (e) { return ok({ error: e.message, code: 'input' }, 400); }
     if (!res.lots.length) return ok({ error: 'No lots fit beside that road', code: 'none', skipped: res.skipped }, 400);
     try {
-      const r = property.plat(res.lots.map(l => ({ poly: l.poly, zoning, frontage: l.frontage, region: 'main' })), { actor: actorOf(ctx.P), key: key(ctx), reason: `Platted along ${rec.name || 'a road'}` });
+      const r = property.plat(res.lots.map(l => ({ poly: l.poly, zoning, frontage: l.frontage, region: townAround(near) })), { actor: actorOf(ctx.P), key: key(ctx), reason: `Platted along ${rec.name || 'a road'}` });
       changed(r.ids);
       return ok({ ids: r.ids, skipped: res.skipped });
     } catch (e) { return fail(e); }
@@ -208,7 +220,7 @@ export function addPropertyRoutes(router, d) {
     } catch (e) { return ok({ error: e.message, code: 'input' }, 400); }
     if (!made.length) return ok({ error: 'No lots fit in the grid', code: 'none', skipped }, 400);
     try {
-      const r = property.plat(made.map(l => ({ poly: l.poly, zoning, frontage: l.frontage, region: 'main' })), { actor: actorOf(ctx.P), key: key(ctx), reason: `Platted a grid (${made.length} lots)` });
+      const r = property.plat(made.map(l => ({ poly: l.poly, zoning, frontage: l.frontage, region: townAround(near) })), { actor: actorOf(ctx.P), key: key(ctx), reason: `Platted a grid (${made.length} lots)` });
       changed(r.ids);
       return ok({ ids: r.ids, skipped });
     } catch (e) { return fail(e); }
@@ -234,5 +246,28 @@ export function addPropertyRoutes(router, d) {
     }
     if (n && d.worldChanged) d.worldChanged();
   }
+  // ------------------------------------------------------------------------------------------- towns (shared/towns.js)
+  // Everyone sees the towns; administrators put lots in a town (a new name makes a new one) and rename them; holders
+  // choose which of their lots is their home base (where their agents live and work: server/towns.js).
+  router.add({ method: 'GET', path: '/api/towns', cap: 'world.view', handler: async () => ok({ towns: towns.list(), main: MAIN_TOWN }) });
+  router.add({ method: 'POST', path: '/api/property/town', cap: 'property.admin', lock: 'edit', handler: async ctx => {
+    const b = body(ctx), ids = Array.isArray(b.ids) ? b.ids.slice(0, 5000).map(String) : [];
+    const t = townId(b.town, d.world()?.name);
+    if (!t) return ok({ error: 'Give the town a name (up to 32 letters).', code: 'input' }, 400);
+    try { const r = property.setTown(ids, t, { actor: actorOf(ctx.P), key: key(ctx) }); if (r.ids.length) changed(r.ids); return ok({ ...r, name: towns.name(r.town) }); } catch (e) { return fail(e); }
+  } });
+  router.add({ method: 'POST', path: '/api/property/town-rename', cap: 'property.admin', lock: 'edit', handler: async ctx => {
+    const b = body(ctx);
+    try { const r = property.renameTown(String(b.from || ''), String(b.to || ''), { actor: actorOf(ctx.P), key: key(ctx) }); changed(r.ids); return ok({ ...r, name: towns.name(r.town) }); } catch (e) { return fail(e); }
+  } });
+  router.add({ method: 'POST', path: '/api/property/home-base', cap: 'property.hold', handler: async ctx => {
+    const b = body(ctx), P = ctx.P;
+    if (!P.account) return ok({ error: 'Sign in first', code: 'signin_required' }, 401);
+    const id = b.lot == null || b.lot === '' ? '' : String(b.lot);
+    if (id && !towns.held(P.account.id).some(l => l.id === id)) return ok({ error: 'Your home base must be a lot you hold.', code: 'not_yours' }, 403);
+    d.settings.changeAccount(P, { 'property.homeBase': id }, { ip: ctx.ip });
+    property.onChange?.([]);   // (its agents move to their new home town: server/index.mjs settleAgents)
+    return ok({ homeBase: towns.homeBase(P.account.id) });
+  } });
   return property;
 }

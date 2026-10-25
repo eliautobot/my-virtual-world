@@ -39,9 +39,9 @@ const ONLY = (() => {
 // The generic built-in male/female bodies are retired: only the textured characters (m01-m12, f01-f12) are loaded.
 const wanted = kind => kind !== 'male' && kind !== 'female' && (!ONLY || ONLY.has(kind));
 const cache = {};
-let extraList = null;
-/** The clips added to the baked characters (assets/chars/extra-clips.json), or null. */
-function extraClips() { return (extraList ??= fetch('/assets/chars/extra-clips.json').then(r => (r.ok ? r.json() : null)).catch(() => null)); }
+const extraList = {};
+/** The clips added to the baked characters (assets/chars/<set>-clips.json: 'extra', and the nights out's 'venue'), or null. */
+function extraClips(set = 'extra') { return (extraList[set] ??= fetch(`/assets/chars/${set}-clips.json`).then(r => (r.ok ? r.json() : null)).catch(() => null)); }
 // Character assets load in a worker when the browser allows (main-thread fallback otherwise).
 let worker = null, workerFailed = false, nextJob = 0;
 const jobs = new Map();
@@ -119,15 +119,19 @@ function loadBase(kind) {
     let a = man.anim, animData = view(a.data);
     // clips added after the bake (tools/chars/extra-clips.mjs: swimming, the walk and run with their loops mended, which
     // take the place of the bake's by name below, and holding things): their frames follow the bake's own
-    const ex = await extraClips(), ef = ex?.kinds?.[kind];
-    let added = false;
-    if (ef) {
-      const eb = await fetch(`/assets/chars/${kind}.extra.bin`).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
+    const ex = await extraClips();
+    let added = false, head = null;
+    for (const set of ['extra', 'venue']) {   // (then the nights out's: tools/chars/extra-clips.mjs --set venue)
+      const xs = set === 'extra' ? ex : await extraClips(set), ef = xs?.kinds?.[kind];
+      if (!ef) continue;
+      const eb = await fetch(`/assets/chars/${kind}.${set}.bin`).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
       if (eb && eb.byteLength === ef * man.bones * 24) {
         const base = a.frames * man.bones * 12, h = Math.ceil((a.frames + ef) * man.bones * 3 / a.w), merged = new Uint16Array(h * a.w * 4);
         merged.set(animData.subarray(0, base)); merged.set(new Uint16Array(eb), base);
-        man.clips = [...man.clips, ...ex.clips.map(c => ({ ...c, off: a.frames + c.off }))];
-        a = man.anim = { ...a, h, frames: a.frames + ef }; animData = merged; added = true;
+        man.clips = [...man.clips, ...xs.clips.map(c => ({ ...c, off: a.frames + c.off }))];
+        a = man.anim = { ...a, h, frames: a.frames + ef }; animData = merged;
+        if (set === 'extra') added = true;
+        else head = xs.heads?.[kind] || null;   // (its head's frame: what is worn on it, render/char-props.js)
       }
     }
     const tex = new THREE.DataTexture(animData, a.w, a.h, THREE.RGBAFormat, THREE.HalfFloatType);
@@ -140,7 +144,7 @@ function loadBase(kind) {
     // goes negative (char-glsl.js chRigK) — only when the character has them, not a stand-in
     for (const n of TRIPO_EXACT) if (man.clips.some(c => c.name === n)) len[T[n]] = -Math.abs(len[T[n]]);
     // where it holds things (tools/chars/extra-clips.mjs grips): only with its added frames, which the hold clips are
-    const grips = added ? ex.grips?.[kind] || null : null;
+    const g0 = added ? ex.grips?.[kind] || null : null, grips = g0 && head ? { ...g0, H: head } : g0;
     return { man, lods, tex, off, len, clip: packClips(off, len), grips };
   })();
   return cache[kind];

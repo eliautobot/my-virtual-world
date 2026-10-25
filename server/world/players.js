@@ -45,6 +45,7 @@ export class Players {
     this.onJoin = null;           // (player, visible) after the first connection of an account
     this.onLeave = null;          // (player, visible) after its last connection closed (and the grace period passed)
     this.onOnlineChange = null;   // the online list changed (join, leave, status, name)
+    this.onUse = null;            // (player) began using something where it stands (PF_USING): server/sim/agents.js playerTook
     this.q = {
       get: this.db.prepare('SELECT * FROM players WHERE world_id = ? AND account_id = ?'),
       put: this.db.prepare(`INSERT INTO players (world_id, account_id, x, y, z, ctx, yaw, look_json, cam_json, needs_json, updated)
@@ -231,7 +232,9 @@ export class Players {
     const wet = deck !== null ? null : under ? under.water : ctx < 0 && this.ground ? this.ground.water(x, z) : null;   // swimming: on the surface, or diving to the bottom
     p.y = Number.isFinite(y) ? Math.min(Math.max(g, wet ? wet.level : g) + 2.4, Math.max(g - (wet ? 0.8 : 0.2), y)) : g;   // a jump from a counter top
     if (Number.isFinite(yaw)) p.yaw = yaw;
-    p.clip = (m.clip | 0) & 63; p.flags = flags;
+    const took = (flags & PF_USING) && !(p.flags & PF_USING);
+    p.clip = (m.clip | 0) & 127; p.flags = flags;   // (a clip of render/anim.js CLIP_NAMES: 128 at most)
+    if (took) try { this.onUse?.(p); } catch { /* the sim's own business */ }   // (sat down, or started playing: the sim gives that place to nobody else)
     p.seq = (m.seq | 0) & 65535; p.lastAt = now; p.ver++; p.dirty = true;
     this.stats.moves++;
   }

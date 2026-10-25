@@ -16,7 +16,12 @@ export const TRIPO_CLIPS = ['idle', 'walk', 'run', 'sit', 'lie', 'jump', 'dance_
   // with no table, and making something cold on a counter (2026-10-08)
   'eat_lap', 'eat_stand', 'eat_stand_hands', 'act_prep',
   // out in a boat (2026-10-14, the fishing game): at the wheel; the rod held, cast, reeled, a fish fought, netted, shown
-  'helm', 'fish_idle', 'fish_cast', 'fish_reel', 'fish_fight', 'fish_net', 'fish_show'];
+  'helm', 'fish_idle', 'fish_cast', 'fish_reel', 'fish_fight', 'fish_net', 'fish_show',
+  // nights out (2026-10-24, tools/chars/extra-clips.mjs --set venue: <kind>.venue.bin): a bartender shaking a cocktail and
+  // pouring it, a DJ at the decks
+  'act_shake', 'act_dj', 'act_bass', 'act_sing', 'act_bar_idle',
+  // the arcade (2026-10-24): each machine its own (shared/arcade-motion.js moves the machine with them)
+  'act_pool', 'act_hockey', 'act_foos', 'act_whack', 'act_punch', 'act_claw', 'act_pinball', 'act_drive'];
 export const T = Object.freeze(Object.fromEntries(TRIPO_CLIPS.map((n, i) => [n, i])));
 export const TRIPO_DUR = {
   idle: 12, walk: 2.3333, run: 1.25, sit: 7.1667, lie: 4, jump: 2.2083, cheer: 12, clap: 12, bow: 6, agree: 4, greet_02: 5.5833,
@@ -27,6 +32,8 @@ export const TRIPO_DUR = {
   act_cook: 2.4, act_wash: 2, act_browse: 6, act_use: 2, act_lift: 3, act_pingpong: 1.2,
   eat_hands: 6, eat_hand: 6, eat_knife: 8, eat_spoon: 7, eat_lap: 6, eat_stand: 6, eat_stand_hands: 6, act_prep: 2,
   helm: 3, fish_idle: 4, fish_cast: 1.3, fish_reel: 0.9, fish_fight: 1.8, fish_net: 1.6, fish_show: 3,
+  act_shake: 4, act_dj: 3.87, act_bass: 3.2, act_sing: 4, act_bar_idle: 6,
+  act_pool: 5.3, act_hockey: 2, act_foos: 2.4, act_whack: 3, act_punch: 2.6, act_claw: 6, act_pinball: 2.4, act_drive: 3,
 };
 /** A clip a character may lack (its added frames missing): played as this one instead. */
 export const TRIPO_FALLBACK = {
@@ -35,6 +42,8 @@ export const TRIPO_FALLBACK = {
   act_cook: 'look_around', act_wash: 'look_around', act_browse: 'look_around', act_use: 'look_around', act_lift: 'warm_up', act_pingpong: 'warm_up',
   eat_hands: 'sit', eat_hand: 'sit', eat_knife: 'sit', eat_spoon: 'sit', eat_lap: 'sit', eat_stand: 'idle', eat_stand_hands: 'idle', act_prep: 'look_around',
   helm: 'idle', fish_idle: 'idle', fish_cast: 'idle', fish_reel: 'idle', fish_fight: 'idle', fish_net: 'idle', fish_show: 'idle',
+  act_shake: 'hold_idle', act_dj: 'play_arcade', act_bass: 'play_arcade', act_sing: 'fold_arms', act_bar_idle: 'idle',
+  act_pool: 'play_arcade', act_hockey: 'play_arcade', act_foos: 'play_arcade', act_whack: 'play_arcade', act_punch: 'play_arcade', act_claw: 'play_arcade', act_pinball: 'play_arcade', act_drive: 'sit',
 };
 /**
  * Clips that put the hands against the body's own marks — a cup or a fork at the lips, a burger held between both hands
@@ -58,6 +67,8 @@ export const OLD_TO_TRIPO = {
   eat_hands: 'eat_hands', eat_hand: 'eat_hand', eat_knife: 'eat_knife', eat_spoon: 'eat_spoon',
   eat_lap: 'eat_lap', eat_stand: 'eat_stand', eat_stand_hands: 'eat_stand_hands', prep: 'act_prep',
   helm: 'helm', fish_idle: 'fish_idle', fish_cast: 'fish_cast', fish_reel: 'fish_reel', fish_fight: 'fish_fight', fish_net: 'fish_net', fish_show: 'fish_show',
+  bartend: 'act_shake', dj: 'act_dj', piano: 'sit_work', bass: 'act_bass', sing: 'act_sing', bar_idle: 'act_bar_idle',
+  pool: 'act_pool', hockey: 'act_hockey', foos: 'act_foos', whack: 'act_whack', punch: 'act_punch', claw: 'act_claw', pinball: 'act_pinball', drive: 'act_drive',   // (the pianist plays as a typist types: the keys at a desk's height)
 };
 /** Fill MVW's CLIP_DUR / CLIP_STRIDE tables from the Tripo timings (called by anim.js at import and after load). */
 export function applyTripoTiming(names, dur, stride, tDur = TRIPO_DUR, tStride = TRIPO_STRIDE) {

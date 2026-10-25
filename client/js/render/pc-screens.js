@@ -188,7 +188,9 @@ export class PcScreens {
     const cam = this.app.stage.camera, cp = cam.position;
     const fr = this.frustum ??= new THREE.Frustum();
     fr.setFromProjectionMatrix(_m.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
-    const clock = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), blink = Math.floor(now * 1.8) & 1, t = Date.now();
+    const t = Date.now(), blink = Math.floor(now * 1.8) & 1, minute = Math.floor(t / 60000);
+    if (minute !== this.clockMin) { this.clockMin = minute; this.clockText = new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }   // (formatting the time is slow on a phone: once a minute)
+    const clock = this.clockText;
     const covered = new Set(), coveredAt = new Set();   // the desk screens and the residents' laptops a live screen is on
     if (this.mine.size) this.updateLive(fr, cp, clock, blink, t, covered, coveredAt);
     else if (this.slots.size) { this.slots.clear(); for (let k = 0; k < LIVE; k++) { this.pool[k].mesh.visible = false; this.pool[k].mesh.userData = {}; } }

@@ -8,12 +8,12 @@ import { ctxB, ctxF, ctxOf } from '../../shared/constants.js';
 import { isOpen } from '../sim/agents.js';
 
 /** Free-time kinds that happen at a venue, and the venue kind they use (index.venues). */
-export const VENUE_OF = Object.freeze({ cafe: 'cafe', bar: 'restaurant', shop: 'shop', gym: 'gym', park: 'park' });
+export const VENUE_OF = Object.freeze({ cafe: 'cafe', bar: 'restaurant', shop: 'shop', gym: 'gym', park: 'park', arcade: 'arcade', lounge_bar: 'lounge_bar', club: 'club' });
 /** The item a visit usually costs, per venue kind (shops and gyms: server/economy/policy.js menus; a café's or a bar's
  *  drink: the middle price of its drinks, server/economy/businesses.js typicalPrice); parks are free. */
-const VISIT_ITEM = Object.freeze({ cafe: 'drink', restaurant: 'drink', shop: 'goods', gym: 'session' });
+const VISIT_ITEM = Object.freeze({ cafe: 'drink', restaurant: 'drink', shop: 'goods', gym: 'session', arcade: 'game_tokens', lounge_bar: 'martini', club: 'cover' });
 /** The furniture a visit needs free (Brain.cafeVisit etc.); null: the place always has room (a park can be strolled). */
-const NEEDS_SLOT = Object.freeze({ cafe: ['eat', 'relax'], restaurant: ['eat'], shop: ['browse'], gym: ['run', 'lift', 'yoga'], park: null });
+const NEEDS_SLOT = Object.freeze({ cafe: ['eat', 'relax'], restaurant: ['eat'], shop: ['browse'], gym: ['run', 'lift', 'yoga'], park: null, arcade: ['play', 'pingpong', 'dance'], lounge_bar: ['eat', 'relax', 'chat'], club: ['dance', 'eat'] });
 export const PER_KIND = 2;
 export const MAX_OPTIONS = 10;
 
@@ -27,6 +27,7 @@ const PLAIN = Object.freeze({
 });
 const AT_VENUE = Object.freeze({
   cafe: 'Coffee or a snack at', bar: 'A drink at', shop: 'Go shopping at', gym: 'Work out at', park: 'Spend time in',
+  arcade: 'Play games at the arcade', lounge_bar: 'Cocktails and live music at', club: 'Go dancing at the club',
 });
 
 const hyp = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);

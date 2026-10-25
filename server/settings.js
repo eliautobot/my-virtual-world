@@ -88,6 +88,13 @@ export const SETTINGS = Object.freeze([
     label: 'Homes filled (%): the share of the city\'s beds its residents fill', saved: 'Homes filled saved',
     help: 'Only homes bring residents; offices, shops and restaurants bring jobs. New homes fill up over a world day or two; when homes go, or the share is lowered, people move away the same way.',
   },
+  // People moving between towns (2026-10-23, server/sim/migration.js): to live where they work, to find work, away from a
+  // town that does much worse than another; newcomers choose a town by how well it does.
+  {
+    path: 'world.townMoves', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'world.edit',
+    label: 'Residents move between towns', saved: 'Saved',
+    help: 'A few a world hour: to the town where they work, to a town with work when theirs has none, or away from a town that does much worse than another. Agents and residents moved into a flat by its owner stay.',
+  },
   {
     path: 'world.home', scope: 'install', tier: 2, type: 'string', default: '', maxLength: 300, cap: 'settings.world',
     label: 'Default home view', saved: 'Default home view saved',
@@ -465,6 +472,7 @@ export const SETTINGS = Object.freeze([
   { path: 'sound.aircraft', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 70, label: 'Aircraft and games' },
   { path: 'sound.voices', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 100, label: 'Agents\' voices' },
   { path: 'sound.media', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 100, label: 'Videos and recordings' },
+  { path: 'sound.music', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 80, label: 'Live music' },
   // Off switches and levels for the heavy parts of the living world (WP4.9/4.17/4.18, spec §7.1 X8): drawn on this
   // account's screens only; the world itself is the same for everyone.
   { path: 'display.wildlife', scope: 'account', tier: 0, type: 'enum', values: ['off', 'fewer', 'normal'], default: 'normal', label: 'Wildlife' },
@@ -492,6 +500,9 @@ export const SETTINGS = Object.freeze([
   // 2026-10-09: the in-world guide (server/guide.js, client/js/ui/guide.js): the welcome tour seen or skipped, the
   // Getting started checklist hidden — a small JSON value kept with the account, never taken from a device.
   { path: 'display.guide', scope: 'account', tier: 0, type: 'string', default: '', maxLength: 200, label: 'Getting started: the tour and the checklist' },
+  // 2026-10-23: the lot an account calls its home base (server/towns.js): where its agents live and work. Kept only while
+  // it holds that lot (POST /api/property/home-base checks it); unset: the first lot it came to hold.
+  { path: 'property.homeBase', scope: 'account', tier: 0, type: 'string', default: '', maxLength: 16, label: 'My home base (a lot I hold)' },
   // 2026-10-08: the selection widget across the top opens when something is selected and folds when nothing is (auto),
   // or stays as the person left it (open / closed: Manual). (It replaced display.selection — the Info panel option is gone.)
   { path: 'display.selectionWidget', scope: 'account', tier: 0, type: 'enum', values: ['auto', 'open', 'closed'], default: 'auto', label: 'The selection widget' },

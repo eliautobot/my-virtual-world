@@ -67,6 +67,7 @@ function question(s) {
     case 'shift': return `${n}'s work starts${s.job && Number.isFinite(s.job.start) ? ` at ${formatClock(s.job.start)}` : ' soon'}. What does ${n} most plausibly do now, ${given}?`;
     case 'rest': return `${n} is exhausted. What does ${n} most plausibly do to recover, ${given}?`;
     case 'after_task': return `${n} has just finished a task in the middle of the night. What does ${n} most plausibly do now, ${given}?`;
+    case 'job': return `${n} is looking for work. Which of these jobs does ${n} most plausibly take, given who they are, what they like and are good at, their money, and how far each is from home?`;
     default: return `What does ${n} most plausibly choose to do next with their free time, ${given}?`;
   }
 }

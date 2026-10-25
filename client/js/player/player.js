@@ -609,7 +609,9 @@ function update(dt, t) {
   if (!cam.fp) deckCamera();
   pose(t);
   // first person: the own body is hidden from its own camera once the camera is nearly in the eyes (others still see it)
-  const seen = cam.fpK < 0.6, xi = agents.extra.indexOf(P.extra);
+  // (at an arcade cabinet the camera is at its screen, inside the player's head: the body is hidden from it too; and at a
+  // game machine played for real, where the camera is in the player's eyes: play/machine-play.js)
+  const seen = cam.fpK < 0.6 && !((app.arcade?.playing || app.machinePlay?.active) && P.state === 'use'), xi = agents.extra.indexOf(P.extra);
   if (seen && xi < 0) agents.extra.push(P.extra); else if (!seen && xi >= 0) agents.extra.splice(xi, 1);
   if (S.focus.b < 0) GU.uFade.value.set(P.x, P.y + 1.0, P.z, 3.4);
   if (t - promptT > 0.12) { promptT = t; findTarget(); }
@@ -734,7 +736,7 @@ function findTarget() {
     else if (best.k === 'elev') html = K + 'Take the elevator';
     else {
       const def = CATALOG[best.e.t], an = CLIP[best.sl.anim];
-      const verb = an === CLIP.lie ? 'Lie down' : SEATED_CLIPS.has(an) ? 'Sit down' : (USES[best.sl.use]?.label || 'Use it');
+      const verb = app.arcade?.playable(best.e.t) ? '🕹️ Play' : an === CLIP.lie ? 'Lie down' : SEATED_CLIPS.has(an) ? 'Sit down' : (USES[best.sl.use]?.label || 'Use it');
       html = K + `${esc(verb)} <span class="dim">· ${esc(def.name)}</span>`;
     }
   }
@@ -751,7 +753,11 @@ function interact() {
   if (t.k === 'stand') standUp();
   else if (t.k === 'talk') talk(t.i);
   else if (t.k === 'player') { const r = app.remote?.byPid.get(t.pid); if (r) P.yaw = P.tyaw = Math.atan2(r.extra.x - P.x, r.extra.z - P.z); P.emote = { clip: CLIP.talk, t0: nowS(), dur: 2 }; app.openChat?.(); }
-  else if (t.k === 'slot') useSlot(t);
+  else if (t.k === 'slot') {
+    useSlot(t);
+    // an arcade cabinet or game machine: step up to it, then its game (play/arcade.js); leaving it steps back
+    if (app.arcade?.playable(t.e.t)) setTimeout(() => { if (P.active && P.state === 'use') app.arcade.playAt(t.e, { onLeave: standUp }); }, 380);
+  }
   else if (t.k === 'elev') openElevator(t.b, t.stop);
   promptT = 0;
 }

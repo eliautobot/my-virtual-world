@@ -34,6 +34,7 @@ import { profileAt, DRAW_LIFT } from '../../shared/island-roads.js';
 import { normalizeWall, checkWall, checkLayout, editWalls, doorway } from '../../shared/walls.js';
 import { coastClasses, protectedWhy, COAST_CLASSES, SECTORS, ISLE_SECTORS, isleClasses } from '../../shared/coasts.js';
 import { islandSlots, newIsland, TEMPLATES, ISLAND_GAP } from '../../shared/island-chain.js';
+import { themeOf, themeWhy, MAX_FLOOR_NAME } from '../../shared/floor-themes.js';
 import { createBuilding, generateLevels, addLevel, validate, freshLevels, freshLevel } from './generate.js';
 import { normalizeFerry, nextFerryId, ferryWhy } from '../../shared/ferries.js';
 import { buildLevel, coreFor } from './layouts.js';
@@ -183,7 +184,8 @@ export class Editor {
     switch (o.op) {
       case 'item.add': case 'item.move': case 'item.del': case 'item.tint': case 'item.sign': return this.itemOp(o, st);
       case 'wall.add': case 'wall.del': case 'wall.door': case 'wall.edit': return this.wallOp(o, st);
-      case 'lvl.clear': case 'lvl.regen': case 'lvl.reset': case 'lvl.apply': return this.levelOp(o, st);
+      case 'lvl.clear': case 'lvl.regen': case 'lvl.reset': case 'lvl.apply': case 'lvl.theme': return this.levelOp(o, st);
+      case 'lvl.name': return this.levelName(o, st);
       case 'flat.set': case 'flat.invite': case 'flat.uninvite': return this.flatOp(o, st);
       case 'flat.add': case 'flat.del': return this.flatPlanOp(o, st);
       case 'flat.lease': return this.flatLease(o, st);
@@ -264,10 +266,19 @@ export class Editor {
   /** A whole floor at once: lvl.clear empties it (the elevator stays; it stays empty when the building is resized),
    *  lvl.regen lays it out again with a new roll of the dice, lvl.reset gives it back the building's own generated
    *  layout, lvl.apply lays a saved layout onto it (o.layout: its id in the caller's library, fitted to this floor's size;
-   *  pieces that don't fit need o.fit 'keep'). Shared layouts are copied for the single floor unless scope === 'all'.
-   *  One undo brings the floor back. */
+   *  pieces that don't fit need o.fit 'keep'), lvl.theme lays it out as a theme (o.theme, shared/floor-themes.js: the
+   *  floor keeps it, so 🎲 Regenerate rolls the same theme and a resize lays it out again). Shared layouts are copied for
+   *  the single floor unless scope === 'all'. A floor's own name (lvl.name) stays through a re-roll. One undo brings
+   *  the floor back. */
   levelOp(o, st) {
     const B = this.bld(o.b), f = this.floorOf(B, o.f);
+    let theme = null;
+    if (o.op === 'lvl.theme') {
+      theme = themeOf(o.theme);
+      if (!theme) throw new Error('No such floor theme');
+      const why = themeWhy(B, f, this.world.levels[B.lv[f]]);
+      if (why) throw new Error(why);
+    }
     for (const k of st.touched.keys()) if (k.startsWith(`i:${B.lv[f]}:`) || k === `lw:${B.lv[f]}` || k === `lm:${B.lv[f]}`) throw new Error('Change the whole floor in a separate step from its furniture');
     let rec = null, fit = null;
     if (o.op === 'lvl.apply') {   // everything is checked before anything changes
@@ -291,9 +302,13 @@ export class Editor {
       this.setLevel(L, { ...keep, name: B.type === 'park' ? L.name : 'Empty floor', items: structuredClone(fixed), walls: [], zones: [], mode: 'empty' });
       this.note(st, `Cleared ${name} · ${B.name}`, where);
     } else if (o.op === 'lvl.regen') {
-      const roll = this.rng.int(1, 1e9);
-      this.setLevel(L, { ...freshLevel(B, floors[0], roll), ...keep });
+      const roll = this.rng.int(1, 1e9), named = L.named ? { name: L.name, named: 1 } : {}, th = themeOf(L.theme) && !themeWhy(B, floors[0], null) ? L.theme : null;
+      this.setLevel(L, { ...freshLevel(B, floors[0], roll, th), ...keep, ...named });
       this.note(st, `Laid out ${name} anew · ${B.name}`, where);
+    } else if (o.op === 'lvl.theme') {
+      const roll = this.rng.int(1, 1e9);
+      this.setLevel(L, { ...freshLevel(B, floors[0], roll, theme.id), ...keep });
+      this.note(st, `Made ${name} ${/^[aeiou]/i.test(theme.name) ? 'an' : 'a'} ${theme.name} · ${B.name}`, where);
     } else if (o.op === 'lvl.apply') {
       const items = fit.layout.items.map((it, k) => ({ ...it, id: k + 1 }));
       this.setLevel(L, { ...keep, ...fit.layout, items, nid: items.length + 1, mode: 'custom' });
@@ -305,6 +320,24 @@ export class Editor {
       this.note(st, `Reset ${name} to its generated layout · ${B.name}`, where);
     }
     return { lv, mode: levelMode(L) };
+  }
+  /** lvl.name: floor f's own name (o.name; empty: the name it was laid out with comes back), shown
+   *  where the floor is named: the floor buttons, the building's tip, the floor control. Every floor sharing the layout
+   *  is named with it unless the floor is copied out (scope). Its layout and mode stay as they are. One undo. */
+  levelName(o, st) {
+    const B = this.bld(o.b), f = this.floorOf(B, o.f);
+    if (B.type === 'park') throw new Error('A park is named with the building');
+    const name = String(o.name ?? '').replace(/[\u0000-\u001f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, MAX_FLOOR_NAME);
+    const lv = this.editable(B, f, o.scope, st, { byHand: false }), L = this.world.levels[lv];
+    this.touch(st, `lv:${lv}`);
+    if (name) { L.name = name; L.named = 1; }
+    else {   // the name it was laid out with comes back (its theme's, or the building's own floor's)
+      delete L.named;
+      const gen = L.roll ? freshLevel(B, f, L.roll, themeOf(L.theme) ? L.theme : null) : freshLevels(B)(f);
+      if (gen) L.name = gen.name || '';
+    }
+    this.note(st, name ? `Named ${floorName(B, f)} “${name}”` : `Took the name off ${floorName(B, f)}`, { b: B.idx, f });
+    return { lv, name: L.name || '' };
   }
   // ------------------------------------------------------------------ flats (2026-10-05)
   // The building's owner holds every flat and may assign it, rent it out or sell it; tenants are characters, AI agents
@@ -836,10 +869,10 @@ export class Editor {
       const L = W.levels[G.lv]; if (!L) continue;
       if (G.regen || G.fit === 'regen') {
         fresh ||= freshLevels({ ...B, ...g, core });
-        const want = G.regen && L.roll ? freshLevel({ ...B, ...g, core }, G.floors[0], L.roll) : fresh(G.floors[0]);   // a re-rolled floor keeps its roll
+        const want = G.regen && L.roll ? freshLevel({ ...B, ...g, core }, G.floors[0], L.roll, themeOf(L.theme) ? L.theme : null) : fresh(G.floors[0]);   // a re-rolled (or themed) floor keeps its roll and theme
         if (!want) continue;
         this.touch(st, `lv:${G.lv}`);
-        this.setLevel(L, { ...want, b: L.b ?? B.idx });
+        this.setLevel(L, { ...want, b: L.b ?? B.idx, ...(L.named ? { name: L.name, named: 1 } : {}) });
         continue;
       }
       if (!G.layout) continue;

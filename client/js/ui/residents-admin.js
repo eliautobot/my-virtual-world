@@ -18,6 +18,8 @@ export function residentsTab(app) {
       <p class="hint">The city's homes decide: its residents fill this share of the beds in its apartment buildings. Offices, shops and restaurants bring jobs, which they take. New homes fill up over a world day or two; when homes go, or the share is lowered, people move away the same way.</p>
       <label class="tr-l">Homes filled<span class="row tr-row"><input type="range" class="pop-pct" min="0" max="100" step="1" value="30" aria-describedby="pop-stat"><output class="tr-v pop-v">30%</output></span></label>
       <p class="hint pop-stat" id="pop-stat">…</p>
+      <label class="row pop-moves-l"><input type="checkbox" class="pop-moves" checked> Residents move between towns</label>
+      <p class="hint">A few a world hour: to the town where they work, to a town with work when theirs has none, or away from a town that does much worse than another; newcomers choose a town by how well it does (the economy window shows each town's needs). Agents, and residents moved into a flat by its owner, stay.</p>
       <div class="sep"></div>
       <p class="hint">Create, change and remove residents. Homes and work places are free ones in the building you pick. Every change can be undone.</p>
       <div class="row"><input class="input rq" placeholder="Search residents" style="flex:1"> <button type="button" class="btn small primary rnew">➕ New resident</button></div>
@@ -36,6 +38,13 @@ export function residentsTab(app) {
         + (st.homeless ? ` · ${num(st.homeless)} without a home (they move away after a world day if none frees up)` : '');
     };
     paintPop();
+    // residents moving between towns (server/sim/migration.js): the setting as saved
+    fetch('/api/settings').then(r => (r.ok ? r.json() : null)).then(v => { const e = v?.settings?.find(x => x.path === 'world.townMoves'); if (e && body.isConnected) { q('.pop-moves').checked = e.value !== false; q('.pop-moves').disabled = !e.canChange; } }).catch(() => {});
+    q('.pop-moves').onchange = async () => {
+      const on = q('.pop-moves').checked;
+      try { await post('/api/settings', { values: { 'world.townMoves': on } }); app.toast?.(on ? 'Residents move between towns' : 'Residents stay in their towns', 'good'); }
+      catch (e) { q('.pop-moves').checked = !on; if (!e.quiet) app.toast?.(e.message, 'bad'); }
+    };
     const popTimer = setInterval(() => { if (!body.isConnected) clearInterval(popTimer); else paintPop(); }, 5000);
     q('.pop-pct').oninput = () => { q('.pop-v').textContent = `${q('.pop-pct').value}%`; };
     q('.pop-pct').onchange = async () => {

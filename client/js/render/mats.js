@@ -44,11 +44,11 @@ vWP = (modelMatrix * w4).xyz; }`;
 
 export function commonUniforms(sh) {
   Object.assign(sh.uniforms, {
-    uNight: GU.uNight, uTime: GU.uTime, uFocusB: GU.uFocusB, uCutY: GU.uCutY, uFade: GU.uFade, uCamP: GU.uCamP, uInB: GU.uInB,
+    uNight: GU.uNight, uTime: GU.uTime, uFocusB: GU.uFocusB, uCutY: GU.uCutY, uFade: GU.uFade, uCamP: GU.uCamP, uInB: GU.uInB, uBeat: GU.uBeat, uBeatOn: GU.uBeatOn,
     uLightMap: GU.uLightMap, uLightRect: GU.uLightRect, uLightMap2: GU.uLightMap2, uLightRect2: GU.uLightRect2, uIndoor: GU.uIndoor, uHour: GU.uHour,
   });
 }
-export const FRAG_PARS = `uniform float uNight, uTime, uCutY, uIndoor, uHour; uniform sampler2D uLightMap, uLightMap2; uniform vec4 uLightRect, uLightRect2; varying vec3 vWP;
+export const FRAG_PARS = `uniform float uNight, uTime, uCutY, uIndoor, uHour, uBeat, uBeatOn; uniform sampler2D uLightMap, uLightMap2; uniform vec4 uLightRect, uLightRect2; varying vec3 vWP;
 ${GLSL}
 float lampMap(sampler2D m, vec4 r, vec2 p) { vec2 q = (p - r.xy) / r.zw; if (q.x < 0. || q.y < 0. || q.x > 1. || q.y > 1.) return 0.; return texture2D(m, q).r; }
 // the street lamps' light on whatever is under them: the city's (render/city.js) and the island roads' (render/island-roads.js)
@@ -57,7 +57,8 @@ float lampLight(vec3 wp) { return lampMap(uLightMap, uLightRect, wp.xz) + lampMa
 
 /**
  * Object material. Geometry attribute aC = (linear rgb, flags): flags = tint(1) + emit*2
- * (emit 1 screen, 2 lamp (night), 3 neon, 4 animated disco). Tint multiplies by the instance colour.
+ * (emit 1 screen, 2 lamp (night), 3 neon, 4 animated disco, 5 chase (marquee bulbs running), 6 cycling colours).
+ * Tint multiplies by the instance colour.
  * withB: geometry has attribute aB (building index) -> hidden when that building is focused (roof details).
  */
 export function makeFurnMat({ glass = false, withB = false, fade = false, lit = false, indoor = false, doorTex = null } = {}) {
@@ -92,7 +93,13 @@ if (fEmit > 0.5) {
   if (fEmit < 1.5) totalEmissiveRadiance += fBase * (0.5 + 0.55 * uNight);
   else if (fEmit < 2.5) totalEmissiveRadiance += fBase * (0.06 + 2.4 * uNight);
   else if (fEmit < 3.5) totalEmissiveRadiance += fBase * (0.55 + 1.7 * uNight);
-  else { float fl = 0.5 + 0.5 * sin(uTime * 4.0 + dot(floor(vWP.xz * 1.14), vec2(1.7, 2.3))); totalEmissiveRadiance += fBase * fl * (0.8 + 1.3 * uNight); }
+  else if (fEmit < 4.5) { float fl = 0.5 + 0.5 * sin(uTime * 4.0 + dot(floor(vWP.xz * 1.14), vec2(1.7, 2.3))); totalEmissiveRadiance += fBase * fl * (0.8 + 1.3 * uNight); }
+  else if (fEmit < 5.5) { float ch = step(0.5, fract(uTime * 1.6 + (vWP.x + vWP.y + vWP.z) * 5.5)); totalEmissiveRadiance += fBase * (0.25 + 0.95 * ch) * (0.8 + 1.2 * uNight); }   // chase: bulbs running
+  else if (fEmit < 6.5) { vec3 hue = 0.5 + 0.5 * cos(6.28318 * (fract(uTime * 0.07 + (vWP.x + vWP.z) * 0.035) + vec3(0.0, 0.33, 0.67))); diffuseColor.rgb = hue * 0.35; totalEmissiveRadiance += hue * (0.75 + 1.3 * uNight); }   // cycle: through the colours
+  else if (fEmit < 7.5) { diffuseColor.a *= uNight * 0.6; totalEmissiveRadiance += fBase * 1.5 * uNight; }   // a beam, a glow: light in the air, only after dark
+  else if (fEmit < 8.5) { vec3 hue = 0.5 + 0.5 * cos(6.28318 * (fract(uTime * 0.09 + (vWP.x - vWP.z) * 0.05) + vec3(0.0, 0.33, 0.67))); hue = pow(hue, vec3(1.6)); diffuseColor.rgb = hue * 0.3; totalEmissiveRadiance += hue * fBase * (0.45 + 0.5 * uNight); }   // a soft cycle: deep colours that stay colours by night (LED floors, video walls)
+  else if (fEmit < 9.5) { float bf = uBeatOn > 0.5 ? pow(1.0 - fract(uBeat), 3.0) : 0.35 + 0.35 * sin(uTime * 2.5); totalEmissiveRadiance += fBase * (0.18 + 1.9 * bf) * (0.7 + 1.1 * uNight); }   // on the beat: a flash with every beat of the music playing here (a strobe, a podium's ring)
+  else { float k = h21(floor(vWP.xz * 1.14) + 3.1); float lit = uBeatOn > 0.5 ? step(fract(k * 3.7 + floor(uBeat) * 0.381), 0.3) * pow(1.0 - fract(uBeat), 1.4) : 0.5 + 0.5 * sin(uTime * 4.0 + k * 6.28); totalEmissiveRadiance += fBase * (0.12 + 1.9 * lit) * (0.8 + 1.2 * uNight); }   // with the beat: tiles lit a different few at each beat (an LED dance floor)
 }
 ${lit ? 'totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.8, 0.55) * lampLight(vWP) * uNight * 1.6;' : ''}
 ${indoor ? 'totalEmissiveRadiance += diffuseColor.rgb * uIndoor;' : ''}`);
@@ -134,7 +141,20 @@ export function makeFloorMat({ lit = true, indoor = false } = {}) {
       .replace('#include <color_fragment>', `
 vec2 p = vL; vec3 c = vFCol; float fr = 0.8; float pat = vPat;
 float aw = max(fwidth(p.x), fwidth(p.y));
-if (pat < 1.5) { c *= 0.9 + 0.18 * fbm(p * 6.0) * (1.0 - smoothstep(0.02, 0.08, aw)) + 0.06 * vnoise(p * 1.3); fr = 0.97; }
+if (pat > 6.5) {
+  // the arcade carpet: dark pile, and on a 0.55 m grid neon rings, dots and four-point stars, each its own colour
+  vec2 q = p / 0.55, cell = floor(q), f = fract(q) - 0.5 - (vec2(h21(cell + 3.1), h21(cell + 7.7)) - 0.5) * 0.36;
+  float r = h21(cell), r2 = h21(cell + 17.0), d = length(f), aa = 0.012 + aw * 2.5;
+  float ring = 1.0 - smoothstep(0.0, aa, abs(d - 0.11 - 0.07 * r) - 0.012);
+  float dotm = 1.0 - smoothstep(0.045, 0.045 + aa, d);
+  float star = 1.0 - smoothstep(0.0, aa, min(abs(f.x) * (1.0 + 9.0 * abs(f.y)), abs(f.y) * (1.0 + 9.0 * abs(f.x))) - 0.014);
+  star *= 1.0 - smoothstep(0.12, 0.16, d);
+  float shape = r < 0.38 ? ring : r < 0.68 ? dotm : r < 0.86 ? star : 0.0;
+  vec3 neon = r2 < 0.34 ? vec3(0.05, 0.75, 0.95) : r2 < 0.67 ? vec3(0.95, 0.12, 0.62) : vec3(0.98, 0.8, 0.12);
+  c *= 0.86 + 0.16 * fbm(p * 7.0) * (1.0 - smoothstep(0.02, 0.08, aw));
+  c = mix(c, neon, shape * 0.92 * (1.0 - smoothstep(0.03, 0.1, aw)));
+  fr = 0.95;
+} else if (pat < 1.5) { c *= 0.9 + 0.18 * fbm(p * 6.0) * (1.0 - smoothstep(0.02, 0.08, aw)) + 0.06 * vnoise(p * 1.3); fr = 0.97; }
 else if (pat < 2.5) {
   float row = floor(p.y / 0.19); float off = h11(row + 3.0) * 1.3; float col = floor((p.x + off) / 1.3);
   c *= 0.8 + 0.32 * h21(vec2(row, col));

@@ -5,7 +5,9 @@
 // outlined, and every building standing on a lot wears a cap of the same colour on its roof, so the colours read from
 // above, at an angle, at night, and over a city whose buildings hide the ground. The rest of the world turns pale
 // (render/scene.js GU.uMap), as in SimCity's data views. One draw call for the fills, one for the outlines, one for the
-// caps, one each for the selection and the picked lots.
+// caps, one each for the selection and the picked lots. The fills are drawn on both sides: a lot's corners may run
+// either way round, and a fill turned face-down was culled, so empty lots showed no colour, only their outline and the
+// caps on built ones (2026-10-23, the product owner: "empty lots dont have any paint colors").
 import * as THREE from 'three';
 import { GROUND_Y, FLOOR_H } from '/shared/constants.js';
 import { S } from '../core/state.js';
@@ -63,7 +65,7 @@ export class LotLayer {
     this.colorOf = () => '#7d8fa8'; this.dim = () => false;
     this.group = new THREE.Group(); this.group.name = 'lots'; this.group.visible = false;
     const basic = o => new THREE.MeshBasicMaterial({ fog: false, ...o });
-    this.fillMat = basic({ vertexColors: true, transparent: true, opacity: 0.62, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    this.fillMat = basic({ vertexColors: true, transparent: true, opacity: 0.62, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     this.lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false, fog: false });
     this.hiMat = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, fog: false });
     this.pickMat = new THREE.LineBasicMaterial({ color: 0xffc83d, depthTest: false, transparent: true, fog: false });

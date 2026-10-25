@@ -253,17 +253,28 @@ export function freshLevels(b) {
   return f => (nb.lv[f] === undefined ? null : structuredClone(scratch.levels[nb.lv[f]]));
 }
 /** Floor f of building b laid out with its own roll of the dice (Regenerate, a floor's `roll`): the same kind of floor,
- *  a different arrangement; the same roll at the same size gives the same floor back. */
-export function freshLevel(b, f, roll) {
-  const rng = new RNG(`${b.seed}:roll:${roll}:${f}`);
-  const lvl = validate(b, buildLevel(b, f, rng, b.type === 'park' ? { dance: rng.chance(0.3) } : {}), f);
+ *  a different arrangement; the same roll at the same size gives the same floor back. theme: lay it out as that theme
+ *  (Floor Themes, shared/floor-themes.js) — it stays the floor's (its `theme`), so a re-roll or a resize keeps it. */
+export function freshLevel(b, f, roll, theme = null) {
+  const rng = new RNG(`${b.seed}:roll:${roll}:${f}${theme ? `:${theme}` : ''}`);
+  const lvl = validate(b, buildLevel(b, f, rng, b.type === 'park' ? { dance: rng.chance(0.3) } : theme ? { theme } : {}), f);
   lvl.b = b.idx;
   if (f === 0) lvl.ground = 1;
   lvl.auto = 1; lvl.roll = roll;
+  if (theme) lvl.theme = theme;
   let n = 1;
   for (const it of lvl.items) it.id = n++;
   lvl.nid = n;
   return lvl;
+}
+/** Themed floors laid out before they were places of their own (2026-10-23: arcades, lounges and clubs were a building's
+ *  staff lounge) take their theme's venue kind, so the city comes to them (server/sim/windex.js, server/economy). Every
+ *  boot, cheap; returns how many changed. */
+export function themeVenues(world) {
+  const want = { arcade: 'arcade', lounge: 'lounge_bar', club: 'club' };
+  let n = 0;
+  for (const L of world.levels || []) if (L && want[L.theme] && L.venue !== want[L.theme]) { L.venue = want[L.theme]; n++; }
+  return n;
 }
 const sortKeys = v => (Array.isArray(v) ? v.map(sortKeys)
   : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, sortKeys(v[k])])) : v);

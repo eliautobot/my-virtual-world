@@ -1,8 +1,8 @@
 // My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Frame pacing (2026-10-03: "my phone gets very hot when in the world ... uncomfortable to use"). On a phone the GPU
 // ran flat out every frame; most of that is spent when nothing on screen needs it. Settings → Display → Frame rate:
-//   auto  — phones and tablets: up to 60 frames a second while you touch, pan or follow someone, 30 once the camera
-//           has been still and untouched for a few seconds (the world's people, water and weather still move, only
+//   auto  — phones and tablets: up to 60 frames a second while you touch, pan, follow someone or play a machine's
+//           game, 30 once the camera has been still and untouched for a few seconds (the world's people, water and weather still move, only
 //           half as often); never faster than 60 on a 90/120 Hz screen. Other devices: as before (every display frame).
 //   60 / 30 — at most that many, always.  max — every display frame.
 // The choice stays with this device (like the graphics quality).

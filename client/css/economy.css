@@ -35,6 +35,15 @@
   grid-template-rows: auto auto minmax(0, 1fr) auto; margin-top: var(--topbar-height, 56px); }
 .ec-city .ec-body { overflow-y: auto; min-height: 0; padding-right: 2px; align-content: start; }   /* short tabs sit at the top */
 .ec-city .ec-err:empty { display: none; }
+/* the World / town switch and a town's needs (ui/econ-city.js, 2026-10-23) */
+.ec-city h3 > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ec-city h3 .row { flex: 0 0 auto; gap: 6px; align-items: center; }
+.ec-city .ec-scope { width: auto; max-width: 52vw; height: 32px; padding: 2px 8px; font-size: 13px; }
+.ec-city .ec-needs .ec-bar b { min-width: 2.2em; text-align: right; }
+.ec-city .ec-issues .lib-row b { font-weight: 600; white-space: normal; }
+/* its lists don't scroll on their own (the window does): in its grid, a list that scrolls was squeezed to nothing once
+   the window's content outgrew it (a phone: the towns, the issues, the busiest businesses) */
+.ec-city .ec-body .lib-list { max-height: none; overflow: visible; }
 @media (max-width: 760px) { .ec-city { margin-top: 0; height: calc(100dvh - var(--topbar-height, 44px) - 14px); } }
 .ec-city .ec-body, .ecdlg .wl-body { display: grid; gap: 10px; min-width: 0; }
 .ec-bal { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--btn); }

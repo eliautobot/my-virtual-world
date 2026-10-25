@@ -26,6 +26,9 @@ import { bodylessAgents, stateOf, isExt, studioAgentAt } from '../core/agent-vie
 import { initIslandPicture, islandPicture, onIslandPicture } from '../render/island-picture.js';
 import { drawAirports, isTerminal } from './airport-map.js';
 import { openNewAgent } from './new-agent.js';
+import { floorLabel } from '/shared/floor-themes.js';
+/** Floor f of B's own name ('' when it has none): on the floor buttons, the building's tip, the floor tag and control. */
+const flName = (B, f) => (B && B.type !== 'park' ? floorLabel(S.world.levels[B.lv[f]]) : '');
 
 export const TYPE_ICON = { office: '🏢', hq: '🏢', apartment: '🏠', cafe: '☕', restaurant: '🍽️', shop: '🛍️', gym: '🏋️', park: '🌳' };
 export const TYPE_NAME = { office: 'Office tower', hq: 'Headquarters', apartment: 'Apartments', cafe: 'Café', restaurant: 'Restaurant', shop: 'Shop', gym: 'Gym', park: 'Park' };
@@ -663,7 +666,7 @@ function showBuilding(b) {
     ${B.mixed && B.shopName ? `<div class="role">Street level: ${esc(B.shopName)}</div>` : ''}</div>${favBtn(B)}</div>
   <div class="act"><div class="ic">👥</div><div><div class="lb occ">Counting people…</div><div class="pl occ2"></div></div></div>
   <div class="row bld-btns">${park ? '<button class="btn primary look">🔍 Visit</button>' : '<button class="btn primary look">🔍 Look inside</button>'}${mayOn(B, 'furnish') ? '<button class="btn furn">🛋️ Furnish</button>' : ''}${mayOn(B, 'build') ? '<button class="btn edit">🏗️ Edit</button><button class="btn place" title="Handles on the building: move, resize, turn, floors">✥ Move</button>' : ''}</div>
-  <div class="sel-place">${flatsRow(B, b)}${park ? '' : `<div class="hint">Floors — click one to look inside${B.lv.some(lv => levelMode(S.world.levels[lv]) !== 'auto') ? ' · ✎ changed by hand · ○ empty' : ''}</div><div class="floors">${Array.from({ length: B.floors }, (_, f) => `<button class="btn" data-f="${f}" data-fm="${levelMode(S.world.levels[B.lv[f]])}">${f + 1}<small></small></button>`).join('')}</div>`}</div>
+  <div class="sel-place">${flatsRow(B, b)}${park ? '' : `<div class="hint">Floors — click one to look inside${B.lv.some(lv => levelMode(S.world.levels[lv]) !== 'auto') ? ' · ✎ changed by hand · ○ empty' : ''}</div><div class="floors">${Array.from({ length: B.floors }, (_, f) => `<button class="btn" data-f="${f}" data-fm="${levelMode(S.world.levels[B.lv[f]])}" title="${esc(`Floor ${f + 1}${flName(B, f) ? ` · ${flName(B, f)}` : ''}`)}">${f + 1}<small></small></button>`).join('')}</div>`}</div>
   <div class="sel-slot"></div>`;
   E.inspBody.className = 'body scroll sel-place-card';
   selCard(`b${b}`);
@@ -698,7 +701,7 @@ function updateOcc() {
   set(E.bd.occ, B.type === 'park' ? `${occ.total} visitor${occ.total === 1 ? '' : 's'} right now` : `${occ.total} ${occ.total === 1 ? 'person' : 'people'} inside now`);
   set(E.bd.occ2, B.type === 'park' ? 'Open all day' : [occ.residents ? `${occ.residents} residents` : '', occ.workers ? `${occ.workers} work here` : ''].filter(Boolean).join(' · ') || 'Nobody lives or works here yet');
   E.bd.occ.closest('.act')?.setAttribute('title', `${E.bd.occ.textContent} · ${E.bd.occ2.textContent}`);   // (the widget may cut them short)
-  if (E.bd.floors) [...E.bd.floors.children].forEach(btn => { const n = (occ.floors && occ.floors[btn.dataset.f]) || 0; set(btn.querySelector('small'), n ? String(n) : ''); btn.title = `Floor ${+btn.dataset.f + 1}: ${n} ${n === 1 ? 'person' : 'people'}${btn.dataset.fm === 'custom' ? ' · changed by hand' : btn.dataset.fm === 'empty' ? ' · empty' : ''}`; });
+  if (E.bd.floors) [...E.bd.floors.children].forEach(btn => { const n = (occ.floors && occ.floors[btn.dataset.f]) || 0; set(btn.querySelector('small'), n ? String(n) : ''); btn.title = `Floor ${+btn.dataset.f + 1}${flName(B, +btn.dataset.f) ? ` · ${flName(B, +btn.dataset.f)}` : ''}: ${n} ${n === 1 ? 'person' : 'people'}${btn.dataset.fm === 'custom' ? ' · changed by hand' : btn.dataset.fm === 'empty' ? ' · empty' : ''}`; });
 }
 function markFloors() {
   if (!E.bd || !E.bd.floors) return;
@@ -732,12 +735,12 @@ function buildFloorWidget(root) {
   // at the level of the floor shown, moving with it. placeFloorw() places it after every frame.
   const el = E.floorw = root.appendChild(h(`<div id="floorw" class="panel hidden" role="group" aria-label="Floor">
     <button type="button" class="btn icon up" title="Up a floor (PageUp or ])" aria-label="Up a floor">▲</button>
-    <div class="fl"><b>1</b><small>/1</small></div>
+    <div class="fl"><b>1</b><small>/1</small><i class="fln"></i></div>
     <button type="button" class="btn icon dn" title="Down a floor (PageDown or [)" aria-label="Down a floor">▼</button>
     <i class="sep2"></i>
     <button type="button" class="btn walls" title="Walls (V)"></button>
     <button type="button" class="btn exit" title="Leave the building (Esc)">Leave</button></div>`));
-  E.fl = el.querySelector('.fl b'); E.flt = el.querySelector('.fl small'); E.fnm = el.querySelector('.fl');
+  E.fl = el.querySelector('.fl b'); E.flt = el.querySelector('.fl small'); E.fnm = el.querySelector('.fl'); E.fln = el.querySelector('.fl .fln');
   E.fup = el.querySelector('.up'); E.fdn = el.querySelector('.dn'); E.walls = el.querySelector('.walls');
   E.fup.onclick = () => changeFloor(1); E.fdn.onclick = () => changeFloor(-1);
   E.walls.onclick = cycleWalls;
@@ -749,9 +752,10 @@ function onFocus() {
   if (B) { S.selF = null; S.selPt = null; app.blds.setFloor(-1, null); }   // inside now: the picked floor's glow has done its job
   E.floorw.classList.toggle('hidden', !B);
   if (B) {
-    set(E.fl, String(f + 1)); set(E.flt, `/${B.floors}`);
-    E.fnm.title = `${B.name} · floor ${f + 1} of ${B.floors}`;
-    E.floorw.setAttribute('aria-label', `${B.name}, floor ${f + 1} of ${B.floors}`);
+    const nm = flName(B, f);
+    set(E.fl, String(f + 1)); set(E.flt, `/${B.floors}`); set(E.fln, nm);
+    E.fnm.title = `${B.name} · floor ${f + 1} of ${B.floors}${nm ? ` · ${nm}` : ''}`;
+    E.floorw.setAttribute('aria-label', `${B.name}, floor ${f + 1} of ${B.floors}${nm ? `, ${nm}` : ''}`);
     E.fup.disabled = f >= B.floors - 1; E.fdn.disabled = f <= 0;
   }
   const wl = WALL_LABEL[S.walls] || 'Cutaway';
@@ -1057,7 +1061,8 @@ function setHover(i, b) {
   if (b >= 0 && i < 0) {
     const B = bld(b);
     if (B) {
-      const fl = hoverF !== null && B.floors > 1 ? `<div class="sub">Floor ${hoverF + 1} — ${S.selB === b && S.selF === hoverF ? 'click to go in' : 'click to pick it, double-click to go in'}</div>` : '';
+      const nm = hoverF !== null ? flName(B, hoverF) : '';
+      const fl = hoverF !== null && B.floors > 1 ? `<div class="sub">Floor ${hoverF + 1}${nm ? ` · <b>${esc(nm)}</b>` : ''} — ${S.selB === b && S.selF === hoverF ? 'click to go in' : 'click to pick it, double-click to go in'}</div>` : '';
       const html = `<b>${esc(B.name)}</b><div class="sub">${esc(TYPE_NAME[B.type] || B.type)}${B.floors > 1 ? ` · ${B.floors} floors` : ''}</div>${fl}`;
       if (E.tip._h !== html) { E.tip.innerHTML = html; E.tip._h = html; }
       E.tip.classList.remove('hidden');
@@ -1073,7 +1078,7 @@ function floorTag() {
   if (!B || !S.selPt || B.floors < 2) { E.ftag.classList.add('hidden'); return; }
   const v = _tv.set(S.selPt.x, floorAt(B, S.selF) + 1.7, S.selPt.z).project(cam.cam);
   if (v.z > 1 || Math.abs(v.x) > 1 || Math.abs(v.y) > 1) { E.ftag.classList.add('hidden'); return; }
-  const t = `Floor ${S.selF + 1} of ${B.floors} · ${matchMedia('(pointer: coarse)').matches ? 'tap' : 'click'} again to go in`;
+  const nm = flName(B, S.selF), t = `Floor ${S.selF + 1} of ${B.floors}${nm ? ` · ${nm}` : ''} · ${matchMedia('(pointer: coarse)').matches ? 'tap' : 'click'} again to go in`;
   if (E.ftag._t !== t) { E.ftag.textContent = t; E.ftag._t = t; }
   E.ftag.classList.remove('hidden');
   E.ftag.style.transform = `translate(${Math.round((v.x + 1) / 2 * innerWidth)}px, ${Math.round((1 - v.y) / 2 * innerHeight)}px) translate(-50%, -130%)`;

@@ -10,7 +10,7 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { generateWorld, markLevelModes } from './world/generate.js';
+import { generateWorld, markLevelModes, themeVenues } from './world/generate.js';
 import { joinCityEdge } from '../shared/city-roads.js';
 import { addPropertyRoutes } from './property-routes.js';
 import { createEconomy, subj as econSubj } from './economy/index.js';
@@ -30,6 +30,8 @@ import { addPlayRoutes } from './play/routes.js';
 import { FishMarket } from './play/fish-market.js';
 import { Angler } from './play/angler.js';
 import { addSignRoutes } from './signs-routes.js';
+import { Music } from './music/music.js';
+import { addMusicRoutes } from './music/routes.js';
 import { addWeatherRoutes } from './weather-routes.js';
 import { FreeWill } from './free-will/free-will.js';
 import { addFreeWillRoutes } from './free-will/routes.js';
@@ -89,10 +91,15 @@ import { EventBus } from './providers/bus.js';
 import { ProviderHost } from './providers/host.js';
 import { AgentProviders } from './agent-providers.js';
 import { Registry } from './providers/registry.js';
-import { generatePopulation, reassign, validatePerson, makeVip, makeAgentBody } from './sim/population.js';
+import { generatePopulation, reassign, validatePerson, makeVip, makeAgentBody, setPlaces } from './sim/population.js';
+import { placeAgents, jobOptions, giveJob } from './sim/placement.js';
+import { Migration } from './sim/migration.js';
+import { addTownNeedsRoutes } from './town-needs.js';
 import { WorldIndex } from './sim/windex.js';
 import { Housing, bedsOf, targetOf, DEFAULT_HOMES_FILLED } from './sim/housing.js';
 import { Sim, realNow } from './sim/sim.js';
+import { setPlayerSpots } from './sim/agents.js';
+import { PF_USING } from '../shared/playerproto.js';
 import { evalPlan } from './sim/plan.js';
 import { Activity } from './activity.js';
 import { Store } from './store.js';
@@ -291,6 +298,8 @@ world.version = world.version || 1;
 // Floor modes (procedural floor layouts, 2026-10-04): which floors are generated and which were changed by hand, once.
 const levelModesMarked = markLevelModes(world);
 if (levelModesMarked) log(`[boot] floor layouts: ${levelModesMarked} marked generated or changed by hand`);
+const themedVenues = themeVenues(world);   // (arcades, lounges and clubs: places the city visits)
+if (themedVenues) log(`[boot] themed floors: ${themedVenues} made places of their own (arcade, lounge, club)`);
 // Roads that stop short of a city edge junction (an older island's Beach Road at the curb) carried on to join it, once.
 let roadsJoined = 0;
 if (Array.isArray(world.roads)) {
@@ -551,6 +560,9 @@ function peoplePayload(withTasks) {
 
 // ------------------------------------------------------------------ editor glue
 let lotsChanged = null;   // set once the property routes exist (below)
+let agentPlaces = null;   // where agents may live and work (server/towns.js places()): set once the property routes exist (below)
+let migration = null;     // people moving between towns (server/sim/migration.js): set once the towns' needs are known (below)
+const hunts = new Map();  // body index → { at, pending }: its own brain choosing its job (Free Will, step 7: settleAgents)
 let economy = null;      // the economy (server/economy/), set once the routes exist (below)
 const app = {
   get world() { return world; },
@@ -567,6 +579,7 @@ const app = {
     if (players) { try { players.worldChanged(); } catch (e) { log.error('[players] after an edit', e.message); } }   // move players out of new walls (C62)
     if (fleet && patches.some(p => p.k === 'wmods')) { try { fleet.sync(); } catch (e) { log.error('[aircraft] after an edit', e.message); } }   // airports placed, moved, removed
     if (harbour && patches.some(p => p.k === 'wmods')) { try { harbour.sync(); } catch (e) { log.error('[boats] after an edit', e.message); } }   // docks placed, moved, removed
+    if (patches.some(p => p.k === 'person' && people[p.i]?.vip)) { try { settleSoon(1500); } catch { /* (before the settling exists: its first run places them) */ } }   // an agent's home or work changed: settled again
   },
 };
 const editor = new Editor(app);
@@ -632,6 +645,9 @@ players = new Players({ dbs, world, perms, settings, log });
 const friends = new Friends(dbs, { accounts });
 players.friends = friends;
 accounts.players = players;   // a deleted account's player and friendships go with it
+// players at furniture (a seat, a machine they play): the sim gives those places to nobody else (server/sim/agents.js)
+setPlayerSpots(() => { const out = []; for (const p of players.byId.values()) if ((p.flags & PF_USING) && p.ctx >= 0) out.push({ x: p.x, z: p.z, ctx: p.ctx }); return out; });
+players.onUse = p => sim?.brain?.playerTook?.(p.x, p.z, p.ctx);
 // play modules (docs/features/play-modules.md): minigames, their levels, badges, leaderboards and players' profiles
 // the airport's aircraft (server/world/aircraft.js): who flies which, their poses checked and shared nearby
 fleet = new Fleet({ world: () => world, players, log, groundAt: (x, z) => { const G = editor.ground(); return G ? G.env.heightAt(x, z) : 0; } });
@@ -822,15 +838,29 @@ function managesBody(P, i) {
   const p = people[i], a = p && p.vip && p.agentId && !p.retired ? agents.byKey(p.agentId) : null;
   return !!a && agents.canManage(P, a);
 }
-/** Gives a new agent its resident body: a home, a reserved desk (agent floor first) and a routine. Returns the body's
+/** Places bodies `idx` (of agent `a`, or each one's own) where they should live and work (server/sim/placement.js): its
+ *  owner's own property first — or the world's owner's, for an agent of the world. → the indices whose home or work
+ *  changed (residents who made way included: reassign gives them theirs). Before the property routes exist: none (the
+ *  first settling, a moment after the start, places them). */
+function placeAgentsNow(idx, a = null) {
+  if (!agentPlaces) return [];
+  const ownerOf = x => x?.ownerId ?? agentPlaces.worldOwner();
+  const list = idx.map(i => ({ i, owner: ownerOf(a || agents.byKey(people[i]?.agentId)), noJob: !!hunts.get(i)?.pending }));
+  const places = agentPlaces.places(); places.today = sim ? sim.brain.day(sim.now()) : null;   // (an employer it quit, until then: placement.js)
+  const r = placeAgents(world, index, people, list, places);
+  return [...r.changed, ...r.bumped];
+}
+/** Gives a new agent its resident body: a home and work near its owner (placeAgentsNow) and a routine. Returns the body's
  *  opaque reference. */
 function spawnAgentBody(a) {
   const r = { name: a.name, emoji: a.emoji, role: a.role, agentId: a.key };
   const p = isExtKey(a.key) ? makeAgentBody(world, index, r, people, { visible: extPublic(a.key) }) : makeVip(world, index, r, people);
+  p.job = { kind: 'free', title: r.role || 'Agent', seek: 1, prev: 'vip' };   // (its own home and work, near its owner: placeAgents)
   const [i] = sim.addPeople([p]);
-  const re = reassign(world, index, people, new RNG('agent:' + a.key));   // a home for the new body
+  const placed = placeAgentsNow([i], a);
+  const re = reassign(world, index, people, new RNG('agent:' + a.key));   // (a home and work for anyone who made way, or for it if none was found)
   const patches = [];
-  for (const k of re.changed) if (k !== i) patches.push({ k: 'person', i: k, person: sim.publicPerson(people[k], k) });
+  for (const k of new Set([...placed, ...re.changed])) if (k !== i) patches.push({ k: 'person', i: k, person: sim.publicPerson(people[k], k) });
   sim.brain.warm(sim.agents[i], sim.now());
   patches.push({ k: 'people-add', list: [sim.publicPerson(people[i], i)] });
   peopleCache = {};
@@ -867,9 +897,10 @@ function reviveAgentBody(a) {
   const p = people[i], sa = sim.agents[i];
   delete p.retired; p.job = { kind: 'free', title: p.role || 'Agent', seek: 1, prev: 'vip' };
   p.name = bodyName(p, a);
+  const placed = placeAgentsNow([i], a);
   const re = reassign(world, index, people, new RNG('revive:' + a.key));
   const patches = [{ k: 'person', i, person: sim.publicPerson(p, i) }];
-  for (const k of re.changed) if (k !== i) patches.push({ k: 'person', i: k, person: sim.publicPerson(people[k], k) });
+  for (const k of new Set([...placed, ...re.changed])) if (k !== i) patches.push({ k: 'person', i: k, person: sim.publicPerson(people[k], k) });
   if (sa) { sa.plan = null; sa.ver++; sim.brain.warm(sa, sim.now()); }
   peopleCache = {};
   broadcast({ t: 'patch', version: world.version, patches, who: 'agents' });
@@ -892,8 +923,8 @@ function renameAgentBody(a) {
   // and its job title follows the role ("<role> at <the HQ>", or the role alone while it has no desk; population.js makeVip)
   if (!isExtKey(a.key)) {
     p.emoji = a.emoji; p.role = a.role;
-    const j = p.job || {}, role = a.role || 'Agent', hq = j.kind === 'vip' && j.b >= 0 ? world.buildings[j.b] : null;
-    if (hq) j.title = `${role} at ${hq.name}`;
+    const j = p.job || {}, role = a.role || 'Agent', at = (j.kind === 'vip' || j.kind === 'staff') && j.b >= 0 ? world.buildings[j.b] : null;
+    if (at) j.title = `${role} at ${j.kind === 'staff' && j.venue && j.venue !== 'lobby' ? (world.levels[at.lv[j.f]]?.name || at.name) : at.name}`;
     else if (j.kind === 'free' && j.prev === 'vip') j.title = role;
   }
   const now = sim.publicPerson(p, i);
@@ -924,6 +955,18 @@ const STATIC = [
 const SECURITY_HEADERS = Object.freeze({
   'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'",
 });
+// The arcade's sealed game box (client/arcade/box.html, docs/features/arcade.md): framed by this site's own pages only, in
+// a sandbox of its own origin, and it may reach nothing but this site's scripts — no network, no forms, no other frames.
+// Its scripts (and the shared sims) answer any origin: a sandboxed frame's requests come from an opaque one.
+const ARCADE_BOX_HEADERS = Object.freeze({
+  'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
+  'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'; media-src 'none'; worker-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'",
+});
+function staticHeaders(pathname) {
+  if (pathname === '/arcade/box.html') return ARCADE_BOX_HEADERS;
+  if ((pathname.startsWith('/arcade/') || pathname.startsWith('/shared/arcade/') || pathname === '/shared/arcade.js' || pathname.startsWith('/vendor/three/build/')) && pathname.endsWith('.js')) return { ...SECURITY_HEADERS, 'access-control-allow-origin': '*' };   // (the 3D games draw with three.js)
+  return SECURITY_HEADERS;
+}
 const gzCache = new Map();
 function sendJSON(req, res, code, obj, pre = null, extra = null) {
   const body = pre ? pre.body : JSON.stringify(obj);
@@ -987,10 +1030,11 @@ function serveStatic(req, res, pathname) {
     if (!st.isFile()) continue;
     const ext = path.extname(file).toLowerCase();
     const type = MIME[ext] || 'application/octet-stream';
+    const sec = staticHeaders(pathname);
     contentEtag(file, st, etag => {
-      if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag, 'cache-control': cache, ...SECURITY_HEADERS }); return res.end(); }
+      if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag, 'cache-control': cache, ...sec }); return res.end(); }
       const text = /^(text|application\/json)/.test(type) || ext === '.svg';
-      const h = { 'content-type': type, etag, 'cache-control': cache, ...SECURITY_HEADERS };
+      const h = { 'content-type': type, etag, 'cache-control': cache, ...sec };
       if (text && /\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
         let c = gzCache.get(file);
         if (!c || c.etag !== etag) { c = { etag, gz: zlib.gzipSync(fs.readFileSync(file)) }; gzCache.set(file, c); }
@@ -1056,13 +1100,84 @@ const api = createApi({
 });
 const router = api.router, WS = api.ws;
 // Property (WP4.13/4.14, DECISIONS E25): lots, title and the holder/administrator operations, with their own routes.
-const property = addPropertyRoutes(router, { dbs, audit, perms, log, world: () => world, broadcast: o => broadcast(o),
+const property = addPropertyRoutes(router, { dbs, audit, perms, log, settings, world: () => world, broadcast: o => broadcast(o),
   worldChanged: () => { worldCache = null; save(); } });
 lotsChanged = () => property.buildingsChanged();
 if (starterLots && !property.count()) {   // the starting map's lots (held by the city, as its builder left them)
   try { log(`[boot] the starting map's lots laid out: ${property.seed(starterLots).ids.length}`); }
   catch (e) { log.error('[boot] the starting map\'s lots could not be laid out', e.message); }
 }
+// ------------------------------------------------------------------ where agents live and work (server/sim/placement.js)
+// Near their owner (2026-10-23): its own property first, then the city's in its home town, then the city's elsewhere —
+// never another player's. Placed when made or brought back, and settled again a moment after lots, buildings or a home
+// base change, at start and every few minutes (an agent moves only to a better tier, never off a place its owner chose).
+// Ordinary residents re-homed or re-hired keep to their own town (population.js setPlaces).
+setPlaces(() => { const P = property.towns.places(); P.pull = migration?.pulls() || null; return P; });   // (newcomers: by the towns' pull)
+{
+  const worldOwnerQ = dbs.db.prepare("SELECT id FROM accounts WHERE world_id = ? AND role = 'owner' AND status = 'active' ORDER BY id LIMIT 1");
+  agentPlaces = { places: () => property.towns.places(), worldOwner: () => worldOwnerQ.get(dbs.worldId)?.id ?? null };
+}
+let settleTimer = null;
+// Its own brain chooses its job (step 7, 2026-10-23): an agent with Free Will on that needs work, its owner having given
+// it none, asks its decision service which of the jobs open to it to take (server/sim/placement.js jobOptions,
+// server/free-will/free-will.js chooseJob); meanwhile its job is left alone. No answer: the rules place it at the next
+// settling, and it doesn't ask again for half an hour.
+const HUNT_AGAIN_MS = 30 * 60000;
+const needsWork = p => !p.job?.pin && !p.post && (!p.job || p.job.kind === 'free' || p.job.b === undefined);
+function startHunts(idx) {
+  if (!freeWill || !agentPlaces) return;
+  for (const i of idx) {
+    const p = people[i], h = hunts.get(i);
+    if (!p || !needsWork(p) || !freeWill.isActive(i) || (h && (h.pending || Date.now() - h.at < HUNT_AGAIN_MS))) continue;
+    const a = agents.byKey(p.agentId); if (!a) continue;
+    const places = agentPlaces.places(); places.today = sim.brain.day(sim.now());
+    const opts = jobOptions(world, index, people, i, a.ownerId ?? agentPlaces.worldOwner(), places, 6);
+    if (opts.length < 2) continue;
+    const T = property.towns, labelled = opts.map(o => ({ ...o, label: `${o.kind === 'staff' ? 'Serving at the counter' : 'At a desk'} at ${o.where}, ${T.name(T.ofBuilding(o.b))}${o.t === 0 ? ' (its owner\'s own business)' : ''}, about ${o.dist} m from its owner's home base` }));
+    const hunt = { at: Date.now(), pending: true };
+    hunts.set(i, hunt);
+    freeWill.chooseJob(i, labelled).then(pick => { hunt.pending = false; if (!(pick && takeHunt(i, pick))) settleSoon(500); }, () => { hunt.pending = false; settleSoon(500); });
+  }
+}
+/** The job its brain picked, if it still needs work and nobody took that place meanwhile. */
+function takeHunt(i, o) {
+  const p = people[i];
+  if (!p || p.retired || !needsWork(p)) return false;
+  if (people.some((q, k) => k !== i && q && !q.retired && ((q.job?.b === o.b && q.job.f === o.f && q.job.id === o.idx && q.job.k === o.k) || (q.post?.b === o.b && q.post.f === o.f && q.post.id === o.idx && q.post.k === o.k)))) return false;
+  giveJob(world, p, { b: o.b, f: o.f, id: o.idx, k: o.k, kind: o.kind, venue: o.venue }, new RNG(`hunt:${p.id}:${Date.now()}`), { by: 'brain' });
+  sim.setJob(i);
+  peopleCache = {}; save({ people: [i] });
+  broadcast({ t: 'patch', version: world.version, patches: [{ k: 'person', i, person: sim.publicPerson(p, i) }], who: 'agents' });
+  log(`[agents] ${p.name} chose its job: ${o.label}`);
+  return true;
+}
+/** Every agent's body, settled where it should live and work; the moves sent to the pages, the routines re-planned. */
+function settleAgents() {
+  try {
+    const idx = [];
+    for (const a of agents.list()) { const i = agents.resolver.resolveBody(a.bodyRef); if (i >= 0 && people[i] && !people[i].retired) idx.push(i); }
+    if (!idx.length) return 0;
+    startHunts(idx);
+    const moved = placeAgentsNow(idx);
+    if (!moved.length) return 0;
+    const re = reassign(world, index, people, new RNG('settle:' + Date.now()));
+    const all = new Set([...moved, ...re.changed]), patches = [];
+    for (const k of all) {
+      const sa = sim.agents[k];
+      if (sa?.plan) sim.brain.interruptSoon(sa);
+      patches.push({ k: 'person', i: k, person: sim.publicPerson(people[k], k) });
+    }
+    peopleCache = {};
+    broadcast({ t: 'patch', version: world.version, patches, who: 'agents' });
+    save({ people: [...all] });
+    log(`[agents] settled: ${moved.length} moved near their owners${re.changed.length ? `, ${re.changed.length} residents placed` : ''}`);
+    return moved.length;
+  } catch (e) { log.warn?.('[agents] settling failed:', e.message); return 0; }
+}
+const settleSoon = (ms = 2500) => { clearTimeout(settleTimer); settleTimer = setTimeout(settleAgents, ms); settleTimer.unref?.(); };
+property.onChange = () => settleSoon();
+setTimeout(settleAgents, 8000).unref?.();
+setInterval(settleAgents, 3 * 60000).unref?.();
 players.lotsOf = id => property.heldBy({ kind: 'account', id: String(id) });   // "Go home": a building on a lot it holds
 // Getting started (server/guide.js): the welcome tour's state and the first things to do, for the in-world guide.
 addGuideRoutes(router, new Guide({ dbs, world: () => world, settings, can: (P, c) => perms.allowed(P, c), landForSale: () => !!economy?.econ?.enabled() }));
@@ -1081,9 +1196,42 @@ addGuideRoutes(router, new Guide({ dbs, world: () => world, settings, can: (P, c
     agentOfSlot: slot => agents.byKey(extKey(slot.id)),
     // property for VC: the editor writes flats' records, an agent's character moves in, the lot map refreshes
     editor: () => editor, agentBody: id => { const a = agents.get(id); return a ? agents.resolver.resolveBody(a.bodyRef) : -1; },
-    lotsChanged: ids => property.lotsChanged(ids) });
+    lotsChanged: ids => property.lotsChanged(ids),
+    // an agent's pay (economy/households.js agentPay): its unpaid days kept with its resident; unpaid too long, it quits
+    // its job (or its post) there, keeps away from that employer a while (placement.js) and its owner is told
+    peopleChanged: list => { const idx = list.map(p => people.indexOf(p)).filter(i => i >= 0); if (idx.length) save({ people: idx }); },
+    agentQuit: ({ p, biz, days, avoid }) => {
+      const i = people.indexOf(p); if (i < 0) return;
+      const a = agents.byKey(p.agentId);
+      p.quit = { b: biz.b, biz: biz.id, untilDay: sim.brain.day(sim.now()) + avoid };
+      let moved = false;
+      if (p.post && p.post.b === biz.b) { sim.setPost(i, null); moved = true; }
+      if (p.job && p.job.b === biz.b) { p.job = { kind: 'free', title: p.role || 'Agent', seek: 1, prev: 'vip' }; sim.setJob(i); moved = true; }
+      peopleCache = {}; save({ people: [i] });
+      const owner = a ? (a.ownerId ?? ownerId()) : null;
+      if (owner != null) notifyAccount(owner, { t: 'mind', ev: 'note', agent: a ? { id: a.id, name: a.name, emoji: a.emoji || '' } : null,
+        text: `${a?.name || 'Your agent'} quit ${moved ? 'its work' : 'working'} at ${biz.name}: it wasn't paid for ${days} days. It is looking for work elsewhere and won't go back there for ${avoid} days.` });
+      log(`[economy] agent ${a?.name || p.agentId} quit at ${biz.name} after ${days} unpaid days`);
+      settleSoon();
+    },
+    // on a post or at work its owner gave it, it can't quit: it tells its owner instead
+    agentUnpaid: ({ p, biz, days, post }) => {
+      const a = agents.byKey(p.agentId), owner = a ? (a.ownerId ?? ownerId()) : null;
+      if (owner == null) return;
+      notifyAccount(owner, { t: 'mind', ev: 'note', agent: { id: a.id, name: a.name, emoji: a.emoji || '' },
+        text: `${a.name} hasn't been paid for ${days} days at ${biz.name}: its wallet is short. It stays at the ${post ? 'post' : 'work'} you gave it; add money to ${biz.name} (Wallet → Businesses) so it can pay its wages.` });
+    } });
   economy.start();
 }
+// What each town needs (server/town-needs.js, 2026-10-23): for everyone, the economy window's town layer — homes, jobs,
+// shops, parks, transit and its businesses, with its issues in plain words.
+const townNeedsNow = addTownNeedsRoutes(router, { world: () => world, index: () => index, people: () => people, towns: property.towns, moves: () => migration?.moves(),
+  books: () => { const econ = economy?.econ; return econ?.enabled?.() ? econ.parts.businesses.table(econ.econDay() - 1).map(r => ({ b: r.b, profit: r.yesterday?.profit ?? 0, owed: r.yesterday?.owed ?? 0 })) : null; } });
+// ... and moves its people (server/sim/migration.js, step 6): a few a world hour, to where they work, to work, to a town
+// that does much better; newcomers by the towns' pull. Settings → Residents turns it off; MVW_HOUSING=off stops it, as
+// it stops the city's population following its homes.
+migration = new Migration({ world: () => world, sim: () => sim, editor, towns: property.towns, needs: townNeedsNow, on: () => settings.get('world.townMoves') !== false, log });
+if (CFG.housing) setInterval(() => { try { migration.step(); } catch (e) { log.warn('[towns]', e.message); } }, 15000).unref?.();
 let agentTalk = null;   // talking with others' agents (server/agent-talk/), set once its routes exist (below)
 let agentSocial = null; // agents and friends (server/agent-social/), set below
 // Free Will (docs/features/FREE-WILL.md, server/free-will/): agents whose owner switched it on let a decision service choose
@@ -1328,6 +1476,12 @@ addPlayRoutes(router, { play, fishMarket, angler, onFinish: (account, r) => {
 } });
 // Pictures on signs (owners' rooftop billboards and signs inside, the Marketing tools' own content): server/signs-routes.js.
 addSignRoutes(router, { world: () => world, dataDir: DATA, readStream: (req, limit) => readStream(req, limit) });
+// The city's music (docs/features/music.md): the library, each Lounge Stage's and DJ Stage's deck (what plays, the
+// requests, its playlist) and their routes (server/music/).
+const music = new Music({ dbs, dataDir: DATA, sim: () => sim, world: () => world, broadcast: o => broadcast(o), log,
+  nameOf: id => visitorNameQ.get(dbs.worldId, Number(id))?.display_name || '' });
+addMusicRoutes(router, { music, perms, audit, readStream: (req, limit) => readStream(req, limit) });
+music.start();
 addWorldAdminRoutes(router, { world: () => world, people: () => people, lots: () => property.all(), worldId: dbs.worldId, audit,
   readStream: (req, limit) => readStream(req, limit),
   replace: (next, why) => {
@@ -1344,10 +1498,11 @@ addWorldAdminRoutes(router, { world: () => world, people: () => people, lots: ()
 // Lot rights (WP4.6): every editor op and every undo/redo is checked against the lots it touches.
 const lotRights = new LotRights(property, () => world);
 editor.rights = lotRights;
-// AI agents on post around the clock (server/agent-posts/): where its owner could furnish, one agent to a spot
+// AI agents on post around the clock (server/agent-posts/): on its owner's own property only (not even an administrator
+// elsewhere), one agent to a spot
 const postRoleQ = dbs.db.prepare("SELECT role FROM accounts WHERE world_id = ? AND id = ? AND status = 'active'");
 const posts = new Posts({ sim: () => sim, world: () => world, agents, perms, property, rights: lotRights, save: marks => save(marks), log,
-  roleOf: id => postRoleQ.get(dbs.worldId, Number(id))?.role || null, notify: (id, m) => notifyAccount(id, m) }).attach();
+  roleOf: id => postRoleQ.get(dbs.worldId, Number(id))?.role || null, notify: (id, m) => notifyAccount(id, m), moved: () => settleSoon() }).attach();
 addPostRoutes(router, posts, { agents });
 // AI apps acting as a person's agent (server/connector/): the OAuth 2.1 authorization server and the MCP endpoint they
 // connect to (outside the /api table: other companies' servers speak OAuth and MCP there), and the person's side of it —
@@ -1699,6 +1854,7 @@ function shutdown(sig) {
   clearInterval(mainLoop);
   clearInterval(vehicleLoop); clearInterval(fleetLoop);
   try { economy?.stop(); } catch (e) { log.error('[economy] shutdown', e.message); }
+  try { music.stop(); music.flush(); } catch (e) { log.error('[music] shutdown', e.message); }
   try { freeWill?.stop(); } catch (e) { log.error('[free-will] shutdown', e.message); }
   try { mind?.stop(); } catch (e) { log.error('[mind] shutdown', e.message); }
   try { agentSocial?.stop(); } catch (e) { log.error('[social] shutdown', e.message); }

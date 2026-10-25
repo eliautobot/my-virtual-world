@@ -1,0 +1,58 @@
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* A machine played for real in the world (client/js/play/machine-play.js): over the world only a slim top bar (the
+   game, its score, its line, pause, leave), the power meter at the right, a few words at the bottom, points rising from
+   the machine, and the pause and results cards. Everything else is the machine itself. */
+/* (while a machine is played the world's own panels step aside: the machine and the game have the screen) */
+body.mp-playing #ui, body.mp-playing #labels { visibility: hidden !important; pointer-events: none !important; }
+.mp-root { position: fixed; inset: 0; z-index: 34; pointer-events: none; user-select: none; -webkit-user-select: none; }
+.mp-touch { position: absolute; inset: 0; pointer-events: auto; touch-action: none; cursor: crosshair; }
+.mp-top { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px;
+  padding: 6px 6px 6px 16px; border-radius: 999px; background: rgba(12, 10, 28, .78); box-shadow: 0 6px 24px rgba(0, 0, 0, .35); color: #e2e8f0;
+  font: 600 14px/1 system-ui, sans-serif; pointer-events: auto; white-space: nowrap; box-sizing: border-box; width: min(560px, calc(100vw - 20px)); }
+/* (one width whatever the line says, so ⏸ and ✕ never move under a finger: the line takes what is left, cut short if it must) */
+.mp-title { color: #c4b5fd; flex: none; }
+.mp-score { flex: none; font: 900 22px/1 system-ui, sans-serif; color: #fde047; text-shadow: 0 0 12px rgba(245, 158, 11, .7); min-width: 3ch; text-align: center; }
+.mp-info { color: #f1f5f9; font-variant-numeric: tabular-nums; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mp-btn { flex: none; width: 34px; height: 34px; border: 0; border-radius: 999px; background: #1f2340; color: #f1f5f9; font: 600 15px system-ui, sans-serif; cursor: pointer; }
+.mp-btn:hover { background: #2d3360; }
+.mp-meter { position: absolute; right: max(18px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%); width: 22px; height: min(260px, 40vh); border-radius: 12px;
+  background: rgba(10, 10, 20, .7); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .15); overflow: hidden; }
+.mp-meter i { position: absolute; left: 3px; right: 3px; bottom: 3px; border-radius: 9px; background: linear-gradient(0deg, #22c55e, #facc15 60%, #ef4444); max-height: calc(100% - 6px); }
+.mp-meter span { position: absolute; left: 50%; bottom: -22px; transform: translateX(-50%); font: 700 10px system-ui, sans-serif; letter-spacing: .12em; color: #e2e8f0; }
+.mp-bal { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(70px, env(safe-area-inset-bottom)); width: 110px; height: 110px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(74, 222, 128, .25) 0 30%, rgba(250, 204, 21, .18) 30% 62%, rgba(239, 68, 68, .25) 62% 100%); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .25); }
+.mp-bal i { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, .25); }
+.mp-bal b { position: absolute; left: calc(50% - 9px); top: calc(50% - 9px); width: 18px; height: 18px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 10px rgba(0, 0, 0, .6); }
+.mp-bal span { position: absolute; left: 50%; bottom: -20px; transform: translateX(-50%); font: 700 10px system-ui, sans-serif; letter-spacing: .12em; color: #e2e8f0; }
+.mp-bal.hidden { display: none; }
+.mp-hint { position: absolute; left: 50%; bottom: max(26px, env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 7px 14px; border-radius: 999px; background: rgba(12, 10, 28, .7);
+  color: #f8fafc; font: 600 13px system-ui, sans-serif; white-space: nowrap; max-width: calc(100vw - 30px); overflow: hidden; text-overflow: ellipsis; }
+.mp-hint:empty { display: none; }
+.mp-floats { position: absolute; inset: 0; overflow: hidden; }
+.mp-float { position: absolute; left: 0; top: 0; font-weight: 900; font-family: system-ui, sans-serif; text-shadow: 0 2px 0 rgba(0, 0, 0, .55), 0 0 14px rgba(0, 0, 0, .5); white-space: nowrap; will-change: transform; }
+.mp-menu { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(5, 4, 15, .45); pointer-events: auto; }
+.mp-menu.hidden, .mp-meter.hidden { display: none; }
+.mp-card { min-width: 260px; max-width: min(380px, calc(100vw - 30px)); max-height: calc(100vh - 40px); overflow: auto; padding: 18px 18px 14px; border-radius: 18px;
+  background: rgba(16, 13, 38, .94); box-shadow: 0 18px 50px rgba(0, 0, 0, .5), inset 0 0 0 1px rgba(167, 139, 250, .25); color: #e2e8f0; display: flex; flex-direction: column; gap: 8px; text-align: center;
+  font: 500 14px/1.3 system-ui, sans-serif; }
+.mp-card > b { font: 900 18px system-ui, sans-serif; letter-spacing: .14em; color: #fde68a; }
+.mp-card button { border: 0; border-radius: 12px; padding: 10px 14px; background: #262a4d; color: #f1f5f9; font: 700 14px system-ui, sans-serif; cursor: pointer; }
+.mp-card button.sel, .mp-card button:hover { background: #4c1d95; box-shadow: 0 0 0 2px #a78bfa; }
+.mp-res-score { font: 900 46px/1 system-ui, sans-serif; color: #fff; text-shadow: 0 0 22px rgba(244, 114, 182, .6); }
+.mp-stars { font-size: 30px; letter-spacing: .2em; color: #3f3f5a; }
+.mp-stars svg.mvi { color: inherit; }   /* (the ★ icon is drawn gold by default: unearned ones stay dark) */
+.mp-stars .on { color: #fde047; text-shadow: 0 0 12px rgba(250, 204, 21, .7); animation: mp-star .5s both; }
+@keyframes mp-star { from { transform: scale(.3); opacity: 0; } to { transform: none; opacity: 1; } }
+.mp-tags, .mp-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.mp-tags span, .mp-badges span { padding: 3px 9px; border-radius: 999px; background: #1e2246; font: 700 12px system-ui, sans-serif; }
+.mp-tags .new { background: #f59e0b; color: #1c1206; }
+.mp-tags .vc { background: #14532d; color: #bbf7d0; }
+.mp-why { color: #fca5a5; font-size: 12px; }
+.mp-board { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; font-size: 13px; }
+.mp-board li { display: flex; gap: 8px; padding: 3px 8px; border-radius: 8px; }
+.mp-board li.me { background: rgba(167, 139, 250, .2); }
+.mp-board li i { width: 1.6em; color: #a5b4fc; font-style: normal; }
+.mp-board li span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-board li.none { justify-content: center; color: #94a3b8; }
+.mp-btns { display: flex; gap: 8px; justify-content: center; }
+@media (max-width: 560px) { .mp-title { display: none; } .mp-top { gap: 8px; padding-left: 12px; } }

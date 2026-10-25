@@ -40,7 +40,7 @@
 // Writes, next to the characters: <kind>.extra.bin (the new frames: 3 rows of RGBA half floats per bone per frame, as in
 // the bake) and extra-clips.json (the clips, the kinds that have them, the grips). The browser appends the frames to each
 // character's animation texture as it loads (render/characters.js). The big .bin files are not touched.
-// Usage: node tools/chars/extra-clips.mjs [--only f01,m15] [--check] [--verify [--no-twist]]   (--check: prints joint
+// Usage: node tools/chars/extra-clips.mjs [--only f01,m15] [--set venue] [--check] [--verify [--no-twist]]   (--check: prints joint
 // residuals; --verify: how well each stroke's palms lead the hands through the water and how well each hold reaches its
 // mark; neither writes anything)
 import fs from 'node:fs';
@@ -51,8 +51,10 @@ import {
   loadRig, frameOf, jointsOf, palmsOf, poseFrom, kindsIn, inv, AIM,
 } from './rig.mjs';
 import { BOTH_R, BOTH_LIFT, BITE_TIP, toolTip, toolDir, TABLE_TOP, DISH_AHEAD, WRIST_MAX, STOVE_PAN, PREP_BOARD } from '../../shared/eating.js';
+import { steer, claw, punch, foos, whack, flippers, hockey } from '../../shared/arcade-motion.js';
+import { MIC, BASS, BASS_SHAPE, bassPt, bassDir, stringZ, PHONES } from '../../shared/stage.js';
 
-const { values: o } = parseArgs({ options: { only: { type: 'string' }, check: { type: 'boolean' }, verify: { type: 'boolean' }, 'no-twist': { type: 'boolean' }, dir: { type: 'string' } } });
+const { values: o } = parseArgs({ options: { only: { type: 'string' }, check: { type: 'boolean' }, verify: { type: 'boolean' }, 'no-twist': { type: 'boolean' }, dir: { type: 'string' }, set: { type: 'string' } } });
 const DIR = path.resolve(o.dir || 'client/assets/chars');
 
 // ------------------------------------------------------------------ the strokes (directions in the body's frame)
@@ -437,6 +439,203 @@ function rodPose(L, D, wrist, head = 0.04, ahead = -0.22) {
     Left: { at: wl, along: alongL, palm: palmL, grip: 0.9, pole: V(0.6, -1, -0.2) } };
 }
 function lerpPt(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+// ------------------------------------------------------------------ nights out (a set of their own: --set venue)
+// The people at work on a night out (2026-10-24, the product owner: "we need new animations and interactions ... the
+// lounge needs bartenders, several, musicians ... the night club needs bartenders, several, nightclub dancers as well
+// as a DJ"): written to <kind>.venue.bin and venue-clips.json, apart from the clips above, so these can be made again
+// without the others. Each on the idle's (or the seated idle's) first, still stance, as the doing clips above.
+// A cocktail shaker (render/char-props.js shaker: round the right hand's grip, its axis along the grip's x): r, height.
+const SHAKER_R = 0.042, SHAKER_H = 0.205;
+/** The right hand holding the shaker with its middle at C and its axis (bottom to cap) along X, and where its cap is. */
+function shakerHand(L, C, X) {
+  const ax = nrm(X), palm = nrm(sub(V(1, 0, 0), scale(ax, dot(V(1, 0, 0), ax))));   // (the palm toward the shaker: facing in, the body's middle)
+  const along = nrm(cross(palm, ax));                                                // (x = along × palm = ax)
+  const p = [0.02 * SHAKER_H, 0.012, SHAKER_R + 0.003];
+  return { hand: { at: L.wristFor('Right', along, palm, p, C), along, palm, grip: 0.9, pole: V(-0.8, -1, -0.3) }, cap: add(C, scale(ax, SHAKER_H * 0.5)), ax };
+}
+/** A hand round a bar that runs along d through its fist, the thumb on top (as the fishing rod: the grip's x along d for
+ *  the right hand, against it for the left), turned `twist` about the bar. */
+function barHand(side, d, twist = 0) {
+  const sq = v => nrm(sub(v, scale(d, dot(v, d))));
+  let palm = sq(side === 'Right' ? [1, 0.15, 0] : [-1, 0.15, 0]);
+  if (twist) palm = nrm(rotv(rotAbout(d, twist, [0, 0, 0]), palm));
+  return { palm, along: side === 'Right' ? nrm(cross(palm, d)) : nrm(cross(d, palm)) };
+}
+/** A hand round a pole that runs along d through its fist, the thumb's side toward d (the microphone's stand, the bass's
+ *  neck), the fingers pointing as near a0 as is square to it. */
+function poleHand(side, d, a0) {
+  const along = nrm(sub(a0, scale(d, dot(a0, d))));
+  return { along, palm: side === 'Right' ? nrm(cross(d, along)) : nrm(cross(along, d)) };
+}
+/** Between two holds of a hand (t 0 … 1). */
+const mixHand = (a, b, t) => ({ at: lerpPt(a.at, b.at, t), along: lerpDir(a.along, b.along, t), palm: lerpDir(a.palm, b.palm, t), grip: a.grip + (b.grip - a.grip) * t, pole: lerpDir(a.pole, b.pole, t) });
+export const VENUE = [
+  { // a bartender making a drink (played when someone has just ordered at the bar: render/agents.js): the shaker upright
+    // before the chest, the right hand round its tin, the left pressed on its cap, shaken hard up and down; then the cap
+    // end tipped forward over the counter, pouring, the left hand on the counter by the glass; and back
+    name: 'act_shake', base: 'idle', still: 1, frames: 48, dur: 4,
+    pose(u, L) {
+      const sh = ks([[0, 0], [0.52, 0], [0.62, 1], [0.88, 1], [1, 0]], u);   // 0 shaking, 1 pouring
+      const shake = u < 0.52 ? Math.sin(TAU * 7 * u / 0.52) : 0;
+      const C0 = add(L.at('Right', [0.14, -0.12, 0.24]), scale(nrm(V(-0.25, 1, 0.2)), 0.05 * shake * L.k));
+      const C1 = L.at('Right', [0.14, -0.2, 0.33]);
+      const X = lerpDir(V(-0.12, 1, 0.08), V(0.1, -0.5, 0.86), smooth(sh));
+      const S = shakerHand(L, lerpPt(C0, C1, smooth(sh)), X);
+      // the left hand: its palm pressed down on the cap while shaking; flat on the counter while pouring
+      const capHand = { p: [0, 0, 0.004], target: add(S.cap, scale(S.ax, 0.004)), along: nrm(cross(S.ax, V(-1, 0, 0))), palm: scale(S.ax, -1), grip: 0.45, pole: V(0.6, -1, -0.4) };
+      const counter = { at: L.at('Left', [-0.08, -0.36, 0.3]), along: V(-0.1, -0.15, 0.98), palm: V(0, -1, 0.1), grip: 0.2, pole: V(0.7, -1, -0.3) };
+      return { head: 0.12 + 0.25 * sh, lean: 0.04 + 0.06 * sh, Right: S.hand, Left: sh < 0.5 ? capHand : counter };
+    },
+  },
+  { // a bartender waiting for an order: both hands on the counter, then the right wiping it in slow circles, looking up
+    // and round now and then
+    name: 'act_bar_idle', base: 'idle', still: 1, frames: 48, dur: 6,
+    pose(u, L) {
+      const wipe = ks([[0, 0], [0.3, 0], [0.38, 1], [0.82, 1], [0.9, 0], [1, 0]], u), a = TAU * 3 * u;
+      const rest = L.at('Right', [0.06, -0.33, 0.35]), circle = add(L.at('Right', [0.12, -0.34, 0.38]), [0.06 * Math.cos(a) * L.k, 0, 0.045 * Math.sin(a) * L.k]);
+      return { head: 0.18 + 0.12 * wipe - 0.1 * Math.max(0, Math.sin(TAU * u * 2)) * (1 - wipe), lean: 0.08,
+        Right: { at: lerpPt(rest, circle, smooth(wipe)), along: V(0.15, -0.2, 0.97), palm: V(0, -1, 0.15), grip: 0.25 + 0.2 * wipe, pole: V(-0.7, -1, -0.3) },
+        Left: { at: L.at('Left', [-0.06, -0.33, 0.35]), along: V(-0.15, -0.2, 0.97), palm: V(0, -1, 0.15), grip: 0.2, pole: V(0.7, -1, -0.3) } };
+    },
+  },
+  { // a DJ at the decks: the right hand on the platter (scratching), the left on the mixer (a fader up and down), then up
+    // pressing the headphones' cup to the left ear, and down again; nodding to the beat all along. At the ear (2026-10-24,
+    // the product owner: "I'm not sure why the dj puts their elbow up so high when placing hand on ear, looks off"): the
+    // palm on the cup (L.earAt: the headphones worn, render/char-props.js), the fingers up over it, the head tilted to it,
+    // the forearm rising to it from an elbow in front at about the shoulder's height, the hand going by the chest's side
+    // (it was sent above the shoulder, behind the ear: the elbow out and up)
+    name: 'act_dj', base: 'idle', still: 1, frames: 64, dur: 3.87,
+    pose(u, L) {
+      const beat = 8 * u, nod = Math.pow(Math.abs(Math.sin(PI * beat)), 2);
+      const scr = Math.sin(TAU * 4 * u) * (u % 0.25 < 0.17 ? 1 : 0.3);   // (scratching in bursts)
+      const plat = L.at('Right', [-0.12, -0.35, 0.32 + 0.035 * scr]);
+      const ear = ks([[0, 0], [0.48, 0], [0.58, 1], [0.88, 1], [0.97, 0], [1, 0]], u), e = smooth(ear);   // 1: the left hand at the ear
+      const head = 0.2 + 0.12 * nod - 0.14 * ear, tilt = 0.16 * e;   // (listening: the head tilted to the hand)
+      const ea = V(0.05, 0.55, -0.83), ep = nrm(sub(V(-1, 0, 0), scale(ea, dot(V(-1, 0, 0), ea))));   // (the palm on the cup, the fingers up and back round it)
+      const fader = L.at('Left', [-0.2 + 0.03 * Math.sin(TAU * 2 * u), -0.34, 0.3]), earAt = L.wristFor('Left', ea, ep, [0, 0.045, 0.004], L.earAt('Left', head, tilt));
+      // (between the mixer and the ear the hand goes by the chest's side, not up past the face)
+      const by = L.at('Left', [0.1, -0.12, 0.2]), q = 1 - e, path = [0, 1, 2].map(i => q * q * fader[i] + 2 * q * e * by[i] + e * e * earAt[i]);
+      return { head, tilt, lean: 0.12,
+        Right: { at: plat, along: V(0.05, -0.35, 0.95), palm: V(0.1, -0.95, 0.1), grip: 0.35, pole: V(-0.7, -1, -0.4) },
+        Left: { at: path, along: lerpDir(V(-0.05, -0.35, 0.95), ea, e), palm: lerpDir(V(-0.1, -0.95, 0.1), ep, e), grip: 0.45 - 0.15 * e, pole: lerpDir(V(0.8, -0.6, -0.4), V(0.4, -0.5, 0.75), e) } };
+    },
+  },
+  // ---- the lounge's band (the Lounge Stage: render/furniture-lounge.js; where the singer, the bassist, the microphone
+  // and the bass are: shared/stage.js, so the hands land on them: 2026-10-24, the product owner: "the lounge singer has
+  // their hand holding the mic in the wrong place, their hand is not holding the mic stand", "the bass player needs more
+  // work the hand placements are off")
+  { // the bassist, behind the double bass (turned toward their right hand, its back on their left hip): the left hand
+    // round its neck, the thumb behind, the fingers over the fingerboard, moving up and down it a note a beat; the right's
+    // fingers on the strings where the fingerboard ends, plucking them on the beat; the head bowed to the neck, nodding
+    name: 'act_bass', base: 'idle', still: 1, frames: 48, dur: 3.2,
+    pose(u, L) {
+      const beat = 4 * u, k = Math.floor(beat) % 4, f = beat % 1, notes = [1.3, 1.42, 1.25, 1.36];
+      const y = notes[(k + 3) % 4] + (notes[k] - notes[(k + 3) % 4]) * smooth(Math.min(1, f / 0.12));   // (shifting to the next note as it is played)
+      const pull = ks([[0, 0], [0.1, 1], [0.3, 0.25], [0.9, 0], [1, 0]], f);
+      const neck = bassDir([0, 1, (BASS_SHAPE.nut[1] - BASS_SHAPE.bridge[1]) / (BASS_SHAPE.nut[0] - BASS_SHAPE.bridge[0])]);
+      const hl = poleHand('Left', neck, bassDir([0, 0, 1]));
+      const P = bassPt([0, BASS.pluck, stringZ(BASS.pluck)]), along = bassDir([0.85, -0.4, 0]), palm = bassDir([0, 0, -1]);
+      return { head: 0.07 + 0.05 * Math.pow(1 - f, 4), lean: 0.04,
+        Left: { target: bassPt([0, y, stringZ(y) - 0.042]), p: [0, 0, 0.031], along: hl.along, palm: hl.palm, grip: 0.8 + 0.08 * (1 - f), pole: V(1, -0.5, -0.3), bend: 1.1 },
+        Right: { target: add(P, add(scale(bassDir([-1, 0, 0]), 0.03 * pull), scale(bassDir([0, 0, 1]), 0.012 * pull))), p: [0, 0.045, 0.022], along, palm, grip: 0.4 + 0.25 * pull, pole: V(-0.8, -1, -0.2), bend: 1.1 } };
+    },
+  },
+  { // the singer at the microphone on its stand: the right hand round the stand just under the microphone, the thumb up,
+    // the left rising with each phrase; leaning in to sing, the head back a little on the long notes, swaying
+    name: 'act_sing', base: 'idle', still: 1, frames: 48, dur: 4,
+    pose(u, L) {
+      const sway = Math.sin(TAU * u), phrase = ks([[0, 0], [0.3, 1], [0.55, 0.35], [0.8, 1], [1, 0]], u);
+      const d = nrm(sub(MIC.top, MIC.foot)), at = lerpPt(MIC.foot, MIC.top, (1.28 - MIC.foot[1]) / (MIC.top[1] - MIC.foot[1])), h = poleHand('Right', d, V(0.55, -0.15, 0.82));
+      return { head: 0.04 + 0.05 * (L.Head[1] - 1.4) / 0.15 - 0.08 * phrase + 0.02 * sway, lean: 0.05 - 0.02 * phrase,
+        Right: { target: at, p: [0, 0, MIC.r + 0.002], along: h.along, palm: h.palm, grip: 0.92, pole: V(-0.8, -0.5, -0.3), bend: 1.1 },
+        Left: { at: lerpPt(L.at('Left', [-0.02, -0.42, 0.08]), L.at('Left', [0.1, -0.12, 0.3]), phrase), along: lerpDir(V(0, -1, 0.1), V(0.6, 0.3, 0.7), phrase), palm: lerpDir(V(-0.95, 0, 0.1), V(0.2, 0.9, -0.3), phrase), grip: 0.2, pole: V(0.8, -1, -0.3) } };
+    },
+  },
+  // ---- the arcade (2026-10-24, the product owner: "the arcade games interaction animations need way more work they look
+  // off"): a clip for each machine, its hands on the machine's own controls where render/furniture-arcade.js draws them
+  // (points in the root frame: x the player's left, y up from the floor, z ahead of where they stand: the machine's slot,
+  // shared/catalog.js); the machine's moving parts follow the same motions (shared/arcade-motion.js)
+  { // billiards: down over the table, the cue on the bridge hand, two practice strokes, the shot, held; up again
+    name: 'act_pool', base: 'idle', still: 1, frames: 64, dur: 5.3,
+    pose(u, L) {
+      const down = ks([[0, 0], [0.1, 1], [0.86, 1], [1, 0]], u);
+      const s = ks([[0, 0], [0.12, 0], [0.22, -0.12], [0.32, 0], [0.42, -0.12], [0.52, 0], [0.58, 0], [0.66, -0.14], [0.69, 0.08], [0.84, 0.08], [0.92, 0], [1, 0]], u);
+      const B = [0.0, 0.865, 0.65], R0 = [-0.1, 0.95, 0.16], d = nrm(sub(B, R0));   // the bridge on the cloth, the cue's line to the cue ball
+      const h = barHand('Right', d), shot = { at: L.wristFor('Right', h.along, h.palm, [0, 0, 0.013], add(R0, scale(d, s * L.k))), along: h.along, palm: h.palm, grip: 0.9, pole: V(-0.6, 0.3, -1) };
+      const ba = V(d[0], 0, d[2]), bp = V(0, -1, 0.05), bridge = { at: L.wristFor('Left', ba, bp, [0, 0, 0], sub(B, [0, 0.03, 0])), along: ba, palm: bp, grip: 0.3, pole: V(0.8, -0.3, -0.5) };
+      const hu = barHand('Right', V(0.08, 1, 0.25)), stand = { at: L.at('Right', [0.04, -0.36, 0.14]), along: hu.along, palm: hu.palm, grip: 0.9, pole: V(-0.5, -1, -0.3) };
+      const rest = { at: L.at('Left', [-0.02, -0.44, 0.06]), along: V(0, -1, 0.1), palm: V(-0.9, 0, 0.2), grip: 0.2, pole: V(0.5, -1, -0.2) };
+      return { head: -0.45 * down + 0.1 * (1 - down), lean: 0.2 + 0.8 * down, Right: mixHand(stand, shot, down), Left: mixHand(rest, bridge, down) };
+    },
+  },
+  { // air hockey: bent over the table, the striker under the right palm, side to side and shooting; the left hand on the rail
+    name: 'act_hockey', base: 'idle', still: 1, frames: 32, dur: 2,
+    pose(u, L) {
+      const p = hockey(u), a = V(0.1, 0, 1), pa = V(0, -1, 0.05);
+      return { head: 0.4, lean: 0.7,
+        Right: { at: L.wristFor('Right', a, pa, [0, 0, 0], [-0.02 - p.x, 0.885, 0.33 + p.z]), along: a, palm: pa, grip: 0.5, pole: V(-0.7, -0.5, -0.4) },
+        Left: { at: L.wristFor('Left', V(-0.1, 0, 1), pa, [0, 0, 0], [0.3, 0.86, 0.3]), along: V(-0.1, 0, 1), palm: pa, grip: 0.3, pole: V(0.7, -0.5, -0.4) } };
+    },
+  },
+  { // foosball: both hands on the handles of two rods, sliding them and twisting, a kick with each now and then
+    name: 'act_foos', base: 'idle', still: 1, frames: 32, dur: 2.4,
+    pose(u, L) {
+      const d = V(0, 0, 1), R = foos(u, 'R'), F = foos(u, 'L'), hR = barHand('Right', d, R.twist), hL = barHand('Left', d, F.twist);
+      return { head: 0.35, lean: 0.5,
+        Right: { at: L.wristFor('Right', hR.along, hR.palm, [0, 0, 0.02], [-0.09, 0.9, 0.31 + R.slide]), along: hR.along, palm: hR.palm, grip: 0.9, pole: V(-0.8, -0.6, -0.2) },
+        Left: { at: L.wristFor('Left', hL.along, hL.palm, [0, 0, 0.02], [0.27, 0.9, 0.31 + F.slide]), along: hL.along, palm: hL.palm, grip: 0.9, pole: V(0.8, -0.6, -0.2) } };
+    },
+  },
+  { // whack-a-mole: the mallet raised over a hole, down on the mole, up and over to the next; the left hand on the edge
+    name: 'act_whack', base: 'idle', still: 1, frames: 48, dur: 3,
+    pose(u, L) {
+      const w = whack(u), hole = k => [[0.3, 0.6], [0, 0.6], [-0.3, 0.6]][k], [hx, hz] = hole(w.hole), [nx, nz] = hole(w.next);
+      const go = w.v < 0.8 ? 0 : smooth((w.v - 0.8) / 0.2), ax = hx + (nx - hx) * go, az = hz + (nz - hz) * go;
+      const T = [ax, 0.93 + 0.3 * (1 - w.hit), az], d = nrm([ax * 0.35 - 0.05, -0.35 + 0.8 * (1 - w.hit), 1]), h = barHand('Right', d);
+      return { head: 0.5, lean: 0.35,
+        Right: { at: L.wristFor('Right', h.along, h.palm, [0.3, 0.11, 0.013], T), along: h.along, palm: h.palm, grip: 0.95, pole: V(-0.8, -0.4, -0.4) },
+        Left: { at: L.wristFor('Left', V(-0.1, 0, 1), V(0, -1, 0.05), [0, 0, 0], [0.28, 0.885, 0.32]), along: V(-0.1, 0, 1), palm: V(0, -1, 0.05), grip: 0.25, pole: V(0.7, -0.6, -0.3) } };
+    },
+  },
+  { // the punching machine: guard up, bouncing, then a right cross into the ball, back to guard
+    name: 'act_punch', base: 'idle', still: 1, frames: 32, dur: 2.6,
+    pose(u, L) {
+      const p = punch(u), out = Math.max(0, p), back = Math.min(0, p), bob = 0.012 * Math.sin(TAU * 2 * u);
+      const K = add(lerpPt(L.at('Right', [0.13, 0.03 + bob, 0.26]), [0, 1.4, 0.47], out), [0, 0, 0.15 * back]);   // the knuckles: by the chin, on the ball
+      const along = lerpDir(V(0.2, 0.7, 0.6), V(0.05, 0.05, 1), out), palm = lerpDir(V(0.95, 0, -0.2), V(0, -1, 0.05), out);
+      return { head: -0.05, lean: 0.08 + 0.14 * out,
+        Right: { at: L.wristFor('Right', along, palm, [0, 0.045, 0], K), along, palm, grip: 1, pole: V(-0.8, -0.8, -0.2) },
+        Left: { at: L.at('Left', [-0.1, -0.02 - bob, 0.3]), along: V(-0.2, 0.7, 0.6), palm: V(-0.95, 0, -0.2), grip: 1, pole: V(0.8, -0.8, -0.2) } };
+    },
+  },
+  { // the claw machine: the left hand on the joystick, steering the claw, the right over the button, pressing it to drop;
+    // looking up into the glass at the claw
+    name: 'act_claw', base: 'idle', still: 1, frames: 48, dur: 6,
+    pose(u, L) {
+      const c = claw(u), pa = V(0, -1, 0.1);
+      return { head: -0.14, lean: 0.12,
+        Left: { at: L.wristFor('Left', V(-0.1, 0, 1), pa, [0, 0, 0], [0.18 + 0.025 * c.jx, 1.1, 0.35 + 0.025 * c.jz]), along: V(-0.1, 0, 1), palm: pa, grip: 0.85, pole: V(0.7, -1, -0.3) },
+        Right: { at: L.wristFor('Right', V(0.1, -0.2, 1), pa, [0, 0.06, 0], [-0.18, 1.08 - 0.05 * c.press, 0.35]), along: V(0.1, -0.2, 1), palm: pa, grip: 0.35, pole: V(-0.7, -1, -0.3) } };
+    },
+  },
+  { // pinball: a hand on each side of the cabinet's front, a finger on each flipper button, pressing; a nudge
+    name: 'act_pinball', base: 'idle', still: 1, frames: 32, dur: 2.4,
+    pose(u, L) {
+      const f = flippers(u), nudge = ks([[0, 0], [0.5, 0], [0.53, 1], [0.6, 0], [1, 0]], u);
+      const hand = (side, x, k) => { const along = V(-0.15 * Math.sign(x), -0.2, 1), palm = V(-Math.sign(x) * 0.9, -0.35, 0); return { at: L.wristFor(side, along, palm, [0, 0.03, 0], [x, 0.93, 0.21 - 0.012 * k]), along, palm, grip: 0.45 + 0.35 * k, pole: V(Math.sign(x) * 0.8, -0.6, -0.3) }; };
+      return { head: 0.42, lean: 0.35 + 0.06 * nudge, Right: hand('Right', -0.3, f.R), Left: hand('Left', 0.3, f.L) };
+    },
+  },
+  { // the racing cabinet, seated: both hands on the wheel, turning it
+    name: 'act_drive', base: 'sit_idle', still: 1, frames: 32, dur: 3,
+    pose(u, L) {
+      const st = steer(u), C = [0, 0.82, 0.4], R = 0.15;
+      const rim = th => [C[0] - R * Math.cos(th), C[1] + R * Math.sin(th) * 0.89, C[2] - R * Math.sin(th) * 0.45];
+      const hand = (side, th) => { const P = rim(th), palm = nrm(sub(C, P)), a0 = V(0, 0.25, 1), along = nrm(sub(a0, scale(palm, dot(a0, palm)))); return { at: L.wristFor(side, along, palm, [0, 0, 0.015], P), along, palm, grip: 0.9, pole: side === 'Right' ? V(-0.8, -1, -0.2) : V(0.8, -1, -0.2) }; };
+      return { head: 0.05, lean: 0.05, Right: hand('Right', -st), Left: hand('Left', Math.PI - st) };
+    },
+  },
+];
 /** Eating with both hands (a burger, a sandwich): its middle held at rest(L), up to the mouth for a bite, held up
  *  chewing, down again. */
 function bothHands(rest) {
@@ -488,8 +687,25 @@ const GRIP_ALONG = 0.55;
 // a cup in the right hand (render/char-props.js upright(): radius, height; its middle 12 mm toward the fingers, against the palm)
 const CUP_R = 0.04, CUP_H = 0.1, CUP_Y = 0.012;
 
+/** The head's frame in bind space (what is worn on it: render/char-props.js; venue-clips.json heads), fitted to its own
+ *  mesh, hair and all (the rig's head top is only a point 0.2 up the neck's line): origin between its sides at its ears'
+ *  height (PHONES.ear over the head's joint), in the middle of its depth; x its left, stretched to its width there (for
+ *  a head PHONES.w wide), y up, stretched from there to over its crown (PHONES.top), z ahead. */
+const HEADS = {};
+function headFrame(R) {
+  if (HEADS[R.kind]) return HEADS[R.kind];
+  const man = R.man, bin = fs.readFileSync(path.join(DIR, R.kind + '.bin')), Lo = man.lods[0], hb = R.idx.Head, H = R.J[hb];
+  const view = e => { const C = { float32: Float32Array, uint8: Uint8Array, uint16: Uint16Array, uint32: Uint32Array }[e.type]; return new C(bin.buffer.slice(bin.byteOffset + e.off, bin.byteOffset + e.off + e.len)); };
+  const P = view(Lo.pos), Jx = view(Lo.j), W = view(Lo.w), wmax = Lo.w.type === 'uint8' ? 255 : Lo.w.type === 'uint16' ? 65535 : 1, pts = [];
+  for (let v = 0; v < P.length / 3; v++) { let w = 0; for (let q = 0; q < 4; q++) if (Jx[v * 4 + q] === hb) w += W[v * 4 + q] / wmax; if (w > 0.5) pts.push([P[v * 3], P[v * 3 + 1], P[v * 3 + 2]]); }
+  let z0 = 9, z1 = -9; for (const p of pts) { z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2]); }
+  const zc = (z0 + z1) / 2, ey = H[1] + PHONES.ear, mid = p => Math.abs(p[2] - zc) < 0.2 * (z1 - z0);
+  const band = pts.filter(p => Math.abs(p[1] - ey) < 0.015 && mid(p)), side = sg => Math.max(...band.filter(p => sg * (p[0] - H[0]) > 0).map(p => sg * (p[0] - H[0])));
+  const wl = side(1), wr = side(-1), crown = Math.max(...pts.filter(p => Math.abs(p[2] - zc) < 0.17 * (z1 - z0)).map(p => p[1]));
+  return (HEADS[R.kind] = { o: [H[0] + (wl - wr) / 2, ey, zc - 0.01], x: [(wl + wr) / 2 / PHONES.w, 0, 0], y: [0, (crown + 0.012 - ey) / PHONES.top, 0], z: [0, 0, 1] });
+}
 /** The body's landmarks in a frame: each joint, and the mouth (in front of and below the head's joint). */
-function landmarks(R, X, desk) {
+function landmarks(R, X, desk, F) {
   const L = { desk };
   R.N.forEach((n, b) => { if (X[b]) L[n] = X[b]; });
   const up = nrm(sub(X[R.idx.HeadTop_End], X[R.idx.Head])), fwd = [0, 0, 1];
@@ -510,6 +726,14 @@ function landmarks(R, X, desk) {
   L.mouthAt = head => {
     const N = X[R.idx.Neck], Hd = X[R.idx.Head], rx = t => rotAbout([1, 0, 0], t, [0, 0, 0]);
     return add(add(N, rotv(rx(head * 0.45), sub(Hd, N))), rotv(rx(head * 1.1), sub(L.mouth, Hd)));
+  };
+  // a point beside an ear, `out` from the middle of the head (in the head's frame: the headphones' cup, PHONES.out), once
+  // the head is bowed by `head` and tilted by `tilt` (as holdFrame turns them): from the head's frame (headFrame, as
+  // render/char-props.js wears things on it), moved with the head's bone in this frame
+  L.earAt = (side, head, tilt = 0, out = PHONES.out) => {
+    const hf = headFrame(R), N = X[R.idx.Neck], Hd = X[R.idx.Head];
+    const E = app(F[R.idx.Head], add(hf.o, scale(hf.x, (side === 'Left' ? 1 : -1) * out)));
+    return add(add(N, rotv(headTurn(head, tilt, 0.45), sub(Hd, N))), rotv(headTurn(head, tilt, 1.1), sub(E, Hd)));
   };
   // the wrist that puts point p of a hand's grip frame (shared/eating.js) at `target`, the hand turned (along, palm)
   L.wristFor = (side, along, palm, p, target) => {
@@ -547,6 +771,9 @@ function wristLimited(L, side, S, a, b, s) {
   }
   return { at, along, palm };
 }
+/** The turn of the neck (share 0.45) or the head (1.1 in all) for a hold's `head` (bowed forward, radians) and `tilt`
+ *  (toward the left shoulder; the right: below 0): bowed, then tilted. */
+const headTurn = (head, tilt, share) => mul(rotAbout([0, 0, 1], -tilt * share, [0, 0, 0]), rotAbout([1, 0, 0], head * share, [0, 0, 0]));
 /** The spine's bones leaned forward by `lean` (radians at the chest) from the hips, from the base frame's joints X. */
 function leanDirs(R, X, lean) {
   const d = {};
@@ -555,10 +782,10 @@ function leanDirs(R, X, lean) {
 }
 /** One frame of a hold, from the base frame F0: { F (the skinning), h (where the hold sent the hands) }. */
 function holdFrame(R, F0, hold, u, desk) {
-  let X0 = jointsOf(R, F0), L = landmarks(R, X0, desk), h = hold.pose(u, L);
+  let X0 = jointsOf(R, F0), L = landmarks(R, X0, desk, F0), h = hold.pose(u, L);
   if (h.lean) {   // leaning in toward the table: the spine first, then the arms reach (and the mouth is) from there
     F0 = poseFrom(R, F0, { d: leanDirs(R, X0, h.lean) });
-    X0 = jointsOf(R, F0); L = landmarks(R, X0, desk); h = hold.pose(u, L);
+    X0 = jointsOf(R, F0); L = landmarks(R, X0, desk, F0); h = hold.pose(u, L);
   }
   const d = {}, hands = {}, palm = {};
   for (const side of ['Left', 'Right']) {
@@ -573,10 +800,10 @@ function holdFrame(R, F0, hold, u, desk) {
     Object.assign(d, { [side + 'Arm']: r.arm, [side + 'ForeArm']: r.fore, [side + 'Hand']: s.along });
     palm[side] = s.palm; hands[side] = s.grip;
   }
-  if (h.head) {   // bow the neck and head forward from where they are in the base frame
+  if (h.head || h.tilt) {   // bow the neck and head forward from where they are in the base frame (and tilt them toward a shoulder)
     for (const [n, k] of [['Neck', 0.45], ['Head', 0.55]]) {
       const dir = nrm(sub(X0[R.idx[n === 'Neck' ? 'Head' : 'HeadTop_End']], X0[R.idx[n]]));
-      d[n] = nrm(rotv(rotAbout([1, 0, 0], h.head * k * (n === 'Head' ? 2 : 1), [0, 0, 0]), dir));
+      d[n] = nrm(rotv(headTurn(h.head || 0, h.tilt || 0, k * (n === 'Head' ? 2 : 1)), dir));
     }
   }
   d.palm = palm;
@@ -633,6 +860,28 @@ function bake(kind) {
       console.log(`  ${side} palm in the idle pose (x its left, y up, z forward):`, pn.map(v => v.toFixed(2)).join(' '), '· hand at', X(idx[side + 'Hand']).map(v => v.toFixed(2)).join(' '), '· thumb tip at', X(idx[side + 'HandThumb3'] ?? idx[side + 'HandThumb2']).map(v => v.toFixed(2)).join(' '), '· nose/head', X(idx.Head).map(v => v.toFixed(2)).join(' '), '· toe', X(idx[side + 'ToeBase']).map(v => v.toFixed(2)).join(' '));
     }
     return { kind, rms: R.rms };
+  }
+  if (o.set === 'venue') {   // nights out only: <kind>.venue.bin
+    const frames = [], made = {}, desk = deskOf(R) || [0, 0.755, 0.55], miss = {};
+    for (const clip of VENUE) {
+      const base = R.clip(clip.base);
+      if (!base) throw new Error(`${kind}: no ${clip.base} to pose from`);
+      for (let fr = 0; fr < clip.frames; fr++) {
+        const { F, h } = holdFrame(R, frameOf(R, base.off), clip, fr / clip.frames, desk);
+        for (const m of F) frames.push(m);
+        if (o.verify) {   // how far each wrist ended from where it was sent (out of reach: the arm as near as it goes)
+          const X = jointsOf(R, F);
+          for (const side of ['Left', 'Right']) if (h[side]?.at) miss[clip.name] = Math.max(miss[clip.name] || 0, len(sub(X[idx[side + 'Hand']], h[side].at)));
+        }
+      }
+      made[clip.name] = clip.frames;
+    }
+    if (o.verify) { console.log(kind, 'worst reach miss (m)', JSON.stringify(Object.fromEntries(Object.entries(miss).filter(([, v]) => v > 0.005).map(([k, v]) => [k, +v.toFixed(3)])))); return { kind, rms: R.rms }; }
+    const hf = headFrame(R), head = [0, 1, 2].flatMap(r => [hf.x[r], hf.y[r], hf.z[r], hf.o[r]]).map(v => +v.toFixed(5));
+    const out = new Uint16Array(frames.length * 12);
+    frames.forEach((m, i) => { for (let q = 0; q < 12; q++) out[i * 12 + q] = f2h(m[q]); });
+    fs.writeFileSync(path.join(DIR, kind + '.venue.bin'), Buffer.from(out.buffer));
+    return { kind, rms: R.rms, frames: frames.length / NB, venue: made, head };
   }
   // swimming: from the first idle frame
   const idle = R.clip('idle') || man.clips[0];
@@ -715,7 +964,7 @@ function bake(kind) {
 
 let kinds = kindsIn(DIR);
 if (o.only) kinds = o.only.split(',');
-const done = {}, results = {}, grips = {};
+const done = {}, results = {}, grips = {}, heads = {};
 let worst = 0;
 for (const k of kinds) {
   const r = bake(k);
@@ -723,9 +972,21 @@ for (const k of kinds) {
   if (!r) { console.log(`${k}: no bake, skipped`); continue; }
   worst = Math.max(worst, r.rms);
   if (r.frames) { done[k] = r.frames; grips[k] = r.grips; }
+  if (r.head) heads[k] = r.head;
   console.log(`${k}: joints rms ${(r.rms * 1000).toFixed(2)} mm${r.frames ? `, ${r.frames} frames written` : ''}`);
 }
 if (o.check || o.verify) process.exit(0);
+if (o.set === 'venue') {
+  const vp = path.join(DIR, 'venue-clips.json'), prev = fs.existsSync(vp) ? JSON.parse(fs.readFileSync(vp, 'utf8')) : { kinds: {} };
+  let off = 0;
+  const clips = VENUE.map(c => { const e = { name: c.name, off, len: c.frames, dur: c.dur, stride: 0, hold: c.base }; off += c.frames; return e; });
+  fs.writeFileSync(vp, JSON.stringify({
+    about: 'Nights out clips (tools/chars/extra-clips.mjs --set venue): <kind>.venue.bin frames follow the bake\'s own and its extra clips; off is from its first frame. heads: each character\'s head frame (bind space, 3x4 rows: x its left, y up, z ahead, scaled to a head shared/stage.js PHONES.ref high; origin at its ears\' height) for what is worn on the head (render/char-props.js).',
+    clips, kinds: { ...prev.kinds, ...done }, heads: { ...prev.heads, ...heads },
+  }, null, 1) + '\n');
+  console.log(`venue-clips.json: ${clips.map(c => c.name).join(', ')} for ${Object.keys({ ...prev.kinds, ...done }).length} characters`);
+  process.exit(0);
+}
 const listPath = path.join(DIR, 'extra-clips.json');
 const prev = fs.existsSync(listPath) ? JSON.parse(fs.readFileSync(listPath, 'utf8')) : { kinds: {} };
 let off = 0;

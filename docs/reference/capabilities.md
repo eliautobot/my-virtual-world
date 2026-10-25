@@ -33,6 +33,9 @@ Roles, low to high: guest, member, admin, owner. *Fixed*: the owner cannot chang
 | `players.see_invisible` | admin |  | yes | See the real status of players who appear offline |
 | `players.spawn` | admin |  | yes | Set where new players appear (the spawn point) |
 | `play.use` | member |  | yes | Play the modules (minigames such as the airport's ring courses), earn levels and badges, see players' profiles |
+| `music.request` | member |  | yes | Ask for songs at a lounge's stage and a club's DJ |
+| `music.upload` | member |  | yes | Add your own songs to the city's music (an administrator approves them before they play) |
+| `music.manage` | admin |  | yes | Run the music: every stage's playlist, requests and genre, the library, and the review of players' songs |
 | `connections.use` | member |  | yes | Use connected agent providers |
 | `agents.connect` | member |  | yes | Connect your own agents: keys, who sees them, who may chat with them |
 | `agents.freewill` | member |  | yes | Give your own agents Free Will: a decision service chooses what they do with their free time |

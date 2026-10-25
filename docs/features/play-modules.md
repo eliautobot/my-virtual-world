@@ -63,7 +63,8 @@ and `wmod.del` ops.
   - the terminal (the "station", joined to the road through the car park), the control tower and a hangar.
 - **A run** starts at the airport the player is at (within 2.5 km).
 
-Interior modules: the registry already requires a price, and the buy-and-place flow comes with the first interior
+The arcade ([arcade](arcade.md)) is the first interior module: its cabinets are furniture, and each of its games is a
+course with verified scores. Interior modules: the registry already requires a price, and the buy-and-place flow comes with the first interior
 module (payment from the player's wallet to a sink, then the place edit, in one transaction like
 `server/economy/realty.js`).
 

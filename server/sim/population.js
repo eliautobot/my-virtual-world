@@ -8,18 +8,20 @@ import * as N from '../../shared/names.js';
 
 const r2 = v => Math.round(v * 100) / 100;
 
-const SHIFTS = {
+import { roleOf, ROLE_TITLE } from '../../shared/nightlife.js';
+export const SHIFTS = {
   cafe: [[6.5, 14.5], [14.5, 21]], restaurant: [[10.5, 17], [17, 23.5]], shop: [[9, 15], [15, 21]],
   gym: [[6, 14], [14, 22]], lobby: [[8, 17]],
+  arcade: [[10, 16.75], [16.75, 23.5]], lounge_bar: [[15, 23.95]], club: [[19.5, 23.95]],   // (nights out: shared/nightlife.js)
 };
-const STAFF_TITLE = { cafe: 'Barista', restaurant: 'Chef', shop: 'Cashier', gym: 'Trainer', lobby: 'Receptionist' };
+export const STAFF_TITLE = { cafe: 'Barista', restaurant: 'Chef', shop: 'Cashier', gym: 'Trainer', lobby: 'Receptionist', arcade: 'Attendant', lounge_bar: 'Bartender', club: 'Bartender' };
 
-function daysMask(rng, kind) {
+export function daysMask(rng, kind) {
   if (kind === 'office' || kind === 'vip' || kind === 'remote') return 0b0011111; // Mon-Fri (bit0 = Mon)
   const off = rng.int(0, 6);
   return 0b1111111 & ~((1 << off) | (1 << ((off + 1) % 7)));
 }
-function schedule(rng, kind, start, end, night) {
+export function schedule(rng, kind, start, end, night) {
   const s = { lunch: r2(rng.float(11.75, 13.1)) };
   if (kind === 'office' || kind === 'vip') s.wake = r2(Math.min(start - 1.2, rng.float(6.2, 7.6)));
   else if (kind === 'staff') s.wake = r2(start < 11 ? start - 1.6 : rng.float(8, 10));
@@ -272,7 +274,10 @@ export function freeWork(world, index, people, b, except = -1) {
   const B = world.buildings[b];
   if (!B || B.gone) return null;
   const used = new Set();
-  people.forEach((p, i) => { const j = p.job; if (i !== except && !p.retired && j && j.b !== undefined && j.id !== undefined) used.add(`${j.b}:${j.f}:${j.id}:${j.k}`); });
+  people.forEach((p, i) => {
+    const j = p.job; if (i !== except && !p.retired && j && j.b !== undefined && j.id !== undefined) used.add(`${j.b}:${j.f}:${j.id}:${j.k}`);
+    if (i !== except && !p.retired && p.post) used.add(`${p.post.b}:${p.post.f}:${p.post.id}:${p.post.k}`);   // (an agent on post holds it)
+  });
   for (const want of ['work', 'staff']) for (let f = 0; f < B.floors; f++) {
     if (want === 'work' && (f === 0 || (B.type !== 'office' && B.type !== 'hq'))) continue;
     const lv = B.lv[f], L = world.levels[lv];
@@ -284,8 +289,36 @@ export function freeWork(world, index, people, b, except = -1) {
   }
   return null;
 }
+// The towns (server/towns.js places(), 2026-10-23: residents follow the towns too): set once by the server, so a
+// resident given a home takes one in the town it works in, and one given work takes it in the town it lives in, when
+// there is any there (else anywhere, as before).
+let placesFn = null;
+export function setPlaces(fn) { placesFn = typeof fn === 'function' ? fn : null; }
+/** Free places (shuffled), taken by town when the towns are known: { left, take(town), pick(pull, rng) }. */
+function pool(list, townOf) {
+  const by = new Map(), n = new Map();   // town → its places; town → how many are still free
+  if (townOf) for (const it of list) { const t = it.town = townOf(it.b); let a = by.get(t); if (!a) by.set(t, a = []); a.push(it); n.set(t, (n.get(t) || 0) + 1); }
+  const pop = a => { while (a && a.length) { const it = a.pop(); if (!it.taken) { it.taken = 1; P.left--; if (it.town !== undefined) n.set(it.town, n.get(it.town) - 1); return it; } } return null; };
+  const P = {
+    left: list.length,
+    take: town => (town != null && by.size ? pop(by.get(town)) : null) || pop(list),
+    /** A town for someone free to live anywhere (a newcomer): by its pull (server/sim/migration.js) times its free places. */
+    pick(pull, rng) {
+      if (!pull || by.size < 2) return null;
+      let sum = 0; const w = [];
+      for (const [t, k] of n) if (k > 0) { const x = (pull.get(t) ?? 0.05) * k; if (x > 0) { w.push([t, x]); sum += x; } }
+      let r = rng.next() * sum;
+      for (const [t, x] of w) { r -= x; if (r <= 0) return t; }
+      return w.at(-1)?.[0] ?? null;
+    },
+  };
+  return P;
+}
 /** Give homeless people a free bed and people who lost their job (or are seeking one) a free desk/shift. */
 export function reassign(world, index, people, rng) {
+  let townOf = null, pull = null;
+  try { const P = placesFn?.(); if (P) { townOf = P.townOf; pull = P.pull || null; } } catch { townOf = null; }
+  const townAt = r => (townOf && r && r.b !== undefined && r.b >= 0 ? townOf(r.b) : null);
   const changed = [];
   const needHome = [];
   const usedBeds = new Set();
@@ -305,15 +338,22 @@ export function reassign(world, index, people, rng) {
       }
     }
     rng.shuffle(free);
-    for (const i of needHome) { const h = free.pop(); if (!h) break; people[i].home = h; changed.push(i); }
+    const beds = pool(free, townOf);
+    for (const i of needHome) {
+      // where it works; one free to live anywhere (a newcomer) by the towns' pull (more to a town that does well)
+      const t = townAt(people[i].job) ?? (people[i].vip || people[i].agentId ? null : beds.pick(pull, rng));
+      const h = beds.take(t); if (!h) break;
+      people[i].home = { b: h.b, f: h.f, u: h.u, bed: h.bed }; changed.push(i);
+    }
   }
   const needJob = [];
   const usedWork = new Set();
   people.forEach((p, i) => {
     if (p.retired) return;   // a removed agent's body holds no desk (WP2.1)
     const j = p.job;
+    if (p.post) usedWork.add(`${p.post.b}:${p.post.f}:${p.post.id}:${p.post.k}`);   // an agent on post holds its spot: no one is hired there
     if (j && j.b !== undefined && j.id !== undefined) usedWork.add(`${j.b}:${j.f}:${j.id}:${j.k}`);
-    else if (j && (j.lost || j.seek)) needJob.push(i);
+    else if (j && (j.lost || j.seek) && !(townOf && (p.vip || p.agentId))) needJob.push(i);   // (an agent's work: its owner's, its own brain's or the rules' near its owner: server/index.mjs settleAgents)
   });
   if (needJob.length) {
     const desks = [], hqDesks = [], shifts = [];
@@ -332,12 +372,13 @@ export function reassign(world, index, people, rng) {
       }
     }
     rng.shuffle(desks); rng.shuffle(hqDesks); rng.shuffle(shifts);
+    const D = pool(desks, townOf), H = pool(hqDesks, townOf), SH = pool(shifts, townOf);
     for (const i of needJob) {
-      const p = people[i], prev = p.job.prev || (p.vip ? 'vip' : 'office');
+      const p = people[i], prev = p.job.prev || (p.vip ? 'vip' : 'office'), t = townAt(p.home);
       let d = null, kind = 'office';
-      if (p.vip) { d = hqDesks.pop() || desks.pop(); kind = 'vip'; }
-      else if (prev === 'staff' && shifts.length) { d = shifts.pop(); kind = 'staff'; }
-      else { d = desks.pop() || hqDesks.pop(); if (!d && shifts.length) { d = shifts.pop(); kind = 'staff'; } }
+      if (p.vip) { d = H.take(t) || D.take(t); kind = 'vip'; }
+      else if (prev === 'staff' && SH.left) { d = SH.take(t); kind = 'staff'; }
+      else { d = D.take(t) || H.take(t); if (!d && SH.left) { d = SH.take(t); kind = 'staff'; } }
       if (!d) continue;
       const B = world.buildings[d.b], L = world.levels[B.lv[d.f]];
       let job;
@@ -355,5 +396,54 @@ export function reassign(world, index, people, rng) {
       changed.push(i);
     }
   }
+  hireNightlife(world, index, people, rng, changed);   // (nights out: their bartenders, DJ, band and dancers)
   return { changed };
+}
+
+/**
+ * The city's nights out want their people (2026-10-23: "the lounge needs bartenders, several, musicians ... the night club
+ * needs bartenders, several, nightclub dancers as well as a DJ"): an arcade's, a lounge's or a club's free serving places
+ * (a bar's well, the DJ's decks, the band's stage, a podium; shared/nightlife.js) go to residents without work, the
+ * nearest first, the club's DJ and the lounge's band before the rest. Returns the indices it hired (also pushed to changed).
+ */
+const EVERY_NIGHT = new Set(['dj', 'musician']);
+export function hireNightlife(world, index, people, rng, changed = []) {
+  const held = new Set(), out = [];
+  for (const [i, p] of people.entries()) {
+    if (!p || p.retired) continue;
+    // (the club's one DJ and the lounge's band play every night the place is open: with two days off a week, one night
+    // in three had no DJ and no music; bartenders and dancers, several of each, keep theirs)
+    if (p.job?.kind === 'staff' && EVERY_NIGHT.has(p.job.role) && p.job.days !== 0b1111111) { p.job.days = 0b1111111; changed.push(i); }
+    if (p.post) held.add(`${p.post.b}:${p.post.f}:${p.post.id}:${p.post.k}`);
+    const j = p.job; if (j && j.b !== undefined && j.id !== undefined) held.add(`${j.b}:${j.f}:${j.id}:${j.k}`);
+  }
+  const open = [];
+  for (const B of world.buildings) {
+    if (!B || B.gone) continue;
+    for (let f = 0; f < B.floors; f++) {
+      const L = world.levels[B.lv[f]], venue = L?.venue;
+      if (venue !== 'arcade' && venue !== 'lounge_bar' && venue !== 'club') continue;
+      for (const [id, k] of index.findUses(B.lv[f], 'staff')) {
+        if (held.has(`${B.idx}:${f}:${id}:${k}`)) continue;
+        const t = L.items.find(i => i.id === id)?.t, role = roleOf(t, k);
+        open.push({ b: B.idx, f, id, k, venue, role, x: B.x, z: B.z, first: role === 'dj' || role === 'musician' ? 0 : 1 });
+      }
+    }
+  }
+  if (!open.length) return out;
+  open.sort((a, b) => a.first - b.first);
+  const free = [];
+  people.forEach((p, i) => { if (p && !p.retired && !p.vip && !p.agentId && !p.post && p.job?.kind === 'free' && p.job.title !== 'Retired' && p.home) free.push(i); });
+  for (const w of open) {
+    if (!free.length) break;
+    let best = -1, bd = Infinity;
+    for (let n = 0; n < free.length; n++) { const h = world.buildings[people[free[n]].home.b]; const d = h ? Math.hypot(h.x - w.x, h.z - w.z) : 1e9; if (d < bd) { bd = d; best = n; } }
+    const i = free.splice(best, 1)[0], p = people[i], B = world.buildings[w.b], L = world.levels[B.lv[w.f]];
+    const sh = rng.pick(SHIFTS[w.venue]);
+    p.job = { kind: 'staff', b: w.b, f: w.f, id: w.id, k: w.k, start: sh[0], end: sh[1], days: EVERY_NIGHT.has(w.role) ? 0b1111111 : daysMask(rng, 'staff'), venue: w.venue, ...(w.role ? { role: w.role } : {}),
+      title: `${w.role ? ROLE_TITLE[w.role] : STAFF_TITLE[w.venue]} at ${L.name || B.name}` };
+    p.sched = schedule(rng, 'staff', p.job.start, p.job.end, p.tr?.night);
+    changed.push(i); out.push(i);
+  }
+  return out;
 }

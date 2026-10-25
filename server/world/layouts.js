@@ -109,7 +109,7 @@ function defaultTint(t, rng) {
     case 'bush': return rng.pick(['#4c8b3f', '#3e7a36', '#5d9b48']);
     case 'flowers': return rng.pick(['#e05b8b', '#f2c14e', '#e8735a', '#b56be0', '#f7f7f7', '#ff8fab']);
     case 'arcade': return rng.pick(['#c0392b', '#2980b9', '#8e44ad', '#16a085', '#f39c12']);
-    default: return rng.pick(WOOD);
+    default: return CATALOG[t]?.cat === 'Arcade' ? rng.pick(['#7c3aed', '#db2777', '#2563eb', '#0891b2', '#dc2626', '#ea580c', '#16a34a', '#111827']) : rng.pick(WOOD);
   }
 }
 
@@ -752,7 +752,8 @@ export function loungeFloor(L, o = {}) {
   L.name = o.name || 'Lounge'; L.venue = 'lounge';
   L.zone(ix0, iz0, ix1, iz1, 'wood');
   placeCore(L);
-  const core = L.b.core;
+  if (o.ground) reserveEntrance(L, 3.2);
+  const core = L.b.core || { x: (ix0 + ix1) / 2 };   // (a building of one floor has no elevator: from the middle)
   const bandZ = iz0 + 5.6;
   kitchenArea(L, core.x + 3.1, iz0, ix1, bandZ, true);
   L.add('bar_counter', (ix0 + core.x - 2.6) / 2, iz0 + 1.3, 0);
@@ -765,6 +766,807 @@ export function loungeFloor(L, o = {}) {
   L.tryAdd('beanbag', [[core.x + 4.2, iz1 - 1.2, P], [core.x - 4.2, iz1 - 1.2, P]]);
   L.tryAdd('beanbag', [[core.x + 5.4, iz1 - 1.5, P]]);
   for (const [x, z] of [[ix0 + 0.4, iz1 - 0.4], [ix1 - 0.4, iz1 - 0.4], [ix0 + 0.4, bandZ + 0.8]]) L.add('plant_tall', x, z);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Floor Themes (shared/floor-themes.js, 2026-10-23): a floor laid out as a kind of place, to fit its size and its elevator.
+/**
+ * An arcade (Floor Themes, 2026-10-23: "arcade themed furniture ... more arcade games ... billiards, bowling, a mechanical
+ * bull ... fill the right amount of space, not half empty, not overcrowded"). Laid out in zones, each fitted to the floor:
+ *   the walls     a big neon ARCADE over a row of cabinets on the back wall; cabinets down the side walls; pixel murals
+ *   bowling       on a floor deep and wide enough, two to four mini lanes along one side, the bowlers' end to the front
+ *   the front     the prize corner on one side of the way in (the counter off the wall with its clerk behind, the prize
+ *                 wall, a prize case, a token machine, a PRIZES sign), the snack corner on the other (the snack bar, a
+ *                 SNACKS sign, high-top tables)
+ *   a lounge      neon booths and gaming chairs in the back corner away from the elevator, a mural over them
+ *   the middle    strips across the room, an aisle between each: strips of attractions (billiards, the bull, air hockey,
+ *                 skee-ball, hoops, the dance machine, racers, claw machines, pinball, whack-a-mole and the punching
+ *                 machine, foosball, the photo booth, the giant joystick) and strips of cabinets back to back, by turns
+ *   the light     strips of light along the way in, LED pillars at the ends of the strips
+ * The way in from the door and the way out of the elevator are kept clear. On a neon arcade carpet; the pieces in arcade
+ * colours. Every cabinet plays (render/furniture.js, play/arcade.js); the attractions are used by residents.
+ */
+export function arcadeFloor(L, o = {}) {
+  const base = L.rng.int(1, 2 ** 30), D = (...k) => dice(base, ...k);
+  const { ix0, ix1, iz0, iz1 } = L, dr = L.b.door, ground = !!o.ground, W = ix1 - ix0, Dp = iz1 - iz0, mid = (ix0 + ix1) / 2;
+  L.name = o.name || 'Arcade'; L.venue = 'arcade';
+  L.zone(ix0, iz0, ix1, iz1, 'carpet_arcade');
+  placeCore(L);
+  if (ground) reserveEntrance(L, 3.4);
+  const core = L.b.core, CAB = 0.43, PITCH = 0.92, AISLE = 1.6, GAP = 0.8;
+  const coreBox = core ? (() => { const bb = itemAABB(core, CATALOG[core.t].rect); return { x0: bb.x0 - 1.1, z0: bb.z0 - 1.1, x1: bb.x1 + 1.1, z1: bb.z1 + 2.2 }; })() : null;
+  const nearCore = (x0, z0, x1, z1) => coreBox && x0 < coreBox.x1 && x1 > coreBox.x0 && z0 < coreBox.z1 && z1 > coreBox.z0;
+  const doorWay = (x0, x1) => ground && x0 < dr.x + 1.5 && x1 > dr.x - 1.5;
+  const tint = (pal, k) => D('tint', k).pick(pal);
+  const MACH = ['#7c3aed', '#db2777', '#2563eb', '#0891b2', '#111827', '#dc2626', '#ea580c', '#16a34a'], NEON = ['#22d3ee', '#f472b6', '#facc15', '#a3e635', '#c084fc', '#fb923c'];
+  const SEAT = ['#7c3aed', '#db2777', '#0e7490', '#b91c1c', '#1d4ed8'];
+  let k = 0;
+  const put = (t, x, z, r = 0, c = null, pad = 0.05) => L.add(t, x, z, r, c ? { c } : null, pad);
+  // ---- the sides: which side has the bowling (and the prize corner), which the lounge and the snacks
+  const coreSide = core ? Math.sign(core.x - mid) : 0;
+  const bowlSide = coreSide ? -coreSide : (D('bowl-side').chance(0.5) ? -1 : 1);
+  const lanes = Dp >= 13 && W >= 15 ? Math.max(2, Math.min(4, Math.floor((W * 0.28) / 1.5))) : 0;
+  const LANE_L = 6.8, bowlW = lanes * 1.5, bowlX0 = bowlSide < 0 ? ix0 : ix1 - bowlW, bowlX1 = bowlX0 + bowlW;
+  const frontD = ground ? 4.4 : 3.4, frontZ = iz1 - frontD;
+  // ---- the back wall: the big sign, the cabinets
+  {
+    const span = coreSide === 0 && coreBox ? (coreBox.x0 - ix0 > ix1 - coreBox.x1 ? [ix0, coreBox.x0] : [coreBox.x1, ix1]) : [lanes && bowlSide < 0 ? bowlX1 : ix0, lanes && bowlSide > 0 ? bowlX0 : ix1];
+    const sx = (span[0] + span[1]) / 2;
+    if (span[1] - span[0] >= 3) L.against('neon_arcade', 'z', iz0, +1, sx, null, 0.01);
+    if (lanes) L.against(D('bowl-sign').chance(0.5) ? 'neon_gameon' : 'neon_invader', 'z', iz0, +1, (bowlX0 + bowlX1) / 2, null, 0.01);
+  }
+  // ---- bowling: lanes along the side, the pin decks against the back wall, the bowlers' end to the front
+  if (lanes) L.with(D('bowling'), () => {
+    L.zone(bowlX0, iz0, bowlX1, iz0 + LANE_L + 1.6, 'wood_dark');
+    const lc = tint(NEON, 'lanes');
+    for (let n = 0; n < lanes; n++) put('bowling_lane', bowlX0 + 0.75 + n * 1.5, iz0 + LANE_L / 2 + 0.02, 0, lc, 0.0);
+    L.reserve(bowlX0, iz0, bowlX1, iz0 + LANE_L + 1.5);   // (the bowlers' room)
+  });
+  // ---- the lounge in the back corner on the other side: booths, gaming chairs, a mural over them
+  const loungeW = W >= 13 ? Math.min(5.0, W * 0.24) : 0, lside = -bowlSide;
+  if (loungeW) L.with(D('lounge'), () => {
+    const x0 = lside < 0 ? ix0 : ix1 - loungeW, x1 = x0 + loungeW;
+    if (nearCore(x0, iz0, x1, iz0 + 4.2)) return;
+    L.zone(x0, iz0, x1, iz0 + 4.0, 'carpet_blue');
+    const cx = (x0 + x1) / 2;
+    put('neon_booth', cx, iz0 + 0.88, 0, tint(SEAT, 'booth'));
+    L.against(D('mural').chance(0.5) ? 'pixel_mural' : 'pixel_mural_maze', 'z', iz0, +1, cx, null, 0.005);
+    L.tryAdd('gaming_chair', [[cx - 1.0, iz0 + 2.75, 0], [cx - 0.9, iz0 + 2.9, 0]], { c: tint(SEAT, 'gc1') });
+    L.tryAdd('gaming_chair', [[cx + 1.0, iz0 + 2.75, 0], [cx + 0.9, iz0 + 2.9, 0]], { c: tint(SEAT, 'gc2') });
+    L.against('tv_wall', 'x', lside < 0 ? ix0 : ix1, lside < 0 ? +1 : -1, iz0 + 2.6);
+    L.reserve(x0, iz0, x1, iz0 + 4.0);
+  });
+  // ---- the front: the prize corner (on the bowling side) and the snack corner
+  const pside = lanes ? bowlSide : (D('sides').chance(0.5) ? 1 : -1);
+  L.with(D('prizes'), () => {
+    const wx = pside > 0 ? ix1 : ix0, inn = -pside, dz = frontZ + 1.25;
+    if (put('reception', wx + inn * 1.9, dz, pside > 0 ? -H : H, tint(MACH, 'desk'))) {
+      L.against('prize_wall', 'x', wx, inn, dz, { c: tint(MACH, 'pwall') });
+      L.reserve(Math.min(wx, wx + inn * 1.45), dz - 2.1, Math.max(wx, wx + inn * 1.45), dz + 2.1);   // (the clerk's side)
+      L.reserve(Math.min(wx + inn * 2.35, wx + inn * 3.7), dz - 1.6, Math.max(wx + inn * 2.35, wx + inn * 3.7), dz + 1.6);   // (and the customers')
+      L.tryAdd('prize_case', [[wx + inn * 1.9, dz - 2.0, pside > 0 ? -H : H], [wx + inn * 2.6, dz - 2.1, 0]], { c: tint(MACH, 'case') });
+      L.against('neon_prizes', 'x', wx, inn, dz - 2.6, null, 0.01);
+      L.against('token_machine', 'x', wx, inn, Math.min(iz1 - 0.5, dz + 2.45), { c: tint(MACH, 'token') });
+    }
+  });
+  L.with(D('snacks'), () => {
+    const wx = pside > 0 ? ix0 : ix1, inn = pside > 0 ? +1 : -1, dz = frontZ + 1.4;
+    if (L.against('snack_bar', 'x', wx, inn, dz, { c: tint(MACH, 'snack') })) {
+      L.reserve(Math.min(wx, wx + inn * 2.7), dz - 1.7, Math.max(wx, wx + inn * 2.7), dz + 1.7);
+      L.against('neon_snacks', 'x', wx, inn, dz - 2.7, null, 0.01);
+      L.tryAdd('hightop_table', [[wx + inn * 3.5, dz - 1.0, 0], [wx + inn * 3.7, dz - 1.4, 0]], { c: tint(NEON, 'ht1') });
+      L.tryAdd('hightop_table', [[wx + inn * 3.5, dz + 0.9, 0], [wx + inn * 3.7, dz + 0.7, 0]], { c: tint(NEON, 'ht2') });
+    }
+  });
+  if (ground) { L.tryAdd('led_pillar', [[dr.x - 2.2, iz1 - 0.6]]); L.tryAdd('led_pillar', [[dr.x + 2.2, iz1 - 0.6]]); }
+  if (lanes) for (let n = 0; n < lanes; n += 2) L.tryAdd('gaming_chair', [[bowlX0 + 1.5 + n * 1.5, iz0 + LANE_L + 2.05, P]], { c: tint(SEAT, 'bowl-seat' + n) });   // (for the next bowler)
+  // the giant joystick: beside the way in on the street floor, in the middle at the front above it
+  L.tryAdd('giant_joystick', ground ? [[dr.x + 3.7, iz1 - 2.4, 0], [dr.x - 3.7, iz1 - 2.4, 0]] : [[mid, frontZ + 1.6, 0], [mid + 3, frontZ + 1.6, 0]], { c: tint(NEON, 'joy') });
+  if (!ground && W >= 16) L.with(D('front-seats'), () => {   // (above the street, the front's middle: a booth each side of the joystick)
+    for (const s of [-1, 1]) L.tryAdd('neon_booth', [[mid + s * 3.4, frontZ + 1.55, P], [mid + s * 4.2, frontZ + 1.55, P]], { c: tint(SEAT, 'fb' + s) });
+  });
+  // a cluster of claw machines against the front wall each side of the middle, facing in (four at most, clear of the way in)
+  L.with(D('front-claws'), () => {
+    const c0 = ground ? dr.x : mid;
+    for (const s of [-1, 1]) {
+      let n = 0;
+      for (let x = c0 + s * (ground ? 3.4 : 5.4); n < 4 && x > ix0 + 2.6 && x < ix1 - 2.6; x += s * 1.04) if (L.against('claw_machine', 'z', iz1, -1, x, { c: tint(MACH, 'fc' + s + n) }, 0.03, 0.02)) n++; else if (n) break;
+    }
+  });
+  // ---- the middle: strips across the room, attractions and cabinets by turns
+  const sideBand = 2 * CAB + AISLE;
+  const mx0 = (lanes && bowlSide < 0 ? bowlX1 + 0.6 : ix0 + sideBand), mx1 = (lanes && bowlSide > 0 ? bowlX0 - 0.6 : ix1 - sideBand);
+  const POD = {   // w × d with the room to play; place(cx, cz) the pieces in the pod's middle
+    pool: [3.4, 4.6, (x, z) => put('pool_table', x, z, 0, tint(['#1f2937', '#7f1d1d', '#4c1d95', '#3b2416', '#0f172a'], 'pool' + x))],
+    bull: [4.4, 4.6, (x, z) => put('mech_bull', x, z - 0.2, 0)],
+    hockey: [2.4, 4.2, (x, z) => put('air_hockey', x, z, 0, tint(MACH, 'ah' + x))],
+    skee: [2.9, 4.4, (x, z) => { for (let n = -1; n <= 1; n++) put('skeeball', x + n * 0.92, z - 0.25, 0, tint(MACH, 'sk' + n)); }],
+    hoops: [2.7, 3.9, (x, z) => { for (const n of [-0.65, 0.65]) put('hoop_shot', x + n, z - 0.25, 0, tint(MACH, 'hp' + n)); }],
+    dance: [2.4, 3.6, (x, z) => put('dance_machine', x, z - 0.45, 0, tint(MACH, 'dm' + x))],
+    racers: [2.6, 3.3, (x, z) => { for (const n of [-0.62, 0.62]) put('racing_sim', x + n, z - 0.3, 0, tint(MACH, 'rs' + n)); }],
+    claws: [3.4, 2.3, (x, z) => { for (let n = -1; n <= 1; n++) put('claw_machine', x + n * 1.02, z - 0.35, 0, tint(MACH, 'cl' + n)); }],
+    pinball: [2.6, 2.9, (x, z) => { for (let n = -1; n <= 1; n++) put('pinball', x + n * 0.82, z - 0.35, 0, tint(MACH, 'pb' + n)); }],
+    games: [3.0, 2.4, (x, z) => { put('whack_mole', x - 0.9, z - 0.3, 0, tint(MACH, 'wm')); put('boxer', x + 0.15, z - 0.4, 0, tint(MACH, 'bx')); put('whack_mole', x + 1.15, z - 0.3, 0, tint(MACH, 'wm2')); }],
+    foos: [3.3, 2.2, (x, z) => put('foosball', x, z, 0, tint(MACH, 'fs' + x))],
+    photo: [1.9, 2.8, (x, z) => put('photo_booth', x, z - 0.35, 0, tint(MACH, 'ph' + x))],
+    joystick: [2.2, 2.2, (x, z) => put('giant_joystick', x, z, D('js').int(0, 3) * H, tint(NEON, 'js'))],
+    chill: [3.2, 3.0, (x, z) => { put('neon_booth', x, z - 0.4, 0, tint(SEAT, 'cb' + x)); }],
+  };
+  const BIG = ['bull', 'pool', 'hockey', 'skee', 'pool', 'hoops', 'dance', 'hockey'], SMALL = ['claws', 'racers', 'pinball', 'games', 'photo', 'joystick', 'foos', 'chill', 'claws', 'pinball'];
+  const big = D('big').shuffle ? D('big').shuffle([...BIG]) : [...BIG], small = D('small').shuffle ? D('small').shuffle([...SMALL]) : [...SMALL];
+  if (W * Dp < 260) big.splice(big.indexOf('bull'), 1);   // (the bull wants a big room)
+  const queue = { big, small }, used = new Set();
+  const takePods = (kind, room, maxD = 99) => {   // pods of this kind that fit side by side in room metres (GAP between them)
+    const out = []; let w = 0;
+    for (let tries = 0; tries < queue[kind].length * 2 && queue[kind].length; tries++) {
+      const id = queue[kind][0], [pw, pd] = POD[id];
+      queue[kind].push(queue[kind].shift());
+      if (pd > maxD || w + (out.length ? GAP : 0) + pw > room) continue;
+      if (used.has(id) && queue[kind].some(q => !used.has(q) && POD[q][1] <= maxD)) continue;   // (each kind once before any twice)
+      out.push(id); used.add(id); w += (out.length > 1 ? GAP : 0) + pw;
+    }
+    return out;
+  };
+  // the stretches of a strip's width free for pods: the door's way in and the elevator's way out kept clear
+  const stretches = (z0, z1) => {
+    const cut = [];
+    if (ground && z1 > iz1 - 4.5) cut.push([dr.x - 1.6, dr.x + 1.6]);   // (the way in, as far as it goes before the room opens out)
+    if (coreBox && z0 < coreBox.z1 && z1 > coreBox.z0) cut.push([coreBox.x0, coreBox.x1]);
+    let segs = [[mx0, mx1]];
+    for (const [a, b] of cut) segs = segs.flatMap(([s0, s1]) => (b <= s0 || a >= s1 ? [[s0, s1]] : [[s0, a], [b, s1]]).filter(([p0, p1]) => p1 - p0 > 1.6));
+    return segs;
+  };
+  // cabinets: about one to 5 m² (24 to 150; screens and models for a phone to draw); past three quarters of that, the
+  // middle's cabinet strips become attractions
+  const cap = Math.max(24, Math.min(150, Math.floor((W * Dp) / 5)));
+  let placed = 0;
+  const cab = (x, z, r) => { if (placed >= cap) return null; const it = L.with(D('cab', k++), () => L.add('arcade', x, z, r, null, 0.02)); if (it) placed++; return it; };
+  const pillars = [];
+  let z = iz0 + 2 * CAB + AISLE, turn = D('first').chance(0.6) ? 'big' : 'cab', strips = 0, nextPods = 'big';   // (pod strips: big and small by turns)
+  if (mx1 - mx0 >= 3.2) while (z < frontZ - 1.2 && strips < 12) {
+    strips++;
+    if (turn === 'cab' && placed >= cap * 0.75) turn = nextPods;
+    if (turn === 'cab') {
+      const d = 4 * CAB + 0.02;
+      if (z + d > frontZ - 0.4) break;
+      const xs = []; let n = 0;
+      for (let x = mx0 + CAB; x <= mx1 - CAB + 1e-6; x += PITCH) {
+        if (doorWay(x - CAB, x + CAB) || nearCore(x - CAB, z, x + CAB, z + d)) { n = 0; continue; }
+        if (n === 6) { n = 0; continue; }
+        xs.push(x); n++;
+      }
+      for (const x of xs) { cab(x, z + CAB, P); cab(x, z + 3 * CAB + 0.02, 0); }
+      pillars.push([mx0 + 0.3, z - AISLE / 2], [mx1 - 0.3, z - AISLE / 2]);
+      z += d + AISLE; turn = nextPods;
+      continue;
+    }
+    const kind = turn, room = frontZ - 0.6 - z;
+    let depth = 0;
+    for (const [s0, s1] of stretches(z, z + (kind === 'big' ? 5 : 3.6))) {
+      let ids = takePods(kind, s1 - s0, room);
+      if (!ids.length) continue;
+      const width = list => list.reduce((t, id) => t + POD[id][0], 0) + Math.max(0, list.length - 1) * GAP;
+      // what the strip's pods leave at its ends: smaller attractions as deep as the strip, so it runs wall to wall
+      const dmax0 = Math.max(...ids.map(id => POD[id][1]));
+      if (kind === 'big') { const left = s1 - s0 - width(ids) - GAP; if (left >= 2.0) { const more = takePods('small', left, dmax0); ids = [...more.slice(0, Math.ceil(more.length / 2)), ...ids, ...more.slice(Math.ceil(more.length / 2))]; } }
+      let x = (s0 + s1) / 2 - width(ids) / 2;
+      const dmax = Math.max(...ids.map(id => POD[id][1]));
+      for (const id of ids) { const [pw, , place] = POD[id]; L.with(D('pod', id, x), () => place(x + pw / 2, z + dmax / 2)); L.reserve(x, z, x + pw, z + dmax); x += pw + GAP; }
+      depth = Math.max(depth, dmax);
+    }
+    if (!depth) { if (kind === 'big') { turn = 'small'; nextPods = 'small'; continue; } break; }
+    nextPods = kind === 'big' ? 'small' : 'big';
+    pillars.push([mx0 + 0.3, z + depth / 2], [mx1 - 0.3, z + depth / 2]);
+    z += depth + AISLE; turn = 'cab';
+  }
+  // what is left before the front: small attractions if it is deep enough, else a row of cabinets facing the front
+  if (mx1 - mx0 >= 3.2) {
+    const room = frontZ - 0.4 - z;
+    let filled = false;
+    if (room >= 2.2) for (const [s0, s1] of stretches(z, z + room)) {
+      const ids = takePods('small', s1 - s0, room); if (!ids.length) continue;
+      const tw = ids.reduce((t, id) => t + POD[id][0], 0) + (ids.length - 1) * GAP, dm = Math.max(...ids.map(id => POD[id][1]));
+      let x = (s0 + s1) / 2 - tw / 2;
+      for (const id of ids) { const [pw, , place] = POD[id]; L.with(D('tail', id, x), () => place(x + pw / 2, z + dm / 2)); L.reserve(x, z, x + pw, z + dm); x += pw + GAP; }
+      filled = true;
+    }
+    if (!filled && room >= 0.5) for (let x = mx0 + CAB, n = 0; x <= mx1 - CAB + 1e-6; x += PITCH) {   // (0.4 to spare before the front)
+      if (doorWay(x - CAB, x + CAB) || nearCore(x - CAB, z, x + CAB, z + 0.9) || ++n % 7 === 0) continue;
+      cab(x, z + CAB, 0);
+    }
+  }
+  // ---- the walls: cabinets along the back wall and down the side walls where nothing else stands
+  for (let x = ix0 + 0.45; x <= ix1 - 0.45 + 1e-6; x += PITCH) cab(x, iz0 + CAB, 0);
+  // (down the side walls every sixth place another game: a claw machine, a punching machine, a pinball)
+  const WALLG = ['claw_machine', 'boxer', 'pinball'], wn = { [-1]: 0, [1]: 0 };
+  for (let zz = iz0 + 0.45 + PITCH; zz <= iz1 - 0.45 + 1e-6; zz += PITCH) for (const side of [-1, 1]) {
+    if (++wn[side] % 6 === 3) { const t = WALLG[(wn[side] / 6 | 0) % 3], it = L.against(t, 'x', side < 0 ? ix0 : ix1, side < 0 ? +1 : -1, zz + (t === 'pinball' ? 0 : 0.05), { c: tint(MACH, 'wg' + side + zz) }, 0.03, 0.02); if (it) { zz += t === 'claw_machine' ? 0.1 : 0; continue; } }
+    cab(side < 0 ? ix0 + CAB : ix1 - CAB, zz, side < 0 ? H : -H);
+  }
+  // ---- the light: LED pillars at the ends of the strips, light strips along the way in, a mural on a free stretch of wall
+  for (const [x, zz] of pillars.slice(0, 6)) L.tryAdd('led_pillar', [[x, zz]]);
+  const lane = ground ? dr.x : core ? core.x : mid, nc = tint(NEON, 'strips');
+  for (let zz = (ground ? iz1 - 1.6 : iz0 + 4); zz > iz0 + 3 && zz < iz1 - 1; zz += ground ? -2.6 : 2.6) for (const s of [-1, 1]) {
+    const bb = { x0: lane + s * 1.15 - 0.06, z0: zz - 1.0, x1: lane + s * 1.15 + 0.06, z1: zz + 1.0 };   // (on the floor: clear of pieces, not of the ways kept open)
+    if (L.inside(bb) && !L.rects.some(q => q[4] === K_ITEM && bb.x0 < q[2] + 0.1 && bb.x1 > q[0] - 0.1 && bb.z0 < q[3] + 0.1 && bb.z1 > q[1] - 0.1)) L.add('floor_neon', lane + s * 1.15, zz, H, { c: nc });
+  }
+  if (W >= 16) L.with(D('murals'), () => {
+    const side = -lside, wx = side < 0 ? ix0 : ix1, inn = side < 0 ? +1 : -1;
+    if (!lanes || side !== bowlSide) L.against(D('m2').chance(0.5) ? 'neon_joystick' : 'neon_invader', 'x', wx, inn, (iz0 + frontZ) / 2, null, 0.01);
+  });
+}
+/** Whether a square pad (a dance floor: it blocks nothing itself) of half size h at x, z is clear and inside. */
+function padFree(L, x, z, h) { const bb = { x0: x - h, z0: z - h, x1: x + h, z1: z + h }; return L.inside(bb) && L.isFree(bb, 0.1); }
+/**
+ * The lounge theme, redone (2026-10-23, the product owner: "a fancy sit back and relax area, modern organic, elegant, soft lighting";
+ * then "it needs a bigger nicer bar ... central bars ... add walls ... it needs to feel comfortable, unique, and flow ...
+ * more variety: couches, loveseats, tables for 4 and 2, counters round the bars, barstool tables ... this looks like a
+ * furniture store instead of a lounge"). Laid out as a place, not a grid:
+ *   the salon     on a big floor one end walled off with panelled walls (two wide openings): a fireplace with a sofa
+ *                 and club chairs round it, bookcases, loveseats, a booth, chaises by the window
+ *   the stage     on the hall's back wall toward one end (a side wall when the back is taken), tables for two and four
+ *                 in arcs before it, like a supper club
+ *   the bar       the centrepiece: an island bar on a big hall, a round bar on a middling one (stools all round, a
+ *                 bartender's well, a lit bottle tower, a halo of lights above), high tables round it beyond its aisle;
+ *                 a wall bar and a drink ledge on a small floor
+ *   the walls     runs of banquettes with their tables, lounge corners (a sofa, club chairs, a coffee table on a rug),
+ *                 round booths, olive trees and palms, art with sconces, lit niches, bookcases on solid walls
+ *   the rest      groups set where the room opens out (the widest free spot first), each turned to the bar, the stage or
+ *                 the fire: sofas with club chairs, loveseats face to face, the curved sofa, a fire table, chaises,
+ *                 booths, tables for four and two, a walkway kept round each, until under a third of the floor is furnished
+ * Aisles run from the way in, the elevator, the stage and the salon to the bar; every group goes down whole or not at all.
+ */
+export function loungeThemeFloor(L, o = {}) {
+  const base = L.rng.int(1, 2 ** 30), D = (...k) => dice(base, ...k);
+  const { ix0, ix1, iz0, iz1 } = L, dr = L.b.door, ground = !!o.ground, W = ix1 - ix0, Dp = iz1 - iz0;
+  L.name = o.name || 'Lounge'; L.venue = 'lounge_bar';
+  L.zone(ix0, iz0, ix1, iz1, D('floor').pick(['smoked_oak', 'smoked_oak', 'wood_dark', 'wood']));
+  placeCore(L);
+  if (ground) reserveEntrance(L, 3.4);
+  const core = L.b.core, cbb = core ? itemAABB(core, CATALOG[core.t].rect) : null;
+  const VELVET = ['#3f5a3c', '#a4532c', '#c9973a', '#1f2c4a', '#7a4a5a', '#5a6b4a', '#b06a4a', '#2f4f4f'], BOUCLE = ['#e4d7c0', '#d9c6a6', '#cdb48e', '#e8dcc4', '#c4a57c'];
+  const RUG = ['#cdb08a', '#b88a5a', '#a8b094', '#d8c7a8', '#b5785a', '#c9a27a', '#9da48a'], WOODS = ['#5b3a26', '#6e4a31', '#8a6242', '#3b2a1f'], CURTAIN = ['#2a2f6b', '#3b1f3a', '#1f3a3a', '#4a2a22'];
+  const STONE = ['#d8cbb5', '#cbbba1', '#bfb3a3'], OAK = ['#a37c55', '#8a6242', '#b8915f'], LEATHER = ['#6b3f2a', '#4a2c20', '#7a4a32', '#33261f'];
+  const tint = (pal, ...k) => D('tint', ...k).pick(pal);
+  const accent = tint(['#1f4a3a', '#5a1f2a', '#1f2c4a', '#2f4f4f', '#6b4a1f', '#3b2a4a'], 'accent');   // (the bar's colour, its stools and high tables)
+  const put = (t, x, z, r = 0, c = null, pad = 0.05) => L.add(t, x, z, r, c ? { c } : null, pad);
+  const keep = fn => { const ni = L.items.length, nr = L.rects.length; if (fn()) return true; L.items.length = ni; L.rects.length = nr; return false; };   // (a group goes down whole or not at all)
+  const frame = (ox, oz, r) => { const cs = Math.cos(r), sn = Math.sin(r); return (t, lx, lz, rr = 0, c = null, pad) => put(t, ox + lx * cs + lz * sn, oz - lx * sn + lz * cs, r + rr, c, pad); };
+  const SEATS = new Set(['curve_sofa', 'serp_sofa', 'boucle_chair', 'shell_chair', 'pouf', 'chaise', 'loveseat', 'sofa_lounge', 'club_chair', 'booth_round', 'banquette_table', 'table_two', 'table_four', 'highboy', 'island_bar', 'round_bar', 'lounge_bar', 'drink_ledge']);
+  const seats = () => L.items.reduce((t, it) => t + (SEATS.has(it.t) ? CATALOG[it.t].slots.filter(s => s.use !== 'staff').length : 0), 0);
+  const solid = () => L.items.reduce((t, it) => { const d = CATALOG[it.t]; return t + (d.block === false || d.fixed ? 0 : (d.rect[2] - d.rect[0]) * (d.rect[3] - d.rect[1])); }, 0);
+  const warm = '#ffcf8a';
+
+  // ---- the salon: on a big floor one end becomes a quieter room behind panelled walls with wide openings
+  let hx0 = ix0, hx1 = ix1, salon = null;
+  if (W >= 24 && Dp >= 13) {
+    const coreLeft = cbb && (cbb.x0 + cbb.x1) / 2 < (ix0 + ix1) / 2;
+    for (const side of cbb ? (coreLeft ? [1, -1] : [-1, 1]) : D('salon-side').chance(0.5) ? [-1, 1] : [1, -1]) {
+      const sw = Math.min(10, Math.max(7.2, W * 0.3)), px = side < 0 ? ix0 + sw : ix1 - sw;
+      if (cbb && px > cbb.x0 - 1.3 && px < cbb.x1 + 1.3) continue;
+      if (ground && dr && Math.abs(px - dr.x) < dr.w / 2 + 2.4) continue;
+      const ops = Dp >= 18 ? [[iz0 + Dp * 0.28, 2.6], [iz0 + Dp * 0.72, 2.6]] : [[iz0 + Dp * 0.55, 2.8]];
+      let z = iz0;
+      for (const [oz, ow] of ops) { if (oz - ow / 2 - z > 0.3) L.wall(px, z, px, oz - ow / 2, 2); L.reserve(px - 1.0, oz - ow / 2, px + 1.0, oz + ow / 2); z = oz + ow / 2; }
+      if (iz1 - z > 0.3) L.wall(px, z, px, iz1, 2);
+      salon = { side, px, ops, x0: side < 0 ? ix0 : px + 0.12, x1: side < 0 ? px - 0.12 : ix1 };
+      if (side < 0) hx0 = px + 0.12; else hx1 = px - 0.12;
+      L.zone(salon.x0, iz0, salon.x1, iz1, D('salon-floor').pick(['carpet_warm', 'wood_dark']));
+      break;
+    }
+  }
+  const HW = hx1 - hx0, hcx = (hx0 + hx1) / 2;
+
+  // ---- the stage: on the hall's back wall toward one end (clear of the elevator), else on its outer side wall
+  const spans = [];
+  if (cbb && cbb.z0 < iz0 + 1.6 && cbb.x1 > hx0 && cbb.x0 < hx1) { if (cbb.x0 - 0.9 - hx0 > 0.5) spans.push([hx0, cbb.x0 - 0.9]); if (hx1 - cbb.x1 - 0.9 > 0.5) spans.push([cbb.x1 + 0.9, hx1]); }
+  else spans.push([hx0, hx1]);
+  spans.sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+  const barKind = HW >= 20 && Dp >= 14.5 ? 'island_bar' : HW >= 11 && Dp >= 11.5 ? 'round_bar' : 'wall';   // (the island wants a big room)
+  let stage = null, bar = null;
+  const wallBar = () => {   // a small floor's bar: on the back wall, its back bar behind, a drink ledge along a side
+    const sp = spans.filter(([a, b]) => b - a >= 4.2).sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+    if (sp.length && Dp >= 8) {
+      const [s0, s1] = sp[0], bx = sp[0][1] - sp[0][0] >= 10 ? (D('bar-end').chance(0.5) ? s0 + 2.4 : s1 - 2.4) : (s0 + s1) / 2;
+      if (L.against('back_bar', 'z', iz0, +1, bx, { c: tint(WOODS, 'bb') }) && put('lounge_bar', bx, iz0 + 1.88, 0, accent)) {
+        bar = { x: bx, z: iz0 + 1.9, wall: true };
+        L.zone(bx - 2.3, iz0, bx + 2.3, iz0 + 3.3, 'travertine');
+        L.reserve(bx - 1.8, iz0 + 0.5, bx + 1.8, iz0 + 1.5); L.reserve(bx - 2.0, iz0 + 2.75, bx + 2.0, iz0 + 3.9);
+        const i = spans.indexOf(sp[0]); spans.splice(i, 1, ...[[s0, bx - 2.5], [bx + 2.5, s1]].filter(([a, b]) => b - a > 0.5));
+        spans.sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+      }
+    }
+    for (const side of [-1, 1]) if (L.against('drink_ledge', 'x', side < 0 ? ix0 : ix1, -side, iz0 + Math.min(4.5, Dp * 0.35), { c: accent })) break;
+  };
+  if (barKind === 'wall') wallBar();
+  const snap = { i: L.items.length, r: L.rects.length, z: L.zones.length };
+  const placeStage = () => {
+  if (Dp >= 9.5 && spans.length && spans[0][1] - spans[0][0] >= 5.6) {
+    const [s0, s1] = spans[0], x = s1 - s0 >= 11 ? (D('stage-end').chance(0.5) ? s0 + 2.8 : s1 - 2.8) : (s0 + s1) / 2;
+    if (put('lounge_stage', x, iz0 + 1.46, 0, tint(CURTAIN, 'curtain'))) {
+      stage = { x, z: iz0 + 2.8, fx: 0, fz: 1, x0: x - 2.9, x1: x + 2.9 };
+      L.zone(x - 2.6, iz0, x + 2.6, iz0 + 3.3, 'wood_dark');
+      for (const s of [-1, 1]) L.tryAdd('slat_screen', [[x + s * 2.62, iz0 + 1.15, H]], { c: tint(OAK, 'scr') });
+      L.reserve(x - 1.6, iz0 + 2.75, x + 1.6, iz0 + 3.5);
+    }
+  }
+  if (!stage && Dp >= 11.5 && HW >= 9) for (const side of D('stage-side').chance(0.5) ? [-1, 1] : [1, -1]) {
+    if (salon && side === salon.side) continue;
+    const wx = side < 0 ? ix0 : ix1, inn = -side, z = iz0 + Math.max(3.4, Dp * 0.42);
+    if (cbb && Math.abs((cbb.x0 + cbb.x1) / 2 - wx) < 5 && z + 2.6 > cbb.z0 && z - 2.6 < cbb.z1 + 2) continue;
+    if (L.against('lounge_stage', 'x', wx, inn, z, { c: tint(CURTAIN, 'curtain') })) { stage = { x: wx + inn * 2.8, z, fx: inn, fz: 0, side }; break; }
+  }
+  };
+  placeStage();
+
+  // ---- the bar: the centrepiece of the hall (a round one if the island doesn't fit; before the stage's tables if it can)
+  for (const t of barKind === 'island_bar' ? ['island_bar', 'round_bar'] : barKind === 'round_bar' ? ['round_bar'] : []) {
+    if (bar) break;
+    const R = CATALOG[t].rect, ring = 1.25;
+    const turn = t === 'island_bar' && Dp > HW * 1.1 ? H : 0, ex = turn ? R[3] : R[2], ez = turn ? R[2] : R[3];
+    const zc = stage && stage.fz ? Math.max(iz0 + Dp * 0.5, stage.z + 3.4 + ez + ring) : iz0 + Dp * 0.5;   // (room before the stage for its tables)
+    const xc = stage && stage.fz ? hcx + (stage.x < hcx ? 1 : -1) * Math.min(3.5, HW * 0.12) : stage ? hcx - stage.fx * Math.min(3, HW * 0.12) : hcx;
+    const offs = [[0, 0], [1.2, 0], [-1.2, 0], [0, -0.8], [0, 0.8], [2.4, 0], [-2.4, 0], [1.2, -0.8], [-1.2, -0.8], [0, -1.6], [3.6, 0], [-3.6, 0], [2.4, -1.6], [-2.4, -1.6], [0, -2.4], [0, 1.6]];
+    for (const [x, z] of [...offs.map(([dx, dz]) => [xc + dx, zc + dz]), ...offs.map(([dx, dz]) => [hcx + dx, iz0 + Dp * 0.55 + dz])]) {
+      const bb = { x0: x - ex - ring, z0: z - ez - ring, x1: x + ex + ring, z1: z + ez + ring };
+      if (!L.inside(bb) || !L.isFree(bb, 0)) continue;
+      if (put(t, x, z, turn, accent)) { bar = { x, z, ex, ez, t, ring }; L.reserve(bb.x0, bb.z0, bb.x1, bb.z1); break; }
+    }
+  }
+  if (bar) {   // (an island: marble under it, high tables round it beyond its aisle)
+    L.zone(bar.x - bar.ex - 0.5, bar.z - bar.ez - 0.5, bar.x + bar.ex + 0.5, bar.z + bar.ez + 0.5, 'marble');
+    const rx = bar.ex + bar.ring + 1.0, rz = bar.ez + bar.ring + 1.0, n = Math.max(4, Math.round(2 * P * Math.sqrt((rx * rx + rz * rz) / 2) / 3.3));
+    for (let k = 0; k < n; k++) { const a = (k + 0.5) / n * 2 * P; L.tryAdd('highboy', [[bar.x + Math.sin(a) * rx, bar.z + Math.cos(a) * rz, a], [bar.x + Math.sin(a) * (rx + 0.5), bar.z + Math.cos(a) * (rz + 0.5), a]], { c: accent }, 0.35); }
+  }
+  if (!bar && barKind !== 'wall') {   // (the middle had no room for it: the bar goes on the back wall first, the stage after if it still fits)
+    if (stage) { L.items.length = snap.i; L.rects.length = snap.r; L.zones.length = snap.z; stage = null; }
+    wallBar(); placeStage();
+  }
+
+  // ---- the ways through: from the way in (or the elevator), the stage and the salon's openings to the bar's aisle
+  const aisle = (ax, az, bx, bz, w = 1.4) => { L.reserve(Math.min(ax, bx) - w / 2, az - w / 2, Math.max(ax, bx) + w / 2, az + w / 2); L.reserve(bx - w / 2, Math.min(az, bz) - w / 2, bx + w / 2, Math.max(az, bz) + w / 2); };
+  if (bar && !bar.wall) {
+    const to = (x, z) => [Math.max(bar.x - bar.ex, Math.min(bar.x + bar.ex, x)), Math.max(bar.z - bar.ez, Math.min(bar.z + bar.ez, z))];
+    if (ground && dr) { const [bx, bz] = to(dr.x, iz1); aisle(bx, bz, dr.x, iz1 - 0.5); aisle(dr.x, iz1 - 0.5, bx, bz); }
+    if (core && CATALOG[core.t].doors) { const cs = Math.cos(core.r), sn = Math.sin(core.r), [dx, dz] = CATALOG[core.t].doors[0], ex = core.x + dx * cs + (dz + 1.2) * sn, ez = core.z - dx * sn + (dz + 1.2) * cs, [bx, bz] = to(ex, ez); aisle(ex, ez, bx, bz); }
+    if (stage) { const [bx, bz] = to(stage.x, stage.z); aisle(bx, bz, stage.x, stage.z, 1.3); }
+    if (salon) for (const [oz] of salon.ops) { const [bx, bz] = to(salon.px, oz); aisle(salon.px, oz, bx, bz, 1.3); }
+  }
+  // ---- before the stage: tables for two and four in arcs, like a supper club
+  if (stage) {
+    const fa = Math.atan2(stage.fx, stage.fz);
+    for (const [R, kind] of [[3.3, 'table_two'], [4.9, 'table_four'], [6.5, 'table_two']]) {
+      const step = (kind === 'table_four' ? 3.15 : 2.9) / R;
+      for (let a = -1.2; a <= 1.2 + 1e-6; a += step) {
+        const ang = fa + a, x = stage.x + Math.sin(ang) * R, z = stage.z + Math.cos(ang) * R;
+        L.tryAdd(kind, [[x, z, ang]], { c: tint(VELVET, 'cab', R, Math.round(a * 10)) }, 0.22);
+      }
+    }
+  }
+
+  // ---- along the walls: banquettes with their tables, lounge corners, booths, trees, art
+  const wallKit = (axis, line, inn, t0, t1, view, tag, low = false) => {   // (low: a partition, cut down in the cutaway: nothing hung on it)
+    const seq = low ? ['banq', 'banq', 'tree', 'booth', 'banq', 'tree'] : view ? ['corner', 'tree', 'banq', 'banq', 'art', 'booth', 'tree', 'corner', 'art'] : ['banq', 'banq', 'banq', 'tree', 'booth', 'art', 'banq', 'banq', 'niche'];
+    let t = t0 + 0.35, k = D('seq', tag).int(0, seq.length - 1), n = 0;
+    const r0 = axis === 'z' ? (inn > 0 ? 0 : P) : (inn > 0 ? H : -H);
+    while (t < t1 - 0.9 && n++ < 60) {
+      const what = seq[k++ % seq.length], w = { corner: 4.0, banq: 2.62, booth: 3.25, tree: 1.1, art: 1.9, niche: 1.3 }[what];
+      if (t + w > t1 - 0.2) { if (w > 1.2) continue; break; }
+      const m = t + w / 2, ox = axis === 'z' ? m : line, oz = axis === 'z' ? line : m;
+      let ok = false;
+      if (what === 'banq') ok = !!L.against('banquette_table', axis, line, inn, m, { c: tint(VELVET, 'bq', tag) });
+      else if (what === 'booth') ok = !!L.against('booth_round', axis, line, inn, m, { c: tint(VELVET, 'bo', tag, n) });
+      else if (what === 'tree') ok = !!(D('tr', tag, n).chance(0.55) ? put('olive_tree', ox + (axis === 'x' ? inn * 0.6 : 0), oz + (axis === 'z' ? inn * 0.6 : 0), D('trr', tag, n).float(0, 6.28), tint(STONE, 'pot', tag, n)) : put('planter_palm', ox + (axis === 'x' ? inn * 0.58 : 0), oz + (axis === 'z' ? inn * 0.58 : 0), 0, '#e9e2d6'));
+      else if (what === 'art') { ok = !!L.against('art_panel', axis, line, inn, m, { c: tint(BOUCLE, 'art', tag, n) }, 0.01); if (ok) for (const d of [-1.15, 1.15]) L.against('wall_sconce', axis, line, inn, m + d, null, 0.005); if (ok) L.tryAdd('vase_set', [[ox + (axis === 'x' ? inn * 0.45 : 0), oz + (axis === 'z' ? inn * 0.45 : 0), r0]]); }
+      else if (what === 'niche') ok = !!L.against('wall_niche', axis, line, inn, m);
+      else ok = keep(() => {   // a lounge corner: the sofa against the wall, club chairs facing it across a coffee table on a rug
+        const q = frame(ox, oz, r0), c = tint(VELVET, 'cs', tag, n), lc = tint(LEATHER, 'cc', tag, n);
+        q('organic_rug', 0, 1.6, 0, tint(RUG, 'cr', tag, n));
+        if (!q('sofa_lounge', 0, 0.52, 0, c)) return false;
+        q('stone_table', 0, 1.55);
+        if (!q('club_chair', -1.35, 2.4, 2.36, lc) || !q('club_chair', 1.35, 2.4, -2.36, lc)) return false;
+        q('side_lamp_table', 1.62, 0.32, 0, tint(WOODS, 'cl', tag, n)); q('floor_lantern', -1.62, 0.3);
+        return true;
+      });
+      t += ok ? w + (what === 'banq' ? 0.04 : 0.3) : 0.6;
+    }
+  };
+  // the hall's walls: its back (beside the stage and the elevator), its outer side, the front (round the way in), the salon's
+  const doorGap = ground && dr ? [dr.x - dr.w / 2 - 2.2, dr.x + dr.w / 2 + 2.2] : null;
+  const cut = (a, b, gaps) => { let out = [[a, b]]; for (const [g0, g1] of gaps) out = out.flatMap(([p, q]) => g1 <= p || g0 >= q ? [[p, q]] : [[p, Math.min(q, g0)], [Math.max(p, g1), q]]).filter(([p, q]) => q - p > 1.0); return out; };
+  const backGaps = [...(stage && stage.fz ? [[stage.x0 - 0.4, stage.x1 + 0.4]] : []), ...(bar && bar.wall ? [[bar.x - 2.6, bar.x + 2.6]] : []), ...(cbb && cbb.z0 < iz0 + 1.6 ? [[cbb.x0 - 1.0, cbb.x1 + 1.0]] : [])];
+  for (const [a, b] of cut(hx0, hx1, backGaps)) wallKit('z', iz0, +1, a, b, false, `b${Math.round(a)}`);
+  for (const [a, b] of cut(hx0, hx1, doorGap ? [doorGap] : [])) wallKit('z', iz1, -1, a, b, true, `f${Math.round(a)}`);
+  for (const side of [-1, 1]) {
+    const wx = side < 0 ? hx0 : hx1, inn = -side, isSalon = salon && ((side < 0 && salon.side < 0) || (side > 0 && salon.side > 0));
+    const gaps = [...(isSalon ? salon.ops.map(([oz, ow]) => [oz - ow / 2 - 0.6, oz + ow / 2 + 0.6]) : []), ...(stage && !stage.fz && stage.side === side ? [[stage.z - 2.9, stage.z + 2.9]] : []), ...(cbb && Math.abs((cbb.x0 + cbb.x1) / 2 - wx) < 3 ? [[cbb.z0 - 1, cbb.z1 + 1]] : [])];
+    for (const [a, b] of cut(iz0 + 0.4, iz1 - 0.4, gaps)) wallKit('x', isSalon ? salon.px + inn * (IW + 0.02) : wx, inn, a, b, !isSalon, `s${side}${Math.round(a)}`, isSalon);
+  }
+
+  // ---- the salon: the fire, a sofa and club chairs round it, bookcases, then whatever fits
+  const GROUPS = loungeGroups({ D, tint, VELVET, BOUCLE, RUG, WOODS, LEATHER, accent });
+  let fire = null;
+  if (salon) {
+    const outer = salon.side < 0 ? ix0 : ix1, inn = -salon.side, zc = (iz0 + iz1) / 2;
+    for (const dz of [0, -1.5, 1.5, -3, 3]) if (keep(() => {
+      if (!L.against('fireplace', 'x', outer, inn, zc + dz)) return false;
+      const q = frame(outer, zc + dz, inn > 0 ? H : -H), lc = tint(LEATHER, 'fc');
+      q('organic_rug', 0, 2.5, H, tint(RUG, 'fr'));
+      if (!q('sofa_lounge', 0, 4.0, P, tint(VELVET, 'fs'))) return false;
+      q('stone_table', 0, 2.6, 0);
+      if (!q('club_chair', -1.55, 2.6, H, lc) || !q('club_chair', 1.55, 2.6, -H, lc)) return false;
+      q('floor_lantern', -1.5, 0.55); q('floor_lantern', 1.5, 0.55);
+      fire = { x: outer + inn * 2.6, z: zc + dz };
+      return true;
+    })) break;
+    for (const [x, z] of [[salon.x0 + 1.6, iz0], [salon.x1 - 1.6, iz0]]) L.against('bookcase', 'z', z, +1, x, { c: tint(WOODS, 'bk', x) });
+    for (const [oz, ow] of salon.ops) for (const s of [-1, 1]) for (const sd of [-1, 1]) L.tryAdd(D('ot', oz, s, sd).chance(0.6) ? 'olive_tree' : 'planter_palm', [[salon.px + sd * 0.7, oz + s * (ow / 2 + 0.55)]], { c: sd > 0 ? tint(STONE, 'op', oz) : '#e9e2d6' });
+  }
+
+  // ---- the rest: groups where the room opens out, the widest spot first, each turned to what it looks at
+  const fillArea = (rx0, rz0, rx1, rz1, kinds, foci, tag) => fillGroups(L, D, GROUPS, { rx0, rz0, rx1, rz1, kinds, foci, tag, cap: 0.29 });
+  const hallFoci = [...(bar && !bar.wall ? [[bar.x, bar.z]] : []), ...(stage ? [[stage.x, stage.z]] : []), ...(bar && bar.wall ? [[bar.x, bar.z]] : [])];
+  if (!hallFoci.length) hallFoci.push([hcx, (iz0 + iz1) / 2]);
+  fillArea(hx0, iz0, hx1, iz1, ['lounge', 'loves', 'curve', 'fire', 'booth', 'four', 'two', 'relax', 'clubs', 'chat'], hallFoci, 'h');
+  if (salon) fillArea(salon.x0, iz0, salon.x1, iz1, ['lounge', 'loves', 'relax', 'curve', 'two', 'four', 'clubs', 'chat'], [fire ? [fire.x, fire.z] : [(salon.x0 + salon.x1) / 2, (iz0 + iz1) / 2]], 's');
+
+  // ---- plants and sculpture where they mean something: the hall's corners, the way in, the elevator's door
+  for (const [x, z] of [[hx0 + 0.6, iz0 + 0.6], [hx1 - 0.6, iz0 + 0.6], [hx0 + 0.6, iz1 - 0.6], [hx1 - 0.6, iz1 - 0.6]]) L.tryAdd(D('cn', x, z).chance(0.5) ? 'olive_tree' : 'planter_palm', [[x, z, D('cr', x).float(0, 6.28)]], { c: tint(STONE, 'cp', x, z) });
+  if (ground && dr) {
+    for (const s of [-1, 1]) L.tryAdd('olive_tree', [[dr.x + s * (dr.w / 2 + 0.9), iz1 - 0.6]], { c: STONE[0] });
+    L.tryAdd(D('greet').chance(0.5) ? 'ring_sculpture' : 'twist_sculpture', [[dr.x, iz1 - 4.6, 0], [dr.x + 2.6, iz1 - 4.2, -0.4], [dr.x - 2.6, iz1 - 4.2, 0.4]], { c: '#a9854a' }, 0.4);
+  } else if (core) {
+    const cs = Math.cos(core.r), sn = Math.sin(core.r), [dx, dz] = (CATALOG[core.t].doors || [[0, 0]])[0], d = 3.4 + (CATALOG[core.t].rect[3] || 0);
+    L.tryAdd(D('greet').chance(0.5) ? 'ring_sculpture' : 'twist_sculpture', [[core.x + dx * cs + d * sn, core.z - dx * sn + d * cs, core.r]], { c: '#a9854a' }, 0.4);
+  }
+  // warm light along the foot of the outer walls
+  for (const side of [-1, 1]) for (let z = iz0 + 1.3; z <= iz1 - 1.0; z += 2.2) L.add('cove_light', (side < 0 ? ix0 : ix1) - side * 0.12, z, H, { c: warm }, 0);
+}
+/** All or nothing: the pieces fn puts down stay only if it returns true. */
+function keepAll(L, fn) { const ni = L.items.length, nr = L.rects.length; if (fn()) return true; L.items.length = ni; L.rects.length = nr; return false; }
+/** Groups set where a region of the floor opens out, the widest free spot first (a lattice of points, each with its
+ *  distance to the nearest piece, wall or kept room), each turned toward the nearest focus in eighths of a half turn
+ *  (round ones any way), keeping a walkway from what was there, until `cap` of the floor is under pieces. GROUPS:
+ *  { kind: { need (free radius), round, make(q, k) } }. */
+function fillGroups(L, D, GROUPS, { rx0, rz0, rx1, rz1, kinds, foci, tag, cap = 0.29, gap = 0.6 }) {
+  const { ix0, ix1, iz0, iz1 } = L, area = (ix1 - ix0) * (iz1 - iz0);
+  const solid = () => L.items.reduce((t, it) => { const d = CATALOG[it.t]; return t + (d.block === false || d.fixed ? 0 : (d.rect[2] - d.rect[0]) * (d.rect[3] - d.rect[1])); }, 0);
+  const pts = [], dist = (p, r) => Math.hypot(Math.max(r[0] - p.x, 0, p.x - r[2]), Math.max(r[1] - p.z, 0, p.z - r[3]));
+  for (let z = rz0 + 0.9; z <= rz1 - 0.9; z += 0.5) for (let x = rx0 + 0.9; x <= rx1 - 0.9; x += 0.5) pts.push({ x, z, d: Math.min(x - ix0, ix1 - x, z - iz0, iz1 - z) });
+  for (const p of pts) for (const r of L.rects) p.d = Math.min(p.d, dist(p, r));
+  let seen = L.rects.length;
+  for (let n = 0; n < 90; n++) {
+    if (L.rects.length < seen) seen = L.rects.length;
+    for (; seen < L.rects.length; seen++) for (const p of pts) p.d = Math.min(p.d, dist(p, L.rects[seen]));
+    if (solid() >= area * cap) break;
+    let best = null; for (const p of pts) if (!p.used && (!best || p.d > best.d)) best = p;
+    if (!best || best.d < 1.0) break;
+    best.used = true;
+    const fits = kinds.filter(k => GROUPS[k].need <= best.d);
+    if (!fits.length) continue;
+    const big = fits.filter(k => GROUPS[k].need >= Math.max(...fits.map(f => GROUPS[f].need)) - 0.45);
+    const kind = D('fk', tag, n).pick(big), f = foci.reduce((a, b) => Math.hypot(b[0] - best.x, b[1] - best.z) < Math.hypot(a[0] - best.x, a[1] - best.z) ? b : a, foci[0]);
+    const ang = Math.atan2(f[0] - best.x, f[1] - best.z), r = GROUPS[kind].round ? ang : Math.round(ang / (P / 8)) * (P / 8);   // (the groups fan round what they look at: no rows)
+    const start = L.rects.length, cs = Math.cos(r), sn = Math.sin(r);
+    const q = (t, lx, lz, rr = 0, c = null, pad = 0.05) => {   // (a group keeps a walkway from the pieces already there)
+      const def = CATALOG[t], x = best.x + lx * cs + lz * sn, z = best.z - lx * sn + lz * cs;
+      if (def.block !== false) { const bb = itemAABB({ x, z, r: r + rr }, def.rect); for (let i = 0; i < start; i++) { const R = L.rects[i]; if (R[4] === K_ITEM && bb.x0 < R[2] + gap && bb.x1 > R[0] - gap && bb.z0 < R[3] + gap && bb.z1 > R[1] - gap) return null; } }
+      return L.add(t, x, z, r + rr, c ? { c } : null, pad);
+    };
+    if (!keepAll(L, () => GROUPS[kind].make(q, `${tag}${n}`))) for (const p of pts) if (Math.hypot(p.x - best.x, p.z - best.z) < 0.6) p.used = true;
+  }
+}
+/** The lounge's groups, each laid out in its own frame (+z toward what it looks at): `need` is the free radius it
+ *  takes, `round` lets it turn any way (round tables), `make(q, k)` places it through q(type, x, z, turn, colour). */
+function loungeGroups({ D, tint, VELVET, BOUCLE, RUG, WOODS, LEATHER, accent }) {
+  return {
+    lounge: { need: 2.15, make: (q, k) => {   // a tufted sofa facing out, club chairs facing it across a coffee table
+      q('organic_rug', 0, -0.1, 0, tint(RUG, 'r', k));
+      if (!q('sofa_lounge', 0, -1.05, 0, tint(VELVET, 's', k))) return false;
+      q('stone_table', 0, 0.05, 0);
+      const lc = tint(LEATHER, 'l', k);
+      if (!q('club_chair', -1.38, 0.95, 2.47, lc) || !q('club_chair', 1.38, 0.95, -2.47, lc)) return false;
+      q('side_lamp_table', 1.62, -1.22, 0, tint(WOODS, 'w', k)); q('floor_lantern', -1.62, -1.22);
+      return true;
+    } },
+    loves: { need: 1.75, make: (q, k) => {   // two loveseats face to face across a stone table
+      q('organic_rug', 0, 0, H, tint(RUG, 'r', k));
+      const c = tint(VELVET, 's', k);
+      if (!q('loveseat', 0, -0.98, 0, c) || !q('loveseat', 0, 0.98, Math.PI, c)) return false;
+      q('stone_table', 0, 0, 0); q('side_lamp_table', 1.25, -1.32, 0, tint(WOODS, 'w', k)); q('floor_lantern', -1.25, 1.32);
+      return true;
+    } },
+    curve: { need: 2.15, make: (q, k) => {
+      q('organic_rug', 0, 0.15, 0, tint(RUG, 'r', k));
+      if (!q('curve_sofa', 0, -0.95, 0, tint(VELVET, 's', k))) return false;
+      q('stone_table', 0, 0.3, D('t', k).float(-0.2, 0.2));
+      const bc = tint(BOUCLE, 'b', k); if (!q('boucle_chair', -0.95, 1.5, Math.PI + 0.35, bc) || !q('boucle_chair', 0.95, 1.5, Math.PI - 0.35, bc)) return false;
+      q('side_lamp_table', 1.6, -0.85, 0, tint(WOODS, 'w', k)); q(D('lamp', k).chance(0.6) ? 'arc_lamp' : 'floor_lantern', -1.65, -1.2, 0);
+      return true;
+    } },
+    fire: { need: 1.95, make: (q, k) => {
+      q('organic_rug', 0, 0, 0, tint(RUG, 'r', k));
+      if (!q('fire_table', 0, 0, 0)) return false;
+      const bc = tint(BOUCLE, 'b', k), sc = tint(VELVET, 's', k);
+      if (!q('boucle_chair', -1.38, 0, Math.PI / 2, bc) || !q('boucle_chair', 1.38, 0, -Math.PI / 2, bc)) return false;
+      q('shell_chair', 0, -1.2, 0, sc); q('shell_chair', 0, 1.2, Math.PI, sc);
+      q('floor_lantern', -1.75, 1.15, 0); q('floor_lantern', 1.75, -1.15, 0);
+      return true;
+    } },
+    relax: { need: 1.75, make: (q, k) => {
+      q('organic_rug', 0, 0.1, 0, tint(RUG, 'r', k));
+      const c = tint(VELVET, 's', k);
+      if (!q('chaise', -0.76, 0, 0, c) || !q('chaise', 0.76, 0, 0, c)) return false;
+      q('side_lamp_table', 0, -0.62, 0, tint(WOODS, 'w', k)); q('planter_palm', -1.65, -0.6, 0, '#e9e2d6'); q('floor_lantern', 1.5, -0.75, 0);
+      return true;
+    } },
+    booth: { need: 1.75, make: (q, k) => !!q('booth_round', 0, 0.4, 0, tint(VELVET, 'b', k)) },
+    four: { need: 1.45, round: true, make: (q, k) => !!q('table_four', 0, 0, D('a', k).pick([0, Math.PI / 4]), tint(VELVET, 'c', k), 0.15) },
+    two: { need: 1.15, round: true, make: (q, k) => !!q('table_two', 0, 0, 0, tint(VELVET, 'c', k), 0.15) },
+    clubs: { need: 1.3, make: (q, k) => {   // two club chairs angled toward each other, a side table between
+      const lc = tint(LEATHER, 'l', k);
+      if (!q('club_chair', -0.62, 0, 0.5, lc) || !q('club_chair', 0.62, 0, -0.5, lc)) return false;
+      q('side_lamp_table', 0, -0.42, 0, tint(WOODS, 'w', k));
+      return true;
+    } },
+    chat: { need: 1.15, make: (q, k) => {   // two shell chairs and a lamp
+      const c = tint(VELVET, 's', k);
+      if (!q('shell_chair', -0.62, 0, 0.45, c) || !q('shell_chair', 0.62, 0, -0.45, c)) return false;
+      q('side_lamp_table', 0, -0.3, 0, tint(WOODS, 'w', k));
+      return true;
+    } },
+    high: { need: 1.0, round: true, make: (q, k) => !!q('highboy', 0, 0, D('a', k).float(0, 2), accent, 0.15) },
+  };
+}
+/**
+ * The night club (2026-10-23, the product owner: "a big DJ booth in the center, like a center stage, dance floor all around ... sort
+ * of like a lounge with tables and booths, larger tables for big parties ... a big bar ... lights, lasers, speakers ...
+ * make the night club fun and really pretty to look at. Think of high end Miami beach clubs"). On black marble:
+ *   the middle   the DJ's round stage (its truss of moving lights, a mirror ball, lasers) on an LED dance floor ring, a
+ *                smaller ring on a middling floor; speaker stacks at its corners, light towers at its sides, go-go
+ *                podiums at its edge, high tables round it
+ *   the bar      the long backlit onyx bar on the back wall, the LED video wall beside it
+ *   VIP          booths for big parties along the side walls, each on velvet carpet between velvet ropes under neon VIP
+ *   the rest     party tables, lounge sofas, loveseats, tables for four, high tables where the room opens out, turned to
+ *                the dance floor; royal palms, neon palms over MIAMI, laser bars on the walls
+ * A small floor gets the DJ's stage on the back wall with the dance floor before it. Aisles run from the way in, the
+ * elevator and the bar to the dance floor.
+ */
+export function clubThemeFloor(L, o = {}) {
+  const base = L.rng.int(1, 2 ** 30), D = (...k) => dice(base, ...k);
+  const { ix0, ix1, iz0, iz1 } = L, dr = L.b.door, ground = !!o.ground, W = ix1 - ix0, Dp = iz1 - iz0;
+  L.name = o.name || 'Night Club'; L.venue = 'club';
+  L.zone(ix0, iz0, ix1, iz1, 'club_marble');
+  placeCore(L);
+  if (ground) reserveEntrance(L, 3.4);
+  const core = L.b.core, cbb = core ? itemAABB(core, CATALOG[core.t].rect) : null;
+  const SEAT = ['#f3f0ea', '#f3f0ea', '#e8b4b8', '#1f1f24', '#2a9d8f', '#c9a227', '#7a1f3d'], ROPE = ['#c2185b', '#7a1f3d', '#e8508a'];
+  const tint = (pal, ...k) => D('tint', ...k).pick(pal);
+  const vip = tint(['#f3f0ea', '#e8b4b8', '#1f1f24', '#7a1f3d'], 'vip'), rope = tint(ROPE, 'rope');
+  const put = (t, x, z, r = 0, c = null, pad = 0.05) => L.add(t, x, z, r, c ? { c } : null, pad);
+  const cx0 = (ix0 + ix1) / 2;
+
+  // ---- the back wall: the bar on its widest stretch clear of the elevator, the LED wall on another
+  const spans = [];
+  if (cbb && cbb.z0 < iz0 + 1.6) { if (cbb.x0 - 0.9 - ix0 > 0.5) spans.push([ix0, cbb.x0 - 0.9]); if (ix1 - cbb.x1 - 0.9 > 0.5) spans.push([cbb.x1 + 0.9, ix1]); }
+  else spans.push([ix0, ix1]);
+  spans.sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+  let bar = null;
+  if (spans.length && spans[0][1] - spans[0][0] >= 7.4) {
+    const [s0, s1] = spans[0], bx = s1 - s0 >= 16 ? (D('bar-end').chance(0.5) ? s0 + 4.2 : s1 - 4.2) : (s0 + s1) / 2;
+    if (L.against('club_bar', 'z', iz0, +1, bx, { c: tint(SEAT, 'stools') })) {
+      bar = { x: bx, z: iz0 + 2.0 };
+      L.reserve(bx - 3.4, iz0 + 1.55, bx + 3.4, iz0 + 2.7);
+      spans.splice(0, 1, ...[[s0, bx - 3.5], [bx + 3.5, s1]].filter(([a, b]) => b - a > 0.5));
+    }
+  }
+  if (!bar) for (const side of [-1, 1]) if (L.against('club_bar', 'x', side < 0 ? ix0 : ix1, -side, iz0 + Math.max(4, Dp * 0.35), { c: tint(SEAT, 'stools') })) { bar = { x: side < 0 ? ix0 + 2.0 : ix1 - 2.0, z: iz0 + Math.max(4, Dp * 0.35) }; break; }
+  spans.sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+  if (spans.length && spans[0][1] - spans[0][0] >= 5.4) L.against('led_wall', 'z', iz0, +1, (spans[0][0] + spans[0][1]) / 2, null, 0.01);
+
+  // ---- the middle: the DJ's stage on its LED dance floor, sound and light round it
+  let floor = null;
+  const oct = (x, z, R) => { const k = 0.414 * R, s = 0.71 * R; return [{ x0: x - R, z0: z - k, x1: x + R, z1: z + k }, { x0: x - k, z0: z - R, x1: x + k, z1: z + R }, { x0: x - s, z0: z - s, x1: x + s, z1: z + s }]; };
+  const tryRing = ring => {
+    const R = CATALOG[ring].rect[2], back = bar && bar.z < iz0 + 3 ? iz0 + 2.8 : iz0 + 0.6;
+    const zc = Math.max(back + R + 0.3, (back + iz1) / 2 - (ground ? 0.8 : 0));
+    for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [2, 0], [-2, 0], [1, 1], [-1, 1], [1, -1], [-1, -1], [0, 2], [0, -2], [3, 0], [-3, 0], [2, 1.5], [-2, 1.5], [4, 0], [-4, 0]]) {
+      const x = cx0 + dx, z = zc + dz;
+      const clear = bb => L.inside(bb) && L.rects.every(r => r[4] === K_RESERVE || bb.x0 >= r[2] || bb.x1 <= r[0] || bb.z0 >= r[3] || bb.z1 <= r[1]);   // (the floor is walked on: it may cover the way in, only pieces and walls are in its way)
+      if (!oct(x, z, R + 0.35).every(clear)) continue;
+      if (!put('dj_stage', x, z, 0)) continue;
+      put(ring, x, z, 0);
+      floor = { x, z, R };
+      for (const a of [0.75, 1.25].map(k => k * P)) put('go_go_podium', x + Math.sin(a) * (R - 0.75), z + Math.cos(a) * (R - 0.75), 0);
+      for (const bb of oct(x, z, R)) L.reserve(bb.x0, bb.z0, bb.x1, bb.z1);   // (the dance floor kept clear)
+      return true;
+    }
+    return false;
+  };
+  if (W >= 17 && Dp >= 16) tryRing('dance_ring');
+  if (!floor && W >= 10.5 && Dp >= 11) tryRing('dance_ring_s');
+  if (!floor) {   // a small floor: the stage against a wall (the back, else a side), the dance floor before it
+    const sp = spans.filter(([a, b]) => b - a >= 5.2).sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+    const tries = [...sp.map(([a, b]) => ['z', iz0, +1, (a + b) / 2]), ['x', ix0, +1, iz0 + Dp * 0.55], ['x', ix1, -1, iz0 + Dp * 0.55]];
+    for (const [axis, line, inn, t] of tries) {
+      if (!keepAll(L, () => {
+        if (!L.against('dj_stage', axis, line, inn, t)) return false;
+        const d = line + inn * (2.83 + 2.3), x = axis === 'z' ? t : d, z = axis === 'z' ? d : t;
+        if (!put('dance_floor', x, z, 0)) return false;
+        L.reserve(x - 2.25, z - 2.25, x + 2.25, z + 2.25);
+        floor = { x, z, R: 2.4, small: true };
+        return true;
+      })) continue;
+      break;
+    }
+  }
+  if (floor && !floor.small) {
+    const { x, z, R } = floor;
+    for (let k = 0; k < 4; k++) { const a = (k + 0.5) / 4 * 2 * P, d = R + 0.95; L.tryAdd('speaker_stack', [[x + Math.sin(a) * d, z + Math.cos(a) * d, a + P]]); }
+    for (let k = 0; k < 4; k++) { const a = k / 4 * 2 * P, d = R + 0.8; L.tryAdd('light_tower', [[x + Math.sin(a) * d, z + Math.cos(a) * d, a + P]]); }
+    const rh = R + 2.3, n = Math.max(6, Math.round(2 * P * rh / 3.4));
+    for (let k = 0; k < n; k++) { const a = (k + 0.5) / n * 2 * P; L.tryAdd('highboy', [[x + Math.sin(a) * rh, z + Math.cos(a) * rh, a]], { c: tint(SEAT, 'hb', k) }, 0.35); }
+  }
+
+  // ---- the ways through: from the way in, the elevator and the bar to the dance floor
+  const aisle = (ax, az, bx, bz, w = 1.6) => { L.reserve(Math.min(ax, bx) - w / 2, az - w / 2, Math.max(ax, bx) + w / 2, az + w / 2); L.reserve(bx - w / 2, Math.min(az, bz) - w / 2, bx + w / 2, Math.max(az, bz) + w / 2); };
+  if (floor) {
+    const to = (px, pz) => { const dx = px - floor.x, dz = pz - floor.z, d = Math.hypot(dx, dz) || 1; return [floor.x + dx / d * floor.R * 0.8, floor.z + dz / d * floor.R * 0.8]; };
+    if (ground && dr) { const [bx, bz] = to(dr.x, iz1); aisle(dr.x, iz1 - 0.5, bx, bz); }
+    if (core && CATALOG[core.t].doors) { const cs = Math.cos(core.r), sn = Math.sin(core.r), [dx, dz] = CATALOG[core.t].doors[0], ex = core.x + dx * cs + (dz + 1.2) * sn, ez = core.z - dx * sn + (dz + 1.2) * cs, [bx, bz] = to(ex, ez); aisle(ex, ez, bx, bz); }
+    if (bar) { const [bx, bz] = to(bar.x, bar.z); aisle(bar.x, bar.z + 0.6, bx, bz, 1.4); }
+  }
+
+  // ---- VIP along the side walls: booths for big parties on velvet carpet between ropes, neon VIP over them
+  const sideRun = (side) => {
+    const wx = side < 0 ? ix0 : ix1, inn = -side;
+    const z0 = iz0 + (bar && !bar.wall ? 2.9 : 0.6), z1 = iz1 - (ground ? 1.2 : 0.6);
+    let z = z0 + 0.2, n = 0;
+    while (z + 4.3 <= z1 && n < 12) {
+      if (cbb && wx + inn * 2.2 > Math.min(cbb.x0, cbb.x1) - 1 && wx + inn * 2.2 < Math.max(cbb.x0, cbb.x1) + 1 && z + 4.3 > cbb.z0 - 1 && z < cbb.z1 + 2) { z += 1; continue; }
+      const m = z + 2.15;
+      if (keepAll(L, () => {
+        if (!L.against('vip_booth', 'x', wx, inn, m, { c: vip })) return false;
+        for (const d of [-2.15, 2.15]) L.add('velvet_rope', wx + inn * 1.15, m + d, H, { c: rope }, 0.02);
+        if (n % 2 === 0) L.against('neon_vip', 'x', wx, inn, m, null, 0.01);
+        else L.against('neon_palm', 'x', wx, inn, m, null, 0.01);
+        return true;
+      })) { L.zone(Math.min(wx, wx + inn * 2.6), m - 2.1, Math.max(wx, wx + inn * 2.6), m + 2.1, 'vip_carpet'); z += 4.4; n++; }
+      else z += 0.8;
+    }
+  };
+  if (W >= 11) for (const side of [-1, 1]) sideRun(side);
+
+  // ---- the rest: party tables, lounges and tables where the room opens out, turned to the dance floor
+  const GROUPS = clubGroups({ D, tint, SEAT, vip });
+  const foci = floor ? [[floor.x, floor.z]] : [[cx0, (iz0 + iz1) / 2]];
+  fillGroups(L, D, GROUPS, { rx0: ix0, rz0: iz0, rx1: ix1, rz1: iz1, kinds: ['party', 'party', 'vipb', 'lounge', 'loves', 'four', 'high', 'two'], foci, tag: 'c', cap: 0.3 });   // (parties first: twice the chance)
+
+  // ---- light and life on the walls and in the corners: lasers high on the side walls, royal palms, the way in
+  for (const side of [-1, 1]) L.against('laser_bar', 'x', side < 0 ? ix0 : ix1, -side, iz0 + Dp * (side < 0 ? 0.42 : 0.58), null, 0.01);
+  for (const [x, z] of [[ix0 + 0.6, iz1 - 0.6], [ix1 - 0.6, iz1 - 0.6], [ix0 + 0.6, iz0 + 0.6], [ix1 - 0.6, iz0 + 0.6]]) L.tryAdd('royal_palm', [[x, z, D('rp', x).float(0, 6.28)]]);
+  if (ground && dr) {
+    for (const s of [-1, 1]) { L.tryAdd('royal_palm', [[dr.x + s * (dr.w / 2 + 0.9), iz1 - 0.6]]); L.tryAdd('velvet_rope', [[dr.x + s * (dr.w / 2 + 0.25), iz1 - 1.6, H]], { c: rope }, 0.02); }
+  }
+  // warm light along the foot of the outer walls, pink
+  for (const side of [-1, 1]) for (let z = iz0 + 1.3; z <= iz1 - 1.0; z += 2.2) L.add('cove_light', (side < 0 ? ix0 : ix1) - side * 0.12, z, H, { c: '#ff4fa3' }, 0);
+}
+/** The club's groups (as the lounge's: +z toward the dance floor). */
+function clubGroups({ D, tint, SEAT, vip }) {
+  const RUG = ['#2a2a30', '#3b1d2c', '#1f2c4a', '#e8dcc6'], WOODS = ['#1f1f24', '#c9a227', '#f3f0ea'];
+  const G = loungeGroups({ D, tint, VELVET: SEAT, BOUCLE: ['#f3f0ea', '#e8dcc6', '#f6e7ea'], RUG, WOODS, LEATHER: SEAT, accent: '#c9a227' });
+  return {
+    lounge: G.lounge, loves: G.loves, four: G.four, two: G.two, high: G.high,
+    party: { need: 2.0, round: true, make: (q, k) => !!q('party_table', 0, 0, D('pa', k).pick([0, Math.PI / 2]), tint(SEAT, 'pt', k), 0.15) },
+    vipb: { need: 2.15, make: (q, k) => { if (!q('vip_booth', 0, 0.5, 0, vip)) return false; q('royal_palm', -2.2, -1.2, 0); q('velvet_rope', 2.3, 0.2, Math.PI / 2, '#c2185b'); return true; } },
+  };
+}
+/** A night club: a dance floor in the middle (two on a wide floor) with the DJ's counter behind it, a long bar on the
+ *  back wall, booths (a sofa and a low table) along the side walls, tables to stand at round the floor; dark tile. */
+export function clubFloor(L, o = {}) {
+  const base = L.rng.int(1, 2 ** 30), D = (...k) => dice(base, ...k);
+  const { ix0, ix1, iz0, iz1 } = L, dr = L.b.door, ground = !!o.ground, W = ix1 - ix0, Dp = iz1 - iz0;
+  L.name = o.name || 'Night Club'; L.venue = 'club';
+  L.zone(ix0, iz0, ix1, iz1, 'tile_dark');
+  placeCore(L);
+  if (ground) reserveEntrance(L, 3.4);
+  const core = L.b.core, cx = (ix0 + ix1) / 2;
+  // the bar along the back wall, clear of the elevator
+  L.with(D('bar'), () => {
+    const cs = coreSpan(L, 0.8);
+    for (const x of [cx - 4.5, cx - 1.5, cx + 1.5, cx + 4.5, cx - 7.5, cx + 7.5]) {
+      if (cs && x + 1.6 > cs.x0 && x - 1.6 < cs.x1) continue;
+      L.add('bar_counter', x, iz0 + 1.3, 0);
+    }
+    L.tryAdd('fridge', [[ix0 + 0.45, iz0 + 0.45], [ix1 - 0.45, iz0 + 0.45]]);
+  });
+  // the dance floor in the middle, the DJ behind it
+  const mz = iz0 + Math.max(5.2, Dp * 0.5), wide = W >= 22;
+  L.with(D('floor'), () => {
+    L.zone(cx - (wide ? 4.6 : 2.4), mz - 2.4, cx + (wide ? 4.6 : 2.4), mz + 2.4, 'marble');
+    const hw = wide ? 4.4 : 2.2;
+    if (padFree(L, cx, mz, hw - 0.01) || padFree(L, cx, mz, 2.2)) {
+      if (wide && padFree(L, cx, mz, hw - 0.01)) { L.add('dance_floor', cx - 2.2, mz, 0); L.add('dance_floor', cx + 2.2, mz, 0); L.reserve(cx - 4.4, mz - 2.2, cx + 4.4, mz + 2.2); }
+      else { L.add('dance_floor', cx, mz, 0); L.reserve(cx - 2.2, mz - 2.2, cx + 2.2, mz + 2.2); }
+    }
+    L.tryAdd('counter', [[cx, mz - 2.75, 0]]);
+    for (const [dx, dz] of [[-3.3, -1.6], [3.3, -1.6], [-3.3, 1.6], [3.3, 1.6]]) L.tryAdd('cafe_table', [[cx + dx * (wide ? 1.7 : 1), mz + dz, 0]], null, 0.1);
+  });
+  // booths along the side walls
+  for (const side of [-1, 1]) {
+    const wx = side < 0 ? ix0 : ix1;
+    for (let z = iz0 + 3.6, n = 0; z <= iz1 - 2.0 && n < 6; z += 3.0, n++) L.with(D('booth', side, n), () => {
+      if (L.against('sofa', 'x', wx, -side, z)) L.add('coffee_table', wx - side * 1.45, z, H);
+    });
+  }
+  L.tryAdd('floor_lamp', [[ix0 + 0.35, iz1 - 0.35], [ix1 - 0.35, iz1 - 0.35]]);
+  if (ground) for (const x of [dr.x - 1.9, dr.x + 1.9]) L.add('plant_tall', x, iz1 - 0.4);
+}
+/** A conference floor: meeting rooms behind glass along the back wall (each a table, a screen and a whiteboard), a
+ *  boardroom in the middle where the floor is deep enough, a reception with a waiting corner, a coffee point. */
+export function conferenceFloor(L, o = {}) {
+  const base = L.rng.int(1, 2 ** 30), D = (...k) => dice(base, ...k);
+  const { ix0, ix1, iz0, iz1 } = L, dr = L.b.door, ground = !!o.ground, W = ix1 - ix0, Dp = iz1 - iz0;
+  L.name = o.name || 'Conference'; L.venue = null;
+  L.zone(ix0, iz0, ix1, iz1, D('finish').pick(['carpet', 'carpet_blue', 'carpet_warm']));
+  placeCore(L);
+  if (ground) reserveEntrance(L, 3.4);
+  const core = L.b.core, cx = core ? core.x : (ix0 + ix1) / 2, coreHalf = core ? CATALOG[core.t].rect[2] + 0.1 : -0.5;
+  // meeting rooms along the back, out from the elevator
+  const bandZ = iz0 + (Dp >= 14 ? 5.2 : Math.max(3.8, Dp * 0.38));
+  if (bandZ - iz0 >= 3.8) for (const side of [-1, 1]) {
+    let a = side < 0 ? cx - coreHalf - 0.5 : cx + coreHalf + 0.5;
+    const end = side < 0 ? ix0 : ix1;
+    if (core) L.wall(a, iz0, a, bandZ, 0);
+    for (let k = 0; k < 24; k++) {
+      const left = Math.abs(end - a); if (left < 3.2) break;
+      const w = left - 6.2 < 3.2 ? left : 6.2, b = a + side * w, x0 = Math.min(a, b), x1 = Math.max(a, b);
+      if (w < left) L.wall(b, iz0, b, bandZ, 1);
+      L.with(D('room', side, k), () => backRoom(L, 'meeting', x0, iz0, x1, bandZ, side, o));
+      a = b; if (w === left) break;
+    }
+  }
+  // the boardroom in the middle (glass, a door on each long side), two tables end to end and a screen
+  const bz0 = bandZ + 2.0, bz1 = Math.min(iz1 - (ground ? 4.2 : 2.4), bz0 + 6.2), bw = Math.min(12.4, W - 8);
+  if (bz1 - bz0 >= 5 && bw >= 7) L.with(D('board'), () => {
+    const x0 = cx - bw / 2, x1 = cx + bw / 2;
+    L.zone(x0, bz0, x1, bz1, 'wood_dark');
+    L.wallGaps(x0, bz0, x1, bz0, [[bw / 2, 1.2]], 1); L.wallGaps(x0, bz1, x1, bz1, [[bw / 2, 1.2]], 1);
+    L.wall(x0, bz0, x0, bz1, 1); L.wall(x1, bz0, x1, bz1, 1);
+    const mz = (bz0 + bz1) / 2;
+    if (bw >= 10) { L.add('meeting_table', cx - 1.95, mz, 0); L.add('meeting_table', cx + 1.95, mz, 0); } else L.add('meeting_table', cx, mz, 0);
+    L.against('tv_wall', 'x', x0 + IW, +1, mz); L.against('whiteboard', 'x', x1 - IW, -1, mz);
+    L.tryAdd('plant_tall', [[x0 + 0.45, bz0 + 0.5], [x1 - 0.45, bz1 - 0.5]]);
+  });
+  // a reception and a waiting corner at the front, a coffee point on a side wall
+  L.with(D('reception'), () => {
+    const rx = ground ? dr.x + (D('rside').chance(0.5) ? 3.6 : -3.6) : cx, rz = iz1 - (ground ? 2.0 : 1.6);
+    L.tryAdd('reception', [[rx, rz, P], [cx + 4, rz, P], [cx - 4, rz, P]]);
+    L.tryAdd('sofa', [[ix0 + 0.5, iz1 - 2.6, H], [ix1 - 0.5, iz1 - 2.6, -H]]);
+    L.tryAdd('coffee_table', [[ix0 + 1.5, iz1 - 2.6, H], [ix1 - 1.5, iz1 - 2.6, H]]);
+  });
+  L.with(D('coffee'), () => {
+    const side = D('cside').chance(0.5) ? -1 : 1, wx = side < 0 ? ix0 : ix1, z = bandZ + 1.8;
+    L.against('counter', 'x', wx, -side, z); L.against('coffee_machine', 'x', wx, -side, z + 1.3); L.against('water_cooler', 'x', wx, -side, z + 2.2);
+  });
+  for (const [x, z] of [[ix0 + 0.4, iz1 - 0.4], [ix1 - 0.4, iz1 - 0.4]]) L.tryAdd('plant', [[x, z]]);
+}
+/** Floor f laid out as a theme (shared/floor-themes.js); ground: the street floor (the entrance kept clear). */
+export function themeFloor(L, theme, o = {}) {
+  const ground = !!o.ground;
+  if (ground && !['arcade', 'club', 'conference', 'cafe', 'restaurant', 'shop', 'gym', 'lounge'].includes(theme)) reserveEntrance(L, 3.2);
+  switch (theme) {
+    case 'arcade': return arcadeFloor(L, { ground });
+    case 'club': return clubThemeFloor(L, { ground });
+    case 'conference': return conferenceFloor(L, { ground });
+    case 'lounge': return loungeThemeFloor(L, { ground });
+    case 'cafe': return cafeFloor(L, { ground });
+    case 'restaurant': return restaurantFloor(L, { ground });
+    case 'shop': return shopFloor(L, { ground });
+    case 'gym': return gymFloor(L, { ground });
+    case 'office': officeFloor(L, { fancy: true }); L.name = 'Open Office'; return null;
+    default: return null;
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -882,6 +1684,7 @@ export function parkLevel(L, o = {}) {
 export function buildLevel(b, f, rng, o = {}) {
   const L = new LevelBuilder(b, rng, b.type === 'park');
   const ground = f === 0;
+  if (o.theme && b.type !== 'park') { themeFloor(L, o.theme, { ground }); return L.result(); }   // a themed floor (Floor Themes)
   switch (b.type) {
     case 'park': parkLevel(L, { name: b.name, dance: o.dance }); break;
     case 'office':

@@ -22,9 +22,9 @@ import { subj, subjKey } from './economy.js';
 import { bp, incomeTax, bracketOf } from './policy.js';
 import landCfg from '../../shared/world-config/land-value.json' with { type: 'json' };
 
-const VENUES = new Set(['cafe', 'restaurant', 'shop', 'gym']);
+const VENUES = new Set(['cafe', 'restaurant', 'shop', 'gym', 'arcade', 'lounge_bar', 'club']);
 /** What a visit used to cost at most (the menus before shared/food.js): who can afford to go. */
-const VISIT_COST = { cafe: 900, restaurant: 1600 };
+const VISIT_COST = { cafe: 900, restaurant: 1600, arcade: 900, lounge_bar: 1600, club: 2800 };
 const CHUNK = 4000;
 const RECEIPTS = 8;   // purchases remembered per resident (memory only: what the day's settlement then charges)
 const fmt = n => vc(n).replace(' VC', '');
@@ -226,6 +226,11 @@ export class Households {
   /** What a resident buys on this visit (deterministic per resident and time, so replays agree): what the simulation had
    *  them order (act.order: shown on their table), else the old fixed baskets (shops, gyms). */
   basket(pid, t, venue, act) {
+    // a night out (arcades, lounges, clubs): tokens to play; the drinks they had; at a club the cover, and now and then a
+    // table's bottle service in a VIP booth
+    if (venue === 'arcade') return ['game_tokens', ...(r01(pid, t, 'n') < 0.3 ? ['game_tokens'] : []), ...(Array.isArray(act.order) ? act.order : [])];
+    if (venue === 'lounge_bar') return Array.isArray(act.order) && act.order.length ? act.order : ['red_wine'];
+    if (venue === 'club') return ['cover', ...(Array.isArray(act.order) && act.order.length ? act.order : ['beer']), ...(act.vip && r01(pid, t, 'v') < 0.25 ? ['bottle_service'] : [])];
     if (Array.isArray(act.order)) return act.order;
     const u = act.use;
     if (venue === 'cafe') {
@@ -324,6 +329,35 @@ export class Households {
   /** Whether anything happened on day d (residents acted, someone bought): a day the world ran. */
   _lived(d) { const D = this.days.get(d); return !!D && (D.alive || D.res.size > 0 || D.biz.size > 0); }
   /** Settles economic day `day` (one database transaction). Returns its summary. */
+  /**
+   * AI agents' pay for a settled day (2026-10-23, the product owner: wages "from the business's own wallet, that way users
+   * are kinda forced or atleast encouraged to make profitable businesses"; "unpaid for days" the agent quits): an agent its
+   * employer paid less than half of what it earned has an unpaid day (p.unpaid, by employer); a day paid resets it.
+   * After policy agents.quitAfterDays in a row it quits — its owner told, and it keeps away from that employer for
+   * agents.avoidDays (the server: d.agentQuit, server/sim/placement.js) — but only work it chose itself: on a post or at
+   * work its owner gave it, it stays and tells its owner it isn't being paid, then again every agents.quitAfterDays
+   * days while it lasts (d.agentUnpaid; 2026-10-23: "if an agent is on an assigned post they cannot quit ... if the agent
+   * gets assigned by the owner to a job ... the agent can send the message about them not having money").
+   */
+  agentPay(list) {
+    const pol = this.e.policy(), after = pol.agents?.quitAfterDays ?? 3, avoid = pol.agents?.avoidDays ?? 7;
+    const touched = [], quits = [], notes = [];
+    for (const x of list) {
+      const p = x.p, short = x.paid * 2 < x.gross;
+      if (!short) { if (p.unpaid) { delete p.unpaid; touched.push(p); } continue; }
+      const u = p.unpaid?.biz === x.biz.id ? p.unpaid : { biz: x.biz.id, b: x.biz.b, name: x.biz.name, days: 0 };
+      u.days++; p.unpaid = u; touched.push(p);
+      if (u.days < after) continue;
+      if (p.post || p.job?.pin) { if ((u.days - after) % after === 0) notes.push({ p, biz: x.biz, days: u.days, post: !!p.post }); }   // (its owner's choice: it stays)
+      else quits.push({ p, biz: x.biz, days: u.days, avoid });
+    }
+    try {
+      if (touched.length) this.e.d.peopleChanged?.(touched);
+      for (const q of quits) { delete q.p.unpaid; this.e.d.agentQuit?.(q); }
+      for (const n of notes) this.e.d.agentUnpaid?.(n);
+    } catch (e) { this.e.log.warn?.('[economy] agents\' pay:', e.message); }
+    return quits.length;
+  }
   settle(day) {
     if (this.q.dayRow.get(this.w, day)?.status === 'done') return { day, already: true };
     this.settling = true;
@@ -354,6 +388,7 @@ export class Households {
       const ms = Math.round(performance.now() - t0);
       this.e.log(`[economy] day ${day} settled: ${plan.wallets.size} wallets, ${fmt(plan.summary.volume)} VC moved (${ms} ms)`);
       this.e.parts.realty?.endLeasesDue();   // tenants past their grace move out (the world's edit, after the commit)
+      this.agentPay(plan.agentPay || []);
       this.e.bump();
       return { day, ms, summary: plan.summary };
     } finally { this.settling = false; }
@@ -421,7 +456,7 @@ export class Households {
     const hh = pol.households, dailyIncome = p => {
       const j = p.job || {};
       if (j.kind === 'free') return pol.welfare[pol.welfareOf[j.title] || 'allowance'] || 0;
-      const role = j.kind === 'office' ? 'office' : j.kind === 'vip' ? 'vip' : j.kind === 'remote' ? null : pol.staffRole[j.venue] || 'cashier';
+      const role = j.kind === 'office' ? 'office' : j.kind === 'vip' ? 'vip' : j.kind === 'remote' ? null : j.role || pol.staffRole[j.venue] || 'cashier';
       return Math.floor((role ? pol.wages[role] || pol.minWage : pol.exports.remotePerHour) * Math.max(0, Math.min(12, (j.end || 0) - (j.start || 0))));
     };
     if (hh.excessSpendPct > 0) for (const p of people) {
@@ -449,7 +484,7 @@ export class Households {
       if (j.kind === 'office' || j.kind === 'vip') { const c = bz.companyOf(j.b); return c ? { biz: c, role: j.kind === 'vip' ? 'vip' : 'office' } : null; }
       if (j.kind === 'staff') {
         if (j.venue === 'lobby') { const c = bz.companyOf(j.b); return c ? { biz: c, role: 'receptionist' } : null; }
-        const v = bz.at(j.b, j.f); return v ? { biz: v, role: pol.staffRole[j.venue] || 'cashier' } : null;
+        const v = bz.at(j.b, j.f); return v ? { biz: v, role: j.role || pol.staffRole[j.venue] || 'cashier' } : null;
       }
       return null;
     };
@@ -513,8 +548,10 @@ export class Households {
       ratio.set(bid, total > 0 ? Math.min(1, can / total) : 1);
     }
     const income = new Map();   // wallet → taxable income today
+    const agentPay = [];        // an AI agent's pay today: whether its employer could pay it (agentPay below)
     for (const x of work) {
       const bw = bz.wallet(x.biz).id, paid = Math.floor(x.gross * ratio.get(x.biz.id)), owed = x.gross - paid;
+      if (x.p.vip && x.p.agentId && x.gross > 0) agentPay.push({ p: x.p, biz: x.biz, gross: x.gross, paid });
       if (paid > 0) { add(bw, 'wages', -paid); add(x.w.id, 'wages', paid); book(x.biz.id).wages += paid; sum.wages += paid; income.set(x.w.id, (income.get(x.w.id) || 0) + paid); }
       if (owed > 0) { debts.push({ id: rid(), debtor: bw, creditor: x.w.id, kind: 'wages', amount: owed, ref: `day:${day}` }); book(x.biz.id).owed += owed; sum.owedWages += owed; }
     }
@@ -632,7 +669,7 @@ export class Households {
     for (const [id, x] of wallets) { const ww = L.wallet(id); if (ww?.owner_kind === 'system') continue; if (!ww) continue; sum.perKind[ww.owner_kind] = (sum.perKind[ww.owner_kind] || 0) + x.amount; }
     sum.treasury = (L.wallet(T).balance) + (wallets.get(T)?.amount || 0);
     const paid = new Map([...D.biz].filter(([, Bx]) => Bx.px && Object.keys(Bx.px).length).map(([id, Bx]) => [id, Bx.px]));
-    return { day, wallets, books, debts, debtPays, summary: sum, cityLines: city.lines, rentNights, leases, customersOf, prices: paid };
+    return { day, wallets, books, debts, debtPays, summary: sum, cityLines: city.lines, rentNights, leases, customersOf, prices: paid, agentPay };
   }
   /** The nearest shop business to a building (groceries for meals at home), cached per building. */
   _shopFinder(W) {

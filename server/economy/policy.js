@@ -31,10 +31,37 @@ const MENUS = {
   gym: [
     { id: 'session', label: 'Gym session', icon: '🏋️', price: 600, inputs: { fitness: 1 } },
   ],
+  // the themed floors the city goes out to (2026-10-23: "some go there spending money"): drinks are shared/food.js items,
+  // so they show in the hand; tokens, the cover and the bottle are the place's own
+  arcade: [
+    { id: 'game_tokens', label: 'Game tokens', icon: '🪙', price: 500, inputs: {} },
+    { id: 'cola', label: 'Cola', icon: '🥤', price: 300, inputs: { drinks: 1 } },
+    { id: 'lemon_soda', label: 'Lemon-lime soda', icon: '🥤', price: 300, inputs: { drinks: 1 } },
+  ],
+  lounge_bar: [
+    { id: 'martini', label: 'Martini', icon: '🍸', price: 1000, inputs: { drinks: 1 } },
+    { id: 'old_fashioned', label: 'Old fashioned', icon: '🍸', price: 1000, inputs: { drinks: 1 } },
+    { id: 'gin_tonic', label: 'Gin & tonic', icon: '🍸', price: 850, inputs: { drinks: 1 } },
+    { id: 'aperol', label: 'Aperol spritz', icon: '🍸', price: 900, inputs: { drinks: 1 } },
+    { id: 'red_wine', label: 'Red wine', icon: '🍷', price: 750, inputs: { drinks: 1 } },
+    { id: 'white_wine', label: 'White wine', icon: '🍷', price: 750, inputs: { drinks: 1 } },
+    { id: 'champagne', label: 'Champagne', icon: '🍷', price: 1100, inputs: { drinks: 1 } },
+    { id: 'whiskey', label: 'Whiskey', icon: '🍸', price: 900, inputs: { drinks: 1 } },
+  ],
+  club: [
+    { id: 'cover', label: 'Cover charge', icon: '🎟️', price: 1500, inputs: {} },
+    { id: 'margarita', label: 'Margarita', icon: '🍸', price: 900, inputs: { drinks: 1 } },
+    { id: 'mojito', label: 'Mojito', icon: '🍸', price: 900, inputs: { drinks: 1 } },
+    { id: 'cosmopolitan', label: 'Cosmopolitan', icon: '🍸', price: 950, inputs: { drinks: 1 } },
+    { id: 'pina_colada', label: 'Piña colada', icon: '🍸', price: 950, inputs: { drinks: 1 } },
+    { id: 'champagne', label: 'Champagne', icon: '🍷', price: 1100, inputs: { drinks: 1 } },
+    { id: 'beer', label: 'Pint of lager', icon: '🍺', price: 600, inputs: { drinks: 1 } },
+    { id: 'bottle_service', label: 'Bottle service', icon: '🍾', price: 15000, inputs: { drinks: 6 } },
+  ],
 };
 /** Who works where, by the residents' job (server/sim/population.js): the role and its wage per world hour. */
-const WAGES = { office: 1300, vip: 1500, barista: 1100, chef: 1400, server: 1000, cashier: 1000, trainer: 1200, receptionist: 1100 };
-const STAFF_ROLE = { cafe: 'barista', restaurant: 'chef', shop: 'cashier', gym: 'trainer', lobby: 'receptionist' };
+const WAGES = { office: 1300, vip: 1500, barista: 1100, chef: 1400, server: 1000, cashier: 1000, trainer: 1200, receptionist: 1100, bartender: 1150, dj: 1700, musician: 1500, dancer: 1300, attendant: 1000 };
+const STAFF_ROLE = { cafe: 'barista', restaurant: 'chef', shop: 'cashier', gym: 'trainer', lobby: 'receptionist', arcade: 'attendant', lounge_bar: 'bartender', club: 'bartender' };
 
 export const POLICY_DEFAULTS = deepFreeze({
   version: 1,
@@ -66,7 +93,7 @@ export const POLICY_DEFAULTS = deepFreeze({
   business: { workingCapitalDays: 5, cityDividend: true },
   fees: { worldFeeBp: 1000 },
   limits: { reauthAbove: 100000, transferMax: 10000000, transfersPerMin: 20, openRequests: 50, requestDays: 7, newAccountDays: 3, newAccountSendPerDay: 10000 },
-  agents: { dailyCap: 10000, approveAbove: 5000, scopes: ['work', 'buy'], actionsPerMin: 30 },
+  agents: { dailyCap: 10000, approveAbove: 5000, scopes: ['work', 'buy'], actionsPerMin: 30, quitAfterDays: 3, avoidDays: 7 },   // (quitAfterDays: days its employer could not pay before an agent quits; avoidDays: how long it then keeps away: households.js)
   ordinances: {
     housingAssist: { on: true, label: 'Housing assistance', icon: '🏠', desc: 'The city pays the rent residents can\'t, up to half of it.', costPct: 50 },
     freeMetro: { on: false, label: 'Free metro', icon: '🚇', desc: 'No fares on the metro; the city pays the operator each day.', cost: 30000 },
@@ -123,7 +150,7 @@ const SCALAR = {
   'business.workingCapitalDays': [0, 60],
   'fees.worldFeeBp': [0, 5000],
   'limits.reauthAbove': VC, 'limits.transferMax': VC, 'limits.transfersPerMin': [1, 600], 'limits.openRequests': [1, 1000], 'limits.requestDays': [1, 90], 'limits.newAccountDays': [0, 365], 'limits.newAccountSendPerDay': VC,
-  'agents.dailyCap': VC, 'agents.approveAbove': VC, 'agents.actionsPerMin': [1, 600],
+  'agents.dailyCap': VC, 'agents.approveAbove': VC, 'agents.actionsPerMin': [1, 600], 'agents.quitAfterDays': [1, 60], 'agents.avoidDays': [0, 365],
   'play.base': [0, 1e7], 'play.repeatPct': [0, 100], 'play.firstStarPct': [0, 1000], 'play.recordPct': [0, 1000], 'play.dailyCap': VC,
   'fishMarket.pct': [0, 300], 'fishMarket.dailyCap': VC,
   'loans.cityRateBp': [0, 5000], 'loans.cityMaxDebt': VC, 'loans.termDays': [1, 3650],

@@ -59,7 +59,7 @@ export class Harbour {
   deckOf(b, dk) {
     const helm = { at: BOATS[b.type].helm, yaw: 0, clip: 0 };
     if (!Array.isArray(dk) || dk.length < 5) return helm;
-    const [x, y, z, yaw] = dk.slice(0, 4).map(num), clip = (num(dk[4]) | 0) & 63;
+    const [x, y, z, yaw] = dk.slice(0, 4).map(num), clip = (num(dk[4]) | 0) & 127;
     if (![x, y, z, yaw].every(Number.isFinite)) return helm;
     const fl = deckFloor(b.type, x, z);
     if (fl == null || Math.abs(fl - y) > 0.06) return { ...helm, clip };

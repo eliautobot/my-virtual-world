@@ -377,7 +377,8 @@ const YOGA = (() => {
 
 export const CLIP_NAMES = [...ANIMS, 'walk_hold', 'idle_hold', 'sit_read', 'stand_work', 'swim_idle', 'swim', 'swim_under', 'walk_phone', 'phone_look', 'sit_drink',
   'eat_hands', 'eat_hand', 'eat_knife', 'eat_spoon', 'eat_lap', 'eat_stand', 'eat_stand_hands', 'prep',
-  'helm', 'fish_idle', 'fish_cast', 'fish_reel', 'fish_fight', 'fish_net', 'fish_show'];   // (a player's clip goes to the server in 6 bits: 64 at most)
+  'helm', 'fish_idle', 'fish_cast', 'fish_reel', 'fish_fight', 'fish_net', 'fish_show',
+  'bar_idle'];   // (a player's clip goes to the server in 7 bits: 128 at most; bar_idle: a bartender with no order, chosen by render/agents.js)
 export const CLIP = Object.fromEntries(CLIP_NAMES.map((n, i) => [n, i]));
 export const NCLIP = CLIP_NAMES.length;
 export const CLIP_DUR = new Float32Array(NCLIP);
@@ -389,7 +390,7 @@ for (let c = 0; c < NCLIP; c++) {
 }
 // Character lab: clip timings come from the baked Tripo clips (charClips.js), not the procedural definitions above.
 applyTripoTiming(CLIP_NAMES, CLIP_DUR, CLIP_STRIDE);
-export const SEATED_CLIPS = new Set(['sit', 'sit_type', 'sit_talk', 'sit_eat', 'sit_relax', 'sit_high', 'sit_play', 'sit_phone', 'sit_read', 'sit_drink',
+export const SEATED_CLIPS = new Set(['sit', 'sit_type', 'sit_talk', 'sit_eat', 'sit_relax', 'sit_high', 'sit_play', 'sit_phone', 'sit_read', 'sit_drink', 'piano', 'drive',
   'eat_hands', 'eat_hand', 'eat_knife', 'eat_spoon', 'eat_lap'].map(n => CLIP[n]));
 
 /** Evaluate clip c at phase u into pose P (reset first). */
