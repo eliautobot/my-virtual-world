@@ -306,11 +306,12 @@ test('batch 4: pool against the computer is won by aiming well, its balls stay o
   assert.equal(tot(Array(12).fill(10)), 300, 'a perfect game');
   assert.equal(tot(Array(21).fill(5)), 150, 'all spares, fives');
   assert.equal(tot([10, 7, 3, 9, 0, 10, 0, 8, 8, 2, 0, 6, 10, 10, 10, 8, 1]), 167, 'a mixed game');
-  // … the pins: into the pocket at an angle strikes most, straight at the head pin less, off the middle never
+  // … the pins: into the pocket at an angle strikes most, straight at the head pin less, off the middle never (since
+  // 2026-10-26 a strike is rarer: harder pins, a skid on a hard throw; the sway is the next test's)
   const shot = (seed, x0, tx, pw) => { const s = BOWLG.init(seed); s.x0 = x0; s.tx = tx; s.chg = 5; s.pw = pw; s.prev = BTN.A; BOWLG.step(s, inputBits(inputValue(0))); let t = 0; while (s.ph === 'roll' && t < 1000) { s.ev.length = 0; BOWLG.step(s, inputBits(inputValue(0))); t++; } return s.rolls[0]; };
   const strikes = (x0, tx, pw) => { let n = 0; for (let seed = 1; seed <= 30; seed++) if (shot(seed, x0, tx + ((seed % 7) - 3) * 0.004, pw) === 10) n++; return n; };
   const pocket = strikes(0.18, 0.035, 0.75), head = strikes(0, 0, 0.55), off = strikes(0, 0.09, 0.55);
-  assert.ok(pocket >= 12 && pocket > head && head >= off && off <= 2, `strikes in 30: the pocket ${pocket}, the head pin ${head}, off the middle ${off}`);
+  assert.ok(pocket >= 5 && pocket > head && head >= off && off <= 2, `strikes in 30: the pocket ${pocket}, the head pin ${head}, off the middle ${off}`);
   for (let seed = 1; seed <= 6; seed++) assert.ok(shot(seed, 0, 0.42, 0.5) === 0, 'a ball rolled at the edge goes into the gutter');
   // the dance machine: steps right on time are PERFECT all through (a full combo); a little off, GREAT; none, the song stops
   const KEYS = [BTN.L, BTN.D, BTN.U, BTN.R];
@@ -324,4 +325,54 @@ test('batch 4: pool against the computer is won by aiming well, its balls stay o
   const g = dance(4, 4); assert.ok(g.judged.great === g.total && g.score < p.score, 'four steps late: GREAT each');
   const none = dance(4, null); assert.ok(none.failed && none.over && none.t < DANCEG.END / 4, 'standing still: the song stops early');
   assert.ok(p.total >= 120, `a full song of steps (${p.total})`);
+});
+
+test('bowling takes a steady hand (2026-10-26, "way too easy"): the aim sways about the mark while the power builds, more the harder; let go without watching it and a game scores as a casual bowler does', () => {
+  const s = BOWLG.init(7), px = BOWLG.toPx(0.03);
+  for (let i = 0; i < 10; i++) BOWLG.step(s, { b: 0, pd: true, px });
+  assert.ok(Math.abs(s.tx - s.aim) < 1e-9, 'no sway before the power builds');
+  let lo = 0, hi = 0;
+  for (let i = 0; i < 49; i++) { BOWLG.step(s, { b: BTN.A, pd: true, px }); const d = Math.abs(s.tx - s.aim); if (s.pw < 0.3) lo = Math.max(lo, d); if (s.pw > 0.8) hi = Math.max(hi, d); }
+  assert.ok(hi > 0.09 && lo < hi * 0.7, `the sway: ${lo.toFixed(3)} m at low power, ${hi.toFixed(3)} m at high`);
+  // whole games: aimed at the pocket (or the middle of what stands), let go at full power whenever the sway happens to be
+  let total = 0, strikes = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    const g = BOWLG.init(seed); let guard = 0;
+    while (!g.over && guard++ < 60) {
+      while (!g.over && g.ph !== 'aim') { g.ev.length = 0; BOWLG.step(g, { b: 0, pd: false, px: 128 }); }
+      if (g.over) break;
+      const up = g.pins.filter(p => p.up && !p.out), at = up.length && up.length < 10 ? up.reduce((a, p) => a + p.x, 0) / up.length : 0.03;
+      const hold = 44 + ((seed * 7 + guard * 3) % 11);
+      for (let i = 0; i < 20; i++) { g.ev.length = 0; BOWLG.step(g, { b: 0, pd: true, px: BOWLG.toPx(at) }); }
+      for (let i = 0; i < hold; i++) { g.ev.length = 0; BOWLG.step(g, { b: BTN.A, pd: true, px: BOWLG.toPx(at) }); }
+      g.ev.length = 0; BOWLG.step(g, { b: 0, pd: true, px: BOWLG.toPx(at) });
+    }
+    assert.ok(g.over, 'the game ends'); total += BOWLG.score(g); strikes += g.strikes;
+  }
+  assert.ok(total / 12 < 175 && strikes / 12 < 4, `a casual game: ${(total / 12).toFixed(0)} on average, ${(strikes / 12).toFixed(1)} strikes (was about 240 and 8)`);
+});
+
+test('a machine a player\'s game is open on is all theirs, wherever they are (2026-10-26: agents walked up and played at a pool table a player was playing)', { timeout: 120000 }, () => {
+  const seed = 'player-hold', world = generateWorld({ seed, population: 400 });
+  const B = world.buildings.filter(b => b && !b.gone && (b.type === 'office' || b.type === 'hq') && b.floors >= 3).sort((a, b) => b.w * b.d - a.w * a.d)[0];
+  const L = freshLevel(B, 1, 1, 'arcade'); world.levels.push(L); B.lv[1] = world.levels.length - 1;
+  const index = new WorldIndex(world), people = generatePopulation(world, index, { population: 400, roster: [] });
+  reassign(world, index, people, new RNG(`${seed}:boot`));
+  const sim = new Sim(world, people, { budgetMs: 1e9 });
+  let T = 0; sim.now = () => T; sim.clock = { simBase: 0, realBase: 0, rate: 1, dayBase: 5 * 3600, dayScale: 16 }; sim.start();
+  const brain = sim.brain, it = L.items.find(i => i.t === 'pool_table') || L.items.find(i => i.t === 'air_hockey');
+  assert.ok(it, 'the arcade has a pool table');
+  const e = index.entry(B.idx, 1, it.id), [a, c] = sim.agents.filter(x => x && x.plan && !x.p.retired && !x.p.post);
+  assert.ok(brain.reserve(a, B.idx, 1, it.id, 0, [T, T + 400]), 'one is at the table');
+  assert.ok(brain.reserve(c, B.idx, 1, it.id, e.slots.length - 1, [T + 20, T + 400]), 'another on the way to its other end');
+  const before = [a.plan, c.plan];
+  // the player is nowhere near it (looking in from above): their game holds it all the same
+  assert.equal(brain.holdPiece(B.idx, 1, it.id, 60000), 2, 'both sent elsewhere');
+  assert.ok(a.plan !== before[0] && c.plan !== before[1], 'their plans were cut');
+  for (let k = 0; k < e.slots.length; k++) assert.ok(brain.taken(B.idx, 1, it.id, k, -1), `spot ${k}: nobody else's`);
+  assert.equal(brain.reserve(c, B.idx, 1, it.id, 0, [T + 5, T + 100]), false, 'and nobody can book it');
+  brain.releasePiece(B.idx, 1, it.id);
+  assert.equal(brain.taken(B.idx, 1, it.id, 0, -1), false, 'let go: free again');
+  brain.holdPiece(B.idx, 1, it.id, -1);
+  assert.equal(brain.pieceHeld(B.idx, 1, it.id), false, 'a hold that ran out holds nothing');
 });

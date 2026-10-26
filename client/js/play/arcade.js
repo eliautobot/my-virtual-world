@@ -199,16 +199,16 @@ class Session {
     this.input = new ArcadeInput({ onPress: n => this.press(n) });
     this.input.onGamepad = () => this.syncPad();
   }
+  /** While it is open the cabinet is this player's (POST /api/arcade/hold, as a machine's game: client/js/play/machine-play.js). */
+  hold(on) {
+    if (!auth.can('play.use') || !Number.isInteger(this.e.b) || !Number.isInteger(this.e.id)) return;
+    post('/api/arcade/hold', { b: this.e.b, f: this.e.f ?? 0, id: this.e.id, on }).catch(() => {});
+  }
   open() {
-    const cam = app.cam, camera = app.stage.camera;
+    this.hold(true); this.holdT = setInterval(() => { if (cur === this) this.hold(true); }, 30000);
     this.M = screenMatrix(this.e);
-    const M = this.M, c = new THREE.Vector3().setFromMatrixPosition(M);
-    const n = new THREE.Vector3().setFromMatrixColumn(M, 2).normalize();
-    const w = ARCADE_SCREEN.w, h = ARCADE_SCREEN.h, tan = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2), aspect = innerWidth / Math.max(1, innerHeight);
-    const dist = Math.max(0.2, (h / 0.78) / (2 * tan), (w / 0.9) / (2 * tan * aspect));   // (clear of the top bar and the cabinet's own bar under it)
-    this.camPos = c.clone().addScaledVector(n, dist);
     try { document.exitPointerLock?.(); } catch { /* not locked */ }
-    cam.pinTo(this.camPos, c);
+    this.frameCamera();
     const pos = this.camPos;
     app.agents.hideFn = (i, x, y, z) => (x - pos.x) ** 2 + (z - pos.z) ** 2 < 0.9 * 0.9 && pos.y - y < 2.2 && pos.y - y > -0.5;
     this.root = html(`<div class="arc-root arc-cover${this.full ? ' full' : ''}" role="dialog" aria-label="Arcade cabinet">
@@ -226,13 +226,24 @@ class Session {
     this.input.attach();
     this.onVis = () => { if (document.hidden && this.state === 'playing') this.pause(); };
     document.addEventListener('visibilitychange', this.onVis);
-    this.onResize = () => { this.full = isFull(); this.root.classList.toggle('full', this.full); this.syncPad(); this.layoutFull(); };
+    this.onResize = () => { this.full = isFull(); this.root.classList.toggle('full', this.full); this.syncPad(); this.layoutFull(); if (!this.full && cur === this) this.frameCamera(); };
     addEventListener('resize', this.onResize);
     unlockSound();
     this.tick = this.tick.bind(this);
     requestAnimationFrame(this.tick);
     if (this.machine) this.startGame(this.machine);   // (a machine's own game, straight in)
     else { this.showLibrary(); this.state = 'library'; }
+  }
+  /** The camera square to the machine's screen, back far enough for all of it to fit the window (clear of the top bar and
+   *  the cabinet's own bar under it). The screen's own size: a cabinet's, or a machine's own screen (the racing seat's is
+   *  2.4 times a cabinet's: framed as a cabinet it ran off the window on a desktop, 2026-10-26); again when the window changes. */
+  frameCamera() {
+    const camera = app.stage.camera, M = this.M, c = new THREE.Vector3().setFromMatrixPosition(M);
+    const n = new THREE.Vector3().setFromMatrixColumn(M, 2).normalize();
+    const sc = SCREENS[this.e.t] || ARCADE_SCREEN, tan = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2), aspect = innerWidth / Math.max(1, innerHeight);
+    const dist = Math.max(0.2, (sc.h / 0.78) / (2 * tan), (sc.w / 0.9) / (2 * tan * aspect));
+    this.camPos = c.clone().addScaledVector(n, dist);
+    app.cam.pinTo(this.camPos, c);
   }
   /** Every display frame: the screen put on the glass (or laid out full), the buttons sent on, the menu's covers drawn. */
   tick(now) {
@@ -456,6 +467,7 @@ class Session {
   leave() {
     if (cur !== this) return;
     this.abandon(); this.endFrame();
+    clearInterval(this.holdT); this.hold(false);
     cur = null;
     this.input.detach();
     removeEventListener('resize', this.onResize);

@@ -95,7 +95,7 @@ const PLAYER_HOLD = 30, PLAYER_NEAR = 0.45;
 const planMark = P => ({ n: P.segs.length, t: P.t, x: P.x, y: P.y, z: P.z, yaw: P.yaw, ctx: P.ctx, seat: P.seat, tele: P.tele, dest: P.meta.dest });
 function planBack(P, m) { P.segs.length = m.n; P.t = m.t; P.x = m.x; P.y = m.y; P.z = m.z; P.yaw = m.yaw; P.ctx = m.ctx; P.seat = m.seat; P.tele = m.tele; P.meta.dest = m.dest; }
 export class Brain {
-  constructor(sim) { this.sim = sim; this.res = new Map(); this.at = new Map(); this.joinable = new Map(); }
+  constructor(sim) { this.sim = sim; this.res = new Map(); this.at = new Map(); this.joinable = new Map(); this.held = new Map(); }
   get W() { return this.sim.world; }
   get index() { return this.sim.index; }
   get router() { return this.sim.router; }
@@ -155,6 +155,7 @@ export class Brain {
   slotAt(b, f, id, k) { const B = this.W.buildings[b], s = this.index.entry(b, f, id)?.slots[k]; return B && s ? toWorld(B, s.lx, s.lz) : null; }
   /** A player at that slot now, for a stay starting within PLAYER_HOLD world minutes (win: by default now). */
   playerOn(b, f, id, k, win = null) {
+    if (this.pieceHeld(b, f, id)) return true;   // (a machine a player's game holds: all of it, whenever)
     const ps = playerSpots(); if (!ps.length) return false;
     const now = this.sim.now(); if (win && win[0] > now + this.wm(PLAYER_HOLD)) return false;
     const ctx = ctxOf(b, f); let at = null;
@@ -172,6 +173,33 @@ export class Brain {
       }
     }
     return false;
+  }
+  // Machines held by a player's game (2026-10-26, the product owner: "While playing arcade games like the pool, agents come
+  // up to the table and play ... make sure this doesn't happen"): a machine game holds its whole piece while it is open,
+  // wherever the player is (looking in, the player's character elsewhere): whoever is at it or on the way goes elsewhere
+  // at once, and no one takes any spot of it until it is let go or the hold runs out (real ms; server/index.mjs
+  // POST /api/arcade/hold, refreshed by the game every 30 s).
+  /** Holds piece id on floor f of building b for ms real milliseconds; returns how many were sent elsewhere. */
+  holdPiece(b, f, id, ms) { this.held.set(b + ':' + f + ':' + id, Date.now() + ms); return this.clearPiece(b, f, id); }
+  releasePiece(b, f, id) { this.held.delete(b + ':' + f + ':' + id); }
+  pieceHeld(b, f, id) {
+    if (!this.held.size) return false;
+    const k = b + ':' + f + ':' + id, u = this.held.get(k);
+    if (!u) return false;
+    if (u < Date.now()) { this.held.delete(k); return false; }
+    return true;
+  }
+  /** Everyone at piece id or bound for it (any of its spots, now or later) goes elsewhere: their plans are cut here. */
+  clearPiece(b, f, id) {
+    const e = this.index.entry(b, f, id); if (!e) return 0;
+    const now = this.sim.now(), done = new Set();
+    e.slots.forEach((s, k) => {
+      for (const r of [...(this.res.get(this.key(b, f, id, k)) || [])]) {
+        const a = r[2] > now && !done.has(r[0]) ? this.sim.agents[r[0]] : null;
+        if (a?.plan) { done.add(r[0]); this.interruptSoon(a); }
+      }
+    });
+    return done.size;
   }
   /** A player sat down or started playing at (x, z) on floor ctx: whoever was to be in that slot soon goes elsewhere. */
   playerTook(x, z, ctx) {

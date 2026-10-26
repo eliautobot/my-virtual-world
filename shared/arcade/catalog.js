@@ -195,7 +195,7 @@ export const GAMES = Object.freeze([
   },
   {
     id: 'strike-lane', kind: 'builtin', title: 'Strike Lane', icon: '🎳', like: 'mini bowling', machine: 'bowling_lane', cabinet: false,
-    blurb: 'Ten frames of bowling with the real scoring: a strike ten and the next two balls, a spare ten and the next one, 300 at most. Aim, choose where you stand, and roll with the power you want: into the pocket at an angle is where the strikes are.',
+    blurb: 'Ten frames of bowling with the real scoring: a strike ten and the next two balls, a spare ten and the next one, 300 at most. Aim, choose where you stand, and roll with the power you want: into the pocket at an angle is where the strikes are. The aim sways as the power builds, more the harder you throw: let go as it crosses your mark.',
     color: '#6d28d9', accent: '#fde047',
     controls: { layout: 'tap' },
     pointer: { hold: 'A' },
@@ -215,4 +215,4 @@ export const GAMES = Object.freeze([
 
 export const gameOf = id => GAMES.find(g => g.id === id) || null;
 /** The game played at an arcade piece of type t (its machine), or null: a cabinet plays the library instead. */
-export const machineGame = t => GAMES.find(g => g.machine === t) || null;
+export const machineGame = t => (t && GAMES.find(g => g.machine === t)) || null;   // (no type, no machine: the library's games have none)

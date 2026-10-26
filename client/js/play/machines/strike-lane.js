@@ -111,7 +111,7 @@ export function create({ THREE, group, play, app }) {
       return {
         info: `Frame ${Math.min(FRAMES, s.frame)} of ${FRAMES} · Ball ${s.r + 1} · Score ${total(s)}`,
         meter: s.ph === 'aim' && s.chg >= 0 ? s.pw : null,
-        hint: s.ph === 'aim' && s.frame === 1 && s.r === 0 ? 'Point where to roll · ◀ ▶ where you stand · hold the mouse button (or Z), let go to roll' : '',
+        hint: s.ph === 'aim' && s.frame === 1 && s.r === 0 ? 'Point where to roll · ◀ ▶ where you stand · hold the mouse button (or Z): the line sways as the power builds, let go as it crosses your mark' : '',
         board: flashT > 0 ? [flash, `SCORE ${total(s)}`] : [`FRAME ${Math.min(FRAMES, s.frame)}`, `SCORE ${total(s)}`],
       };
     },

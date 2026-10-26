@@ -88,7 +88,14 @@ class Play {
   }
   /** A point of the machine's own frame (shared/arcade/machines.js) in the world. */
   world(p) { return new THREE.Vector3(p[0], p[1], p[2]).applyMatrix4(this.M); }
+  /** While the game is open the whole machine is this player's (POST /api/arcade/hold: the world sends anyone at it or on
+   *  the way elsewhere and lets nobody else take a spot of it; refreshed every 30 s, let go on leaving). */
+  hold(on) {
+    if (!auth.can('play.use') || !Number.isInteger(this.e.b) || !Number.isInteger(this.e.id)) return;
+    post('/api/arcade/hold', { b: this.e.b, f: this.e.f ?? 0, id: this.e.id, on }).catch(() => {});
+  }
   async open() {
+    this.hold(true); this.holdT = setInterval(() => { if (cur === this) this.hold(true); }, 30000);
     let mod;
     try { mod = await VIEWS[this.g.id](); } catch (err) { console.error(err); this.close(); return; }
     if (cur !== this) return;
@@ -332,6 +339,7 @@ class Play {
     if (cur !== this) return;
     cur = null;
     this.abandon();
+    clearInterval(this.holdT); this.hold(false);
     this.input.detach();
     document.removeEventListener('visibilitychange', this.onVis);
     removeEventListener('resize', this.onResize);

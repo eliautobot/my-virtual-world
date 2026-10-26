@@ -27,6 +27,7 @@ import { toWorldAt } from '../shared/airport-layout.js';
 import { Fleet } from './world/aircraft.js';
 import { Harbour } from './world/boats.js';
 import { addPlayRoutes } from './play/routes.js';
+import { addArcadeHoldRoutes } from './play/arcade-hold.js';
 import { FishMarket } from './play/fish-market.js';
 import { Angler } from './play/angler.js';
 import { addSignRoutes } from './signs-routes.js';
@@ -1477,6 +1478,8 @@ addPlayRoutes(router, { play, fishMarket, angler, onFinish: (account, r) => {
 } });
 // Pictures on signs (owners' rooftop billboards and signs inside, the Marketing tools' own content): server/signs-routes.js.
 addSignRoutes(router, { world: () => world, dataDir: DATA, readStream: (req, limit) => readStream(req, limit) });
+// A machine game or a cabinet holds its whole machine while it is open: server/play/arcade-hold.js.
+addArcadeHoldRoutes(router, { sim: () => sim, world: () => world });
 // The city's music (docs/features/music.md): the library, each Lounge Stage's and DJ Stage's deck (what plays, the
 // requests, its playlist) and their routes (server/music/).
 const music = new Music({ dbs, dataDir: DATA, sim: () => sim, world: () => world, broadcast: o => broadcast(o), log,

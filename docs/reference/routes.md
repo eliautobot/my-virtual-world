@@ -2,7 +2,7 @@
 
 Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand. Proprietary - see [LICENSE](../../LICENSE).
 
-457 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
+458 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
 
 | Method | Path | Capability | Lowest role | Re-auth |
 |---|---|---|---|---|
@@ -116,6 +116,7 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | POST | `/api/agents/unshare` | `chat.use` | member |  |
 | POST | `/api/agents/update` | `chat.use` | member |  |
 | GET | `/api/agents/usable` | `chat.use` | member |  |
+| POST | `/api/arcade/hold` | `play.use` | member |  |
 | GET | `/api/audit` | `audit.read` | admin |  |
 | GET | `/api/auth/me` | `public` | guest |  |
 | POST | `/api/auth/reauth` | `account.session` | member |  |

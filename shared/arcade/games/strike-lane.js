@@ -6,15 +6,19 @@
 // go on sliding into the others, off the kickbacks at the sides, into the pit; one only grazed wobbles and stays up.
 // Controls: the pointer (the mouse over the lane, a finger on it) aims (where across the lane the ball is to reach the
 // pins); ◀ ▶ step to where you stand; hold A (the mouse button, a finger, Z), the power rising and falling, let go to
-// roll. Left eight seconds, it rolls by itself (softly, anywhere). The sim (rules only; the game in the world is
+// roll. Left eight seconds, it rolls by itself (softly, anywhere). It takes a steady hand (2026-10-26, the product owner:
+// "the bowling game is way too easy"; a straight ball at the pointer struck 8 to 10 times a game): while the power builds
+// the aim sways about where you point (WOB, more the harder the throw: the line shows it), so you let go as it passes
+// your mark; a hard throw also skids a little off its line (SKID). The sim (rules only; the game in the world is
 // client/js/play/machines/strike-lane.js): deterministic, see shared/arcade/core.js; metres on the lane (x across, z
 // toward the bowler), speeds in metres a step (1/60 s).
 import { BTN, baseState, roll } from '../core.js';
 import { BOWL, bowlPins } from '../machines.js';
 
 const { hw: HW, ballR: BR, pinR: PR } = BOWL, NS = 6, START = 2.05, STAND = 0.3;
-export const PHYS = { ballM: 4.5, knock: 0.012, ballE: 0.45, pinE: 0.3, slide: 0.9, tumble: 0.5, scatter: 0.35 };   // (the ball heavier than a pin; how hard a pin must be hit to fall; how much of its push a falling pin keeps; how far the dice turn it)
+export const PHYS = { ballM: 4.5, knock: 0.0135, ballE: 0.45, pinE: 0.3, slide: 0.9, tumble: 0.49, scatter: 0.35 };   // (the ball heavier than a pin; how hard a pin must be hit to fall; how much of its push a falling pin keeps; how far the dice turn it)
 const STOP = 0.0004, VMIN = 0.03, VMAX = 0.08, IDLE = 8 * 60;
+export const WOB = { amp: 0.17, low: 0.3, period: 46, skid: 0.04 };   // (the sway at full power, m; how much of it at the lowest; frames a sway takes; a full-power skid, m)
 export const FRAMES = 10, SPOTS = bowlPins();
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 /** The pointer across the lane (px: x, 0 … 255 over the lane's width) and back. */
@@ -25,7 +29,7 @@ const freshPins = () => SPOTS.map(([x, z]) => ({ x, z, vx: 0, vz: 0, up: true, o
 export function init(seed) {
   return {
     ...baseState(seed), frame: 1, r: 0, rolls: [], frames: [], pins: freshPins(), standAt: 0,
-    ph: 'aim', pt: 0, x0: 0, tx: 0.03, chg: -1, pw: 0, prev: 0, idle: 0,
+    ph: 'aim', pt: 0, x0: 0, tx: 0.03, aim: 0.03, wph: 0, chg: -1, pw: 0, prev: 0, idle: 0,
     ball: { x: 0, z: START, vx: 0, vz: 0, gutter: false, live: false }, knocked: 0, strikes: 0, spares: 0, gutters: 0, over: false,
   };
 }
@@ -54,7 +58,8 @@ export function total(s) { let t = 0; for (const f of card(s.rolls)) if (f.total
 function launch(s, pw) {
   const B = s.ball;
   B.x = s.x0; B.z = START; B.gutter = false; B.live = true;
-  let dx = s.tx - s.x0, dz = BOWL.head - START; const d = Math.sqrt(dx * dx + dz * dz); dx /= d; dz /= d;
+  const skid = (roll(s, 41) - 20) / 20 * WOB.skid * pw * pw;   // (a hard throw skids a little off its line)
+  let dx = s.tx + skid - s.x0, dz = BOWL.head - START; const d = Math.sqrt(dx * dx + dz * dz); dx /= d; dz /= d;
   const v = VMIN + (VMAX - VMIN) * pw; B.vx = dx * v; B.vz = dz * v;
   s.ph = 'roll'; s.pt = 0; s.chg = -1; s.idle = 0; s.standAt = s.pins.filter(p => p.up).length;
   s.ev.push({ k: 'roll', p: pw });
@@ -142,12 +147,17 @@ export function step(s, inp) {
   const b = inp.b, released = s.prev & ~b;
   s.prev = b;
   if (s.ph === 'aim') {
-    if (inp.pd) s.tx = clamp(fromPx(inp.px), -HW, HW);
+    if (inp.pd) s.aim = clamp(fromPx(inp.px), -HW, HW);
     if (b & BTN.L) s.x0 = Math.max(-STAND, s.x0 - 0.006); if (b & BTN.R) s.x0 = Math.min(STAND, s.x0 + 0.006);
     if (b) s.idle = 0;
-    if (b & BTN.A) { s.chg++; const k = s.chg % 100; s.pw = k < 50 ? k / 50 : (100 - k) / 50; }
-    else if (s.chg >= 0 && released & BTN.A) { if (s.chg > 2) launch(s, Math.max(0.05, s.pw)); else s.chg = -1; }
+    if (b & BTN.A) {
+      if (s.chg < 0) s.wph = roll(s, 628) / 100;   // (each throw's sway starts somewhere of its own)
+      s.chg++; const k = s.chg % 100; s.pw = k < 50 ? k / 50 : (100 - k) / 50;
+      s.wph += (2 * Math.PI) / WOB.period;
+      s.tx = clamp(s.aim + WOB.amp * (WOB.low + (1 - WOB.low) * s.pw) * Math.sin(s.wph), -HW, HW);
+    } else if (s.chg >= 0 && released & BTN.A) { if (s.chg > 2) launch(s, Math.max(0.05, s.pw)); else s.chg = -1; }
     else if (++s.idle >= IDLE) { s.tx = (roll(s, 61) - 30) * 0.012; launch(s, 0.2); }   // (left too long: a soft roll, anywhere)
+    if (s.ph === 'aim' && s.chg < 0) s.tx = s.aim;   // (no sway until the power builds)
     return;
   }
   if (s.ph === 'sweep') { if (++s.pt >= 45) { s.ph = 'aim'; s.pt = 0; s.ball.live = false; s.ev.push({ k: 'ready', frame: s.frame, r: s.r }); } return; }

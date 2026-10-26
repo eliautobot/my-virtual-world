@@ -2,6 +2,19 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.1.2 (2026-10-26)
+
+- **A machine you play is yours while you play it**: when you open a machine's game or a cabinet (looking in, or as a
+  player beside it), the whole machine is held for you until you leave: anyone at it or on the way goes elsewhere at
+  once, and no agent or resident takes a spot at it (before, agents could walk up to a pool table you were playing and
+  join in).
+- **Strike Lane takes a steady hand**: the aim now sways while the power builds, more the harder you throw, so you let go
+  as the line crosses your mark; a hard throw skids a little off its line, and the pins take a firmer hit to fall. A
+  casual game scores about 120 instead of about 240; strikes are earned.
+- **The racing seat fits a desktop window**: its screen (Turbo Rush on its own glass) was framed like a cabinet's, which
+  is less than half its size, and ran off the window; the camera now steps back to fit the whole of each machine's
+  screen, and again when the window is resized.
+
 ## v2.1.1 (2026-10-25)
 
 - **The game's own soundtrack**: 26 original songs come with the game (the lounge's jazz, piano and bossa nova, the
