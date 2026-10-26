@@ -43,6 +43,21 @@ added twice, and a later version's new songs come with the next start. `MVW_SOUN
 --data <data folder> [--as-is]` while the server is stopped (docs in the tool). The host backup (`tools/admin.mjs
 backup`) includes the songs.
 
+## The city's own music in the background
+
+`client/js/audio/score.js` (2026-10-26): the score (the library's `score` songs, each with its mood and loop points: the
+game's soundtrack) plays as you go about the world. The mood of the moment (`shared/music.js` `scoreMood`): `build` while
+building or furnishing, else by the city's hour: `day` from 5:30, `evening` from 17:30, `night` from 20:30. A song loops
+seamlessly between its loop points for two and a half to four minutes (`SCORE.turn`), then another of its mood comes in
+over a 7 s crossfade; a new mood comes in over 4 s. Its volume is Settings → Sound → **Background music** (`sound.score`,
+40 % by default; the master volume and the top bar's mute too). It makes way: silent where live music is heard (a band
+or a DJ: the stage's level, by distance), lower while an agent speaks (35 %) or the page listens to you (15 %), and while
+a machine's or a cabinet's game is open (30 %). It fetches a song only when it is to play (nothing while its volume is
+0; turned down to 0 it lets the song go after 4 s), keeps at most two decoded at 32 kHz, starts with the first click or
+key (browser rules), and stops while the page is hidden. `app.score.state` shows what plays. Checks:
+`tests/score.test.mjs`; lab `tools-bin/score-check.mjs` (a real browser: day, night, building, the dip, off and on, at
+most two decoded) and `tools-bin/score-club-check.mjs` (silent in a club while the DJ plays).
+
 ## A stage's deck
 
 One for each Lounge Stage and DJ Stage (a building, a floor, the piece: `b:f:id`), kept by the server (table

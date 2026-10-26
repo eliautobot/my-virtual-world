@@ -2,6 +2,15 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.1.3 (2026-10-26)
+
+- **Background music**: the game's own score now plays as you go about the world: soft day songs in the morning and
+  afternoon, evening songs at dusk, night songs after dark, and its building song while you build or furnish, each
+  looping seamlessly and crossfading into the next every few minutes. It has its own slider, Settings → Sound →
+  Background music (40 % to start), and makes way for live music (silent in a club or lounge while the band or DJ
+  plays), for agents' voices and while you play a machine.
+- **A clean stop**: stopping the server no longer logs a phone warning (a phone sync could start as the database closed).
+
 ## v2.1.2 (2026-10-26)
 
 - **A machine you play is yours while you play it**: when you open a machine's game or a cabinet (looking in, or as a

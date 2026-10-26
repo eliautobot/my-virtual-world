@@ -93,6 +93,7 @@ const SOUNDS = [
   ['volVoices', 'Agents\' voices', 'Voice conversations and 🔊 read aloud.'],
   ['volMedia', 'Videos and recordings', 'Voicemail, and audio and video in chats and on the PC.'],
   ['volMusic', 'Live music', 'The lounge\'s band and the club\'s DJ, when you are on their floor.'],
+  ['volScore', 'Background music', 'The city\'s own music as you go about: by day, at dusk, at night and while you build. It makes way for live music and voices.'],
 ];
 function soundTab(d, body) {
   const paint = () => {

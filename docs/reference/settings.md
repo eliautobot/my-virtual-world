@@ -108,6 +108,7 @@ Changed in Settings by an account holding the capability named; *install* settin
 | `sound.voices` | account | number | 100 | `account.self` | Agents' voices |
 | `sound.media` | account | number | 100 | `account.self` | Videos and recordings |
 | `sound.music` | account | number | 80 | `account.self` | Live music |
+| `sound.score` | account | number | 40 | `account.self` | Background music |
 | `display.wildlife` | account | enum | normal | `account.self` | Wildlife |
 | `display.weatherFx` | account | enum | on | `account.self` | Rain and lightning |
 | `display.traffic` | account | enum | normal | `account.self` | Traffic |

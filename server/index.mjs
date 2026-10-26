@@ -1859,6 +1859,7 @@ function shutdown(sig) {
   log(`[shutdown] ${sig}: saving and closing`);
   clearInterval(mainLoop);
   clearInterval(vehicleLoop); clearInterval(fleetLoop);
+  try { phone?.stop(); } catch (e) { log.error('[phone] shutdown', e.message); }   // (before the database closes: a sync starting then wrote to a closed one)
   try { economy?.stop(); } catch (e) { log.error('[economy] shutdown', e.message); }
   try { music.stop(); music.flush(); } catch (e) { log.error('[music] shutdown', e.message); }
   try { freeWill?.stop(); } catch (e) { log.error('[free-will] shutdown', e.message); }

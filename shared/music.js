@@ -58,3 +58,27 @@ export function parsePlace(s) {
   return m ? { b: +m[1], f: +m[2], id: +m[3] } : null;
 }
 export const fmtTime = s => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+/** The city's own music (the 'score' family; client/js/audio/score.js, 2026-10-26): which of its moods fits the moment,
+ *  'build' while building, else by the hour: 'day' from 5:30, 'evening' from 17:30, 'night' from 20:30. A track plays
+ *  for turn[0] to turn[1] seconds (looping between its loop points) before the next of its mood comes in over fade
+ *  seconds; a change of mood comes in over quick seconds. */
+export const SCORE = Object.freeze({ day: 5.5, evening: 17.5, night: 20.5, turn: Object.freeze([150, 230]), fade: 7, quick: 4, level: 0.8 });
+export function scoreMood(hour, building = false) {
+  if (building) return 'build';
+  const h = (((Number(hour) || 0) % 24) + 24) % 24;
+  return h >= SCORE.night || h < SCORE.day ? 'night' : h >= SCORE.evening ? 'evening' : 'day';
+}
+/** The tracks for mood m among the library's (the score's approved ones; any of them when none has that mood). */
+export function scoreTracks(tracks, m) {
+  const all = [...tracks].filter(t => familyOf(t.genre) === 'score' && (!t.status || t.status === 'approved') && t.seconds > 10);
+  const fit = all.filter(t => t.mood === m);
+  return fit.length ? fit : all;
+}
+/** The next track: one of list, not the one playing nor the last one of its mood when there is a choice. */
+export function scoreNext(list, playing = null, lastOfMood = null, rnd = Math.random) {
+  let pool = list.filter(t => t.id !== playing && t.id !== lastOfMood);
+  if (!pool.length) pool = list.filter(t => t.id !== playing);
+  if (!pool.length) pool = list;
+  return pool.length ? pool[Math.floor(rnd() * pool.length) % pool.length] : null;
+}

@@ -170,12 +170,13 @@ export class Player {
       await new Promise(resolve => {
         const s = ctx.createBufferSource();
         s.buffer = b; s.connect(OUT);
-        s.onended = () => { if (this.src === s) this.src = null; resolve(); };
+        bus.emit('audio:speaking', true);   // (the background music dips while an agent speaks: audio/score.js)
+        s.onended = () => { if (this.src === s) this.src = null; bus.emit('audio:speaking', false); resolve(); };
         this.src = s; s.start();
       });
     } else if (v && v.text) {
-      this.browser = true;
-      try { await browserSay(v.text, v, () => g !== this.gen); } finally { this.browser = false; }
+      this.browser = true; bus.emit('audio:speaking', true);
+      try { await browserSay(v.text, v, () => g !== this.gen); } finally { this.browser = false; bus.emit('audio:speaking', false); }
     }
   }
   /** How loud it is now (0–1); the browser's voice can't be measured: a gentle pulse instead. */

@@ -695,12 +695,13 @@ export class Phone {
     return this.state(P, a.id);
   }
   async tick() {
-    if (this.ticking) return;
+    if (this.ticking || this.timers === false) return;   // (stopped: the server is going, its database with it)
     this.ticking = true;
     this.ticks += 1;
     try {
       try { this.handBackIdle(); } catch (e) { this.log?.warn?.('[phone] hand-back:', e.message); }
       for (const r of this.q.lines.all(this.w)) {
+        if (this.timers === false) break;
         const line = this.lineView(r);
         const p = this.paused.get(line.connectionId);
         if (p && p.until > this.now()) continue;
