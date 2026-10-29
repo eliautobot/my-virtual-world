@@ -16,7 +16,7 @@ function world(people) {
   const v = new Voice({
     dbs: { worldId: 'w', db: { prepare: () => ({ get: () => undefined, run: () => {} }) } },
     agents: { list: () => [...agents.values()], get: id => agents.get(id) || null, update: (id, patch) => Object.assign(agents.get(id), patch) },
-    connections: { get: () => null, secretsFor: () => ({}) }, registry: { implemented: () => true },
+    connections: { get: () => null, secretsFor: () => ({}), mayReachLocal: () => false }, registry: { implemented: () => true },
     host: { call: async (svc, method) => { if (method === 'voices') { lists++; return { voices: VOICES }; } throw new Error('no'); } },
     principalFor: () => ({ account: { id: 1 } }), config: () => ({}), bodyOf: a => ({ fem: a.fem }),
   });

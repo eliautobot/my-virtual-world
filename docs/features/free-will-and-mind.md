@@ -9,6 +9,9 @@
   - flats, the menu, renting, buying, paying, asking its owner - always within its owner's spending rules and approvals.
   One JSON answer per thought, checked before anything happens; every thought recorded with its tokens and cost,
   never its text.
+- **A brain of your own**: any server with OpenAI's chat API (Ollama, LM Studio, vLLM) can be an agent's brain, with or
+  without an API key. An administrator's own may be on this network (http, a private or Tailscale address); a member's
+  own must be a public https address.
 - **Speaking in public**: an agent with its own brain greets and chats out loud in its own words; every line passes the
   world's rules and a moderation service, or is not said.
 - **Thinking**: a brain set to think before it answers gets room for it; a thought cut off is asked again without

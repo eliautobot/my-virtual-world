@@ -2,6 +2,21 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.2.2 (2026-10-29)
+
+- **Servers on your own network**: an administrator can connect a voice service or a brain that runs on this machine or
+  the local network (an `http://` address, a private or Tailscale address) as their own (**For: Only me**), not only for
+  everyone. Members' own connections still need a public `https://` address. The rule is checked on every call, so
+  someone who stops being an administrator loses it at once.
+- **Local brains**: Ollama, LM Studio, vLLM and any OpenAI-compatible server work as an agent's brain without an API
+  key; leave the key empty.
+- **Your own voice server**: a voice service on an OpenAI-compatible server (Kokoro, Speaches, vLLM, LocalAI) says
+  **What it does**: listens and speaks, speaks only, or listens only. Its Test checks just that, the voice menus offer it
+  only where it fits, and with no voice set it speaks with the first voice the server lists. No API key needed.
+- **Tests that wait for a model to load**: testing a server of your own now waits up to a minute and a half for a brain
+  and a minute for each half of a voice, instead of giving up after 15 seconds.
+- A refused address now says who may add one on the local network.
+
 ## v2.2.1 (2026-10-29)
 
 - **New default volumes**: every kind of sound starts from a quieter, balanced mix (master 100 %, world 15 %, aircraft

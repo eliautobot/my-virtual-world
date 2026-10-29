@@ -23,7 +23,9 @@ const PROVIDERS = {
   openai: { label: 'OpenAI', icon: 'O', models: [], hint: 'Your OpenAI API key and one of its chat models.' },
   anthropic: { label: 'Anthropic', icon: 'A', models: [], hint: 'Your Anthropic API key and one of its Claude models.' },
   google: { label: 'Google', icon: 'G', models: [], hint: 'Your Google AI Studio key and one of its Gemini models.' },
-  custom: { label: 'Other (OpenAI-compatible)', icon: '⚙', models: [], hint: 'Any server that speaks the OpenAI chat API, at a public https address.' },
+  custom: { label: 'Other (OpenAI-compatible)', icon: '⚙', models: [], hint: 'Any server that speaks the OpenAI chat API, at a public https address.',
+    // (an administrator's may be on this network: Ollama, LM Studio, vLLM — server/connections.js mayReachLocal)
+    hintLocal: 'Any server that speaks the OpenAI chat API: a public https address, or one on this network (Ollama, LM Studio, vLLM). Its address ends in /v1.' },
 };
 const prov = p => PROVIDERS[p] || PROVIDERS.custom;
 const KIND_NAME = { openclaw: 'OpenClaw', hermes: 'Hermes', claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agentapi: 'its own computer (connected agent)', universal: 'an agent server', models: 'a model provider' };
@@ -104,11 +106,12 @@ export async function brainTab(C, body, live) {
     add = `<details class="st-sec sb-new"${f.open ? ' open' : ''}><summary><h4>➕ Connect a new brain</h4><span class="hint">Paste an API key — it stays sealed on the server and is never shown again.</span></summary>
       <form class="sb-form" autocomplete="off">
         <div class="sb-provs" role="radiogroup" aria-label="Provider">${Object.entries(PROVIDERS).map(([k, v]) => `<button type="button" class="sb-prov${f.provider === k ? ' on' : ''}" data-prov="${k}" role="radio" aria-checked="${f.provider === k}"><span>${v.icon}</span>${esc(v.label)}</button>`).join('')}</div>
-        <p class="hint">${esc(P.hint)}</p>
+        <p class="hint">${esc(P.hintLocal && auth.can('connections.manage') ? P.hintLocal : P.hint)}</p>
         <div class="sb-fields">
           <label>Model<input class="input mono" name="model" list="sb-models" maxlength="120" spellcheck="false" placeholder="${f.provider === 'openrouter' ? 'deepseek/deepseek-v4.1-flash' : 'the model\'s name at your provider'}" value="${esc(f.model || '')}"><datalist id="sb-models">${P.models.map(m => `<option value="${esc(m)}">`).join('')}</datalist></label>
-          ${f.provider === 'custom' ? `<label>Address (https)<input class="input mono" name="baseUrl" maxlength="300" spellcheck="false" placeholder="https://my-server.example.com/v1" value="${esc(f.baseUrl || '')}"></label>` : ''}
-          <label>API key<input class="input mono" name="apiKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="${f.pending ? 'set — paste again to replace' : 'sk-…'}"></label>
+          ${f.provider === 'custom' ? (auth.can('connections.manage') ? `<label>Address (https, or http for a server on this network)<input class="input mono" name="baseUrl" maxlength="300" spellcheck="false" placeholder="http://my-pc:11434/v1" value="${esc(f.baseUrl || '')}"></label>`
+            : `<label>Address (https)<input class="input mono" name="baseUrl" maxlength="300" spellcheck="false" placeholder="https://my-server.example.com/v1" value="${esc(f.baseUrl || '')}"></label>`) : ''}
+          <label>${f.provider === 'custom' ? 'API key (leave it empty if the server has none)' : 'API key'}<input class="input mono" name="apiKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="${f.pending ? 'set — paste again to replace' : f.provider === 'custom' ? 'none for Ollama or LM Studio' : 'sk-…'}"></label>
           <label>Name<input class="input" name="label" maxlength="60" placeholder="My ${esc(P.label)} brain" value="${esc(f.label || '')}"></label>
           <details class="sb-adv"><summary class="hint">Prices, for its monthly budget${f.provider === 'openrouter' ? ' (OpenRouter reports them itself: leave 0)' : ''}</summary>
             <div class="sb-two"><label>US$ per million tokens in<input class="input" name="priceIn" inputmode="decimal" value="${esc(f.priceIn ?? '0')}"></label><label>US$ per million tokens out<input class="input" name="priceOut" inputmode="decimal" value="${esc(f.priceOut ?? '0')}"></label></div></details>
@@ -271,7 +274,7 @@ function wireBrain(C, body, { st, brains }) {
     e.preventDefault(); keep();
     const d = new FormData(form), key = String(d.get('apiKey') || '').trim(), model = String(d.get('model') || '').trim();
     if (!model) return C.say('Which model should it think with?', true);
-    if (!key && !f.pending) return C.say('Paste the API key from your provider.', true);
+    if (!key && !f.pending && f.provider !== 'custom') return C.say('Paste the API key from your provider.', true);
     const num = v => { const n = Number(String(v || '0').replace(',', '.')); return Number.isFinite(n) && n >= 0 ? n : 0; };
     const config = { provider: f.provider, model, thinking: 'off', priceInPerMTok: num(f.priceIn), priceOutPerMTok: num(f.priceOut) };
     if (f.provider === 'custom') config.baseUrl = String(d.get('baseUrl') || '').trim();
@@ -279,7 +282,7 @@ function wireBrain(C, body, { st, brains }) {
     form.querySelector('[type=submit]').disabled = true;
     step(0, 'run');
     const saved = f.pending ? await C.call('/api/connections/update', { id: f.pending, label, config, secrets: key ? { apiKey: key } : undefined })
-      : await C.call('/api/connections', { kind: 'models', label, scope: 'account', config, secrets: { apiKey: key } });
+      : await C.call('/api/connections', { kind: 'models', label, scope: 'account', config, secrets: key ? { apiKey: key } : {} });
     if (!saved) { step(0, 'fail'); form.querySelector('[type=submit]').disabled = false; return; }
     f.pending = saved.id; step(0, 'done'); step(1, 'run');
     const t = await C.call('/api/connections/test', { id: saved.id });

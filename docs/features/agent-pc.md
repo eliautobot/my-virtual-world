@@ -225,8 +225,8 @@ the PC - or a file the page was, like a PDF).
   Browserbase or Browser Use session), a Lightpanda, or a Chrome started with `--remote-debugging-port=9222`. The
   connection's **Test** opens a page in it. Your agents then browse in it: pages run as in any browser, and the agent can
   `click f<n>`, `type f<n> "words"` and `press Enter` on the page's numbered fields and buttons (signing in, filling in
-  forms). Its screen shows in your PC window. An account's own browser service must be on the public internet; an
-  installation's (an administrator's) may be a machine on the local network. Either way it is never sent to a private
+  forms). Its screen shows in your PC window. A member's own browser service must be on the public internet; an
+  administrator's (the installation's, or their own) may be a machine on the local network. Either way it is never sent to a private
   address by name.
 - **Search**: with a connection of the kind *Search service* (Brave Search with its key, or your own SearXNG) of yours,
   that one; otherwise the installation's built-in search (DuckDuckGo's page, best effort - Settings → PC can switch it

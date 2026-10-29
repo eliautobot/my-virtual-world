@@ -68,8 +68,8 @@ browser ──(the world's socket and routes)──► server ──(IPC)──�
     of its sessions (including those started from OpenClaw's other channels) and change its settings;
   - someone it is **shared** with chats with its agents in sessions of their own: they see only the sessions they started
     here, never anyone else's, and never the gateway's settings;
-  - a person's own connection may name only a public address; a gateway on this machine or the local network is an
-    installation connection (the server's network is the administrator's).
+  - a member's own connection may name only a public address; a gateway on this machine or the local network is an
+    administrator's, the installation's or their own (the server's network is the administrator's).
 - **Its agents are agents** (`server/agents.js`): each agent the gateway lists has an agent record (`connection_id`, its
   OpenClaw id as `native_id`), owned like the connection, shared like any agent, and listed in the chat window - named
   and badged as OpenClaw shows them: `agents.list` carries only what OpenClaw's settings give, so each agent's

@@ -16,7 +16,8 @@
 // Services (VOICE_PROVIDERS in ./manifest.js): OpenAI, OpenRouter, Groq and any OpenAI-compatible server ("custom") through
 // /audio/speech and /audio/transcriptions (OpenRouter's transcription as JSON with the audio in base64); ElevenLabs,
 // Google Cloud (Text-to-Speech and Speech-to-Text v1, an API key), Deepgram, xAI and Qwen (Alibaba Model Studio) through
-// their own APIs. A custom server must be a public HTTPS address unless the connection is the installation's, and a Qwen
+// their own APIs. A custom server must be a public HTTPS address unless an administrator wrote it down (the server says
+// so: Connections.mayReachLocal — the installation's, or an administrator's own), and a Qwen
 // address must be Alibaba Cloud's — both checked when the connection is used, the custom one again on every connection.
 // Errors carry a code the server acts on (auth, quota, rate_limited, bad_request, unsupported, timeout, network, blocked,
 // provider_error) and words of our own: a service's error text is never passed on.
@@ -24,7 +25,7 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import crypto from 'node:crypto';
-import { BUILTIN_MANIFESTS, VOICE_PROVIDERS } from './manifest.js';
+import { BUILTIN_MANIFESTS, VOICE_PROVIDERS, voiceDoes } from './manifest.js';
 import { privateAddress, guardedLookup } from './models.js';
 import { sniff, seconds as audioSeconds, wavFromPcm, joinWav, joinMp3 } from '../voice/audio.js';
 
@@ -83,16 +84,17 @@ const num = v => (Number.isFinite(v) ? v : null);
 function target(p) {
   const c = p.config || {}, provider = c.provider || 'openai', def = VOICE_PROVIDERS[provider];
   if (!def) throw fail('bad_request', 'Unknown voice service');
-  const key = p.secrets && p.secrets.apiKey;
-  if (!key) throw fail('auth', 'No API key is set for this connection');
-  const local = p.allowPrivate === true;   // (the server says so only for the installation's own connections)
+  const key = (p.secrets && p.secrets.apiKey) || '';
+  // (a server of one's own — Kokoro, Speaches, vLLM — often has no key: then none is sent)
+  if (!key && provider !== 'custom') throw fail('auth', 'No API key is set for this connection');
+  const local = p.allowPrivate === true;   // (the server says so only for an administrator's connections)
   if (provider === 'custom') {
     let u;
     try { u = new URL(String(c.baseUrl || '')); } catch { throw fail('bad_request', 'The custom service needs a base URL'); }
-    if (u.protocol !== 'https:' && !(local && u.protocol === 'http:')) throw fail('blocked', 'A custom voice service must use https');
+    if (u.protocol !== 'https:' && !(local && u.protocol === 'http:')) throw fail('blocked', 'Your own voice service must use https: one on this network (http, a private or Tailscale address) is added by an administrator');
     if (u.username || u.password) throw fail('bad_request', 'Put the key in the API key field, not in the URL');
     const host = u.hostname.replace(/^\[|\]$/g, '');
-    if (!local && net.isIP(host) && privateAddress(host)) throw fail('blocked', 'That server is not on the public internet');
+    if (!local && net.isIP(host) && privateAddress(host)) throw fail('blocked', 'That server is not on the public internet: one on this network (http, a private or Tailscale address) is added by an administrator');
     return { provider, def, key, base: u.href.replace(/\/+$/, ''), guard: !local };
   }
   if (provider === 'qwen' && c.baseUrl) {
@@ -183,7 +185,7 @@ function refusal(res, what) {
   return fail('provider_error', `${what} failed (HTTP ${res.status})`);
 }
 const ok = (res, what) => { if (res.status < 200 || res.status > 299) throw refusal(res, what); return res; };
-const bearer = t => ({ Authorization: `Bearer ${t.key}` });
+const bearer = t => (t.key ? { Authorization: `Bearer ${t.key}` } : {});
 
 // ------------------------------------------------------------------ text in pieces
 /** The text cut into pieces of at most n characters, at sentence ends where it can, else at a comma or a space. */
@@ -271,11 +273,14 @@ async function speakOne(t, p, text, model, voice, speed, ms) {
 /** p: { config, secrets, allowPrivate, text, voice?, model?, speed?, instructions?, language?, timeoutMs? } */
 async function speak(p) {
   const t = target(p);
-  if (!t.def.speak) throw fail('unsupported', `${t.def.label} doesn't speak`);
+  if (!voiceDoes(p.config, 'speak')) throw fail('unsupported', `${t.def.label} doesn't speak${t.provider === 'custom' ? ' (its settings say it only listens)' : ''}`);
   const text = String(p.text || '').trim();
   if (!text) throw fail('bad_request', 'Nothing to say');
   if (text.length > MAX_TEXT) throw fail('bad_request', `At most ${MAX_TEXT} characters at a time`);
-  const model = modelOf(t, p, 'speak'), voice = voiceOf(t, p), speed = speedOf(t, p);
+  const model = modelOf(t, p, 'speak'), speed = speedOf(t, p);
+  // (a server of one's own with no voice set: the first it lists — OpenAI's alloy is none of Kokoro's or Chatterbox's)
+  const named = (typeof p.voice === 'string' && p.voice.trim()) || String((p.config || {}).voice || '').trim();
+  const voice = !named && t.provider === 'custom' ? (await firstVoice(t)) || voiceOf(t, p) : voiceOf(t, p);
   const ms = Math.max(2000, Math.min(120000, Number(p.timeoutMs) || 60000)), t0 = Date.now();
   const list = pieces(text, PIECE[t.provider] || 4000);
   const bufs = await inOrder(list, PARALLEL, x => speakOne(t, p, x, model, voice, speed, ms));
@@ -293,7 +298,7 @@ async function speak(p) {
 /** p: { config, secrets, allowPrivate, audio (base64), language?, model?, timeoutMs? } */
 async function transcribe(p) {
   const t = target(p);
-  if (!t.def.listen) throw fail('unsupported', `${t.def.label} doesn't listen`);
+  if (!voiceDoes(p.config, 'listen')) throw fail('unsupported', `${t.def.label} doesn't listen${t.provider === 'custom' ? ' (its settings say it only speaks)' : ''}`);
   const audio = typeof p.audio === 'string' ? Buffer.from(p.audio, 'base64') : null;
   if (!audio || audio.length < 64) throw fail('bad_request', 'Nothing to hear');
   if (audio.length > MAX_AUDIO_IN) throw fail('bad_request', 'The recording is too large');
@@ -429,17 +434,35 @@ async function voices(p) {
       return { voices: (j && Array.isArray(j.voices) ? j.voices : []).slice(0, 300).map(v => ({ id: s(v.voice_id), label: s(v.name || v.voice_id), ...(v.gender ? { gender: s(v.gender) } : {}) })).filter(v => v.id) };
     }
     case 'custom': {
-      // an OpenAI-compatible server may list its voices (Kokoro, Speaches: /audio/voices); otherwise the configured one
-      try {
-        const res = await send('GET', `${t.base}/audio/voices`, { ...bearer(t), Accept: 'application/json' }, null, { timeoutMs: 8000, guard: t.guard, max: MAX_JSON });
-        const j = res.status === 200 ? parse(res) : null;
-        const list = j && (Array.isArray(j.voices) ? j.voices : Array.isArray(j.data) ? j.data : Array.isArray(j) ? j : null);
-        if (list && list.length) return { voices: list.slice(0, 400).map(v => (typeof v === 'string' ? { id: s(v), label: s(v) } : { id: s(v.id || v.voice_id || v.name), label: s(v.name || v.id) })).filter(v => v.id).map(described) };
-      } catch (e) { if (e.code === 'blocked') throw e; }
+      // an OpenAI-compatible server may list its voices (Kokoro, Speaches, Chatterbox, Qwen3-TTS: /audio/voices); otherwise the configured one
+      const list = await listedVoices(t);
+      if (list.length) return { voices: list.map(described) };
       return { voices: [{ id: voiceOf(t, p), label: voiceOf(t, p) }] };
     }
     default: return { voices: [] };
   }
+}
+
+/** The voices an OpenAI-compatible server lists at /audio/voices ([{ id, label }], none if it lists none or can't be
+ *  reached; a refused address still throws). */
+async function listedVoices(t) {
+  const s = v => String(v ?? '').slice(0, 120);
+  try {
+    const res = await send('GET', `${t.base}/audio/voices`, { ...bearer(t), Accept: 'application/json' }, null, { timeoutMs: 8000, guard: t.guard, max: MAX_JSON });
+    const j = res.status === 200 ? parse(res) : null;
+    const list = j && (Array.isArray(j.voices) ? j.voices : Array.isArray(j.data) ? j.data : Array.isArray(j) ? j : null);
+    return (list || []).slice(0, 400).map(v => (typeof v === 'string' ? { id: s(v), label: s(v) } : { id: s(v && (v.id || v.voice_id || v.name)), label: s(v && (v.name || v.id)) })).filter(v => v.id);
+  } catch (e) { if (e.code === 'blocked') throw e; return []; }
+}
+/** A server's first listed voice that is a voice name, kept ten minutes per address (null: it lists none). */
+const FIRST_VOICE = new Map();
+async function firstVoice(t) {
+  const hit = FIRST_VOICE.get(t.base);
+  if (hit && Date.now() - hit.at < 600000) return hit.voice;
+  const v = (await listedVoices(t)).find(x => x.id.length <= 200 && !/[\u0000-\u001f\u007f/?#\\]/.test(x.id));
+  FIRST_VOICE.set(t.base, { at: Date.now(), voice: v ? v.id : null });
+  if (FIRST_VOICE.size > 50) FIRST_VOICE.delete(FIRST_VOICE.keys().next().value);
+  return v ? v.id : null;
 }
 
 /** Half a second of silence (16 kHz mono), for a listening test. */
@@ -451,20 +474,31 @@ export default {
   transcribe,
   voices,
   async test(p) {
+    // (what the connection does is what is tested: a server that only speaks isn't asked to listen)
+    let t = null, half = null;
     try {
-      const t = target(p), out = [];
-      if (t.def.speak) {
-        const r = await speak({ ...p, text: 'Hello.', timeoutMs: 20000 });
+      t = target(p); const out = [];
+      const ms = t.provider === 'custom' ? 60000 : 20000;   // (a server of one's own may load its model first)
+      if (voiceDoes(p.config, 'speak')) {
+        half = 'speak';
+        const r = await speak({ ...p, text: 'Hello.', timeoutMs: ms });
         out.push(`spoke ${r.seconds !== null ? `${r.seconds.toFixed(1)} s` : 'a word'} with ${r.voice} in ${r.ms} ms`);
       }
-      if (t.def.listen) {
-        const r = await transcribe({ ...p, audio: SILENCE().toString('base64'), timeoutMs: 20000 });
+      if (voiceDoes(p.config, 'listen')) {
+        half = 'listen';
+        const r = await transcribe({ ...p, audio: SILENCE().toString('base64'), timeoutMs: ms });
         out.push(`listened in ${r.ms} ms`);
       }
       return { ok: true, detail: `${t.def.label}: ${out.join(', ')}` };
     } catch (e) {
+      // a server of one's own said to do both, refusing one of them: which one, and how to say it does only the other
+      if (t && t.provider === 'custom' && half && voiceDoes(p.config, 'speak') && voiceDoes(p.config, 'listen') && ['bad_request', 'unsupported'].includes(e.code)) {
+        const other = half === 'speak' ? 'listens' : 'speaks';
+        return { ok: false, error: `${half === 'speak' ? 'Speaking' : 'Listening'}: ${e.message}`, code: e.code,
+          fix: `If this server only ${other}, set What it does to "${other === 'speaks' ? 'Speaks only' : 'Listens only'}"; otherwise check the models and the voice.` };
+      }
       const fix = { auth: 'Paste a valid API key in the connection settings.', quota: 'Add credit to the service\'s account.', bad_request: 'Check the models and the voice (and the base URL for a custom service).',
-        rate_limited: 'Wait a minute and test again.', blocked: 'A custom service must be a public https address.', unsupported: 'Choose another service for this.' }[e.code] || 'Try again in a minute; if it keeps failing, check the service\'s status page.';
+        rate_limited: 'Wait a minute and test again.', blocked: 'Your own service must be a public https address. One on this network (http, a private or Tailscale address) is added by an administrator, for everyone or for themselves.', unsupported: 'Choose another service for this.' }[e.code] || 'Try again in a minute; if it keeps failing, check the service\'s status page.';
       return { ok: false, error: e.message, code: e.code, fix };
     }
   },

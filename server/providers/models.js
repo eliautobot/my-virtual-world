@@ -14,7 +14,8 @@
 // Providers: OpenAI, OpenRouter, Google (its documented OpenAI-compatible endpoint) and any OpenAI-compatible server
 // ("custom") through POST {base}/chat/completions; Anthropic through its Messages API. A custom server must be a public
 // HTTPS address (checked when the connection is made, so a name that later points inside cannot reach in) unless the
-// connection is the installation's (an administrator's), which may name a server on the local network.
+// connection is an administrator's (the server says so: Connections.mayReachLocal — the installation's, or an
+// administrator's own), which may name a server on the local network (Ollama, LM Studio, vLLM on this machine or the tailnet).
 // Errors carry a code the server acts on (auth, quota, rate_limited, bad_request, refused, timeout, network, blocked,
 // provider_error) and a message of our own: a provider's error text is never passed on (some repeat part of the key).
 import http from 'node:http';
@@ -85,12 +86,12 @@ function endpoint(p) {
   }
   let u;
   try { u = new URL(String(c.baseUrl || '')); } catch { throw fail('bad_request', 'The custom provider needs a base URL'); }
-  const local = p.allowPrivate === true;   // (the server says so only for the installation's own connections)
-  if (u.protocol !== 'https:' && !(local && u.protocol === 'http:')) throw fail('blocked', 'A custom provider must use https');
+  const local = p.allowPrivate === true;   // (the server says so only for an administrator's connections)
+  if (u.protocol !== 'https:' && !(local && u.protocol === 'http:')) throw fail('blocked', 'Your own model provider must use https: one on this network (http, a private or Tailscale address) is added by an administrator');
   if (u.username || u.password) throw fail('bad_request', 'Put the key in the API key field, not in the URL');
   // (an address written as a number is never looked up, so the lookup's check doesn't see it: checked here)
   const host = u.hostname.replace(/^\[|\]$/g, '');
-  if (!local && net.isIP(host) && privateAddress(host)) throw fail('blocked', 'That server is not on the public internet');
+  if (!local && net.isIP(host) && privateAddress(host)) throw fail('blocked', 'That server is not on the public internet: one on this network (http, a private or Tailscale address) is added by an administrator');
   return { provider, base: u.href.replace(/\/+$/, ''), guard: !local };
 }
 
@@ -156,9 +157,10 @@ function contentOf(t, provider) {
 
 /** The request for one completion: where it goes, its headers and body, and how to read the answer. */
 function build(p) {
-  const key = p.secrets && p.secrets.apiKey;
-  if (!key) throw fail('auth', 'No API key is set for this connection');
+  const key = (p.secrets && p.secrets.apiKey) || '';
   const { provider, base, guard } = endpoint(p);
+  // (a server of one's own — Ollama, LM Studio, vLLM — often has no key: then none is sent)
+  if (!key && provider !== 'custom') throw fail('auth', 'No API key is set for this connection');
   const c = p.config || {};
   const over = typeof p.model === 'string' && p.model.trim() ? p.model.trim() : '';
   if (over && (over.length > 200 || /[\s\u0000-\u001f\u007f]/.test(over))) throw fail('bad_request', 'That is not a model name');
@@ -199,7 +201,7 @@ function build(p) {
     ...(provider === 'openai' && thinking !== 'off' ? { reasoning_effort: thinking } : {}),
     ...(stream ? { stream: true, ...(provider === 'openrouter' ? {} : { stream_options: { include_usage: true } }) } : {}),
   };
-  return { provider, guard, model, prefill: false, url: `${base}/chat/completions`, headers: { Authorization: `Bearer ${key}` }, body };
+  return { provider, guard, model, prefill: false, url: `${base}/chat/completions`, headers: key ? { Authorization: `Bearer ${key}` } : {}, body };
 }
 
 /** p: { config: { provider, baseUrl, model, thinking }, secrets: { apiKey }, system, user, json, maxTokens, temperature, timeoutMs, allowPrivate }
@@ -333,13 +335,14 @@ function streamed(p, r, ctx, t0) {
  * OpenAI's (omni-moderation-latest; no charge) or an OpenAI-compatible server's that has one; other providers have none.
  */
 async function moderate(p) {
-  const key = p.secrets && p.secrets.apiKey;
-  if (!key) throw fail('auth', 'No API key is set for this connection');
+  const key = (p.secrets && p.secrets.apiKey) || '';
   const { provider, base, guard } = endpoint(p);
+  // (a server of one's own — Ollama, LM Studio, vLLM — often has no key: then none is sent)
+  if (!key && provider !== 'custom') throw fail('auth', 'No API key is set for this connection');
   if (provider !== 'openai' && provider !== 'custom') throw fail('bad_request', 'This provider has no moderation service (use OpenAI)');
   const input = String(p.input || '').slice(0, 2000);
   if (!input) throw fail('bad_request', 'Nothing to check');
-  const res = await request('POST', `${base}/moderations`, { Authorization: `Bearer ${key}` }, { model: provider === 'openai' ? 'omni-moderation-latest' : (String(p.config?.moderationModel || '') || 'omni-moderation-latest'), input },
+  const res = await request('POST', `${base}/moderations`, key ? { Authorization: `Bearer ${key}` } : {}, { model: provider === 'openai' ? 'omni-moderation-latest' : (String(p.config?.moderationModel || '') || 'omni-moderation-latest'), input },
     { timeoutMs: Math.max(1000, Math.min(30000, Number(p.timeoutMs) || 8000)), guard });
   if (res.status !== 200 || !res.json) throw refusal(res, 'The moderation service');
   const r = Array.isArray(res.json.results) ? res.json.results[0] : null;
@@ -372,11 +375,14 @@ export default {
   },
   async test(p) {
     try {
-      const r = await complete({ ...p, system: 'You answer with one word.', user: 'Say OK.', maxTokens: 16, temperature: 0, timeoutMs: 20000 });
+      // (a server of one's own — Ollama, LM Studio — may load the model first: a minute and more)
+      const own = (p.config?.provider || 'openai') === 'custom';
+      const r = await complete({ ...p, system: 'You answer with one word.', user: 'Say OK.', maxTokens: 16, temperature: 0, timeoutMs: own ? MAX_TIMEOUT_MS : 20000 });
       return { ok: true, detail: `${r.model} answered in ${r.ms} ms` };
     } catch (e) {
+      if (e.code === 'timeout' && (p.config?.provider || 'openai') === 'custom') return { ok: false, error: e.message, code: e.code, fix: 'A model on your own server may still be loading, or be too big for it: test again in a minute, or try a smaller model.' };
       const fix = { auth: 'Paste a valid API key in the connection settings.', quota: 'Add credit to the provider account.', bad_request: 'Check the model name (and the base URL for a custom provider).',
-        rate_limited: 'Wait a minute and test again.', blocked: 'A custom provider must be a public https address.', refused: 'Try another model.' }[e.code] || 'Try again in a minute; if it keeps failing, check the provider\'s status page.';
+        rate_limited: 'Wait a minute and test again.', blocked: 'Your own provider must be a public https address. One on this network (http, a private or Tailscale address) is added by an administrator, for everyone or for themselves.', refused: 'Try another model.' }[e.code] || 'Try again in a minute; if it keeps failing, check the provider\'s status page.';
       return { ok: false, error: e.message, code: e.code, fix };
     }
   },

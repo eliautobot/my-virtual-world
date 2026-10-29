@@ -113,6 +113,18 @@ test('a custom provider: a public https address only — unless the installation
   assert.equal(reqs.at(-1).url, '/custom/v1/chat/completions');
 });
 
+test('a server of one\'s own (Ollama, LM Studio) with no key: no Authorization header; a vendor still needs its key', async () => {
+  reply = ok('hi');
+  const r = await adapter.complete({ config: { provider: 'custom', baseUrl: `${url}/ollama/v1`, model: 'qwen3:8b' }, secrets: {}, user: 'U', timeoutMs: 3000, allowPrivate: true });
+  assert.equal(r.text, 'hi');
+  assert.equal(reqs.at(-1).url, '/ollama/v1/chat/completions'); assert.equal(reqs.at(-1).headers.authorization, undefined);
+  await adapter.complete({ config: { provider: 'custom', baseUrl: `${url}/ollama/v1`, model: 'qwen3:8b' }, secrets: { apiKey: 'lm-studio' }, user: 'U', timeoutMs: 3000, allowPrivate: true });
+  assert.equal(reqs.at(-1).headers.authorization, 'Bearer lm-studio', 'a key, when there is one');
+  assert.equal((await adapter.complete({ config: { provider: 'openrouter' }, secrets: {}, user: 'U' }).catch(e => e)).code, 'auth');
+  const refused = await adapter.complete({ config: { provider: 'custom', baseUrl: `${url}/ollama/v1`, model: 'm' }, secrets: {}, user: 'U', timeoutMs: 3000 }).catch(e => e);
+  assert.equal(refused.code, 'blocked'); assert.match(refused.message, /administrator/, 'says who may add one on this network');
+});
+
 test('the model list', async () => {
   reply = () => ({ status: 200, body: { data: [{ id: 'a/b', name: 'A B' }, { id: '' }] } });
   const r = await adapter.models({ config: { provider: 'openrouter' }, secrets: { apiKey: 'k' } });

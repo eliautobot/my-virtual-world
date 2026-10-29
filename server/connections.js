@@ -11,7 +11,7 @@
 //   visible, not even to an admin (X11).
 import { RANK } from './auth/permissions.js';
 import { aadConnection } from './secret-holders.js';
-import { connectionKindFor } from './providers/manifest.js';
+import { connectionKindFor, voiceDoes } from './providers/manifest.js';
 
 export class ConnectionError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -49,9 +49,11 @@ export function checkConfig(manifest, config, { partial = false } = {}) {
 /** The settings with each field's default filled in (what the adapter goes by). */
 const withDefaults = (m, cfg) => ({ ...Object.fromEntries(m.fields.filter(f => f.type !== 'secret' && f.default !== undefined).map(f => [f.key, f.default])), ...cfg });
 /** Whether a field must have a value: required, or required with a setting (requiredIf: { auth: 'token' }) — unless a
- *  field it gives way to is set (unlessSet: a paired device's token stands in for the gateway's own). */
+ *  field it gives way to is set (unlessSet: a paired device's token stands in for the gateway's own), or a setting makes it
+ *  optional (optionalIf: { provider: 'custom' } — a server of one's own may have no API key). */
 function needed(f, m, config, have = new Set()) {
   if (f.unlessSet && have.has(f.unlessSet)) return false;
+  if (f.optionalIf && Object.entries(f.optionalIf).every(([k, v]) => withDefaults(m, config || {})[k] === v)) return false;
   if (f.required) return true;
   if (!f.requiredIf) return false;
   const cfg = withDefaults(m, config || {});
@@ -86,6 +88,7 @@ export class Connections {
       delSecret: db.prepare('DELETE FROM connection_secrets WHERE world_id = ? AND connection_id = ? AND field = ?'),
       delSecrets: db.prepare('DELETE FROM connection_secrets WHERE world_id = ? AND connection_id = ?'),
       unlinkAgents: db.prepare('UPDATE agents SET connection_id = NULL WHERE world_id = ? AND connection_id = ?'),
+      owner: db.prepare("SELECT id, login, role FROM accounts WHERE world_id = ? AND id = ? AND status = 'active'"),
     };
   }
 
@@ -128,6 +131,20 @@ export class Connections {
   }
   canUse(P, c) { return this.level(P, c) !== null; }
   visible(P) { return this.list().filter(c => this.canUse(P, c)); }
+  /** Whether the server may call this connection's address on the local network: http, or a private, loopback or tailnet
+   *  address (a voice server, a model server like Ollama or LM Studio, a browser on another machine). Trust follows whoever
+   *  wrote the address down. The installation's connections are an administrator's (only connections.manage adds them); an
+   *  account's own is trusted while its owner holds connections.manage — the same people, so nobody gains a reach they
+   *  didn't have — checked on every call: an owner who loses it, or is switched off, is back to the public internet at
+   *  once. A member's own must be a public https address (it may not reach inside the server's network), and so must one
+   *  the server made for a connected agent. Every caller of the provider helper passes this as allowPrivate. */
+  mayReachLocal(c) {
+    if (!c) return false;
+    if (c.scope === 'installation') return true;
+    if (c.scope !== 'account' || c.ownerId == null || this.isSystem(c)) return false;
+    const r = this.q.owner.get(this.w, Number(c.ownerId));
+    return !!r && this.can({ account: { id: r.id, login: r.login, role: r.role }, role: r.role }, 'connections.manage');
+  }
   /** What a principal may see of one connection: use gives its label and status; manage adds settings, which credentials are set and the shares. */
   view(P, c) {
     const m = this.registry.manifest(c.kind), level = this.level(P, c);
@@ -143,7 +160,7 @@ export class Connections {
     // a voice service: which service, what it can do and its voice (the pickers), never its address or prices
     if (c.kind === 'voice') {
       const def = m?.providers?.[c.config.provider || 'openai'] || {};
-      o.voice = { provider: c.config.provider || 'openai', label: def.label || c.config.provider, speak: !!def.speak, listen: !!def.listen, voice: c.config.voice || def.voice || '' };
+      o.voice = { provider: c.config.provider || 'openai', label: def.label || c.config.provider, speak: voiceDoes(c.config, 'speak'), listen: voiceDoes(c.config, 'listen'), voice: c.config.voice || def.voice || '' };
     }
     return o;
   }
@@ -297,8 +314,10 @@ export class Connections {
     } else if (!this.registry.implemented(c.kind)) res = { ok: false, error: `${m.label} isn't available on this server.`, fix: 'Nothing to do here: this kind of connection does not work on this server.' };
     else if (!this.host) res = { ok: false, error: 'The provider helper is not running.', fix: 'Ask an administrator to check the server.' };
     else {
-      // (allowPrivate: an installation's connection — an administrator's — may name a server on the local network)
-      try { res = await this.host.call(c.kind, action, { connectionId: String(c.id), config: c.config, secrets: this.secretsFor(c.id), allowPrivate: c.scope === 'installation' }); }
+      // (allowPrivate: an administrator's connection may name a server on the local network — mayReachLocal)
+      // (a test gets the adapter's own deadlines: a server of one's own may load its model first — a voice's two halves a
+      // minute each, a brain's a minute and a half)
+      try { res = await this.host.call(c.kind, action, { connectionId: String(c.id), config: c.config, secrets: this.secretsFor(c.id), allowPrivate: this.mayReachLocal(c) }, action === 'test' ? { timeoutMs: 130000 } : {}); }
       catch (e) { res = { ok: false, error: e.message, code: e.code }; }
     }
     const out = this.scrub(res, c.id);

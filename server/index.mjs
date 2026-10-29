@@ -714,7 +714,7 @@ connections.probes.set('search', async (c, secrets) => {
 });
 connections.probes.set('browser', async (c, secrets) => {
   if (!secrets.endpoint) return { ok: false, error: 'The browser address is missing', fix: 'Edit the connection and enter the browser\'s address.' };
-  const p = await new CdpPage(secrets.endpoint, { allowPrivate: c.scope === 'installation' }).open();
+  const p = await new CdpPage(secrets.endpoint, { allowPrivate: connections.mayReachLocal(c) }).open();
   try { const v = await p.call('Browser.getVersion'); return { ok: true, detail: `${v.product || 'A DevTools browser'} answered and opened a page` }; } finally { p.close(); }
 });
 const agentBodies = { spawn: spawnAgentBody, retire: retireAgentBody, revive: reviveAgentBody, rename: renameAgentBody, state: agentBodyState };
@@ -1319,7 +1319,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
     const P = principalFor(a.ownerId);
     if (!P) return null;
     const list = connections.visible(P).filter(c => c.kind === 'browser' && c.enabled).sort((x, y) => (x.scope === 'account' ? 0 : 1) - (y.scope === 'account' ? 0 : 1));
-    for (const c of list) { const sec = connections.secretsFor(c.id); if (sec.endpoint) return { endpoint: sec.endpoint, allowPrivate: c.scope === 'installation', connection: c.id }; }
+    for (const c of list) { const sec = connections.secretsFor(c.id); if (sec.endpoint) return { endpoint: sec.endpoint, allowPrivate: connections.mayReachLocal(c), connection: c.id }; }
     return null;
   };
   // (its search: its owner's search service — their own first — else the installation's built-in one)
@@ -1406,10 +1406,10 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
     money: mindMoney, problems, notify: (id, m) => notifyAccount(id, m),
     // public speech: each line checked by the moderation service (the helper, credentials per call), then shown in the
     // agent's speech bubble like the routine's lines (the 'say' event every client draws)
-    moderate: (c, input) => host.call('models', 'moderate', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: c.scope === 'installation', input, timeoutMs: 8000 }, { timeoutMs: 10000 }),
+    moderate: (c, input) => host.call('models', 'moderate', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: connections.mayReachLocal(c), input, timeoutMs: 8000 }, { timeoutMs: 10000 }),
     say: (i, text) => { if (sim) sim.emit({ t: 'say', i, text, until: sim.now() + Math.min(14, Math.max(7, sim.brain.wm(4) * 0.6)) }); },
     // (a streamed answer — the chat window — sends its pieces to onDelta as they are written)
-    complete: (c, req, onDelta) => host.call('models', 'complete', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: c.scope === 'installation', ...req },
+    complete: (c, req, onDelta) => host.call('models', 'complete', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: connections.mayReachLocal(c), ...req },
       { timeoutMs: (req.timeoutMs || 45000) + 2000, onDelta: onDelta || null }),
     abort: (c, streamId) => host.call('models', 'abort', { connectionId: String(c.id), streamId }, { timeoutMs: 5000 }),
     config: () => ({
@@ -1435,7 +1435,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   pcWork = new PcWork({ pc, mind, agents, work, names: pcNames, bus: providerBus, zoneOf: pcZone, log, browser: () => pcBrowser,
     notify: (accountId, n) => notifications.create(accountId, { kind: 'pc', ...n }) }).start();
   mind.talk = talk;     // (agents an owner blocked are not spoken to when they meet)
-  mind.modelsFn = c => host.call('models', 'models', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: c.scope === 'installation' });
+  mind.modelsFn = c => host.call('models', 'models', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: connections.mayReachLocal(c) });
   chat.inproc.models = mind.chatAdapter();
   chat.chatBlock = (P, a, c) => mind.chatBlock(a, c);
   addMindRoutes(router, mind, { agents, problems });
@@ -1529,7 +1529,7 @@ music.start();
 // MVW Radio's hosts (server/radio/): an agent per station, breaks from the world's news written by its brain.
 const radio = new Radio({ dataDir: DATA, music, agents, connections, dbs, world: () => world, life: () => agentLife, postsAt: (b, f, id) => posts.servingAt(b, f, id, { onDuty: true }), mind: () => mind, voice: () => voice, principalFor: id => ownerPrincipal(id), econ: () => economy?.econ || null, weather: () => weather,
   broadcast: o => broadcast(o), log,
-  complete: (c, req) => host.call('models', 'complete', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: c.scope === 'installation', ...req }, { timeoutMs: (req.timeoutMs || 40000) + 5000 }) });
+  complete: (c, req) => host.call('models', 'complete', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: connections.mayReachLocal(c), ...req }, { timeoutMs: (req.timeoutMs || 40000) + 5000 }) });
 addRadioRoutes(router, { radio, agents, audit });
 radio.breaksOff = !CFG.radio; radio.start({ every: CFG.radio ? 15000 : 3000 });   // (tests: no breaks, studios checked often)
 addWorldAdminRoutes(router, { world: () => world, people: () => people, lots: () => property.all(), worldId: dbs.worldId, audit,

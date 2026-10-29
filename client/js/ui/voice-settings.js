@@ -124,8 +124,9 @@ export async function voiceTab(d, body, app) {
         <details class="vs-add"${form.open ? ' open' : ''}><summary>➕ Add a voice service</summary><form class="aform vs-form" autocomplete="off">
           <label>Service<span class="row"><select class="input vs-f-prov">${Object.entries(provs).map(([k, v]) => `<option value="${k}"${form.provider === k ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}</select></span></label>
           <p class="hint vs-f-hint"></p>
-          <label>API key<input class="input mono vs-f-key" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="paste it — it is never shown again"></label>
-          <label class="vs-f-url-l">Address (https)<input class="input mono vs-f-url" maxlength="300" spellcheck="false" placeholder="https://my-voice-server.example.com/v1"></label>
+          <label><span class="vs-f-key-l">API key</span><input class="input mono vs-f-key" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="paste it — it is never shown again"></label>
+          <label class="vs-f-url-l">${manager ? 'Address (https, or http for a server on this network)' : 'Address (https)'}<input class="input mono vs-f-url" maxlength="300" spellcheck="false" placeholder="https://my-voice-server.example.com/v1"></label>
+          <label class="vs-f-does-l">What it does<span class="row"><select class="input vs-f-does"><option value="both">Listens and speaks</option><option value="speak">Speaks only (text to speech, like Kokoro)</option><option value="listen">Listens only (speech to text, like Whisper)</option></select></span></label>
           <label>Name<input class="input vs-f-label" maxlength="60" placeholder="My voice"></label>
           <details><summary class="hint">Models and voice (optional: each service has good defaults)</summary>
             <label>Speaking model<input class="input mono vs-f-sm" maxlength="200" spellcheck="false"></label>
@@ -141,7 +142,7 @@ export async function voiceTab(d, body, app) {
   function adminHtml() {
     const S = p => adm.settings.find(x => x.path === p), ov = adm.overview;
     const inst = conns.filter(c => c.scope === 'installation' && c.enabled);
-    const pick = (cls, path, what) => `<select class="input ${cls}"><option value="">None (the browser's own)</option>${inst.filter(c => provs[c.config?.provider]?.[what]).map(c => `<option value="${c.id}"${String(S(path)?.value || '') === String(c.id) ? ' selected' : ''}>${esc(c.label)} (${esc(provs[c.config?.provider]?.label || '')})</option>`).join('')}</select>`;
+    const pick = (cls, path, what) => `<select class="input ${cls}"><option value="">None (the browser's own)</option>${inst.filter(c => (c.voice ? c.voice[what] : provs[c.config?.provider]?.[what])).map(c => `<option value="${c.id}"${String(S(path)?.value || '') === String(c.id) ? ' selected' : ''}>${esc(c.label)} (${esc(provs[c.config?.provider]?.label || '')})</option>`).join('')}</select>`;
     const on = S('voice.enabled')?.value !== false;
     const sel = (cls, path, fmt = x => x) => { const s = S(path); return `<select class="input ${cls}">${s.values.map(v => `<option value="${v}"${String(v) === String(s.value) ? ' selected' : ''}>${fmt(v)}</option>`).join('')}</select>`; };
     return `<div class="tier-head">🏢 The world's voice — everyone without their own</div>
@@ -197,10 +198,14 @@ export async function voiceTab(d, body, app) {
     if (f) {
       const prov = f.querySelector('.vs-f-prov');
       const hint = () => {
-        const v = provs[prov.value] || {};
-        f.querySelector('.vs-f-hint').innerHTML = `${v.speak && v.listen ? 'Listens and speaks' : v.speak ? 'Speaks only' : 'Listens only'}${v.voice ? ` · its usual voice: ${esc(v.voice)}` : ''}${v.docs ? ` · <a href="${esc(v.docs)}" target="_blank" rel="noopener">its documentation</a>` : ''}`;
-        f.querySelector('.vs-f-url-l').classList.toggle('hidden', !(prov.value === 'custom' || prov.value === 'qwen'));
-        f.querySelector('.vs-f-url').placeholder = prov.value === 'qwen' ? 'https://dashscope-intl.aliyuncs.com (your region\'s address)' : 'https://my-voice-server.example.com/v1';
+        const v = provs[prov.value] || {}, own = prov.value === 'custom';
+        f.querySelector('.vs-f-hint').innerHTML = own ? `A server with OpenAI's audio API (Kokoro, Speaches, vLLM, LocalAI…): its address ends in /v1; say below what it does${manager ? '' : '. Yours must be a public https address'}`
+          : `${v.speak && v.listen ? 'Listens and speaks' : v.speak ? 'Speaks only' : 'Listens only'}${v.voice ? ` · its usual voice: ${esc(v.voice)}` : ''}${v.docs ? ` · <a href="${esc(v.docs)}" target="_blank" rel="noopener">its documentation</a>` : ''}`;
+        f.querySelector('.vs-f-url-l').classList.toggle('hidden', !(own || prov.value === 'qwen'));
+        // (a server of one's own: what it does, and maybe no key; an administrator's may be on this network)
+        f.querySelector('.vs-f-does-l').classList.toggle('hidden', !own);
+        f.querySelector('.vs-f-key-l').textContent = own ? 'API key (leave it empty if the server has none)' : 'API key';
+        f.querySelector('.vs-f-url').placeholder = prov.value === 'qwen' ? 'https://dashscope-intl.aliyuncs.com (your region\'s address)' : manager ? 'https://… or http://my-pc:8880/v1' : 'https://my-voice-server.example.com/v1';
         f.querySelector('.vs-f-label').placeholder = `My ${v.label || 'voice'}`;
         form.provider = prov.value;
       };
@@ -209,25 +214,27 @@ export async function voiceTab(d, body, app) {
       f.onsubmit = async e => {
         e.preventDefault(); err('');
         const out = f.querySelector('.vs-f-out'), key = f.querySelector('.vs-f-key').value.trim(), v = provs[prov.value] || {};
-        if (!key) { out.textContent = 'Paste the API key from the service.'; return; }
+        if (!key && prov.value !== 'custom') { out.textContent = 'Paste the API key from the service.'; return; }
         const config = { provider: prov.value };
         for (const [cls, k] of [['.vs-f-url', 'baseUrl'], ['.vs-f-sm', 'speakModel'], ['.vs-f-voice', 'voice'], ['.vs-f-lm', 'listenModel']]) { const x = f.querySelector(cls).value.trim(); if (x) config[k] = x; }
+        if (prov.value === 'custom') config.does = f.querySelector('.vs-f-does').value;
+        const speaks = !!v.speak && (config.does || 'both') !== 'listen', listens = !!v.listen && (config.does || 'both') !== 'speak';
         const label = f.querySelector('.vs-f-label').value.trim() || `My ${v.label || 'voice'}`;
         const scope = f.querySelector('.vs-f-scope')?.value || 'account';
         out.textContent = 'Adding…';
         let id;
-        try { id = (await post('/api/connections', { kind: 'voice', label, scope, config, secrets: { apiKey: key } })).id; }
+        try { id = (await post('/api/connections', { kind: 'voice', label, scope, config, secrets: key ? { apiKey: key } : {} })).id; }
         catch (x) { out.textContent = `✗ ${x.message}`; return; }
         out.textContent = 'Testing it (it says "Hello." and hears half a second of silence)…';
         let ok = false;
         try { const r = await post('/api/connections/test', { id }); ok = r.ok !== false; out.textContent = ok ? `✓ ${r.detail || 'It works'}` : `✗ ${r.error || 'It doesn\'t work yet'}${r.fix ? ` — ${r.fix}` : ''}`; }
         catch (x) { out.textContent = `✗ ${x.message}`; }
         if (ok && f.querySelector('.vs-f-use').checked && scope === 'account') {
-          try { await post('/api/voice/prefs', { ...(v.listen ? { listen: { connection: id } } : {}), ...(v.speak ? { speak: { connection: id, voice: '' } } : {}) }); } catch (x) { err(x.message); }
+          try { await post('/api/voice/prefs', { ...(listens ? { listen: { connection: id } } : {}), ...(speaks ? { speak: { connection: id, voice: '' } } : {}) }); } catch (x) { err(x.message); }
         }
         form.open = !ok;
         await load(); render();
-        app?.toast?.(ok ? `${label} added${f.querySelector('.vs-f-use')?.checked && scope === 'account' ? ' — it listens and speaks for you now' : ''}` : `${label} added, but its test failed`, ok ? 'good' : 'bad', 4200);
+        app?.toast?.(ok ? `${label} added${f.querySelector('.vs-f-use')?.checked && scope === 'account' ? ` — it ${listens && speaks ? 'listens and speaks' : speaks ? 'speaks' : 'listens'} for you now` : ''}` : `${label} added, but its test failed`, ok ? 'good' : 'bad', 4200);
       };
     }
     // the world's voice (administrators)

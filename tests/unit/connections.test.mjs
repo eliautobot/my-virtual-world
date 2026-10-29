@@ -156,3 +156,36 @@ test('the secret holder: credentials are found, re-sealed after a key rotation a
   h.forget(h.list()[0].id);
   assert.equal(dbs.db.prepare('SELECT COUNT(*) n FROM connection_secrets').get().n, 0);
 });
+
+test('who may reach the local network: the installation\'s and an administrator\'s own, while they are one; never a member\'s own', async () => {
+  const { conns, dbs, calls } = make();
+  const acct = dbs.db.prepare("INSERT INTO accounts (id, world_id, login, display_name, display_key, role, password_hash, password_changed, created, updated) VALUES (?, ?, ?, ?, ?, ?, 'x', 0, 0, 0)");
+  for (const [id, role] of [[1, 'owner'], [2, 'member'], [4, 'admin']]) acct.run(id, dbs.worldId, `u${id}`, `U${id}`, `u${id}`, role);
+  const add = (who, scope = 'account') => conns.create(who, { kind: 'openclaw', label: 'L', scope, config: { url: 'ws://my-pc:18789' }, secrets: { token: 'tok-12345678' } });
+  const inst = add(admin, 'installation'), adminOwn = add(admin), ownerOwn = add(owner), memberOwn = add(member);
+  assert.deepEqual([inst, adminOwn, ownerOwn, memberOwn].map(c => conns.mayReachLocal(c)), [true, true, true, false]);
+  assert.equal(conns.mayReachLocal(null), false);
+  // the helper is told so on every call
+  await conns.probe(admin, adminOwn.id, 'test'); assert.equal(calls.at(-1).params.allowPrivate, true);
+  await conns.probe(member, memberOwn.id, 'test'); assert.equal(calls.at(-1).params.allowPrivate, false);
+  // checked each time: demoted or switched off, back to the public internet at once; the installation's stays
+  dbs.db.prepare("UPDATE accounts SET role = 'member' WHERE id = 4").run();
+  assert.equal(conns.mayReachLocal(conns.get(adminOwn.id)), false, 'demoted');
+  await conns.probe(P(4, 'member'), adminOwn.id, 'test'); assert.equal(calls.at(-1).params.allowPrivate, false);
+  assert.equal(conns.mayReachLocal(conns.get(inst.id)), true);
+  dbs.db.prepare("UPDATE accounts SET status = 'disabled' WHERE id = 1").run();
+  assert.equal(conns.mayReachLocal(conns.get(ownerOwn.id)), false, 'switched off');
+});
+
+test('a field a setting makes optional: an API key for a server of one\'s own (custom), never for a vendor', () => {
+  const { conns, registry } = make();
+  registry.adopt([mock.manifest, manifest('openclaw'), manifest('codex'), manifest('models'), manifest('voice')]);
+  const mine = conns.create(member, { kind: 'models', label: 'Ollama', config: { provider: 'custom', baseUrl: 'https://llm.example.com/v1', model: 'qwen3:8b' } });
+  assert.deepEqual(conns.secretState(mine.id), { apiKey: false });
+  expect(() => conns.create(member, { kind: 'models', label: 'x', config: { provider: 'openai' } }), 400, 'bad_setting');
+  const v = conns.create(member, { kind: 'voice', label: 'Kokoro', config: { provider: 'custom', baseUrl: 'https://tts.example.com/v1', does: 'speak' } });
+  assert.deepEqual([conns.view(member, v).voice.speak, conns.view(member, v).voice.listen], [true, false]);
+  expect(() => conns.create(member, { kind: 'voice', label: 'x', config: { provider: 'custom', baseUrl: 'https://tts.example.com/v1', does: 'sing' } }), 400, 'bad_setting');
+  // switching a keyless one to a vendor needs the key
+  expect(() => conns.update(member, mine.id, { config: { provider: 'openai' } }), 400, 'bad_setting');
+});

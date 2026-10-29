@@ -223,6 +223,37 @@ test('a member brings their own voice service (and it may not reach inside the n
   assert.equal((await ann.get('/api/voice/options')).json.speak.source, 'installation');
 });
 
+test('an administrator\'s own voice service and brain may be on this network (http, a local address) and need no key; a member\'s may not', async () => {
+  const base = `http://127.0.0.1:${fake.address().port}/v1`;
+  const mine = await owner.post('/api/connections', { kind: 'voice', label: 'My Kokoro', scope: 'account', config: { provider: 'custom', baseUrl: base, voice: 'v2', does: 'speak' }, secrets: {} });
+  assert.equal(mine.status, 200, `no key needed for a server of one's own: ${mine.text}`);
+  const n = heard.length;
+  const t = await owner.post('/api/connections/test', { id: mine.json.id });
+  assert.equal(t.json.ok, true, t.text); assert.match(t.json.detail, /spoke/);
+  assert.equal(heard.length, n, 'a server that only speaks isn\'t asked to listen');
+  assert.equal(spoken.at(-1).auth, undefined, 'no key, no Authorization header');
+  assert.equal((await owner.post('/api/voice/prefs', { listen: { connection: mine.json.id } })).json.code, 'cannot', 'it only speaks');
+  assert.equal((await owner.post('/api/voice/prefs', { speak: { connection: mine.json.id, voice: 'v2' } })).status, 200);
+  const r = await speak(owner, { text: 'From my own server on this network.' });
+  assert.equal(r.status, 200, r.json && JSON.stringify(r.json));
+  assert.equal(spoken.at(-1).input, 'From my own server on this network.');
+  const svc = (await owner.get('/api/voice/options')).json.services.find(x => x.id === mine.json.id);
+  assert.deepEqual([svc.speak, svc.listen], [true, false], 'offered to speak, not to listen');
+  assert.equal((await owner.post('/api/voice/prefs', { speak: { connection: null } })).status, 200);
+  // a brain the same way (Ollama, LM Studio on this network): the administrator's works, a member's is refused
+  const brain = await owner.post('/api/connections', { kind: 'models', label: 'My Ollama', scope: 'account', config: { provider: 'custom', baseUrl: base, model: 'fake' }, secrets: {} });
+  assert.equal(brain.status, 200, brain.text);
+  const bt = await owner.post('/api/connections/test', { id: brain.json.id });
+  assert.equal(bt.json.ok, true, bt.text);
+  const hers = await ann.post('/api/connections', { kind: 'models', label: 'Her Ollama', scope: 'account', config: { provider: 'custom', baseUrl: base, model: 'fake' }, secrets: {} });
+  assert.equal(hers.status, 200, hers.text);
+  const ht = await ann.post('/api/connections/test', { id: hers.json.id });
+  assert.deepEqual([ht.json.ok, ht.json.code], [false, 'blocked'], 'a member\'s own may not reach inside the network');
+  // a vendor's service still needs its key
+  assert.equal((await ann.post('/api/connections', { kind: 'voice', label: 'x', scope: 'account', config: { provider: 'openai' }, secrets: {} })).status, 400);
+  for (const [c, id] of [[owner, mine.json.id], [owner, brain.json.id], [ann, hers.json.id]]) assert.equal((await c.post('/api/connections/remove', { id })).status, 200);
+});
+
 test('the installation\'s service for listening and the one for speaking are each named by their own id, even when both can do both', async () => {
   const base = `http://127.0.0.1:${fake.address().port}/v1`;
   const ears = await owner.post('/api/connections', { kind: 'voice', label: 'Platform ears', scope: 'installation', config: { provider: 'custom', baseUrl: base }, secrets: { apiKey: 'e' } });

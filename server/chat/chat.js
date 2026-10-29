@@ -94,7 +94,7 @@ export class Chat {
         throw new ChatError(e.status || 502, e.code || 'provider_error', e.message);
       }
     }
-    try { return await this.host.call(c.kind, method, { connectionId: String(c.id), config: c.config, secrets: this.connections.secretsFor(c.id), allowPrivate: c.scope === 'installation', ...params }, opts); }
+    try { return await this.host.call(c.kind, method, { connectionId: String(c.id), config: c.config, secrets: this.connections.secretsFor(c.id), allowPrivate: this.connections.mayReachLocal(c), ...params }, opts); }
     catch (e) {
       if (e.code === 'host_down' || e.code === 'timeout' || e.code === 'run_uncertain') throw new ChatError(502, e.code, e.message);
       if (e.code === 'unsupported') throw new ChatError(501, 'unsupported', 'This agent platform does not do that');
@@ -569,7 +569,7 @@ export class Chat {
     try { u = new URL(String(r && r.url)); own = new URL(String(c.config && c.config.url)); } catch { throw new ChatError(502, 'provider_error', 'The provider did not open its screen'); }
     // (the relay dials the connection's own address, never one the answer names)
     if (!/^wss?:$/.test(u.protocol) || u.host !== own.host || (u.protocol === 'wss:') !== (own.protocol === 'https:')) throw new ChatError(502, 'provider_error', 'The provider named another address for its screen');
-    return { url: u.href, allowPrivate: c.scope === 'installation', account: P.account.id };
+    return { url: u.href, allowPrivate: this.connections.mayReachLocal(c), account: P.account.id };
   }
   // ---------------------------------------------------------------- which chats are working (the Sidebar's marks)
   /** Whether a chat is working now: an answer of this installation's being written in it, or — a provider session — the

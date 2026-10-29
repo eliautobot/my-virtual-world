@@ -14,7 +14,9 @@ import { bus } from '../core/state.js';
 const SCOPES = { account: 'Personal', installation: 'Shared' };
 
 function fieldHtml(f, value, edit) {
-  const id = `cf-${f.key}`, lab = esc(f.label) + (f.required && !edit ? ' *' : '');
+  // (a field a setting makes optional — optionalIf: { provider: 'custom' }, a server of one's own with no key — says so)
+  const unless = f.optionalIf ? Object.entries(f.optionalIf).map(([k, v]) => `${k} ${v}`).join(', ') : '';
+  const id = `cf-${f.key}`, lab = esc(f.label) + (f.required && !edit ? (unless ? ` * (not for ${esc(unless)})` : ' *') : '');
   if (f.type === 'secret') return `<label>${lab}<input class="input cf" id="${id}" data-key="${esc(f.key)}" data-secret="1" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="${edit && value ? 'set — leave blank to keep' : ''}"></label>`;
   if (f.type === 'select') return `<label>${lab}<select class="input cf" id="${id}" data-key="${esc(f.key)}">${f.options.map(o => `<option value="${esc(o)}"${(value ?? f.default) === o ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
   if (f.type === 'boolean') return `<label class="check"><input class="cf" id="${id}" data-key="${esc(f.key)}" data-bool="1" type="checkbox"${(value ?? f.default) ? ' checked' : ''}> ${lab}</label>`;

@@ -111,6 +111,15 @@ export const VOICE_PROVIDERS = Object.freeze({
   custom: { label: 'Any OpenAI-compatible server', speak: true, listen: true, speakModel: 'tts-1', listenModel: 'whisper-1', voice: 'alloy', speakPrice: 0, listenPrice: 0,
     docs: 'https://platform.openai.com/docs/api-reference/audio' },
 });
+/** Whether a voice connection does this ('speak' | 'listen'): what its service can do, and for an OpenAI-compatible server
+ *  what its owner says it offers (does: a text-to-speech server like Kokoro only speaks, a transcription server like
+ *  Whisper or Qwen3-ASR only listens; 'both', the default, is what every connection made before it said). The server's
+ *  voice, the pages' pickers and the adapter's test all go by this. */
+export function voiceDoes(config, what) {
+  const c = config || {}, provider = c.provider || 'openai', def = VOICE_PROVIDERS[provider];
+  if (!def || (what !== 'speak' && what !== 'listen') || !def[what]) return false;
+  return provider !== 'custom' || !c.does || c.does === 'both' || c.does === what;
+}
 
 /** The kinds this product lists. `arrivesIn` names the work package that builds the adapter; until then the kind is
  *  listed and says so. `official` is the vendor's documented interface the adapter will use (X12). */
@@ -227,7 +236,8 @@ export const BUILTIN_MANIFESTS = Object.freeze([
       f('thinking', 'Thinking', 'select', { options: ['off', 'low', 'medium', 'high'], default: 'off' }),
       f('priceInPerMTok', 'Price per million input tokens (US$)', 'number', { default: 0, min: 0, max: 1000 }),
       f('priceOutPerMTok', 'Price per million output tokens (US$)', 'number', { default: 0, min: 0, max: 1000 }),
-      f('apiKey', 'API key', 'secret', { required: true }),
+      // (a server of one's own — Ollama, LM Studio, vLLM — often has no key: optional for custom)
+      f('apiKey', 'API key', 'secret', { required: true, optionalIf: { provider: 'custom' } }),
     ],
     capabilities: { chat: true, sessions: true, models: true, stop: true, effort: true, attachments: true },
   },
@@ -256,12 +266,13 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     fields: [
       f('provider', 'Service', 'select', { options: Object.keys(VOICE_PROVIDERS), default: 'openai' }),
       f('baseUrl', 'Base URL (custom; Qwen: your region or workspace address)', 'url'),
+      f('does', 'What it does (custom)', 'select', { options: ['both', 'speak', 'listen'], default: 'both' }),
       f('speakModel', 'Speaking model', 'text'),
       f('voice', 'Voice', 'text'),
       f('listenModel', 'Listening model', 'text'),
       f('speakPricePerMChars', 'Price per million characters spoken (US$)', 'number', { default: 0, min: 0, max: 10000 }),
       f('listenPricePerMinute', 'Price per minute heard (US$)', 'number', { default: 0, min: 0, max: 100 }),
-      f('apiKey', 'API key', 'secret', { required: true }),
+      f('apiKey', 'API key', 'secret', { required: true, optionalIf: { provider: 'custom' } }),
     ],
     capabilities: { speak: true, listen: true },
     providers: VOICE_PROVIDERS,

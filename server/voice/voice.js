@@ -17,7 +17,7 @@
 // - A spoken text is made pronounceable from the Markdown first (server/voice/text.js); the same audio asked again (a
 //   replay) comes from a small cache and is not paid twice.
 import crypto from 'node:crypto';
-import { VOICE_PROVIDERS } from '../providers/manifest.js';
+import { VOICE_PROVIDERS, voiceDoes } from '../providers/manifest.js';
 import { speakable } from './text.js';
 import { sniff, seconds as audioSeconds } from './audio.js';
 import { pieces } from '../providers/voice.js';
@@ -237,7 +237,8 @@ export class Voice {
   check(c, what) {
     if (!c || c.kind !== 'voice') throw new VoiceError(400, 'not_voice', 'That connection is not a voice service');
     const def = VOICE_PROVIDERS[c.config.provider || 'openai'];
-    if (!def || !def[what]) throw new VoiceError(400, 'cannot', `${def ? def.label : 'That service'} can't ${what === 'speak' ? 'speak' : 'listen'}`);
+    // (what it does: its service's abilities, and for a server of one's own what its settings say it offers)
+    if (!def || !voiceDoes(c.config, what)) throw new VoiceError(400, 'cannot', `${def ? (def[what] ? c.label || def.label : def.label) : 'That service'} can't ${what === 'speak' ? 'speak' : 'listen'}`);
     if (!c.enabled) throw new VoiceError(409, 'disabled', 'That voice service is switched off');
     if (!this.registry.implemented('voice')) throw new VoiceError(503, 'unavailable', 'Voice services are not available right now');
     return def;
@@ -362,7 +363,7 @@ export class Voice {
   async call(c, method, params, timeoutMs) {
     await this.slot();
     try {
-      return await this.host.call('voice', method, { connectionId: String(c.id), config: c.config, secrets: this.connections.secretsFor(c.id), allowPrivate: c.scope === 'installation', ...params },
+      return await this.host.call('voice', method, { connectionId: String(c.id), config: c.config, secrets: this.connections.secretsFor(c.id), allowPrivate: this.connections.mayReachLocal(c), ...params },
         { timeoutMs: timeoutMs + 5000 });
     } catch (e) {
       this.day.failed++;
@@ -515,7 +516,7 @@ export class Voice {
   }
   service(c) {
     const def = VOICE_PROVIDERS[c.config.provider || 'openai'] || {};
-    return { id: c.id, label: c.label, scope: c.scope, mine: c.scope === 'account', provider: c.config.provider || 'openai', service: def.label || '', speak: !!def.speak, listen: !!def.listen,
+    return { id: c.id, label: c.label, scope: c.scope, mine: c.scope === 'account', provider: c.config.provider || 'openai', service: def.label || '', speak: voiceDoes(c.config, 'speak'), listen: voiceDoes(c.config, 'listen'),
       voice: c.config.voice || def.voice || '' };
   }
   describe(r) {

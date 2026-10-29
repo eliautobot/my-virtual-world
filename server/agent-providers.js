@@ -56,7 +56,7 @@ export class AgentProviders {
   params(c, extra = {}) {
     const m = this.manifestOf(c);
     const config = { ...Object.fromEntries(m.fields.filter(f => f.type !== 'secret' && f.default !== undefined).map(f => [f.key, f.default])), ...c.config };
-    return { connectionId: String(c.id), config, secrets: this.connections.secretsFor(c.id), allowPrivate: c.scope === 'installation', ...extra };
+    return { connectionId: String(c.id), config, secrets: this.connections.secretsFor(c.id), allowPrivate: this.connections.mayReachLocal(c), ...extra };
   }
   openAll() { for (const c of this.connections.list()) if (c.enabled && this.isLive(c)) this.open(c); }
   /** Opens (or re-configures) a connection's live link; what goes wrong before the provider is reached (an address a

@@ -18,3 +18,7 @@
 - **Voice**: dictation, reading answers aloud, and a hands-free voice mode that takes turns by itself; through a voice
   service (OpenAI, ElevenLabs, Google, Groq, Deepgram, xAI, Qwen, OpenRouter or any compatible one), the installation's
   for everyone without their own, or the browser's own; each agent may have its own voice.
+- **Your own voice server**: any server with OpenAI's audio API (Kokoro, Speaches, vLLM, LocalAI) can be a voice service.
+  Say what it does (listens and speaks, speaks only, or listens only) and its Test checks just that; a server without an
+  API key needs none. An administrator's own may be on this network (http, a private or Tailscale address), for
+  themselves (Only me) or for everyone; a member's own must be a public https address.

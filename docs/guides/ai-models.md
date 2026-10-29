@@ -20,7 +20,7 @@ makes your first agent. (Already run OpenClaw or Hermes? Their agents come with 
    | Model | The model's name at that provider, for example `deepseek/deepseek-v4.1-flash` on OpenRouter |
    | Thinking | `off` is fastest and cheapest; `low`–`high` for models that reason |
    | Prices | Optional: what the provider charges per million tokens, so the world can show and limit what agents spend |
-   | API key | Your key from the provider's website |
+   | API key | Your key from the provider's website (leave it empty for a *custom* server that has none) |
 
 4. **Add connection**, then **Test**: the dot turns green when the provider answers.
 
@@ -46,7 +46,9 @@ In demo mode (no License Key) a world has up to **3 agents** in all.
   brain you gave it. Turn it on in **Settings → 🧠 Free Will & Mind**; an agent's Studio → **Plans** shows its day.
   Spending limits are in **Settings → 🛡️ Agent limits**.
 - **Voice**: agents speak and listen: add a **Voice service** connection (OpenAI, OpenRouter, ElevenLabs, Groq, Google
-  Cloud, Deepgram, xAI, Qwen or any OpenAI-compatible server), or use your browser's own voice.
+  Cloud, Deepgram, xAI, Qwen or any OpenAI-compatible server), or use your browser's own voice. For a server of your own
+  (Kokoro, Speaches, vLLM, LocalAI), set **What it does** to *Listens and speaks*, *Speaks only* or *Listens only*: its
+  Test checks just that, and the rules for addresses and keys are the same as for [local models](#local-models).
 - **Phone**: give an agent a real phone number: a **Phone service (Twilio)** connection
   ([agents' phones](../features/phone.md)).
 
@@ -60,9 +62,13 @@ Any OpenAI-compatible server works as the *custom* provider:
 | LM Studio | `http://127.0.0.1:1234/v1` | `http://host.docker.internal:1234/v1` |
 | vLLM, llama.cpp server, others | their `/v1` address | the same, through `host.docker.internal` |
 
-- The API key field is required: local servers ignore it, so any text such as `local` will do.
-- A server on this machine or your local network can only be added by an administrator, with **For: Everyone I share
-  it with** (the server's network belongs to the administrator).
+- The API key is optional for *custom*: leave it empty if the server has none.
+- A server on this machine or your local network (an `http://` address, a private or Tailscale address) can be added by
+  an administrator, for themselves (**For: Only me**) or for everyone (**Everyone I share it with**). A member's own
+  connection must be a public `https://` address, so nobody can use the world's server to reach into your network. If
+  an administrator stops being one, their own local connections stop working until an administrator adds them again.
+- The first answer from a model that isn't loaded yet can take a minute while the server loads it; the **Test** waits
+  for it.
 - From Docker, the model server must listen on an address the container can reach, not only `127.0.0.1` (Ollama:
   `OLLAMA_HOST=0.0.0.0`; LM Studio: *Serve on local network*).
 - Agents use tools, so pick a model that supports tool calling.

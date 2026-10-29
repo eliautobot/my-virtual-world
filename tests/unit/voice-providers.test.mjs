@@ -236,6 +236,38 @@ test('a custom OpenAI-compatible server: https and public unless the installatio
   assert.equal((await adapter.transcribe(P('custom', { ...mine, allowPrivate: true, audio: wav(1).toString('base64') }))).text, 'local');
 });
 
+test('a server of one\'s own: what it does is what is tested and used; with no key, no Authorization header', async () => {
+  script = (req, res) => {
+    if (req.url === '/tts/v1/audio/speech') return audioRes(res, wav(0.5), 'audio/wav');
+    if (req.url === '/tts/v1/audio/voices') return jsonRes(res, { status: 'ok', voices: ['Abigail.wav', 'Adrian.wav'] });
+    if (req.url === '/asr/v1/audio/transcriptions') return jsonRes(res, { text: 'heard' });
+    jsonRes(res, { detail: 'Not Found' }, 404);
+  };
+  // a text-to-speech server (Kokoro): it only speaks, and has no key
+  const tts = { config: { provider: 'custom', baseUrl: `${url}/tts/v1`, speakModel: 'kokoro', voice: 'af_bella', does: 'speak' }, secrets: {}, allowPrivate: true };
+  const t1 = await adapter.test(tts);
+  assert.equal(t1.ok, true, JSON.stringify(t1)); assert.match(t1.detail, /spoke/); assert.doesNotMatch(t1.detail, /listened/, 'not asked to listen');
+  assert.equal(last().headers.authorization, undefined, 'no key: no Authorization header');
+  await assert.rejects(adapter.transcribe({ ...tts, audio: wav(1).toString('base64') }), e => e.code === 'unsupported');
+  // no voice set: the first the server lists (OpenAI's alloy is none of its voices)
+  await adapter.speak({ ...tts, config: { ...tts.config, voice: undefined }, text: 'Hi.' });
+  assert.equal(last().json.voice, 'Abigail.wav');
+  await adapter.speak({ ...tts, config: { ...tts.config, voice: undefined }, voice: 'Adrian.wav', text: 'Hi.' });
+  assert.equal(last().json.voice, 'Adrian.wav', 'a voice asked for wins');
+  // a transcription server (Qwen3-ASR on vLLM): it only listens
+  const asr = { config: { provider: 'custom', baseUrl: `${url}/asr/v1`, listenModel: 'Qwen/Qwen3-ASR-0.6B', does: 'listen' }, secrets: { apiKey: 'k-1' }, allowPrivate: true };
+  const t2 = await adapter.test(asr);
+  assert.equal(t2.ok, true, JSON.stringify(t2)); assert.match(t2.detail, /listened/); assert.doesNotMatch(t2.detail, /spoke/);
+  assert.equal(last().headers.authorization, 'Bearer k-1', 'a key, when there is one');
+  await assert.rejects(adapter.speak({ ...asr, text: 'x' }), e => e.code === 'unsupported');
+  // said to do both (what every connection made before said), the server only speaks: which half failed and how to say so
+  const both = await adapter.test({ ...tts, config: { ...tts.config, does: undefined } });
+  assert.equal(both.ok, false); assert.match(both.error, /^Listening:/); assert.match(both.fix, /Speaks only/);
+  // a vendor's service still needs its key, and a member's own server still must be public https
+  await assert.rejects(adapter.speak({ config: { provider: 'openai' }, secrets: {}, text: 'x' }), e => e.code === 'auth');
+  await assert.rejects(adapter.speak({ ...tts, allowPrivate: false, text: 'x' }), e => e.code === 'blocked' && /administrator/.test(e.message));
+});
+
 test('refusals in our words: key, credit, rate limit with its wait, a disabled API, a bad model; not audio; nothing to say', async () => {
   const cases = [
     [401, { error: { message: 'Incorrect API key provided: KEY-SECRET-123' } }, {}, 'auth'],
