@@ -35,10 +35,10 @@ module's `verify()` works the score out on the server: ring passes, order, speed
 | | World modules | Interior modules |
 |---|---|---|
 | What | Big modules that take up world space: an airport, the fishing docks (a marina, a lake dock: [fishing](fishing.md)), a race track later | Things inside a building: a kitchen, an arcade, a bar |
-| Who places them | Administrators only | Players, in their own buildings |
+| Who places them | Administrators only | Per kind: owners on their own floors (a kitchen) or administrators (a radio studio) |
 | Where | Edit dock → 🌍 World modules | Buildings section (furnishing) |
-| Cost | None (the world's own) | Virtual Coin, and expensive on purpose: owning modules is progression of its own, next to ranks, levels and prizes |
-| Registry | `registerPlay({ placement: 'world' })` plus a kind in `shared/world-modules.js` | `registerPlay({ placement: 'interior', price })` |
+| Cost | None (the world's own) | Per kind: free (the radio studio; kitchens for now) or Virtual Coin later (owning modules is progression of its own, next to ranks, levels and prizes) |
+| Registry | `registerPlay({ placement: 'world' })` plus a kind in `shared/world-modules.js` | a kind in `shared/interior-modules.js` (`registerInteriorKind`, imported by `shared/interior-kinds.js`), pointing at its play module when it has a game |
 
 **A world module** is `{ id, kind, name, x, z, rot, y }` in `world.worldModules`, edited with the `wmod.add`, `wmod.set`
 and `wmod.del` ops.
@@ -63,10 +63,51 @@ and `wmod.del` ops.
   - the terminal (the "station", joined to the road through the car park), the control tower and a hangar.
 - **A run** starts at the airport the player is at (within 2.5 km).
 
-The arcade ([arcade](arcade.md)) is the first interior module: its cabinets are furniture, and each of its games is a
-course with verified scores. Interior modules: the registry already requires a price, and the buy-and-place flow comes with the first interior
-module (payment from the player's wallet to a sink, then the place edit, in one transaction like
-`server/economy/realty.js`).
+**An interior module** (2026-10-27; the product owner: "the 'modules' system should work the same for all type of
+inside spaces that will have unique playable or unique functions") is a room with a purpose laid on a floor as one
+unit: a record `{ id, kind, name, x0, z0, x1, z1, face, data }` in its floor's layout (`L.mods`, the building's own
+frame; `face` is the side its door is on: 0 +z, 1 +x, 2 −z, 3 −x), edited with the `imod.add`, `imod.set` (move,
+resize, turn, rename) and `imod.del` ops (`server/world/edit.js imodOp`).
+- **What it lays:** its own walls (the sides not along the building's outer walls, a doorway on its face side) and its
+  pieces, laid by its kind's `fill`; each tagged with its id (an item's `it.mod`, a wall's sixth element), so a move,
+  a resize or a removal takes exactly its own away and lays them again. Furniture that isn't its own is never
+  swallowed: it has to be moved first.
+- **Rights and undo:** the edit route's lot rights name the ops as furnishing; a kind with `who: 'admin'` is for
+  administrators only; a priced kind is bought first (the buy-and-place flow comes with the first priced kind). The
+  floor's whole layout is kept for undo (`lv:<lv>`), so one undo brings a module back whole.
+- **Where it may go** (`checkModule`, the same in the browser's ghost and on the server): where its kind allows
+  (`allowed(B, f, L)`), inside the floor, at its kind's sizes (free within min..max on a step, or snapped to a list),
+  at most `perFloor` of its kind, not over another module, the entrance, the elevator, a wall or furniture; and the
+  floor must stay walkable (`levelConnected`).
+- **A kind** (`registerInteriorKind`): `kind, label, icon, blurb, who, price, play (a play module id or null), size,
+  perFloor, wall, allowed(B, f, L), fill(B, f, L, rec)`, and optionally `check(B, f, L, rec)` (its own rule for a
+  record), `locked` (its pieces change only with it) and `joins(t)` (a piece of type t placed or moved inside it
+  becomes its own); `size.start` is the ghost's first size. A client asks a floor's records what runs there
+  (`modsAt`), never a marker piece.
+- **Arranged by hand:** moving or removing a module's own pieces, or a piece joining it, marks its record `custom`.
+  A module's pieces stay inside it. Moving a custom module carries its pieces, walls and floor along as they are
+  (`shiftModule`); a rename never lays it out again; a resize or a turn of a custom module is refused with code
+  `custom` unless the op says `reset: true` (the Furniture panel's tool asks first: "your arrangement is lost"), and
+  the tool's ↺ Lay out again does the same at its size. Sending its own size with a move never snaps it.
+- **Kinds:** the Radio Studio (`shared/radio-studio.js`; administrators, free, 3.5 × 3 to 12 × 9 m, six a floor, only in
+  a Radio Station's studio building): each one is a station of MVW Radio (`server/radio/radio.js syncStudios` puts it
+  on the air, and takes its station off when it goes).
+- **The Kitchen** (`shared/kitchen-module.js`; owners on their own floors, administrators anywhere, free for now, one a
+  floor): where Order Up is played. Only where food or drink is served (`shared/edit.js kitchenFloor`: cafés, restaurants, lounges, night clubs, arcades; not offices,
+  flats, shops, gyms, parks or the airport). Any size from 4.4 × 4 to 16 × 12 m on half-metre steps, the room plus a
+  0.4 m strip in front for the pass (named: Small 4.5 × 4, Medium 6.5 × 4, Large 8.5 × 5, Extra large 12 × 8); a
+  bigger kitchen fits more stations, so a longer menu (the café's: Small espresso and latte, Medium a croissant too,
+  Large all five), then more of them for more cooks at once (the template's `more`, round after round; islands 1.9 m
+  apart in a deep one: an Extra large café kitchen has 35 stations). Its stations move as you like and an appliance
+  placed inside joins it (`joins`: Order Up's pieces); the chef starts just inside the hatch. It lays its own walls (`wall: false`): the front, on its face side, has the
+  door at the inner end and the hatch the pass stands in. Its stations are its template's (`shared/orderup/kitchens.js`,
+  `rec.data.kitchen`: the café's coffee kitchen for now), each in the first row of its liking with room. A Café floor
+  gets one laid with it (`server/world/layouts.js cafeKitchen`), a record like a placed one. The page plays the
+  floor's kitchen record's pieces (`client/js/play/order-up.js kitchenHere`); a floor laid before kitchens were
+  modules still plays its own Order Up pieces.
+
+The arcade ([arcade](arcade.md)) came first, before this layer: its cabinets are furniture, and each of its games is a
+course with verified scores.
 
 ## Prizes in Virtual Coin
 

@@ -71,6 +71,7 @@ export function simUntilHour(clock, sim, h) {
 export function worldMin(clock, minutes) { return minutes * 60 / clock.dayScale; } // world minutes -> sim seconds
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export function formatClock(h) {
+  h = ((h % 24) + 24) % 24;   // (an overnight shift's end is past 24: shared/shifts.js)
   const hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
   const ap = hh >= 12 ? 'PM' : 'AM';
   return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${ap}`;

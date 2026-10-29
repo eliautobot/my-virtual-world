@@ -37,8 +37,8 @@ export async function createVehicles(options){
   return new Vehicles(options);
 }
 export class Vehicles {
- constructor({world,worldId,players,store,perms,clock,actors=()=>[],now=()=>Date.now(),log=null}){
-  Object.assign(this,{world,worldId,players,store,perms,clock,actors,now,log});this.physics=new RAPIER.World({x:0,y:-9.81,z:0});this.dynamics=new VehicleDynamics(this.physics);
+ constructor({world,worldId,players,store,perms,clock,actors=()=>[],residentCars=()=>[],now=()=>Date.now(),log=null}){
+  Object.assign(this,{world,worldId,players,store,perms,clock,actors,residentCars,now,log});this.physics=new RAPIER.World({x:0,y:-9.81,z:0});this.dynamics=new VehicleDynamics(this.physics);
   const saved=store.load('vehicles');this.traffic=new VehicleTraffic(world,{seed:`${worldId}:traffic`,nextId:saved?.worldId===worldId?Math.max(saved.nextId||1,...(Array.isArray(saved.cars)?saved.cars.slice(0,128):[]).filter(c=>Number.isSafeInteger(c.id)).map(c=>c.id+1)):1});this.all=this.traffic.all;this.trafficRoads=world.roads;
   this.lifecycle=new VehicleUseLifecycle();this.owners=new Map();this.staticBodies=[];this.kinematic=new Map();this.pedestrians=new Map();this.tickN=0;this.at=now();this.dirty=false;
   this.stats={ticks:0,physicsMs:0,frames:0,bytes:0,entries:0,exits:0,refused:0};this.buildStatic();
@@ -178,6 +178,8 @@ export class Vehicles {
   // Traffic stops for the cars people drive and for people on foot in its lane.
   const obstacles=[];for(const c of this.all.values())if(c.mode===1)obstacles.push({x:c.x,z:c.z,len:this.rig(c).halfLength*2});
   for(const p of this.players.byId.values())if(p.ctx===-1&&!p.vehicleId)obstacles.push({x:p.x,z:p.z,len:.8});
+  // and for residents' cars (2026-10-28: they drive by a timetable planned ahead, shared/car-route.js; traffic keeps clear)
+  try{for(const o of this.residentCars())obstacles.push(o);}catch{/* the city not ready yet */}
   const simDt=Math.min(dt*Math.max(0,clock.rate||0),.5),n=Math.ceil(simDt/.1);for(let i=0;i<n;i++)this.traffic.step(simDt/n,clock.time,clock.hour,obstacles);
   for(const [id,r]of this.kinematic){const c=this.all.get(id);if(!c){this.physics.removeRigidBody(r.body);this.kinematic.delete(id);continue;}
    if(c.physics==='client'){const q=c.rotation,o=bodyOffset(q,this.rig(c).height/2+.18);r.body.setNextKinematicTranslation({x:c.x+o.x,y:(c.y||0)+o.y,z:c.z+o.z});r.body.setNextKinematicRotation(q);continue;}

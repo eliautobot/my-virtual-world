@@ -11,9 +11,11 @@ import { SUBWAY_SPEED } from './nav.js';
 import { stationInside, stationY } from '../../shared/stations.js';
 import { nextSailing } from '../../shared/ferries.js';
 import { walkStart } from '../../shared/road-kit.js';
+import { driveTimetable, pathAt, carAt } from '../../shared/car-route.js';
 
 export const U_WALK = USE_ID.walk, U_WAIT = USE_ID.wait, U_COMMUTE = USE_ID.commute;
 const DRIVE_AFTER = 300;   // s: beyond the city, residents drive rather than walk further than this
+const BOARD = 5, LINGER = 12, WAITING = 25, DOOR = 1.4;   // s getting in / out at the kerb; s its car stays after; s at least it waits at the kerb before (already there as its resident comes out); m from the car's middle to where it gets in
 const hyp = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 
 export class Plan {
@@ -275,11 +277,52 @@ export class Router {
     P.seg(ride, ib.x, stationY(sb.st), ib.z, P.yaw, A.idle, U_COMMUTE, 0, F_HIDDEN, CTX_UNDER);
     P.move(sb.x, stationY(sb.st), sb.z, o.speed, o.anim, o.use, { ctx: CTX_OUT, prop: o.prop });
   }
-  /** Beyond the city: walk to the road, drive (hidden at the wheel; the browsers draw the car, WP4.9), walk on. */
+  /**
+   * Beyond the city: walk to the road, drive, walk on. 2026-10-28 (the product owner: leaving the Radio Station people
+   * "disappear ... their position is moving straight (not through roads)"; then a real route, the lights, traffic): its
+   * car waits at the kerb where its route starts (nav.carRoute: the quickest way along the roads, in the kerbside lane);
+   * it walks to it and gets in, and rides in it — its body where its car is, through each of its path's corners and each
+   * change of speed — as shared/car-route.js drives it: the roads' speed limits, slower round turns, stopping at the lights
+   * (on the city traffic's own timetable) and the stop signs; at the end it gets out at the kerb and walks on, its car
+   * there a moment more. The browsers draw the car by the same timetable (the 'rcar' message: render/resident-cars.js).
+   * With no route: hidden at the wheel straight there, the car drawn along the lanes (as before).
+   */
   drive(P, A0, B0, r, o) {
-    const nav = this.nav;
+    const nav = this.nav, tShow = P.t;
     if (A0.walk) for (const q of nav.spurPts(A0.x, A0.z, A0.node).slice(1)) P.move(q.x, q.y, q.z, o.speed, o.anim, o.use, { ctx: CTX_OUT, prop: o.prop });
     else P.move(A0.bx, GROUND_Y, A0.bz, o.speed, o.anim, o.use, { ctx: CTX_OUT, prop: o.prop });
+    const R = this.onDrive && o.i !== undefined ? nav.carRoute(A0, B0) : null;
+    if (R) {
+      const y = (x, z) => (nav.beyond(x, z) ? nav.groundY(x, z) : GROUND_Y);
+      const door = p => ({ x: p.x - p.dz * DOOR, z: p.z + p.dx * DOOR });   // (beside it, on the kerb's side)
+      const c0 = pathAt(R, 0), d0 = door(c0);
+      P.move(d0.x, y(d0.x, d0.z), d0.z, o.speed, o.anim, o.use, { ctx: CTX_OUT, prop: o.prop });
+      const tIn = P.t;
+      P.seg(BOARD, c0.x, y(c0.x, c0.z), c0.z, P.yaw, A.idle, U_COMMUTE, 0, F_HIDDEN, CTX_OUT, { veh: VEH_CAR });   // getting in
+      const T = driveTimetable(R, P.t, { plans: R.plans }), D = { pts: R.pts, S: R.S, ks: T.ks, ts: T.ts };
+      // the moments it passes each corner of its path, and each change of speed: its body there then
+      const times = new Set(T.ts.map(t => Math.round(t * 20) / 20));
+      for (let k = 1, j = 0; k < R.S.length; k++) {
+        const sk = R.S[k];
+        while (j < T.ks.length - 2 && T.ks[j + 1] < sk) j++;
+        const ds = T.ks[j + 1] - T.ks[j];
+        if (ds > 1e-6) times.add(Math.round((T.ts[j] + (sk - T.ks[j]) / ds * (T.ts[j + 1] - T.ts[j])) * 20) / 20);
+      }
+      const at = {};
+      for (const t of [...times].sort((a, b) => a - b)) {
+        if (t <= P.t + 0.01) continue;
+        carAt(D, t, at);
+        P.seg(t - P.t, at.x, y(at.x, at.z), at.z, P.yaw, A.idle, U_COMMUTE, 0, F_HIDDEN, CTX_OUT, { veh: VEH_CAR });
+      }
+      const cE = pathAt(R, R.len), dE = door(cE);
+      P.seg(BOARD, cE.x, y(cE.x, cE.z), cE.z, P.yaw, A.idle, U_COMMUTE, 0, F_HIDDEN, CTX_OUT, { veh: VEH_CAR });   // parking, getting out
+      const tOut = P.t;
+      P.move(dE.x, y(dE.x, dE.z), dE.z, o.speed, o.anim, o.use, { ctx: CTX_OUT, prop: o.prop });
+      this.onDrive({ i: o.i, t0: Math.min(tShow, tIn - WAITING), tIn, tOut, t1: tOut + LINGER, pts: R.pts, ks: T.ks, ts: T.ts });
+      if (B0.walk) for (const q of nav.spurPts(B0.x, B0.z, B0.node, true).slice(1)) P.move(q.x, q.y, q.z, o.speed, o.anim, o.use, { ctx: CTX_OUT, prop: o.prop });
+      else P.move(B0.x, GROUND_Y, B0.z, o.speed, o.anim, o.use, { ctx: CTX_OUT, prop: o.prop });
+      return;
+    }
     // the car is drawn along the lanes of the route (render/resident-cars.js) while the driver is hidden at the wheel
     const pts = this.onDrive && o.i !== undefined ? nav.carPath(A0, B0) : null;
     if (pts) this.onDrive({ i: o.i, t0: P.t, t1: P.t + r.time, pts });

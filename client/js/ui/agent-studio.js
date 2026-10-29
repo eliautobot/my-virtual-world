@@ -27,6 +27,7 @@ import { workTab, loadWork } from './studio-work.js';
 import { visitorsTab, loadTalks, loadBlocks, PUBLIC_WORDS } from './studio-visitors.js';
 import { phoneTab, leavePhone } from './studio-phone.js';
 import { pcTab, leavePc } from './studio-pc.js';
+import { experienceTab } from './studio-experience.js';
 
 let app = null, cur = null, marker = null;
 
@@ -37,6 +38,7 @@ export const TABS = [
   { id: 'brain', label: 'Brain', icon: '🧠', color: '#a78bfa', zone: 'head', pose: ['idle_hold', 'book'], run: brainTab },
   { id: 'voice', label: 'Voice', icon: '🔊', color: '#a3e635', zone: 'throat', pose: ['talk'], run: voiceTab, need: 'chat.use' },
   { id: 'work', label: 'Work', icon: '💼', color: '#818cf8', pose: ['idle', 'briefcase'], run: workTab, need: 'agents.profile' },
+  { id: 'experience', label: 'Experience', icon: '🏆', color: '#fb923c', pose: ['idle'], run: experienceTab, need: 'agents.profile' },   // (every game of the world: its levels, ranks, badges, 2026-10-28)
   { id: 'visitors', label: 'Visitors', icon: '🛎️', color: '#f59e0b', pose: ['talk'], run: visitorsTab, need: 'agents.profile' },
   { id: 'phone', label: 'Phone', icon: '📱', color: '#34d399', pose: ['phone_look', 'phone'], run: phoneTab, leave: leavePhone, need: 'agents.phone' },
   { id: 'pc', label: 'PC', icon: '💻', color: '#60a5fa', pose: ['idle'], run: pcTab, leave: leavePc, need: 'agents.pc' },
@@ -166,6 +168,7 @@ export async function open(id, want = 'overview', { swap = false } = {}) {
     talks: () => loadTalks(id),
     post: () => getJSON(`/api/agent-posts/spots?agent=${id}`),
     job: () => getJSON(`/api/agent-posts/work?agent=${id}`),   // (its workplace: its owner's pick or its own; ui/studio-world.js placeTab)
+    shows: () => getJSON(`/api/radio/shows?agent=${id}`),   // (the shows it was on the air in, 30 days: ui/studio-world.js placeTab)
     blocks: () => loadBlocks(id),
     // a third-party agent's connection (its slot; Brain → Its connection): only its owner reads it
     slot: () => (isExt(C.rec()) && auth.can('agents.connect') ? getJSON('/api/agent-slots').then(r => r.agents.find(a => `ext-${a.id}` === C.rec()?.key) || null) : Promise.resolve(null)),
@@ -427,7 +430,7 @@ async function overviewTab(C, body, live) {
   if (C.i >= 0 && info) {
     const home = homeOf(info), j = info.job || {};
     cards.push(card('place', T('place').color, '🏠 Places', `<div class="st-hw"><div class="st-hw-t"><div class="st-line">🏠 ${home ? `<b>${esc(home.building)}</b> · floor ${home.f + 1}${home.u >= 0 ? `, flat ${home.u + 1}` : ''}` : 'Looking for a place'}</div>
-      <div class="st-line">💼 ${j.b >= 0 ? `<b>${esc(j.title || 'Works')}</b>${j.start != null ? ` · ${formatClock(j.start)}–${formatClock(j.end)}` : ''}` : 'Between jobs'}</div></div>${home ? floorPlanSvg(home, { mini: true }) : ''}</div>`));
+      <div class="st-line">${j.kind === 'post' ? `🛎️ <b>${esc(j.title || 'On post')}</b> · on duty 24/7` : `💼 ${j.b >= 0 ? `<b>${esc(j.title || 'Works')}</b>${j.start != null ? ` · ${formatClock(j.start)}–${formatClock(j.end)}` : ''}` : 'Between jobs'}`}</div></div>${home ? floorPlanSvg(home, { mini: true }) : ''}</div>`));
   }
   if (recent && !recent.private) {
     const last = (recent.activity || []).slice(-3).reverse();
@@ -480,8 +483,8 @@ function dayRing(info) {
   const hour = ((S.hour ?? 12) % 24 + 24) % 24, [hx, hy] = pt(hour, R - 6);
   const lunch = sc.lunch != null ? pt(sc.lunch) : null;
   const ticks = [0, 6, 12, 18].map(t => { const [x, y] = pt(t, R + 9); return `<text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}">${t === 0 ? '0' : t}</text>`; }).join('');
-  return `<figure class="st-day" title="Its day: asleep ${sc.bed != null ? formatClock(sc.bed) : '?'}–${sc.wake != null ? formatClock(sc.wake) : '?'}${j.start != null ? `, work ${formatClock(j.start)}–${formatClock(j.end)}` : ''}">
-    <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="d-base" cx="${cx}" cy="${cy}" r="${R}"/>${arc(sc.bed % 24, sc.wake, 'd-sleep')}${j.b >= 0 ? arc(j.start, j.end, 'd-work') : ''}
+  return `<figure class="st-day" title="${j.kind === 'post' ? 'Its day: on duty around the clock' : `Its day: asleep ${sc.bed != null ? formatClock(sc.bed) : '?'}–${sc.wake != null ? formatClock(sc.wake) : '?'}${j.start != null ? `, work ${formatClock(j.start)}–${formatClock(j.end)}` : ''}`}">
+    <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="d-base" cx="${cx}" cy="${cy}" r="${R}"/>${j.kind === 'post' ? `<circle class="d-work" cx="${cx}" cy="${cy}" r="${R}" fill="none"/>` : `${arc(sc.bed % 24, sc.wake, 'd-sleep')}${j.b >= 0 ? arc(j.start, j.end, 'd-work') : ''}`}
       ${lunch ? `<circle class="d-lunch" cx="${lunch[0].toFixed(1)}" cy="${lunch[1].toFixed(1)}" r="4"/>` : ''}${ticks}
       <line class="d-hand" x1="${cx}" y1="${cy}" x2="${hx.toFixed(1)}" y2="${hy.toFixed(1)}"/><circle class="d-pin" cx="${cx}" cy="${cy}" r="3"/></svg>
     <figcaption><span class="k-sleep">Asleep</span><span class="k-work">Work</span><span class="k-lunch">Lunch</span></figcaption></figure>`;

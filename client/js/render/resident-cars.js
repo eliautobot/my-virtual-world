@@ -4,10 +4,15 @@
 // a browser that connects), and this draws the resident's car along them — the same classic models as traffic, wheels
 // turning, lights at night — only while that resident's plan says they are in the car (the segment's vehicle byte), so
 // a changed plan takes the car away at once. A short wait at each end for getting in and parking.
+// 2026-10-28 (the product owner: people leaving the Radio Station "disappear ... their position is moving straight (not
+// through roads)"): a drive now comes with its timetable (shared/car-route.js: the quickest way along the roads, the
+// lights, the stop signs), the same one the server moves its driver by, so the resident is where its car is. Its car
+// waits at the kerb while they walk to it, takes them there, and stays a moment after they get out (while they are near).
 import * as THREE from 'three';
 import { ROAD_TOP } from './island-roads.js';
 import { S, bus } from '../core/state.js';
 import { evalDecoded, F_HIDDEN, VEH_CAR } from '/shared/proto.js';
+import { carAt, arcLengths } from '/shared/car-route.js';
 import { createVehicleAsset } from './vehicle-assets.js';
 import { GU, uploadUsed } from './scene.js';
 import { makeVehicleLampMaterial, makeVehicleBeamMaterial, wheelSpinAngle, composeVehicleWheelMatrix } from './vehicle-effects.js';
@@ -42,11 +47,16 @@ export function init(a) {
   bus.on('frame', update);
   app.residentCars = { get drives() { return drives; }, shown: 0 };
 }
+const keyOf = r => `${r.i}:${r.tIn ?? r.t0}`;   // (one resident may have more than one drive planned: there and back)
 function add(r) {
   if (!Array.isArray(r.pts) || r.pts.length < 4 || !(r.t1 > r.t0)) return;
+  if (Array.isArray(r.ks) && Array.isArray(r.ts) && r.ks.length === r.ts.length && r.ks.length >= 2) {
+    drives.set(keyOf(r), { key: keyOf(r), i: r.i, t0: r.t0, t1: r.t1, tIn: r.tIn, tOut: r.tOut, timed: { pts: r.pts, S: arcLengths(r.pts), ks: r.ks, ts: r.ts }, k: r.i % KINDS.length, col: PAINT[(r.i * 7) % PAINT.length] });
+    return;
+  }
   const n = r.pts.length / 2, x = new Float32Array(n), z = new Float32Array(n), s = new Float32Array(n);
   for (let k = 0; k < n; k++) { x[k] = r.pts[2 * k]; z[k] = r.pts[2 * k + 1]; if (k) s[k] = s[k - 1] + Math.hypot(x[k] - x[k - 1], z[k] - z[k - 1]); }
-  drives.set(r.i, { i: r.i, t0: r.t0, t1: r.t1, x, z, s, L: s[n - 1], k: r.i % KINDS.length, col: PAINT[(r.i * 7) % PAINT.length] });
+  drives.set(keyOf(r), { key: keyOf(r), i: r.i, t0: r.t0, t1: r.t1, x, z, s, L: s[n - 1], k: r.i % KINDS.length, col: PAINT[(r.i * 7) % PAINT.length] });
 }
 /** Position and heading at distance d along a drive. */
 function at(D, d, out) {
@@ -69,14 +79,26 @@ function update() {
   const t = S.simT, plans = app.net?.plans, cam = app.stage.camera.position;
   const off = localStorage.getItem('mvw.traffic') === 'off', counts = kinds.map(() => 0);
   if (!off && plans) for (const D of drives.values()) {
-    if (t > D.t1 + 5) { drives.delete(D.i); continue; }
+    if (t > D.t1 + 5) { drives.delete(D.key); continue; }
     if (t < D.t0) continue;
     const p = plans[D.i]; if (!p) continue;
     evalDecoded(p, t, _e);
-    if (!(p.flags[_e.k] & F_HIDDEN) || p.veh?.[_e.k] !== VEH_CAR) continue;   // not (or no longer) at the wheel
-    const dur = D.t1 - D.t0, board = Math.min(BOARD, dur * 0.2), u = Math.max(0, Math.min(1, (t - D.t0 - board) / Math.max(1, dur - 2 * board)));
-    const d = (u - Math.sin(2 * Math.PI * u) / (2 * Math.PI)) * D.L;   // pulls away and slows to a stop
-    at(D, d, _e);
+    let d;
+    if (D.timed) {
+      // its timetable: at the wheel from getting in to getting out (else the plan changed: no car); before and after,
+      // parked at the kerb while its resident is near it
+      if (t > D.t1) continue;
+      const px = _e.x, pz = _e.z, wheel = (p.flags[_e.k] & F_HIDDEN) && p.veh?.[_e.k] === VEH_CAR;
+      carAt(D.timed, t, _e);
+      if (t >= D.tIn && t <= D.tOut) { if (!wheel) continue; }
+      else if (Math.hypot(px - _e.x, pz - _e.z) > 60) continue;   // (its resident on the way to it, or just gone from it)
+      d = _e.s;
+    } else {
+      if (!(p.flags[_e.k] & F_HIDDEN) || p.veh?.[_e.k] !== VEH_CAR) continue;   // not (or no longer) at the wheel
+      const dur = D.t1 - D.t0, board = Math.min(BOARD, dur * 0.2), u = Math.max(0, Math.min(1, (t - D.t0 - board) / Math.max(1, dur - 2 * board)));
+      d = (u - Math.sin(2 * Math.PI * u) / (2 * Math.PI)) * D.L;   // pulls away and slows to a stop
+      at(D, d, _e);
+    }
     if (Math.hypot(_e.x - cam.x, _e.z - cam.z) > FAR) continue;
     const kk = kinds[D.k], idx = counts[D.k]; if (idx >= MAX) continue; counts[D.k]++;
     _q.setFromAxisAngle(_up, _e.yaw);
@@ -85,6 +107,7 @@ function update() {
     const spin = wheelSpinAngle(d, kk.asset.wheel.radius);
     for (let w = 0; w < 4; w++) kk.wheels.setMatrixAt(idx * 4 + w, composeVehicleWheelMatrix(_m, kk.asset.wheels[w].centre, spin, _w));
     kk.beams.setMatrixAt(idx, _m);
+    D.at = { x: _e.x, y: _p.y, z: _e.z, d, t };   // (where it is now: its engine's sound, audio/vehicle-sound.js)
   }
   let shown = 0;
   kinds.forEach((kk, k) => {

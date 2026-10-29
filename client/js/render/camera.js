@@ -272,7 +272,10 @@ export class CityCamera {
   apply() {
     const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
     const c = this.cam, ox = Math.sin(this.yaw) * cp, oz = Math.cos(this.yaw) * cp;   // (ox, sp, oz): target → camera
-    c.position.set(this.target.x + ox * this.dist, this.target.y + sp * this.dist, this.target.z + oz * this.dist);
+    // (distCap: how far back the camera may be this way before something is in the way, a room's walls and ceiling in
+    // Play mode; the distance asked for is kept and comes back once there is room)
+    const d = this.distCap ? Math.max(0.35, Math.min(this.dist, this.distCap(ox, sp, oz, this.dist))) : this.dist;
+    c.position.set(this.target.x + ox * d, this.target.y + sp * d, this.target.z + oz * d);
     if (c.position.y < this.target.y + 0.4) c.position.y = this.target.y + 0.4;
     const eye = this.fpK > 0 ? this.fpEye?.() : null;
     if (eye) {
@@ -281,7 +284,7 @@ export class CityCamera {
       c.position.set(c.position.x + (eye.x - c.position.x) * u, c.position.y + (eye.y - c.position.y) * u, c.position.z + (eye.z - c.position.z) * u);
       c.lookAt(_v.set(c.position.x - ox, c.position.y - sp, c.position.z - oz));
     } else c.lookAt(this.target);
-    c.near = clamp(this.dist * 0.015, 0.08, 6);
+    c.near = clamp(d * 0.015, 0.08, 6);
     // held at a pose (pinTo): from the orbit's own place and aim to the held one, eased; close up, so a near plane to match
     if (this.pin && this.pinK > 0) {
       const u = this.pinK * this.pinK * (3 - 2 * this.pinK), P = this.pin;

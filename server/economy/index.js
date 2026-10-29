@@ -28,7 +28,7 @@ import { createMindMoney } from './mind-money.js';
 export function createEconomy(d) {
   const econ = new Economy(d);
   const p = econ.parts;
-  p.businesses = new Businesses(econ, { property: d.property });
+  p.businesses = new Businesses(econ, { property: d.property, editor: d.editor });
   p.households = new Households(econ);
   p.market = new Market(econ);
   p.city = new City(econ);

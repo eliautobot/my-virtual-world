@@ -12,10 +12,17 @@ import {
 import '../../shared/airport.js';   // the built-in modules register themselves
 import '../../shared/fishing.js';
 import '../../shared/arcade.js';
+import '../../shared/orderup/module.js';
 
 const RUN_TTL_MS = 2 * 3600e3;    // a run not finished within two hours is forgotten
 const START_GAP_MS = 1500;        // one start every 1.5 s per account
 const BIO_MAX = 280, SHOWCASE_MAX = 3, BOARD_MAX = 50;
+const AUTO_XP = 0.5;              // an unattended run (an agent's shift: server/play/kitchen-shifts.js) earns half the experience
+// (a player is an account, its id; an agent plays as minus its id, 2026-10-28: the same tables, boards and profile, named
+// from the agents' table)
+const WHO = (t, col) => `LEFT JOIN accounts a ON ${col} > 0 AND a.id = ${col} AND a.status = 'active'
+  LEFT JOIN agents g ON ${col} < 0 AND g.id = -${col} AND g.world_id = ${t}.world_id AND g.deleted IS NULL`;
+const WHO_OK = '(a.id IS NOT NULL OR g.id IS NOT NULL)', WHO_NAME = 'COALESCE(a.display_name, g.name)';
 export class PlayError extends Error { constructor(status, code, msg) { super(msg); this.status = status; this.code = code; } }
 const fail = (status, code, msg) => { throw new PlayError(status, code, msg); };
 
@@ -49,19 +56,20 @@ export class PlayCore {
       profilePut: db.prepare(`INSERT INTO player_profiles (world_id, account_id, bio, showcase, updated) VALUES ($w, $a, $bio, $sc, $t)
         ON CONFLICT (world_id, account_id) DO UPDATE SET bio = $bio, showcase = $sc, updated = $t`),
       account: db.prepare("SELECT id, display_name AS name, role, created FROM accounts WHERE world_id = ? AND id = ? AND status = 'active'"),
-      boardLow: db.prepare(`SELECT b.account_id AS id, a.display_name AS name, b.score, b.stars, b.at FROM play_best b JOIN accounts a ON a.id = b.account_id AND a.status = 'active'
-        WHERE b.world_id = ? AND b.module = ? AND b.course = ? ORDER BY b.score ASC, b.at ASC LIMIT ?`),
-      boardHigh: db.prepare(`SELECT b.account_id AS id, a.display_name AS name, b.score, b.stars, b.at FROM play_best b JOIN accounts a ON a.id = b.account_id AND a.status = 'active'
-        WHERE b.world_id = ? AND b.module = ? AND b.course = ? ORDER BY b.score DESC, b.at ASC LIMIT ?`),
-      aheadLow: db.prepare(`SELECT COUNT(*) AS n FROM play_best b JOIN accounts a ON a.id = b.account_id AND a.status = 'active'
-        WHERE b.world_id = ? AND b.module = ? AND b.course = ? AND (b.score < ? OR (b.score = ? AND b.at < ?))`),
-      aheadHigh: db.prepare(`SELECT COUNT(*) AS n FROM play_best b JOIN accounts a ON a.id = b.account_id AND a.status = 'active'
-        WHERE b.world_id = ? AND b.module = ? AND b.course = ? AND (b.score > ? OR (b.score = ? AND b.at < ?))`),
+      agent: db.prepare("SELECT id, name, emoji, owner_id AS owner, created FROM agents WHERE world_id = ? AND id = ? AND deleted IS NULL"),
+      boardLow: db.prepare(`SELECT b.account_id AS id, ${WHO_NAME} AS name, b.score, b.stars, b.at FROM play_best b ${WHO('b', 'b.account_id')}
+        WHERE b.world_id = ? AND b.module = ? AND b.course = ? AND ${WHO_OK} ORDER BY b.score ASC, b.at ASC LIMIT ?`),
+      boardHigh: db.prepare(`SELECT b.account_id AS id, ${WHO_NAME} AS name, b.score, b.stars, b.at FROM play_best b ${WHO('b', 'b.account_id')}
+        WHERE b.world_id = ? AND b.module = ? AND b.course = ? AND ${WHO_OK} ORDER BY b.score DESC, b.at ASC LIMIT ?`),
+      aheadLow: db.prepare(`SELECT COUNT(*) AS n FROM play_best b ${WHO('b', 'b.account_id')}
+        WHERE b.world_id = ? AND b.module = ? AND b.course = ? AND ${WHO_OK} AND (b.score < ? OR (b.score = ? AND b.at < ?))`),
+      aheadHigh: db.prepare(`SELECT COUNT(*) AS n FROM play_best b ${WHO('b', 'b.account_id')}
+        WHERE b.world_id = ? AND b.module = ? AND b.course = ? AND ${WHO_OK} AND (b.score > ? OR (b.score = ? AND b.at < ?))`),
       // one player's experience (the primary key's prefix: an index lookup, never a scan)
       xpOf: db.prepare('SELECT COALESCE(SUM(xp), 0) AS xp FROM play_progress WHERE world_id = ? AND account_id = ?'),
       // the top players in SQL (sorted and cut there, names joined): one query, whatever the number of players
-      top: db.prepare(`SELECT p.account_id AS id, a.display_name AS name, SUM(p.xp) AS xp FROM play_progress p
-        JOIN accounts a ON a.id = p.account_id AND a.status = 'active' WHERE p.world_id = ? GROUP BY p.account_id ORDER BY xp DESC, p.account_id LIMIT ?`),
+      top: db.prepare(`SELECT p.account_id AS id, ${WHO_NAME} AS name, SUM(p.xp) AS xp FROM play_progress p ${WHO('p', 'p.account_id')}
+        WHERE p.world_id = ? AND ${WHO_OK} GROUP BY p.account_id ORDER BY xp DESC, p.account_id LIMIT ?`),
     };
   }
 
@@ -105,11 +113,11 @@ export class PlayCore {
     const n = Math.max(1, Math.min(BOARD_MAX, Math.floor(Number(limit)) || 20));
     const rows = (m.score.better === 'lower' ? this.q.boardLow : this.q.boardHigh).all(this.w, m.id, c.id, n);
     const levels = this.levels(rows.map(r => r.id).concat(viewer ? [viewer] : []));
-    const row = (r, place) => ({ place, id: r.id, name: r.name, score: r.score, stars: r.stars, at: r.at, level: levels.get(r.id) || 1, rank: rankOf(levels.get(r.id) || 1).id });
+    const row = (r, place) => ({ place, id: r.id, name: r.name, score: r.score, stars: r.stars, at: r.at, level: levels.get(r.id) || 1, rank: rankOf(levels.get(r.id) || 1).id, ...(r.id < 0 ? { agent: true } : {}) });
     const out = { module: m.id, course: c.id, rows: rows.map((r, k) => row(r, k + 1)), you: null };
     if (viewer) {
       const mine = this.q.best.all(this.w, viewer, m.id).find(b => b.course === c.id);
-      if (mine) { const a = this.q.account.get(this.w, viewer); out.you = row({ id: viewer, name: a?.name || '', ...mine }, this.placeOf(m.id, c.id, mine.score, mine.at)); }
+      if (mine) { const a = viewer < 0 ? this.q.agent.get(this.w, -viewer) : this.q.account.get(this.w, viewer); out.you = row({ id: viewer, name: a?.name || '', ...mine }, this.placeOf(m.id, c.id, mine.score, mine.at)); }
     }
     return out;
   }
@@ -124,19 +132,20 @@ export class PlayCore {
   topPlayers(limit = 20) {
     const n = Math.max(1, Math.min(BOARD_MAX, Math.floor(limit) || 20)), t = this.now();
     if (this.topCache && this.topCache.n === n && t - this.topCache.at < 10000) return this.topCache.rows;   // a public page: at most one query every 10 s
-    const rows = this.q.top.all(this.w, n).map((r, k) => ({ place: k + 1, id: r.id, name: r.name, xp: Math.round(r.xp), level: playerLevel(r.xp), rank: rankOf(playerLevel(r.xp)).id }));
+    const rows = this.q.top.all(this.w, n).map((r, k) => ({ place: k + 1, id: r.id, name: r.name, xp: Math.round(r.xp), level: playerLevel(r.xp), rank: rankOf(playerLevel(r.xp)).id, ...(r.id < 0 ? { agent: true } : {}) }));
     this.topCache = { n, at: t, rows };
     return rows;
   }
   /** A player's profile, as anyone signed in sees it (own: also what can be edited). */
   profile(accountId, viewerId = null) {
-    const a = this.q.account.get(this.w, accountId);
+    const g = accountId < 0 ? this.q.agent.get(this.w, -accountId) : null;   // (an agent's: minus its id)
+    const a = g ? { id: accountId, name: g.name, created: g.created, agent: { id: g.id, emoji: g.emoji, owner: g.owner } } : this.q.account.get(this.w, accountId);
     if (!a) fail(404, 'not_found', 'No such player');
     const p = this.q.profile.get(this.w, accountId) || {}, pr = this.progress(accountId);
     let showcase = []; try { showcase = JSON.parse(p.showcase || '[]'); } catch { showcase = []; }
     const earned = new Set(pr.badges.map(b => b.id));
     return {
-      id: a.id, name: a.name, own: viewerId === a.id, since: a.created, bio: p.bio || '',
+      id: a.id, name: a.name, own: viewerId === a.id, since: a.created, bio: p.bio || '', ...(a.agent ? { agent: a.agent } : {}),
       showcase: showcase.filter(id => earned.has(id)).slice(0, SHOWCASE_MAX),
       level: pr.level, xp: Math.round(pr.xp), progress: pr.progress, rank: pr.rank, runs: pr.runs, stars: pr.stars,
       badges: pr.badges, modules: pr.modules, vc: this.winnings(accountId).total,
@@ -162,7 +171,7 @@ export class PlayCore {
 
   // ---------------------------------------------------------------- playing
   /** Starts a run of a course. where: the module's own idea of where (the airport's building). */
-  start(account, moduleId, courseId, where = null) {
+  start(account, moduleId, courseId, where = null, o = {}) {   // (o.auto: an unattended run, an agent's shift)
     const m = playOf(moduleId); if (!m) fail(404, 'not_found', 'No such module');
     const c = courseOf(m, courseId); if (!c) fail(404, 'not_found', 'No such course');
     const t = this.now();
@@ -176,7 +185,7 @@ export class PlayCore {
     }
     this.gc(t);
     for (const [id, r] of this.runs) if (r.account === account.id) this.runs.delete(id);   // one run at a time
-    const run = { id: crypto.randomBytes(12).toString('hex'), account: account.id, module: m.id, course: c.id, version: m.version, at: t, data };
+    const run = { id: crypto.randomBytes(12).toString('hex'), account: account.id, module: m.id, course: c.id, version: m.version, at: t, data, auto: !!o.auto };
     // a module that plays out over a while keeps its own state with the run (never sent to the browser), with a secret
     // for its own dice (the fishing module: what bites)
     if (m.init) { run.secret = crypto.randomBytes(16).toString('hex'); run.state = m.init(c, data, this.contextFor(m.id, where, account) || {}); }
@@ -214,8 +223,8 @@ export class PlayCore {
     catch (e) { this.log?.warn?.('[play] verify failed', m.id, e.message); res = { ok: false, why: 'That run could not be checked' }; }
     if (!res?.ok) return { ok: false, why: res?.why || 'That run did not count', detail: res };
     const before = this.progress(account.id), prevBest = before.modules[m.id].best[c.id] || null;
-    const stars = starsFor(m, c, res.score), newBest = better(m, res.score, prevBest?.score);
-    const xp = Math.max(1, Math.round((m.xp({ ...res, stars, newBest }, c) || 0) * (stars ? 1 : 0.25)));
+    const stars = Number.isInteger(res.stars) ? Math.max(0, Math.min(3, res.stars)) : starsFor(m, c, res.score), newBest = better(m, res.score, prevBest?.score);   // (a module may give its own: a Rush's)
+    const xp = Math.max(1, Math.round((m.xp({ ...res, stars, newBest }, c) || 0) * (stars ? 1 : 0.25) * (run.auto ? AUTO_XP : 1)));
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.q.progPut.run({ w: this.w, a: account.id, m: m.id, xp, t });
@@ -229,9 +238,10 @@ export class PlayCore {
     const after = this.progress(account.id), mine = after.modules[m.id].best[c.id];
     const runCtx = { ...res, stars, newBest, place: mine?.place ?? null, module: m.id, course: c.id };
     const badges = this.award(account.id, after, m.id, runCtx);
-    const vc = this.payPrize(account, run, m, c, { stars, newBest, prevStars: prevBest?.stars || 0, place: mine?.place ?? null, prevPlace: prevBest?.place ?? null }, runRow);
+    const vc = run.auto || account.id < 0 ? { amount: 0, parts: [], paid: 0, why: 'An agent\'s shift: paid by its post' } : this.payPrize(account, run, m, c, { stars, newBest, prevStars: prevBest?.stars || 0, place: mine?.place ?? null, prevPlace: prevBest?.place ?? null }, runRow);
     return {
-      ok: true, score: res.score, ms: res.ms ?? null, stars, newBest, prevBest, best: mine || null, xp, place: mine?.place ?? null, row: Number(runRow) || null,
+      ok: true, score: res.score, ms: res.ms ?? null, stars, newBest, prevBest, best: mine || null, xp, place: mine?.place ?? null, row: Number(runRow) || null, detail: res.detail || null,
+      game: { id: m.id, name: m.name || m.id, course: c.id, courseName: c.name || c.id },   // (what was played: MVW Radio's news, server/radio/)
       module: { level: after.modules[m.id].level, was: before.modules[m.id].level, progress: after.modules[m.id].progress },
       player: { level: after.level, was: before.level, rank: after.rank, rankUp: after.rank.id !== before.rank.id, progress: after.progress },
       badges: badges.map(id => publicBadge(badgeOf(id))), vc,

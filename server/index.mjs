@@ -19,7 +19,7 @@ import { Weather } from './world/weather.js';
 import { Wildlife } from './world/wildlife.js';
 import { addWorldAdminRoutes } from './world-admin-routes.js';
 import { addPromoRoutes } from './promo-routes.js';
-import { PlayCore } from './play/play.js';
+import { PlayCore, PlayError } from './play/play.js';
 import { Solids } from '../shared/roofs.js';
 import { groundSites } from '../shared/fishing-trip.js';
 import { STARTER } from '../shared/fishing-gear.js';
@@ -30,10 +30,16 @@ import { addPlayRoutes } from './play/routes.js';
 import { addArcadeHoldRoutes } from './play/arcade-hold.js';
 import { FishMarket } from './play/fish-market.js';
 import { Angler } from './play/angler.js';
+import { CookRecord } from './play/cook.js';
+import { KitchenShifts } from './play/kitchen-shifts.js';
+import { addOrderUpAgentRoutes } from './play/routes.js';
+import { kitchenOf as ouKitchenOf } from '../shared/orderup/kitchens.js';
 import { addSignRoutes } from './signs-routes.js';
 import { Music } from './music/music.js';
 import { seedSoundtrack } from './music/soundtrack.js';
 import { addMusicRoutes } from './music/routes.js';
+import { Radio } from './radio/radio.js';
+import { addRadioRoutes } from './radio/routes.js';
 import { addWeatherRoutes } from './weather-routes.js';
 import { FreeWill } from './free-will/free-will.js';
 import { addFreeWillRoutes } from './free-will/routes.js';
@@ -126,6 +132,7 @@ import { SecretBox, KeyConfigError, unreadableHelp } from './secrets.js';
 import { registerSecretHolders } from './secret-holders.js';
 import { redact, scrub } from './redact.js';
 import { Settings } from './settings.js';
+import { placeMenu } from '../shared/kitchen-module.js';
 import { loadConfig } from './config.js';
 import { createLogger } from './log.js';
 
@@ -443,6 +450,7 @@ log(`[boot] ${world.buildings.filter(b => !b.gone).length} buildings, ${people.l
 let solids = null, solidsKey = -1;
 function playContext(id, where, account) {
   if (id === 'fishing') return fishingContext(where, account);
+  if (id === 'orderup') return orderUpContext(where, account);
   if (id !== 'airport') return {};
   const list = (world.worldModules || []).filter(m => m.kind === 'airport' && Number.isFinite(m.y));
   const p = account ? players?.byId.get(account.id) : null, far = m => (p ? Math.hypot(p.x - m.x, p.z - m.z) : 0);
@@ -452,6 +460,21 @@ function playContext(id, where, account) {
   if (!solids || solidsKey !== world.version) { solids = new Solids(world); solidsKey = world.version; }
   const G = editor.ground();
   return { airport: { id: m.id, x: m.x, z: m.z, y: m.y, yaw: m.rot }, clearAt: (x, z) => Math.max(G ? G.env.heightAt(x, z) : -Infinity, solids.roofAt(x, z)) };
+}
+/**
+ * Order Up's context (shared/orderup/module.js prepare): the kitchen a Rush is played in (where: { b, f }, the building
+ * and floor), as its record has it: its stations (the playable pieces of the kitchen, in the order they stand on the
+ * floor: the browser lays the Rush out from this same list), its template and its place's menu; a fresh seed; and the
+ * cook's skills (server/play/cook.js: the Rush is played, and played again, with them).
+ */
+function orderUpContext(where, account) {
+  const b = Number(where?.b), f = Number(where?.f), B = Number.isSafeInteger(b) ? world.buildings[b] : null;
+  const L = B && !B.gone && Number.isSafeInteger(f) ? world.levels[B.lv?.[f]] : null;
+  const rec = (L?.mods || []).find(m => m.kind === 'kitchen');
+  if (!rec) return { kitchen: null };
+  const K = ouKitchenOf(rec.data?.kitchen), stations = (L.items || []).filter(it => it.mod === rec.id && K.stations[it.t]).map(it => ({ id: it.id, t: it.t }));
+  if (!stations.some(s => s.t === 'ou_pass')) return { kitchen: null };
+  return { seed: crypto.randomBytes(8).toString('hex'), skills: account ? cooks.skillsOf(account.id) : {}, kitchen: { b, f, stations, kitchen: rec.data?.kitchen || null, menu: rec.data?.menu || null } };   // (the cook's skills as the server has them)
 }
 /**
  * The fishing module's context (shared/fishing.js prepare): the dock a trip starts from (where: its id, else the one
@@ -671,7 +694,8 @@ const play = new PlayCore({ dbs, log, contextFor: (id, where, account) => playCo
 players.play = play;
 vehicles = await createVehicles({ world, worldId: dbs.worldId, players, store, perms, log,
   clock: () => ({ rate: sim.clock.rate, time: sim.now(), hour: sim.hour() }),
-  actors: () => { const t = sim.now(); return sim.agents.filter(a => a.plan && !a.p.retired).map(a => ({ id: `n:${a.i}`, ...evalPlan(a.plan, t) })); } });
+  actors: () => { const t = sim.now(); return sim.agents.filter(a => a.plan && !a.p.retired).map(a => ({ id: `n:${a.i}`, ...evalPlan(a.plan, t) })); },
+  residentCars: () => (sim ? sim.residentCarsNow() : []) });   // (the traffic keeps clear of residents' cars: shared/car-route.js)
 players.vehicles = vehicles;
 weather = new Weather({ worldId: dbs.worldId, store, clock: () => sim.clock, simNow: () => sim.now(), broadcast, audit });
 wildlife = new Wildlife(world, { seed: dbs.worldId, clock: () => sim.clock });
@@ -926,7 +950,8 @@ function renameAgentBody(a) {
   if (!isExtKey(a.key)) {
     p.emoji = a.emoji; p.role = a.role;
     const j = p.job || {}, role = a.role || 'Agent', at = (j.kind === 'vip' || j.kind === 'staff') && j.b >= 0 ? world.buildings[j.b] : null;
-    if (at) j.title = `${role} at ${j.kind === 'staff' && j.venue && j.venue !== 'lobby' ? (world.levels[at.lv[j.f]]?.name || at.name) : at.name}`;
+    if (j.kind === 'post' && p.post) p.job = sim.postJob(p, p.post);   // (on post: "<role> at <the place>", as the sim words it)
+    else if (at) j.title = `${role} at ${j.kind === 'staff' && j.venue && j.venue !== 'lobby' ? (world.levels[at.lv[j.f]]?.name || at.name) : at.name}`;
     else if (j.kind === 'free' && j.prev === 'vip') j.title = role;
   }
   const now = sim.publicPerson(p, i);
@@ -941,7 +966,7 @@ function renameAgentBody(a) {
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json',
-  '.md': 'text/markdown; charset=utf-8', '.py': 'text/x-python; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8' };   // /skill.md and the Python example of the Agent API (WP2.14)
+  '.md': 'text/markdown; charset=utf-8', '.py': 'text/x-python; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.mp3': 'audio/mpeg' };   // /skill.md and the Python example of the Agent API (WP2.14)
 const STATIC = [
   ['/vendor/three/', path.join(ROOT, 'node_modules/three/'), 'public, max-age=86400'],
   // The official Rapier build, loaded by a driver's browser only while driving (decision A20).
@@ -951,6 +976,7 @@ const STATIC = [
   ['/shared/', path.join(ROOT, 'shared/'), 'no-cache'],
   ['/promo/', path.join(DATA, 'promo/'), 'public, max-age=86400'],   // promotional aircraft graphics (WP4.11)
   ['/signs/', path.join(DATA, 'signs/'), 'public, max-age=86400'], // pictures on owners' signs and the Marketing tools' own content
+  ['/assets/sfx/', path.join(ROOT, 'client/assets/sfx/'), 'public, max-age=86400'],   // the game's sound effects (audio/engine.js)
   ['/', path.join(ROOT, 'client/'), 'no-cache'],
 ];
 // No framing by other sites (the sign-in dialog), no MIME sniffing, no full URLs in Referer headers to other sites.
@@ -1207,7 +1233,7 @@ addGuideRoutes(router, new Guide({ dbs, world: () => world, settings, can: (P, c
       const a = agents.byKey(p.agentId);
       p.quit = { b: biz.b, biz: biz.id, untilDay: sim.brain.day(sim.now()) + avoid };
       let moved = false;
-      if (p.post && p.post.b === biz.b) { sim.setPost(i, null); moved = true; }
+      if (p.post && p.post.b === biz.b) { sim.setPost(i, null); if (a) posts.ended(a); moved = true; }   // (its owner is told below: not as a post that vanished)
       if (p.job && p.job.b === biz.b) { p.job = { kind: 'free', title: p.role || 'Agent', seek: 1, prev: 'vip' }; sim.setJob(i); moved = true; }
       peopleCache = {}; save({ people: [i] });
       const owner = a ? (a.ownerId ?? ownerId()) : null;
@@ -1239,7 +1265,7 @@ let agentSocial = null; // agents and friends (server/agent-social/), set below
 // Free Will (docs/features/FREE-WILL.md, server/free-will/): agents whose owner switched it on let a decision service choose
 // what they do with their free time. Requests go through the provider helper (credentials per call, never in this
 // process's environment); the simulation never waits for an answer.
-let freeWill = null, agentLife = null, mind = null, problems = null, voice = null;
+let freeWill = null, agentLife = null, mind = null, problems = null, voice = null, ownerPrincipal = () => null;
 // a connection saved (a new key, say) or tested and working: a brain or decision service it had paused may go again now
 let phone = null;      // agents' phones (server/phone/), set below
 let pc = null, pcNames = t => t, pcTimer = null, pcWork = null, pcBrowser = null, pcProvScreens = null, pcWatch = null, pcChrome = null;   // the agents' PC (server/pc/), set below
@@ -1254,7 +1280,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   // talking with others' agents in the city (server/agent-talk/): short conversations through a bar, answered in a bubble
   // only the talker sees; their owners read them and block whom they choose
   const talk = new Talk({ dbs, agents, connections, sessions: chat.sessions, transcripts: chat.transcripts, chat, setting: k => settings.get(k), sim: () => sim,
-    ownerOf: a => a.ownerId ?? principalFor(null)?.account?.id ?? null, work, log }).attach();
+    ownerOf: a => a.ownerId ?? principalFor(null)?.account?.id ?? null, work, life: () => agentLife, log }).attach();
   addTalkRoutes(router, talk, { agents });
   agentTalk = talk;
   const accountQ = dbs.db.prepare("SELECT id, login, role FROM accounts WHERE world_id = ? AND id = ? AND status = 'active'");
@@ -1264,6 +1290,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
     const r = id ? accountQ.get(dbs.worldId, id) : null;
     return r ? { account: { id: r.id, login: r.login, role: r.role }, role: r.role } : null;
   };
+  ownerPrincipal = principalFor;   // (MVW Radio's hosts speak as their owners: server/radio/)
   // agents' phones (server/phone/, docs/features/phone.md): a Twilio number per agent — texts, calls, voicemail, contacts;
   // read from Twilio every few seconds (no webhook), what reaches the agent goes into its phone chat, its answer is a reply
   phone = new Phone({ dbs, agents, connections, host, chat, notifications, send: sendToAccount, principalFor, setting: k => settings.get(k),
@@ -1467,9 +1494,20 @@ addPromoRoutes(router, { world: () => world, dataDir: DATA, audit, broadcast: o 
 // Play modules: the same routes for every module (server/play/routes.js)
 const fishMarket = new FishMarket({ dbs, economy: () => economy, world: () => world, players, log });
 angler = new Angler({ dbs, economy: () => economy, play, market: fishMarket, log });
-addPlayRoutes(router, { play, fishMarket, angler, onFinish: (account, r) => {
+const cooks = new CookRecord({ dbs, play, log, pay: (cookId, vc, what, idem, fn) => {   // (a skills respec's price, to the economy's Fees; no economy: free)
+  const E = economy?.econ; if (!E?.enabled?.() || cookId <= 0) return fn();
+  const w = E.walletFor(econSubj('account', cookId));
+  if (w.status === 'frozen') throw new PlayError(409, 'frozen', 'Your wallet is frozen');
+  return E.dbs.tx(() => { E.ledger.transfer(w.id, E.sink('fees').id, Math.round(vc * 100), { kind: 'purchase', actor: `account:${cookId}`, memo: what, idem }); return fn(); });
+} });
+addPlayRoutes(router, { play, fishMarket, angler, cooks, onFinish: (account, r) => {
   const out = {};
+  try { if (r.newBest && r.place && r.place <= 3 && r.game) radio.note(`${account.displayName || account.login || 'A player'} ${r.place === 1 ? 'set a new record' : `made the top ${r.place}`} on ${r.game.courseName} (${r.game.name})${r.player?.rankUp ? `, and is now ${r.player.rank?.name || 'a rank higher'}` : ''}.`); } catch { /* the radio's news only */ }
   try { const c = fishMarket.stow(account, r); if (c) out.catch = c; } catch (e) { log.error('[fishing] stowing a catch failed', e.message); }
+  try {   // (Order Up: the Cookbook and the badges of a cook's whole history)
+    const c = cooks.afterRush(account.id, r);
+    if (c) { out.cookbook = c.cookbook; if (c.badges?.length) out.badges = [...(out.badges || r.badges || []), ...c.badges]; }
+  } catch (e) { log.error('[orderup] the Cookbook failed', e.message); }
   try {
     const u = angler.afterTrip(account, r);
     if (u) { out.tackle = { used: u.used }; out.dex = { ...u.dex, records: u.records }; if (u.badges?.length) out.badges = [...(r.badges || []), ...u.badges]; }
@@ -1488,6 +1526,12 @@ addMusicRoutes(router, { music, perms, audit, readStream: (req, limit) => readSt
 // (the game's own soundtrack, each song once: server/music/soundtrack.js)
 if (CFG.soundtrack) { try { seedSoundtrack(music, { log }); } catch (e) { log.error('[music] the soundtrack could not be added', e.message); } }
 music.start();
+// MVW Radio's hosts (server/radio/): an agent per station, breaks from the world's news written by its brain.
+const radio = new Radio({ dataDir: DATA, music, agents, connections, dbs, world: () => world, life: () => agentLife, postsAt: (b, f, id) => posts.servingAt(b, f, id, { onDuty: true }), mind: () => mind, voice: () => voice, principalFor: id => ownerPrincipal(id), econ: () => economy?.econ || null, weather: () => weather,
+  broadcast: o => broadcast(o), log,
+  complete: (c, req) => host.call('models', 'complete', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: c.scope === 'installation', ...req }, { timeoutMs: (req.timeoutMs || 40000) + 5000 }) });
+addRadioRoutes(router, { radio, agents, audit });
+radio.breaksOff = !CFG.radio; radio.start({ every: CFG.radio ? 15000 : 3000 });   // (tests: no breaks, studios checked often)
 addWorldAdminRoutes(router, { world: () => world, people: () => people, lots: () => property.all(), worldId: dbs.worldId, audit,
   readStream: (req, limit) => readStream(req, limit),
   replace: (next, why) => {
@@ -1508,8 +1552,14 @@ editor.rights = lotRights;
 // elsewhere), one agent to a spot
 const postRoleQ = dbs.db.prepare("SELECT role FROM accounts WHERE world_id = ? AND id = ? AND status = 'active'");
 const posts = new Posts({ sim: () => sim, world: () => world, agents, perms, property, rights: lotRights, save: marks => save(marks), log,
-  roleOf: id => postRoleQ.get(dbs.worldId, Number(id))?.role || null, notify: (id, m) => notifyAccount(id, m), moved: () => settleSoon() }).attach();
+  roleOf: id => postRoleQ.get(dbs.worldId, Number(id))?.role || null, notify: (id, m) => notifyAccount(id, m), moved: () => settleSoon(),
+  pay: (b, f, id, k) => economy?.econ?.parts?.households?.payInfo(b, f, id, k) ?? null }).attach();
 addPostRoutes(router, posts, { agents });
+// agents cooking on their kitchen shifts (server/play/kitchen-shifts.js): Rushes played and recorded as a player's; an
+// agent's cooking (its level, badges, Cookbook, skills, its shift now) for anyone, its skill points for its owner
+const shifts = new KitchenShifts({ play, cooks, posts, world: () => world, freeWill: id => !!freeWill?.settingsOf(id)?.enabled, notify: (id, m) => notifyAccount(id, m),
+  ownerOf: a => a.ownerId ?? principalFor(null)?.account?.id ?? null, log }).attach();
+addOrderUpAgentRoutes(router, { agents, play, cooks, shifts, freeWillOn: id => !!freeWill?.settingsOf(id)?.enabled });
 // AI apps acting as a person's agent (server/connector/): the OAuth 2.1 authorization server and the MCP endpoint they
 // connect to (outside the /api table: other companies' servers speak OAuth and MCP there), and the person's side of it —
 // the consent page's answer, the list of apps, disconnecting one — in the route table. Settings → connector.enabled.
@@ -1535,6 +1585,17 @@ if (journal) journal.allow = (P, keys, target) => economy?.econ.parts.realty?.gu
   || lotRights.checkKeys(keys, { admin: perms.allowed(P, 'world.edit'), subject: P.account ? { kind: 'account', id: String(P.account.id) } : null, agentBody: i => managesBody(P, i) }, lv => editor.levelOwner(lv), target);
 // What the economy sold or let stays put: the editor asks it before every op that isn't its own.
 editor.guard = (o, ed) => economy?.econ.parts.realty?.guardOp(o, ed) || null;
+editor.menuAt = (b, f) => economy?.econ.parts.businesses?.menuAt(b, f) || null;   // (a kitchen's stations from its place's menu: shared/kitchen-module.js)
+// Kitchens laid before their records said what their place sells (2026-10-28): told now, as they stand (an arrangement by
+// hand kept), so their Rushes order only that (shared/orderup/rules.js); a menu change writes it from then on.
+try {
+  let n = 0;
+  for (const B of world.buildings || []) for (let f = 0; B && !B.gone && f < (B.lv || []).length; f++) {
+    const L = world.levels[B.lv[f]];
+    for (const m of L?.mods || []) if (m.kind === 'kitchen' && !Array.isArray(m.data?.menu)) { m.data = { ...(m.data || {}), menu: editor.menuAt(B.idx, f) || placeMenu(L) || [] }; n++; }
+  }
+  if (n) log.info(`[kitchens] ${n} told what their place sells`);
+} catch (e) { log.warn('[kitchens]', e.message); }
 /** The only way into /api: route → session → capability → Origin and CSRF (POST) → re-authentication → body → handler. */
 async function handleApi(req, res, url) {
   const hit = router.match(req.method, url.pathname);

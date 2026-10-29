@@ -66,3 +66,14 @@ test('the paving turns round curves in real corners; the landside reaches the en
   const w = { worldModules: [{ id: 'wm0', kind: 'airport', x: 0, z: 0, rot: 0, y: 1 }] };
   assert.equal(moduleBoxes(w).filter(b => b.label === 'a canopy column').length, LANDSIDE.columns.f.length);
 });
+
+test('what is underfoot on a module\'s grounds: its car park and paving concrete, the tower\'s compound gravel, else the ground\'s own (2026-10-28)', async () => {
+  const { groundAt, laysOwnGround } = await import('../shared/world-modules.js');
+  const { toWorldAt } = await import('../shared/airport-layout.js');
+  const m = { kind: 'radio', id: 'wm1', x: 100, z: -50, rot: 0.7, y: 4 }, w = { worldModules: [m] }, at = (s, f) => { const p = toWorldAt(m, s, f); return groundAt(w, p.x, p.z); };
+  assert.equal(at(20, 0), 'concrete', 'the car park'); assert.equal(at(36, -14), 'concrete', 'the drive'); assert.equal(at(10, -14), 'concrete', 'the walk to the door');
+  assert.equal(at(-26, 22), 'gravel', 'the tower\'s compound'); assert.equal(at(36, 20), null, 'its grass: the ground\'s own'); assert.equal(at(400, 0), null, 'far away');
+  const a = { kind: 'airport', id: 'wm2', x: 0, z: 0, rot: 0, y: 4 };
+  assert.equal(groundAt({ worldModules: [a] }, 0, 0), 'concrete', 'the runway');
+  assert.ok(laysOwnGround('radio') && laysOwnGround('airport') && !laysOwnGround('marina'));
+});

@@ -35,10 +35,14 @@ export const app = { S, bus, Q, THREE, auth };
 window.__mvw = app;
 app.icons = watchIcons(document.body);   // the interface's emoji become the theme's line icons (core/icons.js)
 
+/** The walls of the focused floor: in Play mode always full height with a ceiling (interiors.js 'fp'), whatever the
+ *  view's cutaway / full / low (the product owner 2026-10-27: in player mode buildings, floors and ceilings are always
+ *  seen, not cut away like the Sim view); otherwise the view's choice (S.walls). */
+const wallMode = () => (app.player?.active ? 'fp' : S.walls);
 /** Re-apply the interior view for S.focus (also used after edits / wall-mode changes). */
 export function applyFocus() {
   const { b, f } = S.focus;
-  const cutY = app.inter.setFocus(b, f, app.cam?.fp && app.player?.active ? 'fp' : S.walls);   // first person: full walls, a ceiling
+  const cutY = app.inter.setFocus(b, f, wallMode());
   GU.uFocusB.value = b;
   GU.uCutY.value = cutY;
   const B = b >= 0 ? S.world.buildings[b] : null;
@@ -113,9 +117,9 @@ async function boot() {
   const inter = app.inter = new Interiors(S.world, atlas);
   stage.scene.add(inter.group);
   const doors = app.doors = new Doors(stage.scene, app);   // the focused floor's doors, opening as people come near
-  bus.on('focus:applied', () => doors.build());
+  bus.on('focus:applied', () => doors.build(S.focus, wallMode()));
   // the floor being looked at changed (a theme, a re-roll, walls drawn or erased): its doors follow, none left behind
-  bus.on('world', ({ levels } = {}) => { const B = S.focus.b >= 0 ? S.world.buildings[S.focus.b] : null; if (B && levels && [...levels].includes(B.lv?.[S.focus.f])) doors.build(); });
+  bus.on('world', ({ levels } = {}) => { const B = S.focus.b >= 0 ? S.world.buildings[S.focus.b] : null; if (B && levels && [...levels].includes(B.lv?.[S.focus.f])) doors.build(S.focus, wallMode()); });
   bus.on('doors', () => doors.sync());
   bus.on('frame', dt => app.blds?.doorsTick?.(app, Math.min(0.1, dt)));   // the facades' entrance doors
   bus.on('frame', dt => doors.update(Math.min(0.1, dt)));
@@ -143,7 +147,7 @@ async function boot() {
   await new Promise(res => { if (net.synced) res(); else { const off = bus.on('synced', () => { off(); res(); }); setTimeout(res, 5000); } });
   // optional UI / feature modules (loaded after the core so a failure there never blocks the world)
   progress(0.8, 'Waking the city…', 'waking');
-  const MODS = ['./core/sync.js', './core/agents.js', './core/prefs.js', './core/theme.js', './render/traffic.js', './render/weather.js', './render/wildlife.js', './audio/mixer.js', './audio/ambience.js', './core/music.js', './audio/nightlife-music.js', './audio/score.js', './render/venue-motion.js', './render/labels.js', './ui/docks.js', './ui/ui.js', './render/promo-aircraft.js', './render/ferries.js', './render/airport.js', './render/docks.js', './render/sea-probe.js', './render/resident-cars.js', './render/boats.js', './render/fountains.js', './ui/perfhud.js', './ui/chat.js', './ui/talk-bar.js', './ui/notify.js', './ui/account.js', './ui/editors.js', './ui/place-tool.js', './ui/world-menu.js', './ui/walls-tool.js', './ui/home.js', './ui/activity.js', './ui/customizer.js', './ui/profile.js', './ui/property.js', './ui/economy.js', './ui/inventory.js', './ui/free-will.js', './ui/mind.js', './ui/agent-studio.js', './ui/sel-feeds.js', './ui/work.js', './ui/roads.js', './ui/lot-tools.js', './ui/ferry-tools.js', './ui/world-modules.js', './ui/terrain-tools.js', './ui/coast-tools.js', './ui/decor-tools.js', './ui/marketing.js', './render/signs.js', './player/vehicles.js', './player/flight.js', './player/boating.js', './play/airport-game.js', './play/fishing-game.js', './audio/aircraft-sound.js', './player/player.js', './player/remote.js', './ui/worldmap.js', './ui/social.js', './ui/licence.js', './ui/agent-providers.js', './ui/guide.js', './render/pc-screens.js', './play/machine-play.js', './play/arcade.js', './ui/post-menu.js', './ui/music-panel.js'];
+  const MODS = ['./core/sync.js', './core/agents.js', './core/prefs.js', './core/theme.js', './render/traffic.js', './render/weather.js', './render/wildlife.js', './audio/mixer.js', './audio/engine.js', './audio/ambience.js', './audio/footsteps.js', './audio/vehicle-sound.js', './audio/radio.js', './core/music.js', './audio/nightlife-music.js', './audio/score.js', './render/venue-motion.js', './render/kitchen-fx.js', './render/labels.js', './ui/docks.js', './ui/ui.js', './render/promo-aircraft.js', './render/ferries.js', './render/airport.js', './render/radio-station.js', './render/docks.js', './render/sea-probe.js', './render/resident-cars.js', './render/boats.js', './render/fountains.js', './ui/perfhud.js', './ui/chat.js', './ui/talk-bar.js', './ui/notify.js', './ui/account.js', './ui/editors.js', './ui/place-tool.js', './ui/world-menu.js', './ui/walls-tool.js', './ui/modules-tool.js', './ui/station-panel.js', './render/studio-signs.js', './ui/home.js', './ui/activity.js', './ui/customizer.js', './ui/profile.js', './ui/property.js', './ui/economy.js', './ui/inventory.js', './ui/free-will.js', './ui/mind.js', './ui/agent-studio.js', './ui/sel-feeds.js', './ui/work.js', './ui/roads.js', './ui/lot-tools.js', './ui/ferry-tools.js', './ui/world-modules.js', './ui/terrain-tools.js', './ui/coast-tools.js', './ui/decor-tools.js', './ui/marketing.js', './render/signs.js', './player/vehicles.js', './player/flight.js', './player/boating.js', './play/airport-game.js', './play/fishing-game.js', './audio/aircraft-sound.js', './player/player.js', './player/remote.js', './ui/worldmap.js', './ui/social.js', './ui/licence.js', './ui/agent-providers.js', './ui/guide.js', './render/pc-screens.js', './play/machine-play.js', './play/order-up.js', './play/arcade.js', './ui/post-menu.js', './ui/music-panel.js'];
   for (const [mi, mod] of MODS.entries()) {
     progress(0.8 + 0.12 * mi / MODS.length);
     try { const m = await import(mod); if (m.init) await m.init(app); }

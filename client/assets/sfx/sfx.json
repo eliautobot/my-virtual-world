@@ -1,0 +1,1661 @@
+{
+ "sounds": {
+  "bird-song": {
+   "takes": [
+    "bird-song-1",
+    "bird-song-2",
+    "bird-song-3",
+    "bird-song-4",
+    "bird-song-5",
+    "bird-song-6",
+    "bird-song-7",
+    "bird-song-8"
+   ]
+  },
+  "bird-wood": {
+   "takes": [
+    "bird-wood-1",
+    "bird-wood-2",
+    "bird-wood-3",
+    "bird-wood-4",
+    "bird-wood-5"
+   ]
+  },
+  "bird-peck": {
+   "takes": [
+    "bird-peck-1",
+    "bird-peck-2",
+    "bird-peck-3"
+   ]
+  },
+  "bird-dove": {
+   "takes": [
+    "bird-dove-1",
+    "bird-dove-2",
+    "bird-dove-3",
+    "bird-dove-4"
+   ]
+  },
+  "bird-crow": {
+   "takes": [
+    "bird-crow-1",
+    "bird-crow-2",
+    "bird-crow-3",
+    "bird-crow-4"
+   ]
+  },
+  "bird-meadow": {
+   "takes": [
+    "bird-meadow-1",
+    "bird-meadow-2",
+    "bird-meadow-3",
+    "bird-meadow-4",
+    "bird-meadow-5"
+   ]
+  },
+  "bird-chirp": {
+   "takes": [
+    "bird-chirp-1",
+    "bird-chirp-2",
+    "bird-chirp-3",
+    "bird-chirp-4",
+    "bird-chirp-5",
+    "bird-chirp-6"
+   ]
+  },
+  "bird-pigeon": {
+   "takes": [
+    "bird-pigeon-1",
+    "bird-pigeon-2",
+    "bird-pigeon-3",
+    "bird-pigeon-4"
+   ]
+  },
+  "bird-gull": {
+   "takes": [
+    "bird-gull-1",
+    "bird-gull-2",
+    "bird-gull-3",
+    "bird-gull-4",
+    "bird-gull-5",
+    "bird-gull-6"
+   ]
+  },
+  "bird-duck": {
+   "takes": [
+    "bird-duck-1",
+    "bird-duck-2",
+    "bird-duck-3",
+    "bird-duck-4",
+    "bird-duck-5"
+   ]
+  },
+  "bird-heron": {
+   "takes": [
+    "bird-heron-1",
+    "bird-heron-2"
+   ]
+  },
+  "night-owl": {
+   "takes": [
+    "night-owl-1",
+    "night-owl-2",
+    "night-owl-3",
+    "night-owl-4"
+   ]
+  },
+  "night-frog": {
+   "takes": [
+    "night-frog-1",
+    "night-frog-2",
+    "night-frog-3",
+    "night-frog-4"
+   ]
+  },
+  "thunder": {
+   "takes": [
+    "thunder-1",
+    "thunder-2",
+    "thunder-3",
+    "thunder-4"
+   ]
+  },
+  "thunder-near": {
+   "takes": [
+    "thunder-near-1",
+    "thunder-near-2"
+   ]
+  },
+  "bed-leaves": {
+   "loop": true,
+   "takes": [
+    "bed-leaves"
+   ]
+  },
+  "bed-wind": {
+   "loop": true,
+   "takes": [
+    "bed-wind"
+   ]
+  },
+  "bed-wind-high": {
+   "loop": true,
+   "takes": [
+    "bed-wind-high"
+   ]
+  },
+  "bed-wind-strong": {
+   "loop": true,
+   "takes": [
+    "bed-wind-strong"
+   ]
+  },
+  "bed-rain-light": {
+   "loop": true,
+   "takes": [
+    "bed-rain-light"
+   ]
+  },
+  "bed-rain-heavy": {
+   "loop": true,
+   "takes": [
+    "bed-rain-heavy"
+   ]
+  },
+  "bed-rain-roof": {
+   "loop": true,
+   "takes": [
+    "bed-rain-roof"
+   ]
+  },
+  "bed-surf": {
+   "loop": true,
+   "takes": [
+    "bed-surf"
+   ]
+  },
+  "bed-surf-strong": {
+   "loop": true,
+   "takes": [
+    "bed-surf-strong"
+   ]
+  },
+  "bed-harbour": {
+   "loop": true,
+   "takes": [
+    "bed-harbour"
+   ]
+  },
+  "bed-stream": {
+   "loop": true,
+   "takes": [
+    "bed-stream"
+   ]
+  },
+  "bed-river": {
+   "loop": true,
+   "takes": [
+    "bed-river"
+   ]
+  },
+  "bed-city-day": {
+   "loop": true,
+   "takes": [
+    "bed-city-day"
+   ]
+  },
+  "bed-city-night": {
+   "loop": true,
+   "takes": [
+    "bed-city-night"
+   ]
+  },
+  "bed-crickets": {
+   "loop": true,
+   "takes": [
+    "bed-crickets"
+   ]
+  },
+  "bed-frogs": {
+   "loop": true,
+   "takes": [
+    "bed-frogs"
+   ]
+  },
+  "bed-underwater": {
+   "loop": true,
+   "takes": [
+    "bed-underwater"
+   ]
+  },
+  "room-home": {
+   "loop": true,
+   "takes": [
+    "room-home"
+   ]
+  },
+  "room-shop": {
+   "loop": true,
+   "takes": [
+    "room-shop"
+   ]
+  },
+  "room-restaurant": {
+   "loop": true,
+   "takes": [
+    "room-restaurant"
+   ]
+  },
+  "room-cafe": {
+   "loop": true,
+   "takes": [
+    "room-cafe"
+   ]
+  },
+  "room-office": {
+   "loop": true,
+   "takes": [
+    "room-office"
+   ]
+  },
+  "room-hall": {
+   "loop": true,
+   "takes": [
+    "room-hall"
+   ]
+  },
+  "room-gym": {
+   "loop": true,
+   "takes": [
+    "room-gym"
+   ]
+  },
+  "jump": {
+   "takes": [
+    "jump-1",
+    "jump-2",
+    "jump-3",
+    "jump-4",
+    "jump-5"
+   ]
+  },
+  "land-hard": {
+   "takes": [
+    "land-hard-1",
+    "land-hard-2",
+    "land-hard-3",
+    "land-hard-4",
+    "land-hard-5"
+   ]
+  },
+  "land-soft": {
+   "takes": [
+    "land-soft-1",
+    "land-soft-2",
+    "land-soft-3",
+    "land-soft-4"
+   ]
+  },
+  "land-wood": {
+   "takes": [
+    "land-wood-1",
+    "land-wood-2",
+    "land-wood-3"
+   ]
+  },
+  "land-sand": {
+   "takes": [
+    "land-sand-1",
+    "land-sand-2",
+    "land-sand-3"
+   ]
+  },
+  "water-in": {
+   "takes": [
+    "water-in-1",
+    "water-in-2",
+    "water-in-3",
+    "water-in-4"
+   ]
+  },
+  "water-wade": {
+   "takes": [
+    "water-wade-1",
+    "water-wade-2",
+    "water-wade-3"
+   ]
+  },
+  "water-out": {
+   "takes": [
+    "water-out-1",
+    "water-out-2",
+    "water-out-3"
+   ]
+  },
+  "dive": {
+   "takes": [
+    "dive-1",
+    "dive-2",
+    "dive-3"
+   ]
+  },
+  "surface": {
+   "takes": [
+    "surface-1",
+    "surface-2",
+    "surface-3"
+   ]
+  },
+  "step-walk-concrete": {
+   "takes": [
+    "step-walk-concrete-1",
+    "step-walk-concrete-2",
+    "step-walk-concrete-3",
+    "step-walk-concrete-4",
+    "step-walk-concrete-5",
+    "step-walk-concrete-6",
+    "step-walk-concrete-7",
+    "step-walk-concrete-8",
+    "step-walk-concrete-9",
+    "step-walk-concrete-10",
+    "step-walk-concrete-11",
+    "step-walk-concrete-12"
+   ]
+  },
+  "step-run-concrete": {
+   "takes": [
+    "step-run-concrete-1",
+    "step-run-concrete-2",
+    "step-run-concrete-3",
+    "step-run-concrete-4",
+    "step-run-concrete-5",
+    "step-run-concrete-6",
+    "step-run-concrete-7",
+    "step-run-concrete-8",
+    "step-run-concrete-9",
+    "step-run-concrete-10",
+    "step-run-concrete-11",
+    "step-run-concrete-12"
+   ]
+  },
+  "step-walk-grass": {
+   "takes": [
+    "step-walk-grass-1",
+    "step-walk-grass-2",
+    "step-walk-grass-3",
+    "step-walk-grass-4",
+    "step-walk-grass-5",
+    "step-walk-grass-6",
+    "step-walk-grass-7",
+    "step-walk-grass-8",
+    "step-walk-grass-9",
+    "step-walk-grass-10",
+    "step-walk-grass-11",
+    "step-walk-grass-12"
+   ]
+  },
+  "step-run-grass": {
+   "takes": [
+    "step-run-grass-1",
+    "step-run-grass-2",
+    "step-run-grass-3",
+    "step-run-grass-4",
+    "step-run-grass-5",
+    "step-run-grass-6",
+    "step-run-grass-7",
+    "step-run-grass-8",
+    "step-run-grass-9",
+    "step-run-grass-10",
+    "step-run-grass-11",
+    "step-run-grass-12"
+   ]
+  },
+  "step-walk-dirt": {
+   "takes": [
+    "step-walk-dirt-1",
+    "step-walk-dirt-2",
+    "step-walk-dirt-3",
+    "step-walk-dirt-4",
+    "step-walk-dirt-5",
+    "step-walk-dirt-6",
+    "step-walk-dirt-7",
+    "step-walk-dirt-8",
+    "step-walk-dirt-9",
+    "step-walk-dirt-10",
+    "step-walk-dirt-11",
+    "step-walk-dirt-12"
+   ]
+  },
+  "step-run-dirt": {
+   "takes": [
+    "step-run-dirt-1",
+    "step-run-dirt-2",
+    "step-run-dirt-3",
+    "step-run-dirt-4",
+    "step-run-dirt-5",
+    "step-run-dirt-6",
+    "step-run-dirt-7",
+    "step-run-dirt-8",
+    "step-run-dirt-9",
+    "step-run-dirt-10",
+    "step-run-dirt-11",
+    "step-run-dirt-12"
+   ]
+  },
+  "step-walk-gravel": {
+   "takes": [
+    "step-walk-gravel-1",
+    "step-walk-gravel-2",
+    "step-walk-gravel-3",
+    "step-walk-gravel-4",
+    "step-walk-gravel-5",
+    "step-walk-gravel-6",
+    "step-walk-gravel-7",
+    "step-walk-gravel-8",
+    "step-walk-gravel-9",
+    "step-walk-gravel-10",
+    "step-walk-gravel-11",
+    "step-walk-gravel-12"
+   ]
+  },
+  "step-run-gravel": {
+   "takes": [
+    "step-run-gravel-1",
+    "step-run-gravel-2",
+    "step-run-gravel-3",
+    "step-run-gravel-4",
+    "step-run-gravel-5",
+    "step-run-gravel-6",
+    "step-run-gravel-7",
+    "step-run-gravel-8",
+    "step-run-gravel-9",
+    "step-run-gravel-10",
+    "step-run-gravel-11",
+    "step-run-gravel-12"
+   ]
+  },
+  "step-walk-sand": {
+   "takes": [
+    "step-walk-sand-1",
+    "step-walk-sand-2",
+    "step-walk-sand-3",
+    "step-walk-sand-4",
+    "step-walk-sand-5",
+    "step-walk-sand-6",
+    "step-walk-sand-7",
+    "step-walk-sand-8",
+    "step-walk-sand-9",
+    "step-walk-sand-10",
+    "step-walk-sand-11",
+    "step-walk-sand-12"
+   ]
+  },
+  "step-run-sand": {
+   "takes": [
+    "step-run-sand-1",
+    "step-run-sand-2",
+    "step-run-sand-3",
+    "step-run-sand-4",
+    "step-run-sand-5",
+    "step-run-sand-6",
+    "step-run-sand-7",
+    "step-run-sand-8",
+    "step-run-sand-9",
+    "step-run-sand-10",
+    "step-run-sand-11",
+    "step-run-sand-12"
+   ]
+  },
+  "step-walk-wood": {
+   "takes": [
+    "step-walk-wood-1",
+    "step-walk-wood-2",
+    "step-walk-wood-3",
+    "step-walk-wood-4",
+    "step-walk-wood-5",
+    "step-walk-wood-6",
+    "step-walk-wood-7",
+    "step-walk-wood-8",
+    "step-walk-wood-9",
+    "step-walk-wood-10",
+    "step-walk-wood-11",
+    "step-walk-wood-12"
+   ]
+  },
+  "step-run-wood": {
+   "takes": [
+    "step-run-wood-1",
+    "step-run-wood-2",
+    "step-run-wood-3",
+    "step-run-wood-4",
+    "step-run-wood-5",
+    "step-run-wood-6",
+    "step-run-wood-7",
+    "step-run-wood-8",
+    "step-run-wood-9",
+    "step-run-wood-10",
+    "step-run-wood-11",
+    "step-run-wood-12"
+   ]
+  },
+  "step-run-tile": {
+   "takes": [
+    "step-run-tile-1",
+    "step-run-tile-2",
+    "step-run-tile-3",
+    "step-run-tile-4",
+    "step-run-tile-5",
+    "step-run-tile-6",
+    "step-run-tile-7",
+    "step-run-tile-8",
+    "step-run-tile-9",
+    "step-run-tile-10",
+    "step-run-tile-11",
+    "step-run-tile-12"
+   ]
+  },
+  "step-walk-tile": {
+   "takes": [
+    "step-walk-tile-1",
+    "step-walk-tile-2",
+    "step-walk-tile-3",
+    "step-walk-tile-4",
+    "step-walk-tile-5",
+    "step-walk-tile-6",
+    "step-walk-tile-7",
+    "step-walk-tile-8",
+    "step-walk-tile-9",
+    "step-walk-tile-10",
+    "step-walk-tile-11",
+    "step-walk-tile-12"
+   ]
+  },
+  "step-walk-carpet": {
+   "takes": [
+    "step-walk-carpet-1",
+    "step-walk-carpet-2",
+    "step-walk-carpet-3",
+    "step-walk-carpet-4",
+    "step-walk-carpet-5",
+    "step-walk-carpet-6",
+    "step-walk-carpet-7",
+    "step-walk-carpet-8",
+    "step-walk-carpet-9",
+    "step-walk-carpet-10",
+    "step-walk-carpet-11",
+    "step-walk-carpet-12"
+   ]
+  },
+  "step-run-carpet": {
+   "takes": [
+    "step-run-carpet-1",
+    "step-run-carpet-2",
+    "step-run-carpet-3",
+    "step-run-carpet-4",
+    "step-run-carpet-5",
+    "step-run-carpet-6",
+    "step-run-carpet-7",
+    "step-run-carpet-8",
+    "step-run-carpet-9",
+    "step-run-carpet-10",
+    "step-run-carpet-11",
+    "step-run-carpet-12"
+   ]
+  },
+  "step-walk-water": {
+   "takes": [
+    "step-walk-water-1",
+    "step-walk-water-2",
+    "step-walk-water-3",
+    "step-walk-water-4",
+    "step-walk-water-5",
+    "step-walk-water-6",
+    "step-walk-water-7",
+    "step-walk-water-8",
+    "step-walk-water-9",
+    "step-walk-water-10",
+    "step-walk-water-11",
+    "step-walk-water-12"
+   ]
+  },
+  "step-run-water": {
+   "takes": [
+    "step-run-water-1",
+    "step-run-water-2",
+    "step-run-water-3",
+    "step-run-water-4",
+    "step-run-water-5",
+    "step-run-water-6",
+    "step-run-water-7",
+    "step-run-water-8",
+    "step-run-water-9",
+    "step-run-water-10",
+    "step-run-water-11",
+    "step-run-water-12"
+   ]
+  },
+  "step-walk-snow": {
+   "takes": [
+    "step-walk-snow-1",
+    "step-walk-snow-2",
+    "step-walk-snow-3",
+    "step-walk-snow-4",
+    "step-walk-snow-5",
+    "step-walk-snow-6",
+    "step-walk-snow-7",
+    "step-walk-snow-8",
+    "step-walk-snow-9",
+    "step-walk-snow-10",
+    "step-walk-snow-11",
+    "step-walk-snow-12"
+   ]
+  },
+  "step-run-snow": {
+   "takes": [
+    "step-run-snow-1",
+    "step-run-snow-2",
+    "step-run-snow-3",
+    "step-run-snow-4",
+    "step-run-snow-5",
+    "step-run-snow-6",
+    "step-run-snow-7",
+    "step-run-snow-8",
+    "step-run-snow-9",
+    "step-run-snow-10",
+    "step-run-snow-11",
+    "step-run-snow-12"
+   ]
+  },
+  "swim-stroke": {
+   "takes": [
+    "swim-stroke-1",
+    "swim-stroke-2",
+    "swim-stroke-3",
+    "swim-stroke-4",
+    "swim-stroke-5",
+    "swim-stroke-6",
+    "swim-stroke-7",
+    "swim-stroke-8",
+    "swim-stroke-9",
+    "swim-stroke-10",
+    "swim-stroke-11",
+    "swim-stroke-12"
+   ]
+  },
+  "car-horn": {
+   "takes": [
+    "car-horn-1",
+    "car-horn-2",
+    "car-horn-3",
+    "car-horn-4"
+   ]
+  },
+  "bus-horn": {
+   "takes": [
+    "bus-horn-1",
+    "bus-horn-2"
+   ]
+  },
+  "car-door-open": {
+   "takes": [
+    "car-door-open-1",
+    "car-door-open-2",
+    "car-door-open-3"
+   ]
+  },
+  "car-door-close": {
+   "takes": [
+    "car-door-close-1",
+    "car-door-close-2",
+    "car-door-close-3",
+    "car-door-close-4"
+   ]
+  },
+  "car-start": {
+   "takes": [
+    "car-start-1",
+    "car-start-2",
+    "car-start-3"
+   ]
+  },
+  "car-stop": {
+   "takes": [
+    "car-stop-1",
+    "car-stop-2"
+   ]
+  },
+  "crash-light": {
+   "takes": [
+    "crash-light-1",
+    "crash-light-2",
+    "crash-light-3",
+    "crash-light-4"
+   ]
+  },
+  "crash-heavy": {
+   "takes": [
+    "crash-heavy-1",
+    "crash-heavy-2",
+    "crash-heavy-3",
+    "crash-heavy-4"
+   ]
+  },
+  "air-brake": {
+   "takes": [
+    "air-brake-1",
+    "air-brake-2",
+    "air-brake-3"
+   ]
+  },
+  "ferry-horn": {
+   "takes": [
+    "ferry-horn-1",
+    "ferry-horn-2"
+   ]
+  },
+  "boat-horn": {
+   "takes": [
+    "boat-horn-1",
+    "boat-horn-2"
+   ]
+  },
+  "car-idle": {
+   "loop": true,
+   "takes": [
+    "car-idle"
+   ]
+  },
+  "bus-idle": {
+   "loop": true,
+   "takes": [
+    "bus-idle"
+   ]
+  },
+  "tyre-road": {
+   "loop": true,
+   "takes": [
+    "tyre-road"
+   ]
+  },
+  "tyre-gravel": {
+   "loop": true,
+   "takes": [
+    "tyre-gravel"
+   ]
+  },
+  "tyre-grass": {
+   "loop": true,
+   "takes": [
+    "tyre-grass"
+   ]
+  },
+  "skid": {
+   "loop": true,
+   "takes": [
+    "skid"
+   ]
+  },
+  "skid-dirt": {
+   "loop": true,
+   "takes": [
+    "skid-dirt"
+   ]
+  },
+  "outboard-idle": {
+   "loop": true,
+   "takes": [
+    "outboard-idle"
+   ]
+  },
+  "outboard-run": {
+   "loop": true,
+   "takes": [
+    "outboard-run"
+   ]
+  },
+  "inboard-run": {
+   "loop": true,
+   "takes": [
+    "inboard-run"
+   ]
+  },
+  "boat-wash": {
+   "loop": true,
+   "takes": [
+    "boat-wash"
+   ]
+  },
+  "ferry-engine": {
+   "loop": true,
+   "takes": [
+    "ferry-engine"
+   ]
+  },
+  "ident-velvet": {
+   "loop": false,
+   "takes": [
+    "ident-velvet-1",
+    "ident-velvet-2",
+    "ident-velvet-3"
+   ]
+  },
+  "ident-bass": {
+   "loop": false,
+   "takes": [
+    "ident-bass-1",
+    "ident-bass-2",
+    "ident-bass-3"
+   ]
+  },
+  "ident-sunday": {
+   "loop": false,
+   "takes": [
+    "ident-sunday-1",
+    "ident-sunday-2",
+    "ident-sunday-3"
+   ]
+  },
+  "ident-grapevine": {
+   "loop": false,
+   "takes": [
+    "ident-grapevine-1",
+    "ident-grapevine-2",
+    "ident-grapevine-3"
+   ]
+  },
+  "radio-tune": {
+   "loop": false,
+   "takes": [
+    "radio-tune-1",
+    "radio-tune-2",
+    "radio-tune-3"
+   ]
+  },
+  "radio-click": {
+   "loop": false,
+   "takes": [
+    "radio-click-1",
+    "radio-click-2"
+   ]
+  },
+  "engine-on": {
+   "loop": true,
+   "takes": [
+    "engine-on"
+   ]
+  },
+  "engine-off": {
+   "loop": true,
+   "takes": [
+    "engine-off"
+   ]
+  },
+  "engine-bus": {
+   "loop": true,
+   "takes": [
+    "engine-bus"
+   ]
+  },
+  "gear-shift": {
+   "loop": false,
+   "takes": [
+    "gear-shift-1",
+    "gear-shift-2",
+    "gear-shift-3",
+    "gear-shift-4"
+   ]
+  },
+  "ou-put-cup": {
+   "loop": false,
+   "takes": [
+    "ou-put-cup-1",
+    "ou-put-cup-2",
+    "ou-put-cup-3"
+   ]
+  },
+  "ou-take-cup": {
+   "loop": false,
+   "takes": [
+    "ou-take-cup-1",
+    "ou-take-cup-2"
+   ]
+  },
+  "ou-put-plate": {
+   "loop": false,
+   "takes": [
+    "ou-put-plate-1",
+    "ou-put-plate-2",
+    "ou-put-plate-3"
+   ]
+  },
+  "ou-put-food": {
+   "loop": false,
+   "takes": [
+    "ou-put-food-1",
+    "ou-put-food-2"
+   ]
+  },
+  "ou-put-metal": {
+   "loop": false,
+   "takes": [
+    "ou-put-metal-1",
+    "ou-put-metal-2"
+   ]
+  },
+  "ou-fridge": {
+   "loop": false,
+   "takes": [
+    "ou-fridge-1",
+    "ou-fridge-2"
+   ]
+  },
+  "ou-pantry": {
+   "loop": false,
+   "takes": [
+    "ou-pantry-1",
+    "ou-pantry-2"
+   ]
+  },
+  "ou-plates-take": {
+   "loop": false,
+   "takes": [
+    "ou-plates-take-1",
+    "ou-plates-take-2"
+   ]
+  },
+  "ou-grind-done": {
+   "loop": false,
+   "takes": [
+    "ou-grind-done-1",
+    "ou-grind-done-2"
+   ]
+  },
+  "ou-load": {
+   "loop": false,
+   "takes": [
+    "ou-load-1",
+    "ou-load-2"
+   ]
+  },
+  "ou-grind-1": {
+   "loop": true,
+   "takes": [
+    "ou-grind-1"
+   ]
+  },
+  "ou-oven-door": {
+   "loop": false,
+   "takes": [
+    "ou-oven-door-1",
+    "ou-oven-door-2"
+   ]
+  },
+  "ou-brew-1": {
+   "loop": true,
+   "takes": [
+    "ou-brew-1"
+   ]
+  },
+  "ou-steam-1": {
+   "loop": true,
+   "takes": [
+    "ou-steam-1"
+   ]
+  },
+  "ou-press-lid": {
+   "loop": false,
+   "takes": [
+    "ou-press-lid-1",
+    "ou-press-lid-2"
+   ]
+  },
+  "ou-oven-1": {
+   "loop": true,
+   "takes": [
+    "ou-oven-1"
+   ]
+  },
+  "ou-press-1": {
+   "loop": true,
+   "takes": [
+    "ou-press-1"
+   ]
+  },
+  "ou-rack": {
+   "loop": false,
+   "takes": [
+    "ou-rack-1",
+    "ou-rack-2"
+   ]
+  },
+  "ou-blend-1": {
+   "loop": true,
+   "takes": [
+    "ou-blend-1"
+   ]
+  },
+  "ou-chop-1": {
+   "loop": true,
+   "takes": [
+    "ou-chop-1"
+   ]
+  },
+  "ou-wash-1": {
+   "loop": true,
+   "takes": [
+    "ou-wash-1"
+   ]
+  },
+  "ou-pour-milk": {
+   "loop": false,
+   "takes": [
+    "ou-pour-milk-1",
+    "ou-pour-milk-2"
+   ]
+  },
+  "ou-pour-smoothie": {
+   "loop": false,
+   "takes": [
+    "ou-pour-smoothie-1"
+   ]
+  },
+  "ou-plate-food": {
+   "loop": false,
+   "takes": [
+    "ou-plate-food-1",
+    "ou-plate-food-2"
+   ]
+  },
+  "ou-bin": {
+   "loop": false,
+   "takes": [
+    "ou-bin-1",
+    "ou-bin-2"
+   ]
+  },
+  "ou-ding": {
+   "loop": false,
+   "takes": [
+    "ou-ding-1",
+    "ou-ding-2"
+   ]
+  },
+  "ou-warn": {
+   "loop": false,
+   "takes": [
+    "ou-warn-1"
+   ]
+  },
+  "ou-burnt": {
+   "loop": false,
+   "takes": [
+    "ou-burnt-1",
+    "ou-burnt-2"
+   ]
+  },
+  "ou-bell": {
+   "loop": false,
+   "takes": [
+    "ou-bell-1",
+    "ou-bell-2"
+   ]
+  },
+  "ou-ticket": {
+   "loop": false,
+   "takes": [
+    "ou-ticket-1",
+    "ou-ticket-2"
+   ]
+  },
+  "ou-lost": {
+   "loop": false,
+   "takes": [
+    "ou-lost-1"
+   ]
+  },
+  "ou-good": {
+   "loop": false,
+   "takes": [
+    "ou-good-1",
+    "ou-good-2"
+   ]
+  },
+  "ou-supreme": {
+   "loop": false,
+   "takes": [
+    "ou-supreme-1"
+   ]
+  },
+  "ou-bad": {
+   "loop": false,
+   "takes": [
+    "ou-bad-1"
+   ]
+  },
+  "ou-coins": {
+   "loop": false,
+   "takes": [
+    "ou-coins-1",
+    "ou-coins-2"
+   ]
+  },
+  "ou-start": {
+   "loop": false,
+   "takes": [
+    "ou-start-1"
+   ]
+  },
+  "ou-end": {
+   "loop": false,
+   "takes": [
+    "ou-end-1"
+   ]
+  },
+  "ou-tick": {
+   "loop": false,
+   "takes": [
+    "ou-tick-1"
+   ]
+  },
+  "ou-swap": {
+   "loop": false,
+   "takes": [
+    "ou-swap-1",
+    "ou-swap-2"
+   ]
+  },
+  "ou-kitchen-1": {
+   "loop": true,
+   "takes": [
+    "ou-kitchen-1"
+   ]
+  },
+  "bed-night-field": {
+   "loop": true,
+   "takes": [
+    "bed-night-field"
+   ]
+  },
+  "bed-lake": {
+   "loop": true,
+   "takes": [
+    "bed-lake"
+   ]
+  },
+  "bed-waterfall": {
+   "loop": true,
+   "takes": [
+    "bed-waterfall"
+   ]
+  },
+  "bed-river-wide": {
+   "loop": true,
+   "takes": [
+    "bed-river-wide"
+   ]
+  },
+  "ou-griddle-1": {
+   "loop": true,
+   "takes": [
+    "ou-griddle-1"
+   ]
+  },
+  "ou-fry-1": {
+   "loop": true,
+   "takes": [
+    "ou-fry-1"
+   ]
+  },
+  "ou-grill-1": {
+   "loop": true,
+   "takes": [
+    "ou-grill-1"
+   ]
+  },
+  "ou-boil-1": {
+   "loop": true,
+   "takes": [
+    "ou-boil-1"
+   ]
+  },
+  "ou-fill-1": {
+   "loop": true,
+   "takes": [
+    "ou-fill-1"
+   ]
+  },
+  "ou-toast-1": {
+   "loop": true,
+   "takes": [
+    "ou-toast-1"
+   ]
+  },
+  "ou-juice-1": {
+   "loop": true,
+   "takes": [
+    "ou-juice-1"
+   ]
+  },
+  "ou-tap-1": {
+   "loop": true,
+   "takes": [
+    "ou-tap-1"
+   ]
+  },
+  "ou-shake-1": {
+   "loop": true,
+   "takes": [
+    "ou-shake-1"
+   ]
+  },
+  "ou-pour-wine": {
+   "loop": false,
+   "takes": [
+    "ou-pour-wine-1",
+    "ou-pour-wine-2"
+   ]
+  },
+  "ou-pour-fizz": {
+   "loop": false,
+   "takes": [
+    "ou-pour-fizz-1"
+   ]
+  },
+  "ou-pour-cocktail": {
+   "loop": false,
+   "takes": [
+    "ou-pour-cocktail-1"
+   ]
+  },
+  "ou-basket": {
+   "loop": false,
+   "takes": [
+    "ou-basket-1",
+    "ou-basket-2"
+   ]
+  },
+  "ou-patty": {
+   "loop": false,
+   "takes": [
+    "ou-patty-1"
+   ]
+  },
+  "ou-simmer-1": {
+   "loop": true,
+   "takes": [
+    "ou-simmer-1"
+   ]
+  },
+  "ou-fire-1": {
+   "loop": true,
+   "takes": [
+    "ou-fire-1"
+   ]
+  },
+  "ou-wok-1": {
+   "loop": true,
+   "takes": [
+    "ou-wok-1"
+   ]
+  },
+  "ou-peel": {
+   "loop": false,
+   "takes": [
+    "ou-peel-1",
+    "ou-peel-2"
+   ]
+  },
+  "ou-pot": {
+   "loop": false,
+   "takes": [
+    "ou-pot-1"
+   ]
+  },
+  "ou-ladle": {
+   "loop": false,
+   "takes": [
+    "ou-ladle-1"
+   ]
+  },
+  "ou-kernels": {
+   "loop": false,
+   "takes": [
+    "ou-kernels-1"
+   ]
+  },
+  "ou-pop-1": {
+   "loop": true,
+   "takes": [
+    "ou-pop-1"
+   ]
+  },
+  "ou-rice": {
+   "loop": false,
+   "takes": [
+    "ou-rice-1",
+    "ou-rice-2"
+   ]
+  },
+  "ou-bamboo-1": {
+   "loop": true,
+   "takes": [
+    "ou-bamboo-1"
+   ]
+  },
+  "ou-scoop": {
+   "loop": false,
+   "takes": [
+    "ou-scoop-1",
+    "ou-scoop-2"
+   ]
+  }
+ },
+ "made": "ElevenLabs sound effects (lab: assets/audio/manifest.json has each one's prompt and date); played only inside My Virtual World (see LICENSE.md)",
+ "grains": {
+  "engine-on": {
+   "map": [
+    [
+     0.456,
+     87.9
+    ],
+    [
+     0.856,
+     89.8
+    ],
+    [
+     0.956,
+     91.8
+    ],
+    [
+     1.056,
+     93.8
+    ],
+    [
+     1.156,
+     95.7
+    ],
+    [
+     1.456,
+     99.6
+    ],
+    [
+     1.856,
+     103.5
+    ],
+    [
+     2.056,
+     107.4
+    ],
+    [
+     2.156,
+     109.4
+    ],
+    [
+     2.256,
+     111.3
+    ],
+    [
+     2.556,
+     115.2
+    ],
+    [
+     2.656,
+     119.1
+    ],
+    [
+     2.856,
+     121.1
+    ],
+    [
+     2.956,
+     123
+    ],
+    [
+     3.256,
+     127
+    ],
+    [
+     3.356,
+     128.9
+    ],
+    [
+     3.456,
+     130.9
+    ],
+    [
+     3.656,
+     132.8
+    ],
+    [
+     3.756,
+     138.7
+    ],
+    [
+     3.956,
+     146.5
+    ],
+    [
+     4.056,
+     148.4
+    ],
+    [
+     4.256,
+     152.3
+    ],
+    [
+     4.356,
+     154.3
+    ],
+    [
+     4.456,
+     156.2
+    ],
+    [
+     4.656,
+     160.2
+    ],
+    [
+     4.856,
+     162.1
+    ],
+    [
+     5.056,
+     164.1
+    ],
+    [
+     5.156,
+     166
+    ],
+    [
+     5.256,
+     168
+    ],
+    [
+     5.356,
+     169.9
+    ],
+    [
+     5.456,
+     171.9
+    ],
+    [
+     5.556,
+     173.8
+    ],
+    [
+     5.656,
+     175.8
+    ],
+    [
+     5.856,
+     177.7
+    ],
+    [
+     6.056,
+     183.6
+    ],
+    [
+     6.256,
+     185.5
+    ]
+   ],
+   "lo": 87.9,
+   "hi": 185.5,
+   "from": "sweep-on-3"
+  },
+  "engine-off": {
+   "map": [
+    [
+     10.106,
+     41
+    ],
+    [
+     9.106,
+     43
+    ],
+    [
+     8.906,
+     46.9
+    ],
+    [
+     8.706,
+     50.8
+    ],
+    [
+     8.606,
+     52.7
+    ],
+    [
+     8.206,
+     54.7
+    ],
+    [
+     8.006,
+     56.6
+    ],
+    [
+     7.706,
+     60.5
+    ],
+    [
+     7.606,
+     66.4
+    ],
+    [
+     7.306,
+     89.8
+    ],
+    [
+     7.006,
+     91.8
+    ],
+    [
+     6.806,
+     95.7
+    ],
+    [
+     6.706,
+     99.6
+    ],
+    [
+     6.506,
+     107.4
+    ],
+    [
+     6.406,
+     109.4
+    ],
+    [
+     6.306,
+     125
+    ],
+    [
+     6.206,
+     140.6
+    ],
+    [
+     6.006,
+     150.4
+    ],
+    [
+     5.806,
+     160.2
+    ],
+    [
+     5.706,
+     164.1
+    ]
+   ],
+   "lo": 41,
+   "hi": 164.1,
+   "from": "sweep-off-2"
+  },
+  "engine-bus": {
+   "map": [
+    [
+     0.306,
+     44.9
+    ],
+    [
+     0.806,
+     48.8
+    ],
+    [
+     1.206,
+     50.8
+    ],
+    [
+     1.606,
+     56.6
+    ],
+    [
+     2.606,
+     62.5
+    ],
+    [
+     3.906,
+     74.2
+    ],
+    [
+     4.106,
+     76.2
+    ],
+    [
+     4.406,
+     78.1
+    ],
+    [
+     4.606,
+     80.1
+    ],
+    [
+     4.906,
+     82
+    ],
+    [
+     5.106,
+     84
+    ],
+    [
+     5.206,
+     89.8
+    ],
+    [
+     5.406,
+     91.8
+    ],
+    [
+     5.806,
+     93.8
+    ],
+    [
+     6.906,
+     95.7
+    ]
+   ],
+   "lo": 44.9,
+   "hi": 95.7,
+   "from": "bus-sweep-1"
+  }
+ }
+}

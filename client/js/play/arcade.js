@@ -15,7 +15,7 @@
 // every step's buttons; POST /api/play/finish has the server play the game again and record its own score. Without an
 // account that may play (or offline) it is a practice game: played the same, nothing kept.
 import * as THREE from 'three';
-import { S, bus } from '../core/state.js';
+import { S, bus, holdView, releaseView } from '../core/state.js';
 import { auth } from '../core/auth.js';
 import { getJSON, post } from '../core/net.js';
 import { esc } from '../core/util.js';
@@ -477,6 +477,7 @@ class Session {
     app.cam.unpin();
     setTimeout(() => { if (!cur) app.agents.hideFn = null; }, 450);
     if (app.arcade) app.arcade.playing = false;
+    releaseView('Arcade');
     this.o.onLeave?.();
   }
 }
@@ -490,6 +491,7 @@ export function playAt(e, o = {}) {
   cur = new Session(e, o);
   app.arcade.playing = true;
   cur.open();
+  holdView('Arcade', 'To leave the cabinet: ✕ at the top (or Esc)');   // (only leaving lets go: core/state.js holdView)
 }
 
 // ------------------------------------------------------------------------------------------- ▶ Play on a cabinet (looking inside)

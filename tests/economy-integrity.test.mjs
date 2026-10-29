@@ -205,6 +205,8 @@ test('an agent on post is paid: its own job\'s wages for the hours on post, up t
     const wages = p => { const m2 = /wages \+([\d,.]+)/.exec(note(p)); return m2 ? Math.round(Number(m2[1].replace(/,/g, '')) * 100) : 0; };
     const shift = Math.min(16, office.job.end - office.job.start) + 0.5, pol = e.policy();
     assert.equal(wages(office), Math.floor(shift * bz.wageOf(bz.companyOf(office.job.b), 'office')), `its job's wages for a full shift (${note(office)})`);
-    assert.equal(wages(idle), Math.floor(8.5 * bz.wageOf(cafe, pol.staffRole.cafe)), `the café pays its barista a day's shift (${note(idle)})`);
+    // (since 2026-10-28 a post with no job of its own is paid for every hour on duty — 24/7: all 24 — at its position's pay,
+    // here the usual: tests/post-pay.test.mjs)
+    assert.equal(wages(idle), Math.floor(24 * bz.wageOf(cafe, pol.staffRole.cafe)), `the café pays its barista every hour on duty (${note(idle)})`);
   } finally { m.close(); }
 });

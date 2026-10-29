@@ -4,7 +4,8 @@
 //   and its door, who lives with it, the rent — and "Show me", which looks inside that floor and marks the flat in the
 //   world (render/flat-marker.js); its job, workplace and hours on a day bar. The town each is in (shared/towns.js), and
 //   whether its owner chose its workplace (a desk's or a counter's ⋯ menu: ui/post-menu.js) — "Let it choose" lifts
-//   that — or it chose it itself near its owner's home base (server/sim/placement.js).
+//   that — or it chose it itself near its owner's home base (server/sim/placement.js). The shows it was on the radio in
+//   (30 days), each opened to what was said.
 // - Money (its owner): its wallet, giving and taking back, what it may use money for (the spending rules the economy
 //   checks before every spend: server/economy/agents.js), approvals waiting, and its statement.
 // - Settings: its name, badge and role; who it is shared with; removing it. (Its look: the Customize tab, studio-look.js.)
@@ -19,6 +20,7 @@ import { flatRecord, openFlat } from './flats.js';
 import { post } from '../core/net.js';
 import { MAIN_TOWN, townName } from '/shared/towns.js';
 import { vc, coin } from './economy.js';
+import { hoursHtml, hoursInput, hoursOk, hoursBody, presetHours, spanText } from './work-hours.js';
 
 const KIND = { studio: 'Studio', one: 'One-bedroom', two: 'Two-bedroom' };
 const toCents = v => { const n = Number(String(v ?? '').replace(/[^0-9.]/g, '')); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : NaN; };
@@ -66,7 +68,7 @@ function townOfB(C, b) {
   return townName(L?.town || MAIN_TOWN, S.world?.name);
 }
 export async function placeTab(C, body, live) {
-  const [info, res, pst, wk] = await Promise.all([C.get('info', true), C.get('resident'), C.get('post'), C.get('job', true)]);
+  const [info, res, pst, wk, shows] = await Promise.all([C.get('info', true), C.get('resident'), C.get('post'), C.get('job', true), C.get('shows')]);
   if (!live()) return;
   if (!info || info.error) { body.innerHTML = `<p class="hint">${esc(info?.error || 'It has no body in the city right now.')}</p>`; return; }
   const home = homeOf(info), j = info.job || {}, sc = info.sched || {}, unpaid = wk?.work?.unpaid || pst?.post?.unpaid || null;
@@ -91,23 +93,70 @@ export async function placeTab(C, body, live) {
     return segs.map(([a, b]) => `<i class="${cls}" style="left:${(a / 24 * 100).toFixed(2)}%;width:${((b - a) / 24 * 100).toFixed(2)}%" title="${label}"></i>`).join('');
   };
   const hour = ((S.hour ?? 12) % 24 + 24) % 24;
+  const posted = !!pst?.post, w = wk?.work, ws = C.st.workHours ||= { open: false, hrs: null };
   const workHtml = `<div class="st-sec hw-work"><div class="st-sec-h"><h4>💼 Work</h4></div>
-    ${j.b >= 0 ? `<div class="hw-job"><div><b>${esc(j.title || 'Works')}</b><small>${esc(j.place || '')} · 🏙️ ${esc(townOfB(C, j.b))}</small></div><button type="button" class="btn small" data-c="work">📍 Show workplace</button></div>` : '<p class="hint">Between jobs.</p>'}
+    ${posted ? `<p class="hint">🛎️ Its post is its work: on duty around the clock at ${esc(pst.post.place)} (above). Give it work hours there instead to let it live its day around them.</p>`
+      : j.b >= 0 ? `<div class="hw-job"><div><b>${esc(j.title || 'Works')}</b><small>${esc(j.place || '')} · 🏙️ ${esc(townOfB(C, j.b))}${w?.start != null ? ` · ${esc(spanText(w))}` : ''}${w?.pay ? ` · 💰 ${w.pay.rate > 0 ? `${vc(w.pay.rate)} an hour` : 'unpaid'}` : ''}</small></div><button type="button" class="btn small" data-c="work">📍 Show workplace</button>${C.owner && w?.chosen ? '<button type="button" class="btn small" data-c="hours">🕐 Edit hours</button>' : ''}</div>
+        ${ws.open && w?.chosen ? `<div class="hw-hrs" data-hrs="edit">${hoursHtml(ws.hrs)}<div class="row"><button type="button" class="btn small primary" data-c="hours-save">Save hours</button><button type="button" class="btn small" data-c="hours-cancel">Cancel</button></div></div>` : ''}` : '<p class="hint">Between jobs.</p>'}
     ${unpaid ? `<p class="hint hw-unpaid">⚠️ Not paid for ${unpaid.days} day${unpaid.days === 1 ? '' : 's'}${unpaid.name ? ` by ${esc(unpaid.name)}` : ''}: its employer's wallet is short. ${wk?.work?.chosen || pst?.post ? 'It stays at the work you gave it: add money to the business so it can pay its wages.' : 'If this goes on, it quits and looks for work elsewhere.'}</p>` : ''}
-    ${C.owner ? `<p class="hint">${wk?.work?.chosen ? '📌 You chose this workplace. <button type="button" class="linkish" data-c="auto">Let it choose</button>' : wk?.work?.by === 'brain' ? '🧠 Its brain chose this job from the ones open to it (Free Will): on your property first, else near your home base.' : 'It chose its workplace itself: on your property first, else near your home base.'} To give it a desk or a counter, look inside your building, tap the piece and choose <b>⋯ → Assign agent → Works here</b>; a home: open one of your flats and <b>Move in</b>.</p>` : ''}
-    <div class="hw-day"><div class="hw-bar">${bar(sc.bed % 24, sc.wake, 'sleep', 'Asleep')}${j.b >= 0 ? bar(j.start, j.end, 'work', 'At work') : ''}${sc.lunch != null ? `<i class="lunch" style="left:${(sc.lunch / 24 * 100).toFixed(2)}%" title="Lunch"></i>` : ''}<b class="now" style="left:${(hour / 24 * 100).toFixed(2)}%"></b></div>
+    ${C.owner && !posted ? `<p class="hint">${wk?.work?.chosen ? '📌 You chose this workplace and its hours. <button type="button" class="linkish" data-c="auto">Let it choose</button>' : wk?.work?.by === 'brain' ? '🧠 Its brain chose this job from the ones open to it (Free Will): on your property first, else near your home base.' : 'It chose its workplace itself: on your property first, else near your home base.'} To give it a desk or a counter with hours you choose, use <b>Its post</b> above, or look inside your building, tap the piece and choose <b>⋯ → Assign agent → Work hours</b>; a home: open one of your flats and <b>Move in</b>.</p>` : ''}
+    ${posted ? `<div class="hw-day"><div class="hw-bar">${bar(0, 24, 'work', 'On duty')}<b class="now" style="left:${(hour / 24 * 100).toFixed(2)}%"></b></div>
       <div class="hw-hours"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
-      <div class="hw-legend"><span class="sleep">Asleep ${sc.bed != null ? `${formatClock(sc.bed)}–${formatClock(sc.wake)}` : ''}</span>${j.b >= 0 && j.start != null ? `<span class="work">Work ${formatClock(j.start)}–${formatClock(j.end)}</span>` : ''}${sc.lunch != null ? `<span class="lunch">Lunch ${formatClock(sc.lunch)}</span>` : ''}</div></div></div>`;
-  body.innerHTML = `<div class="hw">${homeHtml}${postHtml(C, pst)}${workHtml}</div>`;
+      <div class="hw-legend"><span class="work">On duty around the clock: no sleep or meals, its needs and its plans waiting</span></div></div></div>`
+    : `<div class="hw-day"><div class="hw-bar">${bar(sc.bed % 24, sc.wake, 'sleep', 'Asleep')}${j.b >= 0 ? bar(j.start, j.end % 24, 'work', 'At work') : ''}${sc.lunch != null ? `<i class="lunch" style="left:${((sc.lunch % 24) / 24 * 100).toFixed(2)}%" title="Lunch"></i>` : ''}<b class="now" style="left:${(hour / 24 * 100).toFixed(2)}%"></b></div>
+      <div class="hw-hours"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
+      <div class="hw-legend"><span class="sleep">Asleep ${sc.bed != null ? `${formatClock(sc.bed)}–${formatClock(sc.wake)}` : ''}</span>${j.b >= 0 && j.start != null ? `<span class="work">Work ${formatClock(j.start)}–${formatClock(j.end)}</span>` : ''}${sc.lunch != null ? `<span class="lunch">${j.end > 24 ? 'Break' : 'Lunch'} ${formatClock(sc.lunch)}</span>` : ''}</div></div></div>`}`;
+  body.innerHTML = `<div class="hw">${homeHtml}${postHtml(C, pst)}${workHtml}${airHtml(C, shows)}</div>`;
   postWire(C, body, pst);
+  airWire(C, body);
   const q = s => body.querySelector(s);
   if (q('[data-c="show"]')) q('[data-c="show"]').onclick = () => (home.u >= 0 ? C.showFlat(home.b, home.f, home.u) : C.peek(() => C.app.lookInside?.(home.b, home.f)));
   if (q('[data-c="flat"]')) q('[data-c="flat"]').onclick = () => openFlat(home.b, home.f, home.u);
   if (q('[data-c="work"]')) q('[data-c="work"]').onclick = () => C.peek(() => C.app.lookInside?.(j.b, j.f >= 0 ? j.f : 0));
+  // its hours where it works (2026-10-28): the chooser opens under its job
+  if (q('[data-c="hours"]')) q('[data-c="hours"]').onclick = () => { ws.open = !ws.open; ws.hrs = { start: w.start, end: w.end % 24, days: w.days ?? 31 }; C.repaint(); };
+  if (q('[data-c="hours-cancel"]')) q('[data-c="hours-cancel"]').onclick = () => { ws.open = false; C.repaint(); };
+  const hz = q('[data-hrs="edit"]');
+  if (hz) {
+    hz.addEventListener('click', e => { const b = e.target.closest('[data-pp]'); if (b && hoursInput(ws.hrs, b)) C.repaint(); });
+    hz.addEventListener('change', e => { if (hoursInput(ws.hrs, e.target)) C.repaint(); });
+  }
+  if (q('[data-c="hours-save"]')) q('[data-c="hours-save"]').onclick = async () => {
+    if (!hoursOk(ws.hrs)) { C.toast('Choose 1 to 16 hours and at least one day', 'bad'); return; }
+    const r = await C.call('/api/agent-posts/work/hours', { agent: C.id, ...hoursBody(ws.hrs) });
+    if (r) { C.toast(`${C.name} works ${spanText(r.work)} now`); ws.open = false; C.drop('job', 'info'); C.repaint(); }
+  };
   if (q('[data-c="auto"]')) q('[data-c="auto"]').onclick = async () => {
     try { await post('/api/agent-posts/work/auto', { agent: C.id }); C.toast(`${C.name} will find its own work`); C.drop('job', 'info'); C.repaint(); }
     catch (e) { C.toast(e.message || 'That did not work', 'bad'); }
   };
+}
+
+// ------------------------------------------------------------------------------------------------ on the air
+// The shows it was on the radio in, the last 30 days (server/radio/shows.js; 2026-10-28, the product owner: each on the
+// air speaks for itself, its talk kept and readable, never in the chat window): when, the station, who with, what about,
+// how many lines were its own; one opened: the whole conversation, as it went out.
+function airHtml(C, d) {
+  const list = Array.isArray(d?.shows) ? d.shows : [];
+  if (!list.length) return '';
+  const st = C.st.air ||= { open: null, lines: new Map(), all: false }, shown = st.all ? list : list.slice(0, 8);
+  const said = id => { const L = st.lines.get(id); return !L ? '<div class="air-said"><small>…</small></div>' : L.error ? `<div class="air-said"><small>${esc(L.error)}</small></div>` : `<div class="air-said">${L.map(l => `<p><b>${esc(l.host)}:</b> ${esc(l.text)}</p>`).join('')}</div>`; };
+  return `<div class="st-sec hw-air"><div class="st-sec-h"><h4>📻 On the air</h4><small class="dim">${list.length} show${list.length === 1 ? '' : 's'}, 30 days</small></div>
+    <ul class="air-list">${shown.map(x => `<li class="air-show${st.open === x.id ? ' on' : ''}"><button type="button" class="air-row" data-show="${esc(x.id)}" aria-expanded="${st.open === x.id}">
+      <small>${esc(when(x.at))}</small> <b>${esc(x.station?.name || 'Radio')}</b>${x.with?.length ? ` with ${esc(x.with.join(', '))}` : ''}${x.topics ? ` · ${esc(x.topics)}` : ''}
+      <small class="dim">${x.spoke ? `${x.spoke} line${x.spoke === 1 ? '' : 's'} its own` : 'in the studio, not on the mic'}</small></button>${st.open === x.id ? said(x.id) : ''}</li>`).join('')}</ul>
+    ${list.length > shown.length ? `<button type="button" class="linkish" data-air="all">All ${list.length}</button>` : ''}</div>`;
+}
+function airWire(C, body) {
+  const st = C.st.air; if (!st) return;
+  body.querySelectorAll('[data-show]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.show; st.open = st.open === id ? null : id; C.repaint();
+    if (st.open && !st.lines.has(id)) {
+      try { st.lines.set(id, (await getJSON(`/api/radio/show?id=${encodeURIComponent(id)}`)).show.lines); } catch (e) { st.lines.set(id, { error: e.message }); }
+      C.repaint();
+    }
+  });
+  const all = body.querySelector('[data-air="all"]'); if (all) all.onclick = () => { st.all = true; C.repaint(); };
 }
 
 // ------------------------------------------------------------------------------------------------ its post
@@ -118,22 +167,27 @@ export async function placeTab(C, body, live) {
 const POST_USE = { staff: 'serving side', work: 'desk', computer: 'desk', cook: 'stove', prep: 'counter' };
 function postHtml(C, d) {
   if (!d || d.error) return '';
-  const p = d.post, st = C.st.post ||= { choosing: false };
+  const p = d.post, st = C.st.post ||= { choosing: false, mode: 'shifts', hrs: presetHours('day') };
+  st.mode ||= 'shifts'; st.hrs ||= presetHours('day');
   const head = '<div class="st-sec-h"><h4>🛎️ Its post</h4></div>';
+  // (choosing: work hours, the default, or 24/7 — 2026-10-28: "give posts job hours, and have a 24/7 option aswell")
+  const chooser = () => `<div class="pt-mode">
+      <div class="pp-modes" role="radiogroup" aria-label="How it works there">${[['shifts', '💼 Work hours'], ['post', '🛎️ 24/7']].map(([k, t]) => `<button type="button" role="radio" aria-checked="${st.mode === k}" class="pp-mode${st.mode === k ? ' on' : ''}" data-ptm="${k}">${t}</button>`).join('')}</div>
+      ${st.mode === 'shifts' ? `<div data-hrs="post">${hoursHtml(st.hrs)}</div><p class="hint">It works these hours there, then lives its day: home, meals, friends, its own plans.</p>` : '<p class="hint">On duty there day and night: no sleep, meals or free time; its needs and its plans wait until you let it go.</p>'}</div>${spotsHtml(d, st.mode)}`;
   if (p) {
     return `<div class="st-sec pt">${head}
-      <div class="pt-now"><span class="pt-ico" aria-hidden="true">🛎️</span><div><b>On post at the ${esc(p.furniture.toLowerCase())}</b><small>${esc(p.place)}${p.since ? ` · since ${new Date(p.since).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}</small></div></div>
-      <p class="hint">It stays there day and night: no sleep, meals or free time, its needs waiting. Whoever walks up talks with it as you chose in <button type="button" class="linkish" data-go="visitors">Visitors</button>.</p>
-      <div class="row wrap"><button type="button" class="btn small" data-pt="show">📍 Show me</button><button type="button" class="btn small" data-pt="leave">Let it go</button><button type="button" class="btn small" data-pt="choose">Move it</button></div>
-      ${st.choosing ? spotsHtml(d) : ''}</div>`;
+      <div class="pt-now"><span class="pt-ico" aria-hidden="true">🛎️</span><div><b>On duty 24/7 at the ${esc(String(p.furniture).split(' ').map(w => (w.length > 1 && w === w.toUpperCase() ? w : w.toLowerCase())).join(' '))}</b><small>${esc(p.place)}${p.since ? ` · since ${new Date(p.since).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}${p.pay ? ` · 💰 ${p.pay.rate > 0 ? `${vc(p.pay.rate)} an hour, ${p.pay.payer === 'business' ? `by ${esc(p.pay.name)}` : p.pay.payer === 'city' ? 'by the city' : 'by you'}` : 'unpaid'}` : ''}</small></div></div>
+      <p class="hint">It stays there day and night: no sleep, meals or free time, its needs and its plans waiting. Whoever walks up talks with it as you chose in <button type="button" class="linkish" data-go="visitors">Visitors</button>. Its pay is set on the piece itself: <b>⋯ → Pay</b>.</p>
+      <div class="row wrap"><button type="button" class="btn small" data-pt="show">📍 Show me</button><button type="button" class="btn small" data-pt="leave">Let it go</button><button type="button" class="btn small" data-pt="choose">Move it or give it hours</button></div>
+      ${st.choosing ? chooser() : ''}</div>`;
   }
   return `<div class="st-sec pt">${head}
-    <p class="hint">Post ${esc(C.name)} around the clock at a reception desk, a counter, a checkout, a desk or a kitchen on your own property (a building on a lot you hold, or a flat you own). Anyone who walks up there talks with it, day and night.</p>
-    ${st.choosing ? spotsHtml(d) : `<button type="button" class="btn small primary" data-pt="choose">Choose a post</button>`}</div>`;
+    <p class="hint">Give ${esc(C.name)} a reception desk, a counter, a checkout or a desk on your own property (a building on a lot you hold, or a flat you own): work hours you choose, or on duty around the clock. Anyone who walks up there talks with it while it is there.</p>
+    ${st.choosing ? chooser() : `<button type="button" class="btn small primary" data-pt="choose">Choose a place</button>`}</div>`;
 }
 /** The spots by building and floor; on a floor, alike pieces (a row of desks) are one line — the first free one is taken —
  *  and a piece of its own (a reception desk, a counter) a line of its own, with who is there. */
-function spotsHtml(d) {
+function spotsHtml(d, mode = 'post') {
   const bs = d.buildings || [];
   if (!bs.length) return '<p class="hint dim">Nowhere yet: you can post your agents only on your own property, a building on a lot you hold or a flat you own.</p>';
   const isMine = (b, f, it, s) => d.post && d.post.b === b && d.post.f === f && d.post.item === it.id && d.post.slot === s.k;
@@ -149,8 +203,10 @@ function spotsHtml(d) {
       const word = POST_USE[g.use] || g.use, says = !g.name.toLowerCase().includes(word.split(' ')[0]);   // (no "Counter · counter")
       const label = `${esc(g.name)}${says && (g.all.length > 1 || g.all[0].it.slots.length > 1) ? ` · ${esc(word)}` : ''}`;
       const note = here ? 'its post now' : g.all.length > 1 ? `${free.length} of ${g.all.length} free` : g.all[0].s.holder ? (g.all[0].s.holder.post ? `${g.all[0].s.holder.name} is on post` : `${g.all[0].s.holder.name}'s place at work`) : '';
-      return `<li class="wk-file"><span class="wk-fi" aria-hidden="true">🛎️</span><span>${label}</span><small>${esc(note)}</small>
-        <button type="button" class="btn small" ${first ? `data-post="${b.b}:${f.f}:${first.it.id}:${first.s.k}"` : 'disabled'}>Post here</button></li>`;
+      // (work hours: a serving side or a desk; a kitchen's stove or counter is a post only)
+      const can = mode === 'post' || g.use === 'staff' || g.use === 'work', pick = mode === 'post' ? first : first || g.all.find(x => x.s.holder && !x.s.holder.post);
+      return `<li class="wk-file"><span class="wk-fi" aria-hidden="true">${mode === 'post' ? '🛎️' : '💼'}</span><span>${label}</span><small>${esc(note)}</small>
+        <button type="button" class="btn small" ${pick && can ? `data-post="${b.b}:${f.f}:${pick.it.id}:${pick.s.k}"` : `disabled${can ? '' : ' title="Only on post (24/7) here"'}`}>${mode === 'post' ? 'Post here' : 'Work here'}</button></li>`;
     }).join('');
   };
   return `<div class="pt-spots">${bs.map(b => `<details class="pt-b"${bs.length === 1 ? ' open' : ''}><summary><b>${esc(b.name)}</b><small>${b.floors.length === 1 ? esc(b.floors[0].name) : `${b.floors.length} floors`}</small></summary>
@@ -167,13 +223,27 @@ function postWire(C, body, d) {
     if (!C.armed(btn('leave'), 'Let it go?')) return;
     if (await C.call('/api/agent-posts/leave', { agent: C.id })) { C.toast(`${C.name} is back to its day`); st.choosing = false; C.drop('post', 'info'); C.repaint(); }
   };
+  body.querySelectorAll('[data-ptm]').forEach(x => { x.onclick = () => { st.mode = x.dataset.ptm; C.repaint(); }; });
+  const hz = body.querySelector('[data-hrs="post"]');
+  if (hz) {
+    hz.addEventListener('click', e => { const b = e.target.closest('[data-pp]'); if (b && hoursInput(st.hrs, b)) C.repaint(); });
+    hz.addEventListener('change', e => { if (hoursInput(st.hrs, e.target)) C.repaint(); });
+  }
   body.querySelectorAll('[data-post]').forEach(x => {
     x.onclick = async () => {
       const [b, f, item, slot] = x.dataset.post.split(':').map(Number);
+      if (st.mode === 'shifts') {
+        if (!hoursOk(st.hrs)) { C.toast('Choose 1 to 16 hours and at least one day', 'bad'); return; }
+        const r = await C.call('/api/agent-posts/work', { agent: C.id, b, f, item, slot, ...hoursBody(st.hrs) });
+        if (!r) return;
+        C.toast(`${C.name} works at ${r.work?.place || 'its new place'}, ${spanText(r.work || st.hrs)}`);
+        st.choosing = false; C.drop('post', 'job', 'info'); C.repaint();
+        return;
+      }
       const r = await C.call('/api/agent-posts', { agent: C.id, b, f, item, slot });
       if (!r) return;
       C.toast(`${C.name} is on its way to its post at ${r.post?.place || 'the spot'}`);
-      st.choosing = false; C.drop('post', 'info'); C.repaint();
+      st.choosing = false; C.drop('post', 'job', 'info'); C.repaint();
     };
   });
 }

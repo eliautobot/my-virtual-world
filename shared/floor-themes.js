@@ -12,7 +12,7 @@ export const FLOOR_THEMES = Object.freeze([
   { id: 'arcade', name: 'Arcade', icon: '🕹️', venue: 'arcade', blurb: 'Rows of playable arcade cabinets on a neon carpet, a prize counter, a snack corner and a lounge to sit out a turn.' },
   { id: 'lounge', name: 'Lounge', icon: '🛋️', venue: 'lounge_bar', blurb: 'Modern organic and softly lit: velvet sofas and bouclé chairs round stone tables, a terrazzo bar, sculpture, a little stage for music.' },
   { id: 'club', name: 'Night Club', icon: '💃', venue: 'club', blurb: 'Miami style: the DJ on a round stage in the middle of an LED dance floor, lights and lasers, a long backlit bar, VIP booths and party tables.' },
-  { id: 'cafe', name: 'Café', icon: '☕', venue: 'cafe', blurb: 'A coffee counter, window bars, sofas and tables: a café residents come to.' },
+  { id: 'cafe', name: 'Café', icon: '☕', venue: 'cafe', blurb: 'One of five styles, each its own place: a Parisian bistro, a Nordic roastery, an industrial coffee lab, a bookshop café or a garden conservatory. A café residents come to.' },
   { id: 'restaurant', name: 'Restaurant', icon: '🍽️', venue: 'restaurant', blurb: 'A dining room with its kitchen and bar: a restaurant residents come to.' },
   { id: 'shop', name: 'Shop', icon: '🛍️', venue: 'shop', blurb: 'Shelves, display tables and a checkout: a shop residents come to.' },
   { id: 'gym', name: 'Gym', icon: '🏋️', venue: 'gym', blurb: 'Treadmills, weights, mats and lockers: a gym residents come to.' },
@@ -34,3 +34,14 @@ export function themeWhy(B, f, L = null) {
 /** A floor's name as people see it: its own name, or what kind of floor it is; '' when there is nothing to say. */
 export const floorLabel = L => String(L?.name || '').trim();
 export const MAX_FLOOR_NAME = 40;
+
+/** The café's five styles (server/world/layouts.js cafeThemeFloor, 2026-10-26: "highly detailed unique and distinct layouts
+ *  that are nice to visit and have style"): each its own counter, floors, seats and features (client/js/render/furniture-cafe.js). */
+export const CAFE_STYLES = Object.freeze({
+  bistro: { name: 'Bistro', blurb: 'Parisian: a zinc counter, marble tables and bentwood chairs, banquette booths, gilt mirrors' },
+  nordic: { name: 'Roastery', blurb: 'Nordic: pale oak, the coffee roaster and its sacks, a long communal table, hanging plants' },
+  loft: { name: 'Coffee Lab', blurb: 'Industrial: a steel bar, a window ledge with stools, pipe shelving, Edison pendants' },
+  library: { name: 'Book Café', blurb: 'A bookshop café: walls of books, wingback chairs by a brick hearth, a walnut counter' },
+  garden: { name: 'Garden Café', blurb: 'A conservatory: rattan, palms, hanging ivy and a tiered fountain on terracotta' },
+});
+export const CAFE_STYLE_IDS = Object.keys(CAFE_STYLES);

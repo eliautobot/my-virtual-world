@@ -321,7 +321,7 @@ export const BITE = {
   avocado_toast: 'f-toast #8db84a', bagel_lox: 'f-disc #f2875a', croissant: 'f-pastry #d99a4a', pain_au_chocolat: 'f-pastry #cf8a3a',
   muffin: 'f-pastry #b0702e', cinnamon_roll: 'f-pastry #c98a42', donut: 'f-donut #f3d3b0', bagel: 'f-donut #c88a3e', scone: 'f-pastry #d9a85e',
   danish: 'f-pastry #d39444', banana_bread: 'f-toast #7a4a22', cookie: 'f-disc #c98f4c', brownie: 'f-toast #3d2214', pretzel: 'f-donut #8a4a1e',
-  nuggets: 'f-bite #d49a4a', fries: 'f-fry #f2c14e', sweet_potato_fries: 'f-fry #e3843a', onion_rings: 'f-donut #d9a04a',
+  nuggets: 'f-bite #d49a4a', fries: 'f-fry #f2c14e', sweet_potato_fries: 'f-fry #e3843a', onion_rings: 'f-donut #d9a04a', popcorn: 'f-bite #f8f0d6',
   margherita: 'f-slice #f7f4ea', pepperoni: 'f-slice #a8321f', hawaiian: 'f-slice #f6d64b', veggie_pizza: 'f-slice #3f8a3a',
   four_cheese: 'f-slice #fbf3d8', bbq_pizza: 'f-slice #6b2a14', pizza_slice: 'f-slice #a8321f', garlic_bread: 'f-toast #f3d27a',
   bruschetta: 'f-toast #d8412f', quesadilla: 'f-slice #f2b53a', nachos: 'f-chip #f2b53a', chips_guac: 'f-chip #7fa83a', churros: 'f-roll #c88a3e',
@@ -425,6 +425,7 @@ function pick(c, p) {
     case PROP.dumbbell: return seated ? 0 : SHAPE.dumbbell;
     case PROP.bag: return seated || typing ? 0 : SHAPE.bag;
     case PROP.briefcase: return seated || typing ? 0 : SHAPE.briefcase;
+    case PROP.headphones: return seated ? SHAPE.headphones : 0;   // (a radio host at the mic, as the DJ wears them: 2026-10-28)
     default: return 0;
   }
 }

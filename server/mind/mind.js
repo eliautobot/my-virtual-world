@@ -259,13 +259,15 @@ export class Mind {
       if (!b.connection) continue;
       const { lifeDay, asleep, toBed } = this.dayOf(i);
       // on post (its owner posted it at a desk or counter around the clock — server/agent-posts/): no plan for a day it
-      // can't live and no evening reflection on it (2026-10-14, the product owner); its money problems still get a
-      // thought. Let go, it plans and reflects again from that day on.
+      // can't live (2026-10-14, the product owner); its evening reflection only on a day that held more than its duty — a
+      // conversation, a show, a visitor (2026-10-28: "if an agent had an interaction or activity other than working on
+      // their post then yes they can reflect on their day otherwise it doesnt trigger the reflection"), at its usual
+      // bedtime; its problems still get a thought. Let go, it plans and reflects again from that day on.
       const posted = !!sim.people[i].post;
       let kind = null;
       if (b.own && !asleep && this.problemDue(agent.id, lifeDay)) kind = 'problem';
       else if (!posted && b.own && !asleep && toBed > 1.5 && (set.lastPlanDay ?? -1) < lifeDay) kind = 'plan';
-      else if (!posted && (asleep || toBed <= 0.5) && (set.lastReflectDay ?? -1) < lifeDay) kind = 'reflect';
+      else if ((asleep || toBed <= 0.5) && (set.lastReflectDay ?? -1) < lifeDay && (!posted || this.life.livedBeyondDuty?.(agent.id, lifeDay))) kind = 'reflect';
       if (!kind) continue;
       const key = `${agent.id}:${kind}:${lifeDay}`, tr = this.tries.get(key);
       if (tr && tr.next > this.now()) continue;
@@ -365,6 +367,9 @@ export class Mind {
       const act = readActions(kind, o, refs);
       if (kind === 'chat' && !act.reply) throw new MindError(502, 'bad_answer', 'The brain answered without a reply');
       if (kind === 'speech' && !act.say) throw new MindError(502, 'bad_answer', 'The brain answered without a line');
+      // on post around the clock (server/agent-posts/) it can't go anywhere: a problem's thought keeps its memory and its
+      // word to its owner, not plans for an errand it can't run (2026-10-28)
+      if (kind === 'problem' && this.sim?.people?.[this.life.byAgent?.get(agent.id)]?.post) act.plans = [];
       const done = applyActions(this.life, agent.id, act, refs);
       // (an evening's reflection may end a friendship that went wrong: server/agent-social/, the same as its owner or an outside AI)
       if (kind === 'reflect' && act.unfriend && this.social) {
@@ -585,7 +590,7 @@ export class Mind {
     const where = atHome ? 'at home' : pos && pos.ctx >= 0 ? `at «${String(info.act?.place || B.placeName(ctxB(pos.ctx), pos.ctx & 63)).slice(0, 60)}»` : 'outside';
     const j = p.job || {};
     const job = j.kind && j.kind !== 'free' && Number.isFinite(j.start)
-      ? { title: info.job?.title || j.title || 'work', hours: `${formatClock(j.start)}–${formatClock(j.end)}${info.job?.place ? ` at «${String(info.job.place).slice(0, 60)}»` : ''}`, today: !!((j.days ?? 31) & (1 << mod(day, 7))) }
+      ? { title: info.job?.title || j.title || 'work', hours: `${j.kind === 'post' ? 'around the clock, on post' : `${formatClock(j.start)}–${formatClock(j.end)}`}${info.job?.place ? ` at «${String(info.job.place).slice(0, 60)}»` : ''}`, today: !!((j.days ?? 31) & (1 << mod(day, 7))) }
       : null;
     const econ = this.econOf();
     const money = econ ? econ.money(p) : null;

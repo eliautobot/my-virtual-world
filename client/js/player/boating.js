@@ -19,7 +19,7 @@
 //
 // app.boating: { active, state(), type, module, id, frame, walking, fishing, deckToWorld, act } — the fishing game uses it.
 import * as THREE from 'three';
-import { S, bus } from '../core/state.js';
+import { S, bus, holdView, releaseView } from '../core/state.js';
 import { h, esc, isTouch } from '../core/util.js';
 import { auth } from '../core/auth.js';
 import { CLIP, CLIP_DUR, CLIP_STRIDE } from '../render/anim.js';
@@ -118,6 +118,7 @@ function start(m) {
   B.s = newBoat(m.type, pose.x, w ? w.level : pose.y, pose.z, pose.h, app.fishStore?.boatKit?.() || {});   // (your engine and anchor upgrades, the seamanship skill: play/fish-store.js)
   if (m.resumed) { B.s.y = pose.y; B.s.pitch = pose.p || 0; B.s.roll = pose.r || 0; }
   Object.assign(B, { active: true, id: m.id, type: m.type, module: m.module, acc: 0, sentAt: 0, leaving: false, ending: false, lastT: 0, water: w, walk: null, clip: CLIP.helm, pclip: CLIP.helm, camH: null, camY: null });
+  holdView('Boat', 'To get off the boat: stop at a dock and press E, or press Esc');   // (only getting off lets go of the view: core/state.js holdView)
   B.prev = { p: new THREE.Vector3(B.s.x, B.s.y, B.s.z), q: new THREE.Quaternion() };
   B.render = { p: B.prev.p.clone(), q: new THREE.Quaternion() };
   B.keys.clear();
@@ -148,6 +149,7 @@ function end(m) {
   if (!B.active) return;
   const P = app.player;
   B.active = false; B.ending = false; B.leaving = false; B.walk = null;
+  releaseView('Boat');
   if (B.mesh) { app.stage.scene.remove(B.mesh); B.mesh = null; B.motors = []; }   // (the geometry is shared: kept)
   if (B.rings) B.rings.visible = false;
   document.body.classList.remove('boating', 'boat-walk');
@@ -302,7 +304,7 @@ function onKey(e) {
   const c = e.code;
   if (c === 'KeyE') { if (!e.repeat) exit(); return true; }
   if (c === 'KeyF') { if (!e.repeat) setWalk(!B.walk); return true; }
-  if (c === 'Escape') { if (app.cam.locked) return false; if (!e.repeat) { leave(); app.setMode?.('explore'); } return true; }
+  if (c === 'Escape') { if (app.cam.locked) return false; if (!e.repeat) { leave(); releaseView('Boat'); app.setMode?.('explore'); } return true; }
   return ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight'].includes(c);
 }
 

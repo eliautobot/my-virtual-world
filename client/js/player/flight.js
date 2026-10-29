@@ -12,7 +12,7 @@
 //
 // app.flight: { active, state(), type, module, onFrame(fn), instruments() } — the ring game (play/airport-game.js) uses it.
 import * as THREE from 'three';
-import { S, bus } from '../core/state.js';
+import { S, bus, holdView, releaseView } from '../core/state.js';
 import { h, esc, isTouch } from '../core/util.js';
 import { auth } from '../core/auth.js';
 import { AIRCRAFT } from '/shared/aircraft-specs.js';
@@ -106,6 +106,7 @@ function start(m) {
     F.s.v = { x: f.x * v, y: 0, z: f.z * v }; F.s.engine = F.s.throttle = 0.6; F.s.rpm = 1;
   }
   Object.assign(F, { active: true, id: m.id, type: m.type, module: m.module, acc: 0, sentAt: 0, ending: false, crashAt: 0, lastT: 0 });
+  holdView('Flying', 'To get out: land, stop and press E, or press Esc');   // (only getting out lets go of the view: core/state.js holdView)
   F.prev = { p: new THREE.Vector3(F.s.p.x, F.s.p.y, F.s.p.z), q: new THREE.Quaternion(F.s.q.x, F.s.q.y, F.s.q.z, F.s.q.w) };
   F.render = { p: F.prev.p.clone(), q: F.prev.q.clone() };
   F.keys.clear();
@@ -143,6 +144,7 @@ function end(m) {
   if (!F.active) return;
   const P = app.player;
   F.active = false; F.ending = false; F.leaving = false;
+  releaseView('Flying');
   if (F.mesh) { app.stage.scene.remove(F.mesh); for (const r of F.rotors) r.disc.material.dispose(); for (const x of F.exhausts) { x.geometry.dispose(); x.material.dispose(); } F.mesh = null; F.rotors = []; F.exhausts = []; }   // (the parts' geometry is shared: kept)
   document.body.classList.remove('flying', 'flying-crash');
   E.hud.classList.add('hidden');
@@ -262,7 +264,7 @@ function onKey(e) {
   if (!F.active) return false;
   const c = e.code;
   if (c === 'KeyE') { if (!e.repeat) exit(); return true; }
-  if (c === 'Escape') { if (app.cam.locked) return false; if (!e.repeat) { leave(); app.setMode?.('explore'); } return true; }
+  if (c === 'Escape') { if (app.cam.locked) return false; if (!e.repeat) { leave(); releaseView('Flying'); app.setMode?.('explore'); } return true; }
   return ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyZ', 'KeyX', 'KeyC', 'KeyR', 'KeyF', 'Space', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(c);
 }
 

@@ -7,7 +7,9 @@ import * as THREE from 'three';
 import { AD_ASSETS, INDOOR_SIGNS, stylesOf, parseSignGeoKey } from '/shared/signs.js';
 import { addArcadeFurniture } from './furniture-arcade.js';
 import { addLoungeFurniture } from './furniture-lounge.js';
+import { addCafeFurniture } from './furniture-cafe.js';
 import { addClubFurniture } from './furniture-club.js';
+import { addStudioFurniture } from './furniture-studio.js';
 
 const TAU = Math.PI * 2, P = Math.PI, H = Math.PI / 2;
 const s2l = c => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
@@ -1037,7 +1039,9 @@ D.door = f => {
 };
 addArcadeFurniture(D);   // the arcade's pieces (render/furniture-arcade.js)
 addLoungeFurniture(D);   // the lounge's pieces (render/furniture-lounge.js)
+addCafeFurniture(D);   // the café's pieces (render/furniture-cafe.js)
 addClubFurniture(D);   // the night club's pieces (render/furniture-club.js)
+addStudioFurniture(D);   // the radio studio's pieces (render/furniture-studio.js)
 export const FURN_DEF = D;
 
 const cache = new Map();

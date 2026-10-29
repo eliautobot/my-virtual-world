@@ -201,8 +201,9 @@ export function placeAgents(world, index, people, list, places, o = {}) {
       }
     }
     // ---------------------------------------------------------------- work
-    // (an agent whose own brain is choosing its job right now (step 7: index.mjs job hunts) waits for its answer)
-    if (!p.job?.pin && !noJob) {
+    // (an agent whose own brain is choosing its job right now (step 7: index.mjs job hunts) waits for its answer; one on
+    // post has its post for its work: 2026-10-28, the product owner: "their assigned post is their job")
+    if (!p.job?.pin && !noJob && !p.post) {
       const j = p.job, has = hasJob(j);
       const cur = has ? tierOf(places, j.b, owner, town) : TIER_NONE;
       const best = rankWork({ work, workHeld, people, places, p, i, owner, town, base, cur, avoidB, rng })[0];

@@ -3,6 +3,7 @@
 // camera, coarser with distance), built in a worker and swapped in only when a whole subtree is ready (no holes, no
 // overlaps), the endless ocean, the lakes, and natural scatter (trees, bushes, rocks) as instanced meshes on the
 // nearest tiles. Budgets per quality level: tile resolution, detail distance, scatter radius, shadows.
+import { laysOwnGround } from '/shared/world-modules.js';
 import * as THREE from 'three';
 import { GU, wettable, uploadUsed } from './scene.js';
 import { Ocean, shoreFoam, waveHeight, underwater, withUnderside } from './water.js';
@@ -185,6 +186,7 @@ export class Terrain {
     const pos = [], idx = [];
     for (const B of this.world.buildings || []) {
       if (!B || B.gone || B.base === undefined || !B.door) continue;
+      if (B.module && laysOwnGround((this.world.worldModules || []).find(m => m.id === B.module)?.kind)) continue;   // (its module's own grounds lead to its door: 2026-10-28, a path straight across the Radio Station's car park)
       const r = (B.rot || 0) * Math.PI / 180, fx = Math.sin(r), fz = Math.cos(r), rx = Math.cos(r), rz = -Math.sin(r), hw = B.door.w / 2 + 0.4;
       const a = toWorld(B, B.door.x, B.d / 2);
       let L = 0;

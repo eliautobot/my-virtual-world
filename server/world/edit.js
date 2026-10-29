@@ -29,12 +29,13 @@ import { normalizeEdit, EDIT_KINDS } from '../../shared/terrain-edits.js';
 import { normalizeDecor, checkDecor, DECOR_LIMITS } from '../../shared/decor.js';
 import { isAdAsset, isIndoorSign, INDOOR_SIGNS, signFace, signSize, signStyle, normalizeSignSettings, normalizeRoofSigns, SIGN_ACCENT } from '../../shared/signs.js';
 import { normalizeStation, checkStation } from '../../shared/stations.js';
+import { INTERIOR_KINDS, modsOf, modAt, normalizeModule, checkModule, layModule, withoutModule, shiftModule } from '../../shared/interior-kinds.js';
 import { normalizeWorldModule, checkWorldModule, levelFor, WORLD_KINDS, roadEndOf, LAYOUT_V, terminalSpec, accessRoadsOf, hasBuilding, clampLevel, dockWhy, moduleDecor } from '../../shared/world-modules.js';
 import { profileAt, DRAW_LIFT } from '../../shared/island-roads.js';
 import { normalizeWall, checkWall, checkLayout, editWalls, doorway } from '../../shared/walls.js';
 import { coastClasses, protectedWhy, COAST_CLASSES, SECTORS, ISLE_SECTORS, isleClasses } from '../../shared/coasts.js';
 import { islandSlots, newIsland, TEMPLATES, ISLAND_GAP } from '../../shared/island-chain.js';
-import { themeOf, themeWhy, MAX_FLOOR_NAME } from '../../shared/floor-themes.js';
+import { themeOf, themeWhy, MAX_FLOOR_NAME, CAFE_STYLE_IDS } from '../../shared/floor-themes.js';
 import { createBuilding, generateLevels, addLevel, validate, freshLevels, freshLevel } from './generate.js';
 import { normalizeFerry, nextFerryId, ferryWhy } from '../../shared/ferries.js';
 import { buildLevel, coreFor } from './layouts.js';
@@ -136,14 +137,14 @@ export class Editor {
     this.actor = typeof actor === 'string' || !actor ? { admin: true, subject: null, name: who } : { admin: actor.admin !== false, subject: actor.subject || null, name: who, system: actor.system || null, agentBody: actor.agentBody || null };
     let st = this.newState();
     const results = [];
-    let error = null, forbidden = false;
+    let error = null, forbidden = false, code = null;
     // All or nothing (the road grid tool, 2026-10-13: a grid half built is worse than none): a batch of road changes
     // only, asked for atomically, leaves the roads as they were when any of its ops is refused.
     // (a world module and its access road are placed the same way: an airport not joined to a road is not placed)
     const whole = atomic && ops.length && ops.every(o => o && /^(road\.(set|del)|wmod\.(add|set|del))$/.test(o.op)), roadsBefore = this.world.roads, wmodsBefore = this.world.worldModules, decoBefore = this.world.decorations, nb0 = this.world.buildings.length, nl0 = this.world.levels.length;
     for (const op of ops.slice(0, 50)) {
       try { results.push(this.op(op || {}, st)); }
-      catch (e) { error = e.message || String(e); forbidden = !!e.forbidden; break; }
+      catch (e) { error = e.message || String(e); forbidden = !!e.forbidden; code = typeof e.code === 'string' ? e.code : null; break; }
     }
     const failedAt = error ? results.length : null;
     if (error && whole) {
@@ -169,7 +170,7 @@ export class Editor {
     };
     try { if (this.app.commit) this.app.commit(commit); else commit(); }
     catch (e) { if (!done) throw e; this.journal?.onError?.(e); rec = null; }   // not written: the store's next sweep writes the world
-    return { ok: !error, error, ...(forbidden ? { code: 'forbidden' } : {}), ...(error ? { failedAt } : {}), results, version: this.world.version, edit: rec ? rec.id : null };
+    return { ok: !error, error, ...(forbidden ? { code: 'forbidden' } : code ? { code } : {}), ...(error ? { failedAt } : {}), results, version: this.world.version, edit: rec ? rec.id : null };
   }
   op(o, st) {
     if (this.rights && !/^(flat|door)\./.test(String(o.op || ''))) {   // (flats and doors have their own: the owner, the buyer, tenants)
@@ -211,6 +212,7 @@ export class Editor {
       case 'station.del': return this.stationDel(o, st);
       case 'ferry.set': return this.ferrySet(o, st);
       case 'ferry.del': return this.ferryDel(o, st);
+      case 'imod.add': case 'imod.set': case 'imod.del': case 'imod.piece': return this.imodOp(o, st);
       case 'wmod.add': return this.wmodAdd(o, st);
       case 'wmod.set': return this.wmodSet(o, st);
       case 'wmod.del': return this.wmodDel(o, st);
@@ -303,11 +305,11 @@ export class Editor {
       this.note(st, `Cleared ${name} · ${B.name}`, where);
     } else if (o.op === 'lvl.regen') {
       const roll = this.rng.int(1, 1e9), named = L.named ? { name: L.name, named: 1 } : {}, th = themeOf(L.theme) && !themeWhy(B, floors[0], null) ? L.theme : null;
-      this.setLevel(L, { ...freshLevel(B, floors[0], roll, th), ...keep, ...named });
+      this.setLevel(L, { ...freshLevel(B, floors[0], roll, th, th ? L.style || null : null), ...keep, ...named });   // (a café keeps its style)
       this.note(st, `Laid out ${name} anew · ${B.name}`, where);
     } else if (o.op === 'lvl.theme') {
-      const roll = this.rng.int(1, 1e9);
-      this.setLevel(L, { ...freshLevel(B, floors[0], roll, theme.id), ...keep });
+      const roll = this.rng.int(1, 1e9), style = theme.id === 'cafe' && CAFE_STYLE_IDS.includes(o.style) ? o.style : null;   // (a café's style chosen, else one by the dice)
+      this.setLevel(L, { ...freshLevel(B, floors[0], roll, theme.id, style), ...keep });
       this.note(st, `Made ${name} ${/^[aeiou]/i.test(theme.name) ? 'an' : 'a'} ${theme.name} · ${B.name}`, where);
     } else if (o.op === 'lvl.apply') {
       const items = fit.layout.items.map((it, k) => ({ ...it, id: k + 1 }));
@@ -333,7 +335,7 @@ export class Editor {
     if (name) { L.name = name; L.named = 1; }
     else {   // the name it was laid out with comes back (its theme's, or the building's own floor's)
       delete L.named;
-      const gen = L.roll ? freshLevel(B, f, L.roll, themeOf(L.theme) ? L.theme : null) : freshLevels(B)(f);
+      const gen = L.roll ? freshLevel(B, f, L.roll, themeOf(L.theme) ? L.theme : null, L.style || null) : freshLevels(B)(f);
       if (gen) L.name = gen.name || '';
     }
     this.note(st, name ? `Named ${floorName(B, f)} “${name}”` : `Took the name off ${floorName(B, f)}`, { b: B.idx, f });
@@ -576,6 +578,8 @@ export class Editor {
       }
       const why = checkItem(B, f, L, it);
       if (why) throw new Error(why);
+      const into = modAt(L, it.x, it.z), IK = into && INTERIOR_KINDS[into.kind];   // (inside an interior module that takes it: its own, arranged by hand)
+      if (IK?.joins?.(t)) { it.mod = into.id; into.custom = true; }
       it.id = L.nid = (L.nid || (Math.max(0, ...L.items.map(i => i.id || 0)) + 1));
       L.nid++;
       L.items.push(it);
@@ -590,9 +594,15 @@ export class Editor {
     if (k < 0) throw new Error('No such item');
     const it = L.items[k];
     if (CATALOG[it.t]?.fixed) throw new Error('That is part of the building');
+    const own = it.mod ? modsOf(L).find(x => x.id === it.mod) : null;
+    if (own) {   // a piece of a locked interior module is changed only with the module (shared/interior-modules.js locked)
+      const m = own, K = INTERIOR_KINDS[m.kind];
+      if (K?.locked) throw new Error(`That is part of ${m.name || `the ${K.label.toLowerCase()}`}: move, resize or remove it as a whole`);
+    }
     this.touch(st, `i:${lv}:${it.id}`);
     if (o.op === 'item.del') {
       L.items.splice(k, 1);
+      if (own) own.custom = true;   // (its module arranged by hand)
       this.softTouch(st, B, lv, it, null);
       this.note(st, `Removed ${itemName(it.t)} · ${floorName(B, f)}`, where);
       return { id: it.id, lv };
@@ -627,6 +637,11 @@ export class Editor {
     const moved = { ...it, x: r3(+o.x), z: r3(+o.z), r: r3(Number.isFinite(+o.r) ? +o.r : it.r) };
     const why = checkItem(B, f, L, moved, it.id);
     if (why) throw new Error(why);
+    // an interior module's piece stays inside it; a piece that a module takes, moved into it, becomes its own
+    const into = modAt(L, moved.x, moved.z);
+    if (own && into?.id !== own.id) throw new Error(`Keep it inside ${own.name || 'its module'}`);
+    if (!own && into && INTERIOR_KINDS[into.kind]?.joins?.(it.t)) { moved.mod = into.id; into.custom = true; }
+    if (own) own.custom = true;
     const old = { ...it };
     Object.assign(it, moved);
     if (!levelConnected(B, f, L)) { Object.assign(it, old); throw new Error('That would block the way through'); }
@@ -869,7 +884,7 @@ export class Editor {
       const L = W.levels[G.lv]; if (!L) continue;
       if (G.regen || G.fit === 'regen') {
         fresh ||= freshLevels({ ...B, ...g, core });
-        const want = G.regen && L.roll ? freshLevel({ ...B, ...g, core }, G.floors[0], L.roll, themeOf(L.theme) ? L.theme : null) : fresh(G.floors[0]);   // a re-rolled (or themed) floor keeps its roll and theme
+        const want = G.regen && L.roll ? freshLevel({ ...B, ...g, core }, G.floors[0], L.roll, themeOf(L.theme) ? L.theme : null, L.style || null) : fresh(G.floors[0]);   // a re-rolled (or themed) floor keeps its roll and theme
         if (!want) continue;
         this.touch(st, `lv:${G.lv}`);
         this.setLevel(L, { ...want, b: L.b ?? B.idx, ...(L.named ? { name: L.name, named: 1 } : {}) });
@@ -1259,6 +1274,71 @@ export class Editor {
     W.stations = want ? [...rest, structuredClone(want)].sort((a, b) => num(a) - num(b)) : rest;
     st.stations = true;
   }
+  // ------------------------------------------------------------------ interior modules (shared/interior-modules.js): a
+  // room with a purpose laid on a floor as one unit (a radio studio, a kitchen …): placed, changed (moved, resized,
+  // turned, renamed) or removed with its own walls and pieces, the floor's layout taken whole for undo
+  imodOp(o, st) {
+    const B = this.bld(o.b), f = this.floorOf(B, o.f);
+    const cur = this.world.levels[B.lv[f]], prev = o.op === 'imod.add' ? null : modsOf(cur).find(m => m.id === String(o.id));
+    if (o.op !== 'imod.add' && !prev) throw new Error('No such module on that floor');
+    const K = INTERIOR_KINDS[prev ? prev.kind : o.mod?.kind];
+    if (!K) throw new Error('Unknown kind of interior module');
+    if (K.who === 'admin' && !this.actor?.admin) throw new Error(`Only administrators place a ${K.label.toLowerCase()}`);
+    if (K.price > 0 && o.op === 'imod.add' && !this.actor?.admin) throw new Error(`A ${K.label.toLowerCase()} is bought first (coming soon)`);
+    const lv = this.editable(B, f, o.scope, st), L = this.world.levels[lv], where = { b: B.idx, f };
+    this.touch(st, `lv:${lv}`);
+    if (o.op === 'imod.piece') {   // one more piece of its kind where there is room among its own (a kitchen's appliance: "Add to the kitchen")
+      const t = String(o.t || '');
+      if (!K.fit || !K.joins?.(t) || !CATALOG[t]) throw new Error(`That doesn't go in a ${K.label.toLowerCase()}`);
+      const at = K.fit(B, f, L, prev, t);
+      if (!at) throw new Error(`There is no room for it in ${prev.name || `the ${K.label.toLowerCase()}`}: make it bigger, or move things to make room`);
+      const out = JSON.parse(JSON.stringify(L)), it = { t, x: r3(at.x), z: r3(at.z), r: r3(at.r || 0), mod: prev.id };
+      const why = checkItem(B, f, out, it); if (why) throw new Error(why);
+      it.id = out.nid = Math.max(out.nid || 0, ...out.items.map(i => (i.id || 0) + 1)); out.nid++;
+      out.items.push(it);
+      out.mods = modsOf(out).map(m => (m.id === prev.id ? { ...m, custom: true } : m));   // (arranged by hand now)
+      if (!levelConnected(B, f, out)) throw new Error('That would block the way through');
+      this.setLevel(L, out);
+      this.note(st, `Added ${itemName(t)} to ${prev.name || `the ${K.label.toLowerCase()}`} · ${floorName(B, f)}`, where);
+      return { id: prev.id, lv, kind: K.kind, item: it.id };
+    }
+    if (o.op === 'imod.del') {
+      this.setLevel(L, withoutModule(L, prev.id));
+      this.note(st, `Removed ${prev.name || `the ${K.label.toLowerCase()}`} · ${floorName(B, f)}`, where);
+      return { id: prev.id, lv, kind: K.kind };
+    }
+    const rec = normalizeModule(o.mod || {}, prev);
+    if (rec instanceof Error) throw rec;
+    rec.id = prev ? prev.id : `m${(L.mnid = (L.mnid || 0) + 1)}`;
+    if (!prev && !rec.name) rec.name = `${K.label} ${modsOf(L).filter(m => m.kind === K.kind).length + 1}`;
+    const sized = prev && (Math.abs((rec.x1 - rec.x0) - (prev.x1 - prev.x0)) > 0.01 || Math.abs((rec.z1 - rec.z0) - (prev.z1 - prev.z0)) > 0.01 || rec.face !== prev.face);
+    const moved = prev && !sized && (Math.abs(rec.x0 - prev.x0) > 0.001 || Math.abs(rec.z0 - prev.z0) > 0.001);
+    if (prev && !sized && !moved && !o.reset) {   // a rename (or its settings): it stays as it is, an arrangement by hand too
+      const keep = { ...rec, ...(prev.custom ? { custom: true } : {}) };
+      this.setLevel(L, { ...L, mods: modsOf(L).map(m => (m.id === prev.id ? keep : m)) });
+      this.note(st, `Changed ${rec.name} · ${floorName(B, f)}`, where);
+      return { id: rec.id, lv, kind: K.kind, name: rec.name };
+    }
+    if (prev?.custom && sized && !o.reset) {   // (the tool asks, then sends o.reset)
+      throw Object.assign(new Error(`${prev.name || `The ${K.label.toLowerCase()}`} is arranged by hand: ${rec.face !== prev.face ? 'turning' : 'resizing'} it lays it out again, and your arrangement is lost`), { code: 'custom' });
+    }
+    const why = checkModule(B, f, L, rec, prev?.id || null);
+    if (why) throw new Error(why);
+    if (prev?.custom && moved && !o.reset) {   // moved as it is: its pieces, walls and floor carried along (o.reset: laid out again)
+      const out = shiftModule(L, prev, { ...rec, custom: true });
+      if (!levelConnected(B, f, out)) throw new Error('It would shut the way through off');
+      this.setLevel(L, out);
+      this.note(st, `Moved ${rec.name} · ${floorName(B, f)}`, where);
+      return { id: rec.id, lv, kind: K.kind, name: rec.name };
+    }
+    K.prepare?.(rec, { B, f, L, menuAt: this.menuAt });   // (laid out anew: what it holds from its place, a kitchen's from its menu)
+    const got = layModule(B, f, L, rec);
+    if (got.why) throw new Error(got.why);
+    this.setLevel(L, got.L);
+    this.note(st, `${prev ? 'Changed' : 'Placed'} ${rec.name} · ${floorName(B, f)}`, where);
+    return { id: rec.id, lv, kind: K.kind, name: rec.name };
+  }
+
   // ------------------------------------------------------------------ world modules (shared/world-modules.js): an airport
   /** The lots under a world polygon (land made into lots is never built over). */
   lotsUnder(pts) {
@@ -1274,6 +1354,21 @@ export class Editor {
     for (const lv of B.lv) st.levels.add(lv);
     st.newB.push(B.idx); st.blds.add(B.idx); st.blv.add(B.idx);
     st.touched.set(`bx:${B.idx}`, '0');
+    return B.idx;
+  }
+  /** Its building goes with a module moved (2026-10-28, the product owner: "i moved the radio station module, and it
+   *  deleted the radio station inside it": it was taken down and a new, empty one put up): the same building, its floors,
+   *  their furniture and modules, its people's posts, carried to where the module now has it. A building of another size
+   *  (a module laid out anew) is made again, as before. → its index. */
+  moveTerminal(cur, next, st) {
+    const B = Number.isInteger(cur.terminal) ? this.world.buildings[cur.terminal] : null, spec = terminalSpec(next);
+    if (!B || B.gone || B.module !== cur.id || !spec) { this.removeTerminal(cur, st); return this.addTerminal(next, st); }
+    const r = spec.rect, g = { x: Math.round((r.x0 + r.x1) / 2 * 100) / 100, z: Math.round((r.z0 + r.z1) / 2 * 100) / 100, w: Math.round((r.x1 - r.x0) * 100) / 100, d: Math.round((r.z1 - r.z0) * 100) / 100, rot: spec.rot };
+    if (Math.abs(g.w - B.w) > 0.01 || Math.abs(g.d - B.d) > 0.01) { this.removeTerminal(cur, st); return this.addTerminal(next, st); }
+    this.touch(st, `bg:${B.idx}`);
+    Object.assign(B, g);
+    if (spec.base !== undefined) B.base = spec.base;
+    this.placed(B, st);
     return B.idx;
   }
   removeTerminal(m, st) {
@@ -1372,7 +1467,7 @@ export class Editor {
       const y = this.roadLevel(m); if (y === null || Math.abs(y - m.y) < 0.02) continue;
       this.touch(st, `wm:${m.id}`);
       const next = { ...m, y };
-      if (hasBuilding(m)) { this.removeTerminal(m, st); next.terminal = this.addTerminal(next, st); }
+      if (hasBuilding(m)) next.terminal = this.moveTerminal(m, next, st);   // (raised or lowered with all it holds)
       this.setWorldModule(m.id, next, st);
       out.push(`${m.name} ${m.y} → ${y}`);
     }
@@ -1462,7 +1557,7 @@ export class Editor {
       if (WORLD_KINDS[cur.kind].dock) { const r = dockWhy(next, this.ground().env); next.wy = Math.round(r.level * 100) / 100; if (r.lake) next.lake = r.lake; else delete next.lake; }
       next.y = this.levelWithout(next, cur.id); next.v = LAYOUT_V;
     }
-    if (moved && hasBuilding(cur)) { this.removeTerminal(cur, st); next.terminal = this.addTerminal(next, st); }   // its building moves with it
+    if (moved && hasBuilding(cur)) next.terminal = this.moveTerminal(cur, next, st);   // its building moves with it, all it holds
     else if (next.name !== cur.name && this.airportOf(this.world.buildings[cur.terminal])) {   // the terminal takes the airport's new name
       const B = this.world.buildings[cur.terminal]; this.touch(st, `bp:${B.idx}`); B.name = B.sign = next.name; st.blds.add(B.idx);
     }

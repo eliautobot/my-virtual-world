@@ -201,6 +201,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .act .lb { font-weight: 600; }
 .act .pl { color: var(--dim); font-size: 12px; }
 .needs { display: grid; grid-template-columns: 70px 1fr; gap: 5px 8px; align-items: center; font-size: 12px; }
+.needs.paused { opacity: .55; filter: saturate(.4); }   /* (on duty around the clock: its needs wait, ui.js) */
 .bar { height: 7px; border-radius: 6px; background: var(--bar); overflow: hidden; }
 .bar i { display: block; height: 100%; border-radius: 6px; transition: width .5s; }
 .kv { display: grid; grid-template-columns: 70px 1fr; gap: 5px 8px; font-size: 12px; margin-top: 8px; }
@@ -1837,3 +1838,10 @@ body.fishing #boathud .bh-row, body.fishing #boathud .bh-top { display: none; } 
 .inv-tadd { display: flex; gap: 4px; } .inv-tadd .inv-tstack { flex: 1; min-width: 0; } .inv-tadd .inv-tqty { width: 64px; }
 .inv-tvcl { display: flex; gap: 6px; align-items: center; font-size: 13px; } .inv-tvcl .input { width: 110px; }
 .inv-ok { color: #6fdc8c; font-weight: 700; }
+/* interior modules in the Furniture panel (ui/modules-tool.js) */
+.mtools { margin: 4px 0 8px; }
+.mtools .row { gap: 6px; margin-bottom: 6px; align-items: center; }
+.mtools .mlist { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.mtools .mname { font-weight: 600; margin-right: 6px; }
+.mtools .mstat.bad { color: var(--bad, #ff7b7b); }
+@media (pointer: coarse) { .mtools .btn.small { min-height: 40px; padding: 6px 12px; } }

@@ -1,7 +1,7 @@
 // My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.9 residents' cars: a drive's lanes run on the roads (city streets and island roads), in the right-hand lane for
 // the way they go, without jumps; the plan marks the drive (the segment's vehicle byte, which the wire format carries);
-// the router tells who drives where and when, matching the hidden segment.
+// the router tells who drives where and when, matching the hidden stretch.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateWorld } from '../server/world/generate.js';
@@ -54,9 +54,12 @@ test('a resident\'s drive: lanes on the roads, right-hand side, no jumps; the ro
   const P = new Plan(1000, { x: A.x, y: 0.15, z: A.z, ctx: -1 }), r = nav.rideCost(A, B);
   assert.ok(r, 'a drive is possible');
   router.drive(P, A, B, r, { speed: 1.4, anim: 1, use: 1, i: 42 });
-  const hidden = P.segs.find(s => s.veh === VEH_CAR);
-  assert.ok(hidden && hidden.flags & F_HIDDEN);
+  const hidden = P.segs.filter(s => s.veh === VEH_CAR);
+  assert.ok(hidden.length && hidden.every(s => s.flags & F_HIDDEN));
   assert.equal(seen.length, 1); assert.equal(seen[0].i, 42);
-  const t0 = 1000 + P.segs.slice(0, P.segs.indexOf(hidden)).reduce((a, s) => a + s.dur, 0);
-  assert.ok(Math.abs(seen[0].t0 - t0) < 1e-6 && Math.abs(seen[0].t1 - (t0 + hidden.dur)) < 1e-6, 'the times of the hidden segment');
+  // (2026-10-28: a drive is timed, shared/car-route.js; its message says when its resident gets in and out — the
+  //  hidden stretch — and when its car is there before and after: tests/agent-cars.test.mjs)
+  const start = k => 1000 + P.segs.slice(0, k).reduce((a, s) => a + s.dur, 0), first = P.segs.indexOf(hidden[0]), last = P.segs.indexOf(hidden.at(-1));
+  assert.ok(Math.abs(seen[0].tIn - start(first)) < 1e-6 && Math.abs(seen[0].tOut - start(last + 1)) < 1e-6, 'the times of the hidden stretch');
+  assert.ok(seen[0].t0 <= seen[0].tIn && seen[0].t1 > seen[0].tOut && Array.isArray(seen[0].ks) && seen[0].ks.length === seen[0].ts.length);
 });

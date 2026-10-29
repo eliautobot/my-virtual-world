@@ -120,8 +120,8 @@ function draw(check) {
     for (const d of K.decks) fill(rectAt(m, d.s0, d.f0, d.s1, d.f1), d.kind === 'float' || d.kind === 'finger' ? 0xdfe3e6 : 0x8a6a4b, 0.85);
     fill(rectAt(m, K.store.s0, K.store.f0, K.store.s1, K.store.f1), 0xdddddd, 0.7);
   } else {
-    fill(rectAt(m, -RUNWAY.w / 2, -RUNWAY.len / 2, RUNWAY.w / 2, RUNWAY.len / 2), 0x30343a, 0.75);
-    for (const B of STRUCTURES) fill(rectAt(m, B.s0, B.f0, B.s1, B.f1), 0xdddddd, 0.6);
+    if (m.kind === 'airport') fill(rectAt(m, -RUNWAY.w / 2, -RUNWAY.len / 2, RUNWAY.w / 2, RUNWAY.len / 2), 0x30343a, 0.75);
+    for (const B of WORLD_KINDS[m.kind].structures) fill(rectAt(m, B.s0, B.f0, B.s1, B.f1), 0xdddddd, 0.6);   // (its buildings, a radio station's tower)
   }
   const road = accessRoad(m, T.moving);
   if (road) { const g = new THREE.BufferGeometry().setFromPoints(road.map((p, k) => new THREE.Vector3(p.x, k ? app.terrain.pointHeight(p.x, p.z) + 1.5 : y, p.z))); const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffd166, depthTest: false })); l.renderOrder = 6; ghost.add(l); }

@@ -11,6 +11,7 @@
 //   spin    a platter on the DJ's decks: turning while the music plays
 //   laser   a laser's fan: sweeping, its pattern changing every four bars
 //   cone    a speaker's cone: pushed out on every beat
+//   clock   a radio studio's clock: its hands and its seconds' dot
 // The arcade's machines (2026-10-24, "the arcade games interaction animations need way more work"): their parts move
 // with whoever plays them (info.user: the slot, item frame; info.clip: what they play — the person there doing it, by
 // render/agents.js, their clip's phase into shared/arcade-motion.js, the same motion their clip was made from):
@@ -59,6 +60,12 @@ export const MOVES = {
     M.makeRotationFromEuler(_e.set(0.12 * Math.sin(TAU * b / 16 + s), yaw, 0, 'YXZ'));
   },
   cone(e, part, M, c) { if (!c.on) return false; M.makeTranslation(0, 0, 0.012 * c.kick); },
+  // ---- a radio studio's clock (render/furniture-studio.js): hours and minutes by the world's clock, the seconds' dot by
+  //      the real one (the world's minutes go by in seconds), ticking from dot to dot
+  clock(e, part, M) {
+    const h = ((S.hour ?? 12) % 12 + 12) % 12, a = part.info.hand === 'hour' ? h / 12 : part.info.hand === 'min' ? h % 1 : Math.floor(Date.now() / 1000) % 60 / 60;
+    M.makeRotationZ(-a * TAU);
+  },
   // ---- the arcade: with whoever plays the machine
   wheel(e, part, M) { const u = userPhase(e, part.info); if (u < 0) return false; M.makeRotationAxis(_a.set(...part.info.axis), -steer(u)); },
   claw(e, part, M) {

@@ -198,6 +198,12 @@ test('a chat\'s answer read aloud: one of the account\'s own, pronounceable, a l
   assert.equal(`${a0} ${a1}`, long.text, 'nothing lost between the parts');
   // text sent directly: at most 4,000 characters a call
   assert.equal((await speak(owner, { text: 'x'.repeat(4001) })).json.code, 'too_long');
+  // a provider's answer (OpenClaw, Hermes: no copy kept here, its chat window sends its words, long: true): in its
+  // agent's voice and in parts like one kept here (2026-10-27: 🔊 on an OpenClaw agent's answer did nothing)
+  const q0 = await speak(owner, { agent: A, text: long.text, long: true, part: 0 }), q1 = await speak(owner, { agent: A, text: long.text, long: true, part: 1 });
+  assert.equal(q0.status, 200, q0.json && JSON.stringify(q0.json));
+  assert.equal(q0.headers.get('x-voice-parts'), '2'); assert.equal(q1.headers.get('x-voice-part'), '1');
+  assert.equal((await speak(bob, { agent: A, text: 'Hello', long: true })).status, 404, 'only for someone who may use the agent');
 });
 
 test('a member brings their own voice service (and it may not reach inside the network); others can\'t use it', async () => {

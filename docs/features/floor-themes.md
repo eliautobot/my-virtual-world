@@ -164,3 +164,16 @@ floors and wall cycle through deep colours that stay colours at night (render/ma
   cabinets' screens drawn together and playable, the name on the floor control and buttons, no page errors, the frame
   rate looking into the arcade. `THEME=lounge ZOOMS=1 FOCUS=lounge_stage,lounge_bar` takes close looks by day and night
   (use `MVW_TEST_ANGLE=vulkan` for the real graphics card).
+
+## The café (redone 2026-10-26)
+
+`server/world/layouts.js` `cafeThemeFloor`, used for the Café theme and the city's own cafés: five styles
+(`shared/floor-themes.js` `CAFE_STYLES`: bistro, nordic, loft, library, garden), each a kit of counter, floors, seats,
+wall pieces and features (`client/js/render/furniture-cafe.js`, catalog category Café). One plan for any floor: the
+style's counter on the back wall (searched along it, else the shorter Café Counter, else a side wall: always an order
+point), its pastry case, condiment bar and menu boards, the queue kept clear; the open kitchen beside it (worktops on
+tile: the Order Up stations come there, PLAN-RESTAURANT-GAME.md); the style's corner (the roaster, a reading nook by the
+hearth); a centrepiece on a big floor (a communal table, a fountain); its walls (booths, books, shelving, palms);
+seats along the front windows from the door outward; a lounge corner on a big floor; tables in the style's mix with
+planters between them; its lights or ivy over the tables. The style is the floor's (`style`), chosen with
+`lvl.theme { theme: 'cafe', style }` or by the dice, and kept by 🎲 Regenerate and a resize. Lab: tools-bin/cafe-check.mjs.

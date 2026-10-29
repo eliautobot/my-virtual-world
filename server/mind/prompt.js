@@ -161,8 +161,11 @@ export function problemText(c, tools = []) {
     ...lifeText(c),
     ...placesText(c, c.atHome ? 'NEAR HOME' : 'NEAR ME'),
     ...tools,
+    // (on post around the clock it goes nowhere: its thought stays where it is — 2026-10-28, a worry on duty wrote a memory
+    //  of an afternoon in the park that never happened)
+    ...(c.act?.post ? ['ON DUTY: my owner posted me at my place of work around the clock. I can\'t go anywhere today: no errands, no outings.'] : []),
     '',
-    `TASK: Something in my life needs dealing with (WHAT IS WRONG). I think about it as myself, calmly and sensibly: what can I do about it today?${tools.length ? ' I may look things up and act with the tools first — only within my owner\'s rules, and never spending the money I need for rent and food on anything else.' : ''} The city may also find me a home or a job by itself. Then I answer with the final JSON: 1 or 2 plans for today that deal with it (or none), at most 1 short memory, and a short message to my owner if they should know or could help (else null).`,
+    `TASK: Something in my life needs dealing with (WHAT IS WRONG). I think about it as myself, calmly and sensibly: what can I do about it today?${tools.length ? ' I may look things up and act with the tools first — only within my owner\'s rules, and never spending the money I need for rent and food on anything else.' : ''} The city may also find me a home or a job by itself. Then I answer with the final JSON: 1 or 2 plans for today that deal with it (or none${c.act?.post ? ': on duty, none' : ''}), at most 1 short memory — a thought I have or something that truly happened, never something I only imagine doing —, and a short message to my owner if they should know or could help (else null).`,
     'FINAL JSON: {"plans":[{"kind":"must" or "want","text":"..."}],"memories":[{"text":"...","importance":1 to 5}],"tell_owner":"..." or null,"thought":"one sentence"}',
   ].join('\n');
 }

@@ -13,7 +13,7 @@ export { DEFAULT_ENVELOPES };
 
 /** A building's footprint (grown by pad m) as a lot-geometry polygon in µm; turned buildings stay turned. */
 const footPoly = (b, pad = 0) => corners(b, pad).map(p => ({ x: mToUm(p.x), z: mToUm(p.z) }));
-const NEED = { 'item.add': 'furnish', 'item.move': 'furnish', 'item.del': 'furnish', 'item.tint': 'furnish', 'item.sign': 'furnish', 'bld.set': 'build', 'bld.signs': 'build', 'bld.floors': 'build', 'bld.del': 'build', 'bld.place': 'build', 'wall.add': 'build', 'wall.del': 'build', 'wall.door': 'build', 'wall.edit': 'build', 'lvl.clear': 'build', 'lvl.regen': 'build', 'lvl.reset': 'build', 'lvl.apply': 'build', 'lvl.theme': 'build', 'lvl.name': 'furnish' };
+const NEED = { 'item.add': 'furnish', 'imod.add': 'furnish', 'imod.set': 'furnish', 'imod.del': 'furnish', 'imod.piece': 'furnish', 'item.move': 'furnish', 'item.del': 'furnish', 'item.tint': 'furnish', 'item.sign': 'furnish', 'bld.set': 'build', 'bld.signs': 'build', 'bld.floors': 'build', 'bld.del': 'build', 'bld.place': 'build', 'wall.add': 'build', 'wall.del': 'build', 'wall.door': 'build', 'wall.edit': 'build', 'lvl.clear': 'build', 'lvl.regen': 'build', 'lvl.reset': 'build', 'lvl.apply': 'build', 'lvl.theme': 'build', 'lvl.name': 'furnish' };
 
 export class LotRights {
   /** @param {import('./property.js').Property} property @param {() => object} world */

@@ -10,6 +10,7 @@ import { subj } from './economy.js';
 import { ROLES } from '../../shared/work.js';
 import { FOOD_BY_ID, CUISINE_OF, LEGACY_ITEMS, MENU_MAX, guessCuisine, menuIds } from '../../shared/food.js';
 import { FOOD_VENUES, foodBase } from './policy.js';
+import { kitchenNeeds } from '../../shared/kitchen-module.js';
 
 // the items of the menus before shared/food.js (books and stats of those days still name them)
 const LEGACY_INPUTS = { pastry: { baked: 1 }, cafe_lunch: { food: 1, coffee: 1 }, meal: { food: 3 }, drink: { drinks: 1 }, dessert: { baked: 1, food: 1 } };
@@ -156,6 +157,21 @@ export class Businesses {
     const own = b.settings?.cuisine;
     return CUISINE_OF[own] ? own : guessCuisine(b.name, b.kind, b.b);
   }
+  /** What the open place on floor f of building b sells (its menu's item ids), or null: its kitchen's stations follow it
+   *  (shared/kitchen-module.js prepare, through the world editor's menuAt). */
+  menuAt(b, f) { const x = this.at(b, f); return x ? [...this.menuIdsOf(x)] : null; }
+  /** A place's menu changed: its kitchen, unless arranged by hand, is laid out again for it (the product owner 2026-10-28:
+   *  "yes if they havent been rearranged, then they should automatically re-lay/adjust the layout"); one arranged by
+   *  hand stays as it is, its menu editor saying what it lacks. Either way its Rushes order from the new menu. */
+  kitchensFollow(b) {
+    const ed = this.d.editor?.(), W = ed?.world, B = W?.buildings?.[b.b], L = B && W.levels[B.lv[b.f]];
+    for (const m of (L?.mods || []).filter(m => m.kind === 'kitchen')) {
+      const menu = this.menuAt(b.b, b.f) || [];
+      const mod = m.custom ? { data: { ...(m.data || {}), needs: kitchenNeeds(menu), menu } } : {};   // (arranged by hand: only what it is asked for)
+      const r = ed.apply([{ op: 'imod.set', b: b.b, f: b.f, id: m.id, ...(m.custom ? {} : { reset: true }), mod }], { system: 'economy', name: 'Economy' }, { journal: false });
+      if (r && r.ok === false) this.e.d.log?.warn?.(`[economy] ${b.name}'s kitchen for its new menu: ${r.error}`);
+    }
+  }
   /** The ids of what a café or restaurant sells (its owner's list, else its cuisine's), cached per settings. */
   menuIdsOf(b) {
     if (!FOOD_VENUES.has(b.kind)) return (this.e.policy().menus[b.kind] || []).map(m => m.id);
@@ -300,6 +316,7 @@ export class Businesses {
     this.version++;
     this.e.d.audit?.log('economy.business', { actor: actor.kind === 'account' ? { id: actor.id, login: actor.login } : null, detail: { business: b.id, patch } });
     this.e.bump();
+    if (patch.menu !== undefined || patch.cuisine !== undefined) { try { this.kitchensFollow(this.get(b.id)); } catch (e) { this.e.d.log?.warn?.(`[economy] kitchen: ${e.message}`); } }
     return this.view(this.get(b.id), { owner: true });
   }
   mayManage(actor, b) {

@@ -43,6 +43,9 @@ export function classifyAct(sim, a, act) {
       if (act.use === 'task') return { kind: 'task', label: home ? 'Worked on a task at home' : `Worked on a task at ${place}`, place, key: null };
       return { kind: 'work', label: `Working at ${place}`, place, key: null };
     case 'meeting': return { kind: 'meeting', label: `A meeting at ${place}`, place, key: null };
+    // on post around the clock (server/agent-posts/): its log says so, one line a stretch (2026-10-28: a posted agent's
+    // day showed only what it did before it was posted)
+    case 'post': return { kind: 'post', label: `On duty at ${place}`, place: place || null, key: null };
     case 'chat': {
       const o = Number.isInteger(a.chatWith) ? sim.agents[a.chatWith] : null;
       return o ? { kind: 'chat', label: `Chatted with ${o.p.name}`, place: place || null, key: null, with: o } : null;
@@ -50,7 +53,9 @@ export function classifyAct(sim, a, act) {
     case 'talk': {
       // with someone it went to see or turned to (a connected agent's meet or say --to): like a chat in the street
       const o = Number.isInteger(act.talkWith) ? sim.agents[act.talkWith] : null;
-      return o ? { kind: 'chat', label: `Talked with ${o.p.name}`, place: place || null, key: null, with: o } : { kind: 'talk', label: 'Talked with a visitor', place: place || null, key: null };
+      // (a player who walked up to it: by name — their conversation itself is remembered by server/agent-talk/)
+      return o ? { kind: 'chat', label: `Talked with ${o.p.name}`, place: place || null, key: null, with: o }
+        : { kind: 'talk', label: act.withName ? `Talked with ${act.withName}` : 'Talked with a visitor', place: place || null, key: null };
     }
     default: return null;
   }

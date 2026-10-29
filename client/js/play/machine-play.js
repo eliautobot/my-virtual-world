@@ -16,6 +16,7 @@
 // the LED panel itself, every frame, instead of its lines), reset(), dispose() }.
 import * as THREE from 'three';
 import { auth } from '../core/auth.js';
+import { holdView, releaseView } from '../core/state.js';
 import { getJSON, post } from '../core/net.js';
 import { esc } from '../core/util.js';
 import { CATALOG } from '/shared/catalog.js';
@@ -352,6 +353,7 @@ class Play {
     if (this.lens) { const C = app.stage.camera; C.fov = this.lens.fov; C.near = this.lens.near; C.updateProjectionMatrix(); }
     setTimeout(() => { if (!cur && !app.arcade?.session) app.agents.hideFn = null; }, 450);
     if (app.machinePlay) app.machinePlay.active = false;
+    releaseView('Arcade');
     this.o.onLeave?.();
   }
 }
@@ -365,6 +367,7 @@ export function playMachine(e, o = {}) {
   cur = new Play(e, g, o);
   app.machinePlay.active = true;
   cur.open();
+  holdView('Arcade', 'To leave the game: ✕ at the top (or Esc, then Leave)');   // (only leaving lets go of the view: core/state.js holdView)
   return true;
 }
 

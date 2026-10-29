@@ -38,4 +38,6 @@ export function addPostRoutes(router, posts, d) {
   R('GET', '/api/agent-posts/work', ({ P, url }) => ({ work: posts.workOf(managed(P, num(url.searchParams.get('agent')))) }));
   R('POST', '/api/agent-posts/work', ({ P, body }) => posts.work(P, owned(P, num(body?.agent)), body || {}));
   R('POST', '/api/agent-posts/work/auto', ({ P, body }) => posts.autoWork(owned(P, num(body?.agent))));
+  R('POST', '/api/agent-posts/pay', ({ P, body }) => posts.setPay(P, body || {}));   // (what a position pays an hour: 2026-10-28)
+  R('POST', '/api/agent-posts/work/hours', ({ P, body }) => posts.hours(P, owned(P, num(body?.agent)), body || {}));   // (new hours where it works: 2026-10-28)
 }

@@ -30,3 +30,8 @@
 .fm-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 2px; border-radius: 999px; border: 1px solid var(--line); background: var(--btn); font-size: 12px; }
 .fm-chip .fd-th { border-radius: 999px; }
 .fm-kindline { font-weight: 600; }
+/* what a menu item needs that the kitchen hasn't got (shared/appliances.js; ui/food-menu.js) */
+.fm-needs { display: block; font-style: normal; font-size: 11px; color: var(--bad, #e06c6c); line-height: 1.2; }
+.fm-tile .fm-needs { font-size: 12px; }
+.fm-miss { margin: 2px 0 8px; padding-left: 18px; font-size: 13px; line-height: 1.5; }
+.fm-miss small { color: var(--dim, #9aa3ad); }

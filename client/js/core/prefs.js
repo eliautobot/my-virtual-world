@@ -50,6 +50,9 @@ const PREFS = {
   volMedia: vol('media', 100),
   volMusic: vol('music', 80),
   volScore: vol('score', 40),
+  volEffects: vol('effects', 80),
+  volVehicles: vol('vehicles', 80),
+  volRadio: vol('radio', 70),
   // the living world's off switches and levels (spec §7.1 X8)
   wildlife: { path: 'display.wildlife', get: () => local.get('mvw.wildlife') || 'normal', apply: v => { local.set('mvw.wildlife', v && v !== 'normal' ? v : null); bus.emit('display', 'wildlife'); } },
   weatherFx: { path: 'display.weatherFx', get: () => local.get('mvw.weatherFx') || 'on', apply: v => { local.set('mvw.weatherFx', v && v !== 'on' ? v : null); bus.emit('display', 'weatherFx'); } },

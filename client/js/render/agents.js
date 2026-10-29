@@ -228,6 +228,8 @@ export class Agents {
       if (a === CLIP.use && p.use[k] === USE_ID.work) a = CLIP.stand_work;   // standing desk: type while standing
       else if (a === CLIP.use && p.use[k] === USE_ID.prep) a = CLIP.prep;   // making something cold on a counter's board: chopping
       else a = eatClip(holdClip(a, prop, p.use[k], i, LOOK_AT_PHONE), item);   // holding something: walk or stand holding it, look at a phone, sip, read; a dish at a table: eaten its way
+      if (a === CLIP.sit && S.radioTalk?.size && S.radioTalk.has(i)) a = CLIP.sit_talk;   // a radio host at the studio desk, their line on air (audio/radio.js)
+      else if (a === CLIP.dj && S.radioTalk?.size && S.radioTalk.has(i)) a = CLIP.talk;   // the studio's DJ at the decks, their line on air (2026-10-28)
       let ph;
       const stride = CLIP_STRIDE[a];
       if (stride > 0) ph = (segLen > 0.02 && u < 1 ? (p.d0[k] + segLen * u) / stride : t * GAIT_V[a] / stride) + (i * 0.618034) % 1;

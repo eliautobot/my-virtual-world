@@ -15,7 +15,8 @@ export const NIGHTLIFE_OPEN = Object.freeze({ arcade: [10, 23.5], lounge_bar: [1
 export const DRINKS = Object.freeze({
   lounge_bar: ['martini', 'old_fashioned', 'gin_tonic', 'aperol', 'red_wine', 'white_wine', 'champagne', 'whiskey'],
   club: ['margarita', 'mojito', 'cosmopolitan', 'pina_colada', 'champagne', 'beer'],
-  arcade: ['cola', 'lemon_soda'],
+  // (2026-10-28: "junk food on arcades like popcorn, pizza, burgers, tacos, soda, water, juice")
+  arcade: ['cola', 'lemon_soda', 'water', 'orange_juice', 'popcorn', 'pizza_slice', 'hot_dog', 'cheeseburger', 'fries', 'tacos'],
 });
 
 /** Who works at a piece with a serving side: its role (the economy's wage, the job's title, what they're seen doing). */

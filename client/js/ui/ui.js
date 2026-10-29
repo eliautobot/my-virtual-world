@@ -626,6 +626,11 @@ function updateAgentLocal() {
 function showSaid(text) { if (!E.ag) return; set(E.ag.said, `“${text}”`); E.ag.said.classList.remove('hidden'); }
 function updateAgentInfo() {
   if (!E.ag || !info || infoFor !== E.ag.i) return;
+  // on post around the clock (server/agent-posts/): its needs wait while it is on duty (2026-10-28: the bars stood still
+  // and looked like it was starving)
+  const onPost = !!info.post;
+  E.ag.needs.classList.toggle('paused', onPost);
+  E.ag.needs.title = onPost ? 'On duty around the clock: its needs wait until it is let go' : '';
   E.ag.needs.innerHTML = NEEDS.map(([k, ic, lb]) => {
     const v = clamp(+(info.needs && info.needs[k]) || 0, 0, 1), c = v > 0.6 ? 'var(--good)' : v > 0.3 ? 'var(--gold)' : 'var(--bad)';
     return `<span class="nd" title="${lb} ${Math.round(v * 100)}%"><span class="nd-l">${ic} ${lb}</span><div class="bar"><i style="width:${Math.round(v * 100)}%;background:${c}"></i></div></span>`;
@@ -633,7 +638,11 @@ function updateAgentInfo() {
   const j = info.job || {}, hm = info.home, sc = info.sched || {};
   // the name takes you there: inside the building, at the floor (and, for a home, the flat marked)
   const link = (b, f, u, t, title) => (b >= 0 && bld(b) ? `<a data-go="${b}:${Math.max(0, f | 0)}:${u ?? -1}" title="${esc(title)}">${esc(t)}</a>` : esc(t));
-  E.ag.kv.innerHTML = `
+  const po = info.post;
+  E.ag.kv.innerHTML = po ? `
+    <span class="k">Work</span><span>🛎️ On duty 24/7 at ${link(po.b, po.f, -1, po.place || '', 'Go inside, to the floor where it is on post')}</span>
+    ${hm ? `<span class="k">Home</span><span>${link(hm.b, hm.f, hm.u >= 0 ? hm.u : -1, `${hm.place || hm.name}${hm.u >= 0 ? `, flat ${hm.u + 1}` : ''}`, hm.u >= 0 ? 'Go inside and see their flat' : 'Go inside, to their floor')}</span>` : ''}
+    <span class="k">Routine</span><span class="dim">Paused while on duty</span>` : `
     ${j.kind !== 'free' && j.title && !info.vip ? `<span class="k">Job</span><span>${esc(j.title)}</span>` : ''}
     ${j.b >= 0 ? `<span class="k">Works at</span><span>${link(j.b, j.f, -1, j.place || '', 'Go inside, to the floor where they work')}${j.start != null ? ` <span class="dim">${formatClock(j.start)}–${formatClock(j.end)}</span>` : ''}</span>` : `<span class="k">Work</span><span class="dim">Between jobs</span>`}
     ${hm ? `<span class="k">Home</span><span>${link(hm.b, hm.f, hm.u >= 0 ? hm.u : -1, `${hm.place || hm.name}${hm.u >= 0 ? `, flat ${hm.u + 1}` : ''}`, hm.u >= 0 ? 'Go inside and see their flat' : 'Go inside, to their floor')}</span>` : '<span class="k">Home</span><span class="dim">Looking for a place</span>'}
@@ -806,6 +815,7 @@ export function flyToFloor(B, f) {
 }
 export function lookInside(b, f = null) {
   const B = bld(b); if (!B) return;
+  if (S.hold) { bus.emit('held', { b, f }); return; }   // (a game holds the view: state.js setFocus)
   stopFollow();
   if (B.type === 'park') { cam.flyTo(B.x, floorAt(B, 0), B.z, clamp(Math.max(B.w, B.d) * 1.25, 30, 120)); return; }
   if (f === null || !Number.isFinite(f)) f = S.focus.b === b ? S.focus.f : 0;
@@ -823,6 +833,7 @@ export function changeFloor(d) {
 }
 export function exitFocus() {
   if (S.focus.b < 0) return;
+  if (S.hold) { bus.emit('held', { b: -1 }); return; }
   stopFollow(); S.focusByFollow = false;
   setFocus(-1);
   cam.goal.y = 0; cam.goalDist = Math.max(cam.goalDist, 55);
@@ -900,6 +911,7 @@ function updateToolbar() {
 }
 export function setMode(m) {
   if (!MODES.some(x => x[0] === m)) m = 'explore';
+  if (S.hold && m !== S.mode) { bus.emit('held', { mode: m }); return; }   // (a game holds the view: state.js setFocus)
   if ((m === 'furnish' || m === 'build') && !canEdit()) {
     toast(auth.account ? 'Your role cannot build or furnish' : 'Sign in to build on your own land', 'bad');
     return;
@@ -1150,11 +1162,14 @@ function escape() {
   if (S.mode !== 'explore') setMode('explore');
 }
 function bindKeys() {
+  let heldAt = -1e9;   // (tried to leave a game some other way: how to leave it, now and then)
+  bus.on('held', () => { const now = performance.now(); if (S.hold?.how && now - heldAt > 2500) { heldAt = now; toast(S.hold.how, 'bad', 2600); } });
   window.addEventListener('keydown', e => {
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     for (const fn of app.hooks.key) if (fn(e)) { e.preventDefault(); return; }
+    if (S.hold) return;   // (a game holds the view: its own keys only, the world's wait until it is left: core/state.js holdView)
     switch (e.key) {
       case 'Escape': escape(); break;
       case 'f': case 'F': if (S.sel >= 0) (S.follow ? stopFollow() : startFollow()); break;

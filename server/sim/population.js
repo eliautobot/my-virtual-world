@@ -23,11 +23,15 @@ export function daysMask(rng, kind) {
 }
 export function schedule(rng, kind, start, end, night) {
   const s = { lunch: r2(rng.float(11.75, 13.1)) };
+  // an overnight shift (shared/shifts.js: its end past 24): up a while before it in the evening, asleep the morning
+  // after; its meal break halfway through (the shift's own hours)
+  if (end > 24) return { lunch: r2(start + (end - start) / 2), wake: r2(start - rng.float(1.4, 2)), bed: r2(end - 24 + rng.float(0.8, 1.5)) };
   if (kind === 'office' || kind === 'vip') s.wake = r2(Math.min(start - 1.2, rng.float(6.2, 7.6)));
   else if (kind === 'staff') s.wake = r2(start < 11 ? start - 1.6 : rng.float(8, 10));
   else s.wake = r2(rng.float(6.8, 9.8));
   s.bed = r2(night ? rng.float(23.6, 25.6) : rng.float(21.9, 23.9));
-  if (kind === 'staff' && end > s.bed - 0.7) s.bed = r2(Math.min(26, end + rng.float(0.8, 1.5)));
+  // (hours its owner chose may run late, whatever the work: never to bed before its shift is over — 2026-10-28)
+  if (end > s.bed - 0.7) s.bed = r2(Math.min(26, end + rng.float(0.8, 1.5)));
   return s;
 }
 
@@ -192,6 +196,8 @@ export function validatePerson(world, index, p) {
   if ((p.job.kind === 'office' || p.job.kind === 'vip' || p.job.kind === 'staff') && !okSlot(p.job)) { p.job = { kind: 'free', title: 'Between jobs', lost: 1, prev: p.job.kind }; changed = true; }
   // its post (an AI agent's, around the clock): gone with the furniture it was at
   if (p.post && !(okSlot(p.post) && POST_USES.has(index.entry(p.post.b, p.post.f, p.post.id).slots[p.post.k].use))) { delete p.post; changed = true; }
+  // (its post's job record goes with it: it looks for work again — server/sim/sim.js postJob)
+  if (p.job?.kind === 'post' && !p.post) { p.job = { kind: 'free', title: 'Between jobs', lost: 1, prev: 'vip' }; changed = true; }
   return changed;
 }
 

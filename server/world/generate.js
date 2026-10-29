@@ -194,7 +194,12 @@ export function makeBuilding(idx, s, rng, uniqueName) {
   switch (s.type) {
     case 'park': b.name = s.name; b.style = 'park'; b.colors = { wall: '#6d9a4c', trim: '#8a8a80', glass: '#000000', roof: '#6d9a4c', accent: '#3f7a3a' }; break;
     case 'hq': b.name = s.name; b.sign = s.sign; b.colors = { wall: '#eef1f2', trim: '#1c2226', glass: '#1d4d5c', roof: '#3f4448', accent: '#e8453c' }; b.roofKind = 'garden'; break;
-    case 'office': b.name = uniqueName(N.TOWER_PREFIX, 'tower', 'Tower') + ' ' + rng.pick(N.TOWER_WORDS); break;
+    case 'office':
+      if (s.module && s.radio) {   // MVW Radio's studio (a Radio Station world module: shared/world-modules.js terminalSpec): charcoal and glass, a red sign
+        b.name = s.name || 'MVW Radio'; b.sign = s.sign || 'MVW RADIO'; b.module = s.module; b.radio = true; b.style = 'glass';
+        b.colors = { wall: '#2b2f36', trim: '#16181c', glass: '#2c4a63', roof: '#3a3f46', accent: '#e23b3b' }; b.roofKind = 'hvac';
+      } else b.name = uniqueName(N.TOWER_PREFIX, 'tower', 'Tower') + ' ' + rng.pick(N.TOWER_WORDS);
+      break;
     case 'apartment': b.name = rng.pick(N.TOWER_PREFIX) + ' ' + rng.pick(N.APT_WORDS); break;
     case 'cafe': b.name = uniqueName(N.CAFE_NAMES, 'cafe', 'Café'); b.sign = b.name; break;
     case 'restaurant': b.name = uniqueName(N.REST_NAMES, 'rest', 'Restaurant'); b.sign = b.name; break;
@@ -255,9 +260,11 @@ export function freshLevels(b) {
 /** Floor f of building b laid out with its own roll of the dice (Regenerate, a floor's `roll`): the same kind of floor,
  *  a different arrangement; the same roll at the same size gives the same floor back. theme: lay it out as that theme
  *  (Floor Themes, shared/floor-themes.js) — it stays the floor's (its `theme`), so a re-roll or a resize keeps it. */
-export function freshLevel(b, f, roll, theme = null) {
+export function freshLevel(b, f, roll, theme = null, style = null) {
   const rng = new RNG(`${b.seed}:roll:${roll}:${f}${theme ? `:${theme}` : ''}`);
-  const lvl = validate(b, buildLevel(b, f, rng, b.type === 'park' ? { dance: rng.chance(0.3) } : theme ? { theme } : {}), f);
+  const built = buildLevel(b, f, rng, b.type === 'park' ? { dance: rng.chance(0.3) } : theme ? { theme, style } : {});
+  const lvl = validate(b, built, f);
+  if (built.style) lvl.style = built.style;   // (a café's style, kept by a re-roll: shared/floor-themes.js CAFE_STYLES)
   lvl.b = b.idx;
   if (f === 0) lvl.ground = 1;
   lvl.auto = 1; lvl.roll = roll;

@@ -121,7 +121,7 @@ export async function plansTab(C, body, live) {
   const life = await C.get('life');
   if (!live()) return;
   if (!life || life.error) { body.innerHTML = `<p class="hint">${esc(life?.error || 'Not available.')}</p>`; return; }
-  const plans = life.plans || [], open = plans.filter(p => p.status === 'open'), past = plans.filter(p => p.status !== 'open').slice(0, 12);
+  const plans = life.plans || [], open = plans.filter(p => p.status === 'open'), held = plans.filter(p => p.status === 'held'), past = plans.filter(p => p.status !== 'open' && p.status !== 'held').slice(0, 12);
   const st = C.st.plans = C.st.plans || { kind: 'want', today: false };
   const SRC = { owner: 'you', mind: 'its Mind', reflection: 'its reflection', chat: 'a chat' };
   const card = p => `<div class="pl-card ${p.kind}${p.source === 'owner' ? ' owner' : ''}" data-id="${p.id}"><div class="pl-t">${esc(p.text)}</div>
@@ -134,6 +134,7 @@ export async function plansTab(C, body, live) {
       <label class="pl-today"><input type="checkbox"${st.today ? ' checked' : ''}> Today</label><button type="submit" class="btn primary">Add</button></form>
     <p class="hint">What ${esc(C.name)} means to do. Free Will weighs these with every choice; its Mind plans around them each morning. What you add stays until it's done — it never drops yours.</p>
     <div class="pl-board">${col('must', '📌 Must', 'Has to happen')}${col('want', '⭐ Wants to', 'Would like to')}</div>
+    ${held.length ? `<div class="st-sec pl-held"><div class="st-sec-h"><h4>🛎️ On hold while on duty</h4><small class="dim">${held.length}</small></div><p class="hint">${esc(C.name)} is on post around the clock: these wait, and are open again once you let it go.</p><div class="pl-past">${held.map(p => `<div class="pl-old held"><span>⏸</span>${esc(p.text)}</div>`).join('')}</div></div>` : ''}
     ${past.length ? `<details class="st-sec"><summary class="hint">Done and dropped (${past.length})</summary><div class="pl-past">${past.map(p => `<div class="pl-old ${p.status}"><span>${p.status === 'done' ? '✓' : '✕'}</span>${esc(p.text)}</div>`).join('')}</div></details>` : ''}
   </div>`;
   body.querySelectorAll('[data-k]').forEach(b => { b.onclick = () => { st.kind = b.dataset.k; body.querySelectorAll('[data-k]').forEach(x => x.classList.toggle('on', x === b)); }; });
@@ -218,7 +219,7 @@ export async function peopleTab(C, body, live) {
     const acts = other ? `<div class="row pp-acts">${!p.ended && p.affinity > 0 && !p.blocked ? `<button type="button" class="btn small pp-end" data-other="${other}">✕ End friendship</button>` : ''}
       <button type="button" class="btn small pp-block" data-other="${other}" data-on="${p.blocked ? 'false' : 'true'}">${p.blocked ? '🔒 Unblock' : '🔒 Block'}</button></div>` : '';
     return `<div class="pp-card${p.ended ? ' ended' : ''}${p.blocked ? ' blocked' : ''}" data-kind="${esc(p.kind)}" data-pid="${esc(p.id)}">
-      <div class="pp-h"><span class="pp-av" data-avatar>${esc(pe?.e || (p.kind === 'agent' ? '🤖' : (p.name || '?').charAt(0).toUpperCase()))}</span><div><b>${esc(p.name)}</b><small>${esc(lv.label)}${p.blocked ? ' · blocked' : ''} · ${p.kind === 'agent' ? 'AI agent' : esc(p.kind)}</small></div></div>
+      <div class="pp-h"><span class="pp-av" data-avatar>${esc(pe?.e || (p.kind === 'agent' ? '🤖' : (p.name || '?').charAt(0).toUpperCase()))}</span><div><b>${esc(p.name)}</b><small>${esc(lv.label)}${p.blocked ? ' · blocked' : ''} · ${p.kind === 'agent' ? 'AI agent' : p.kind === 'player' ? 'Player' : 'Resident'}</small></div></div>
       <div class="pp-rings">${ring(Math.max(0, p.affinity), 'warm', 'warmth')}${ring(p.trust, 'trust', 'trust')}</div>
       <small class="dim">${p.interactions} chat${p.interactions === 1 ? '' : 's'}${p.lastPlace ? ` · last at ${esc(p.lastPlace)}` : ''} ${trend(p)}</small>
       ${p.ended && p.endedUntil != null && so ? `<small class="dim">Ended: can grow again in ${Math.max(1, p.endedUntil - so.today)} world day${p.endedUntil - so.today === 1 ? '' : 's'}</small>` : ''}

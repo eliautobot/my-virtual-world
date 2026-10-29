@@ -93,6 +93,103 @@ export const CATALOG = {
     slots: [-1.1, -0.37, 0.37, 1.1].map(x => S(x, 0.55, P, 'sit_high', 'eat', { az: 1.1, y: 0.28 })) },
   cafe_counter: { name: 'Café Counter', cat: 'Kitchen', h: 1.6, rect: [-1.6, -0.4, 1.6, 0.4], tint: true,
     slots: [S(-0.8, -0.78, 0, 'staff', 'staff', { az: -0.95 }), S(0.8, -0.78, 0, 'staff', 'staff', { az: -0.95 }), S(0, 0.78, P, 'talk', 'order', { az: 1.05, dur: [1, 3] })] },
+  // ---------------- Café (Floor Themes' café redone, 2026-10-26: client/js/render/furniture-cafe.js) ----------------
+  counter_bistro: { name: 'Bistro Counter', cat: 'Café', h: 1.45, rect: [-2.05, -0.47, 2.05, 0.48], tint: true, slots: [S(-0.9, -0.88, 0, 'staff', 'staff', { az: -1.0 }), S(0.9, -0.88, 0, 'staff', 'staff', { az: -1.0 }), S(0, 0.88, P, 'talk', 'order', { az: 1.1, dur: [1, 3] })] },
+  counter_nordic: { name: 'Oak Coffee Counter', cat: 'Café', h: 1.45, rect: [-2.05, -0.47, 2.05, 0.48], tint: true, slots: [S(-0.9, -0.88, 0, 'staff', 'staff', { az: -1.0 }), S(0.9, -0.88, 0, 'staff', 'staff', { az: -1.0 }), S(0, 0.88, P, 'talk', 'order', { az: 1.1, dur: [1, 3] })] },
+  counter_loft: { name: 'Steel Coffee Bar', cat: 'Café', h: 1.45, rect: [-2.05, -0.47, 2.05, 0.48], tint: true, slots: [S(-0.9, -0.88, 0, 'staff', 'staff', { az: -1.0 }), S(0.9, -0.88, 0, 'staff', 'staff', { az: -1.0 }), S(0, 0.88, P, 'talk', 'order', { az: 1.1, dur: [1, 3] })] },
+  counter_library: { name: 'Library Counter', cat: 'Café', h: 1.45, rect: [-2.05, -0.47, 2.05, 0.48], tint: true, slots: [S(-0.9, -0.88, 0, 'staff', 'staff', { az: -1.0 }), S(0.9, -0.88, 0, 'staff', 'staff', { az: -1.0 }), S(0, 0.88, P, 'talk', 'order', { az: 1.1, dur: [1, 3] })] },
+  counter_garden: { name: 'Rattan Counter', cat: 'Café', h: 1.45, rect: [-2.05, -0.47, 2.05, 0.48], tint: true, slots: [S(-0.9, -0.88, 0, 'staff', 'staff', { az: -1.0 }), S(0.9, -0.88, 0, 'staff', 'staff', { az: -1.0 }), S(0, 0.88, P, 'talk', 'order', { az: 1.1, dur: [1, 3] })] },
+  pastry_vitrine: { name: 'Pastry Case', cat: 'Café', h: 1.3, rect: [-0.76, -0.36, 0.76, 0.36], tint: true, slots: [] },
+  bistro_set: { name: 'Bistro Table', cat: 'Café', h: 0.95, rect: [-0.98, -0.42, 0.98, 0.42], slots: [S(-0.62, 0, H, 'sit_eat', 'eat', { ax: -1.3, az: 0.3 }), S(0.62, 0, -H, 'sit_eat', 'eat', { ax: 1.3, az: -0.3 })] },
+  rattan_set: { name: 'Rattan Table', cat: 'Café', h: 1.2, rect: [-0.98, -0.42, 0.98, 0.42], slots: [S(-0.62, 0, H, 'sit_eat', 'eat', { ax: -1.3, az: 0.3 }), S(0.62, 0, -H, 'sit_eat', 'eat', { ax: 1.3, az: -0.3 })] },
+  communal_table: { name: 'Communal Table', cat: 'Café', h: 0.8, rect: [-1.65, -0.9, 1.65, 0.9], tint: true,
+    slots: [-1.0, 0, 1.0].flatMap(x => [S(x, 0.72, P, 'sit_eat', 'eat', { az: 1.25 }), S(x, -0.72, 0, 'sit_eat', 'eat', { az: -1.25 })]) },
+  window_ledge: { name: 'Window Ledge', cat: 'Café', h: 1.1, rect: [-1.3, -0.45, 1.3, 0.35],
+    slots: [-0.95, -0.32, 0.32, 0.95].map(x => S(x, 0.15, P, 'sit_high', 'eat', { az: 0.65, y: 0.28 })) },
+  cafe_booth: { name: 'Café Booth', cat: 'Café', h: 1.2, rect: [-1.0, -0.98, 1.0, 0.98], tint: true,
+    slots: [S(-0.45, 0.66, P, 'sit_eat', 'eat', { ax: 1.35 }), S(0.45, 0.66, P, 'sit_eat', 'eat', { ax: 1.35 }), S(-0.45, -0.66, 0, 'sit_eat', 'eat', { ax: 1.35 }), S(0.45, -0.66, 0, 'sit_eat', 'eat', { ax: 1.35 })] },   // (sat into from its open end, +x: its other end stands against a wall)
+  wingback_set: { name: 'Wingback Chairs', cat: 'Café', h: 1.2, rect: [-1.1, -0.5, 1.1, 0.5],
+    slots: [S(-0.62, 0.1, 0.35, 'sit_relax', 'relax', { az: 0.95, y: -0.05 }), S(0.62, 0.1, -0.35, 'sit_relax', 'relax', { az: 0.95, y: -0.05 })] },
+  coffee_roaster: { name: 'Coffee Roaster', cat: 'Café', h: 2.15, rect: [-0.85, -0.5, 1.05, 0.8], slots: [] },
+  bean_sacks: { name: 'Coffee Sacks', cat: 'Café', h: 0.6, rect: [-0.5, -0.35, 0.5, 0.32], slots: [] },
+  library_wall: { name: 'Wall of Books', cat: 'Café', h: 2.6, rect: [-1.5, -0.22, 1.5, 0.45], wall: true, slots: [] },
+  hearth: { name: 'Brick Hearth', cat: 'Café', h: 1.6, rect: [-1.15, -0.4, 1.15, 0.32], wall: true, slots: [] },
+  fountain_tiered: { name: 'Tiered Fountain', cat: 'Café', h: 1.6, rect: [-0.8, -0.8, 0.8, 0.8], slots: [] },
+  cafe_palm: { name: 'Palm Planter', cat: 'Café', h: 2.0, rect: [-0.42, -0.42, 0.42, 0.42], tint: true, slots: [] },
+  gilt_mirror: { name: 'Gilt Mirror', cat: 'Café', h: 2.45, rect: [-0.6, -0.05, 0.6, 0.02], wall: true, block: false, slots: [] },
+  menu_board: { name: 'Chalkboard Menu', cat: 'Café', h: 2.3, rect: [-0.8, -0.04, 0.8, 0.02], wall: true, block: false, slots: [] },
+  edison_pendants: { name: 'Edison Pendants', cat: 'Café', h: 2.97, rect: [-0.5, -0.45, 0.5, 0.45], block: false, slots: [] },
+  pipe_shelf: { name: 'Pipe Shelving', cat: 'Café', h: 2.0, rect: [-0.92, -0.18, 0.92, 0.18], wall: true, slots: [] },
+  condiment_bar: { name: 'Condiment Bar', cat: 'Café', h: 1.26, rect: [-0.57, -0.3, 0.57, 0.3], tint: true, slots: [] },
+  hanging_ivy: { name: 'Hanging Ivy', cat: 'Café', h: 2.95, rect: [-0.3, -0.3, 0.3, 0.3], block: false, slots: [] },
+  zinc_bar: { name: 'Zinc Bar', cat: 'Café', h: 1.45, rect: [-2.46, -0.46, 2.46, 1.0], tint: true,
+    slots: [S(-1.4, -0.9, 0, 'staff', 'staff', { az: -1.0 }), S(0.9, -0.9, 0, 'staff', 'staff', { az: -1.0 }), S(0, 1.2, P, 'talk', 'order', { az: 1.5, dur: [1, 3] }),
+      ...[-1.9, -0.95, 0.95, 1.9].map(x => S(x, 0.75, P, 'sit_high', 'eat', { az: 1.3, y: 0.28 }))] },
+  banquette_long: { name: 'Window Banquette', cat: 'Café', h: 1.05, rect: [-2.1, -0.62, 2.1, 1.1], tint: true,
+    slots: [-1.4, 0, 1.4].flatMap(x => [S(x, -0.32, 0, 'sit_eat', 'eat', { az: 0.6 }), S(x, 0.85, P, 'sit_eat', 'eat', { az: 1.35 })]) },
+  cafe_sconce: { name: 'Brass Sconce', cat: 'Café', h: 2.25, rect: [-0.1, -0.03, 0.1, 0.25], wall: true, block: false, slots: [] },
+  poster_frame: { name: 'Framed Poster', cat: 'Café', h: 2.25, rect: [-0.42, -0.03, 0.42, 0.01], wall: true, block: false, slots: [] },
+  coat_stand: { name: 'Coat Stand', cat: 'Café', h: 1.85, rect: [-0.22, -0.22, 0.22, 0.22], slots: [] },
+  newspaper_rack: { name: 'Newspaper Rack', cat: 'Café', h: 1.2, rect: [-0.33, -0.19, 0.33, 0.0], wall: true, slots: [] },
+  bookshelf_divider: { name: 'Bookshelf Divider', cat: 'Café', h: 2.4, rect: [-1.2, -0.2, 1.2, 0.2], slots: [] },
+  library_table: { name: 'Library Table', cat: 'Café', h: 1.1, rect: [-1.0, -0.95, 1.0, 0.95],
+    slots: [S(-0.45, -0.75, 0, 'sit_eat', 'eat', { az: -1.25 }), S(0.45, -0.75, 0, 'sit_eat', 'eat', { az: -1.25 }), S(-0.45, 0.75, P, 'sit_eat', 'eat', { az: 1.25 }), S(0.45, 0.75, P, 'sit_eat', 'eat', { az: 1.25 })] },
+  globe_stand: { name: 'Globe', cat: 'Café', h: 1.25, rect: [-0.3, -0.3, 0.3, 0.3], slots: [] },
+  // the roastery's, the coffee lab's and the garden's own pieces (Order Up phase 1b part 3), and a rug for any of them
+  paper_pendant: { name: 'Paper Lanterns', cat: 'Café', h: 2.97, rect: [-0.6, -0.6, 0.6, 0.6], block: false, slots: [] },
+  plant_wall: { name: 'Living Plant Wall', cat: 'Café', h: 2.7, rect: [-1.25, -0.04, 1.25, 0.22], wall: true, slots: [] },
+  slat_wall: { name: 'Oak Slat Wall', cat: 'Café', h: 2.8, rect: [-1.25, -0.03, 1.25, 0.07], wall: true, block: false, slots: [] },
+  mesh_partition: { name: 'Mesh Partition', cat: 'Café', h: 2.0, rect: [-1.05, -0.22, 1.05, 0.22], slots: [] },
+  neon_coffee: { name: 'Neon COFFEE Sign', cat: 'Café', h: 2.5, rect: [-1.0, -0.03, 1.0, 0.06], wall: true, block: false, slots: [] },
+  chalk_wall: { name: 'Chalk Wall', cat: 'Café', h: 2.6, rect: [-1.25, -0.03, 1.25, 0.02], wall: true, block: false, slots: [] },
+  cold_brew_tower: { name: 'Cold Brew Tower', cat: 'Café', h: 1.95, rect: [-0.32, -0.32, 0.32, 0.32], slots: [] },
+  hedge_planter: { name: 'Boxwood Hedge', cat: 'Café', h: 1.15, rect: [-1.0, -0.3, 1.0, 0.3], tint: true, slots: [] },
+  flower_bed: { name: 'Flower Bed', cat: 'Café', h: 0.75, rect: [-0.9, -0.4, 0.9, 0.4], tint: true, slots: [] },
+  vine_trellis: { name: 'Vine Trellis with Lights', cat: 'Café', h: 2.97, rect: [-1.5, -1.5, 1.5, 1.5], block: false, slots: [] },
+  birdcage: { name: 'Birdcage', cat: 'Café', h: 2.97, rect: [-0.25, -0.25, 0.25, 0.25], block: false, slots: [] },
+  stone_urn: { name: 'Stone Urn', cat: 'Café', h: 1.5, rect: [-0.38, -0.38, 0.38, 0.38], tint: true, slots: [] },
+  cafe_rug: { name: 'Café Rug', cat: 'Café', h: 0.02, rect: [-1.7, -1.2, 1.7, 1.2], tint: true, block: false, slots: [] },
+  // Order Up's kitchen stations (phase 2): a cook's place in front of the ones cooked at (Order Up's cooks from phase 5; in a café
+  // nobody is hired for them: a restaurant's are its staff, server/sim/windex.js)
+  ou_fridge: { name: 'Ingredient Fridge', cat: 'Kitchen', h: 2.0, rect: [-0.42, -0.36, 0.42, 0.34], slots: [] },
+  ou_pantry: { name: 'Pantry Shelves', cat: 'Kitchen', h: 2.0, rect: [-0.6, -0.3, 0.6, 0.28], slots: [] },
+  ou_prep: { name: 'Prep Counter', cat: 'Kitchen', h: 1.05, rect: [-0.6, -0.34, 0.6, 0.34], slots: [S(0, 0.72, P, 'cook', 'cook', { dur: [2, 5] })] },
+  ou_grinder: { name: 'Grinder Station', cat: 'Kitchen', h: 1.4, rect: [-0.4, -0.34, 0.4, 0.34], slots: [] },
+  ou_espresso: { name: 'Espresso Station', cat: 'Kitchen', h: 1.35, rect: [-0.6, -0.34, 0.6, 0.34], slots: [S(-0.1, 0.72, P, 'cook', 'cook', { dur: [2, 5] })] },
+  ou_steamer: { name: 'Milk Steamer', cat: 'Kitchen', h: 1.4, rect: [-0.4, -0.34, 0.4, 0.34], slots: [S(0, 0.72, P, 'cook', 'cook', { dur: [2, 5] })] },
+  ou_oven: { name: 'Deck Oven', cat: 'Kitchen', h: 1.65, rect: [-0.5, -0.38, 0.5, 0.38], slots: [S(0, 0.8, P, 'cook', 'cook', { dur: [2, 6] })] },
+  ou_press: { name: 'Sandwich Press', cat: 'Kitchen', h: 1.2, rect: [-0.4, -0.34, 0.4, 0.34], slots: [] },
+  ou_blender: { name: 'Blender Station', cat: 'Kitchen', h: 1.35, rect: [-0.4, -0.34, 0.4, 0.34], slots: [] },
+  ou_plating: { name: 'Plating Counter', cat: 'Kitchen', h: 1.1, rect: [-0.6, -0.34, 0.6, 0.34], slots: [] },
+  ou_pass: { name: 'The Pass', cat: 'Kitchen', h: 1.9, rect: [-0.8, -0.3, 0.8, 0.3], slots: [S(0, -0.65, 0, 'use', 'cook', { dur: [1, 3] })] },
+  ou_dishes: { name: 'Dish Return', cat: 'Kitchen', h: 1.45, rect: [-0.45, -0.34, 0.45, 0.34], slots: [] },
+  ou_sink: { name: 'Kitchen Sink', cat: 'Kitchen', h: 1.35, rect: [-0.7, -0.34, 0.7, 0.34], slots: [S(-0.24, 0.72, P, 'wash', 'cook', { dur: [2, 6] })] },
+  ou_bin: { name: 'Kitchen Bin', cat: 'Kitchen', h: 0.75, rect: [-0.22, -0.22, 0.22, 0.27], slots: [] },
+  ou_extinguisher: { name: 'Fire Extinguisher', cat: 'Kitchen', h: 1.25, rect: [-0.12, -0.02, 0.12, 0.18], wall: true, block: false, slots: [] },
+  ou_rail: { name: 'Order Rail', cat: 'Kitchen', h: 1.98, rect: [-0.9, -0.02, 0.9, 0.06], wall: true, block: false, slots: [] },
+  // the appliances a menu calls for beyond the coffee bar's (shared/appliances.js; the product owner 2026-10-28: "to add
+  // fries to the menu, you will need a fryer"): a kitchen gets them when its menu needs them, or its owner adds them
+  ou_kettle: { name: 'Tea Station', cat: 'Kitchen', h: 1.45, rect: [-0.4, -0.34, 0.4, 0.34], slots: [S(0, 0.72, P, 'cook', 'cook', { dur: [2, 5] })] },
+  ou_toaster: { name: 'Conveyor Toaster', cat: 'Kitchen', h: 1.3, rect: [-0.4, -0.34, 0.4, 0.34], slots: [S(0, 0.72, P, 'cook', 'cook', { dur: [2, 5] })] },
+  ou_juicer: { name: 'Juice Station', cat: 'Kitchen', h: 1.35, rect: [-0.4, -0.34, 0.4, 0.34], slots: [S(0, 0.72, P, 'cook', 'cook', { dur: [2, 5] })] },
+  ou_griddle: { name: 'Flat-top Griddle', cat: 'Kitchen', h: 1.3, rect: [-0.6, -0.36, 0.6, 0.36], slots: [S(0, 0.74, P, 'cook', 'cook', { dur: [2, 6] })] },
+  ou_grill: { name: 'Char Grill', cat: 'Kitchen', h: 1.35, rect: [-0.6, -0.36, 0.6, 0.36], slots: [S(0, 0.74, P, 'cook', 'cook', { dur: [2, 6] })] },
+  ou_fryer: { name: 'Deep Fryer', cat: 'Kitchen', h: 1.25, rect: [-0.4, -0.36, 0.4, 0.36], slots: [S(0, 0.74, P, 'cook', 'cook', { dur: [2, 6] })] },
+  ou_soda: { name: 'Soda Fountain', cat: 'Kitchen', h: 1.5, rect: [-0.5, -0.34, 0.5, 0.34], slots: [S(0, 0.72, P, 'cook', 'cook', { dur: [1, 3] })] },
+  // the pizza oven, the stove and the wok (2026-10-28: an Italian's, a pizzeria's and an Asian kitchen's)
+  ou_pizza_oven: { name: 'Pizza Oven', cat: 'Kitchen', h: 1.97, rect: [-0.6, -0.42, 0.6, 0.42], slots: [S(0, 0.8, P, 'cook', 'cook', { dur: [2, 6] })] },
+  ou_stove: { name: 'Stove', cat: 'Kitchen', h: 1.3, rect: [-0.5, -0.36, 0.5, 0.39], slots: [S(0, 0.76, P, 'cook', 'cook', { dur: [2, 6] })] },
+  ou_wok: { name: 'Wok Burner', cat: 'Kitchen', h: 1.2, rect: [-0.45, -0.36, 0.45, 0.36], slots: [S(0, 0.74, P, 'cook', 'cook', { dur: [2, 6] })] },
+  ou_popcorn: { name: 'Popcorn Machine', cat: 'Kitchen', h: 1.7, rect: [-0.4, -0.34, 0.4, 0.34], slots: [S(0, 0.72, P, 'cook', 'cook', { dur: [2, 5] })] },   // (the arcade's)
+  // the tandoor, the rice cooker, the bamboo steamer and the ice cream freezer (2026-10-28)
+  ou_tandoor: { name: 'Tandoor', cat: 'Kitchen', h: 1.1, rect: [-0.45, -0.36, 0.45, 0.36], slots: [S(0, 0.74, P, 'cook', 'cook', { dur: [2, 6] })] },
+  ou_rice: { name: 'Rice Station', cat: 'Kitchen', h: 1.35, rect: [-0.4, -0.34, 0.4, 0.34], slots: [S(0, 0.72, P, 'cook', 'cook', { dur: [1, 3] })] },
+  ou_bamboo: { name: 'Bamboo Steamer', cat: 'Kitchen', h: 1.2, rect: [-0.45, -0.36, 0.45, 0.36], slots: [S(0, 0.74, P, 'cook', 'cook', { dur: [2, 5] })] },
+  ou_freezer: { name: 'Ice Cream Freezer', cat: 'Kitchen', h: 1.15, rect: [-0.5, -0.34, 0.5, 0.35], slots: [S(0, 0.73, P, 'cook', 'cook', { dur: [1, 3] })] },
+  // the bar's (2026-10-28: a lounge's or a club's kitchen pours its drinks)
+  ou_taps: { name: 'Beer Taps', cat: 'Kitchen', h: 1.55, rect: [-0.5, -0.34, 0.5, 0.34], slots: [S(0, 0.72, P, 'cook', 'cook', { dur: [1, 3] })] },
+  ou_wine: { name: 'Wine Fridge', cat: 'Kitchen', h: 1.3, rect: [-0.4, -0.35, 0.4, 0.36], slots: [S(0, 0.72, P, 'cook', 'cook', { dur: [1, 3] })] },
+  ou_cocktail: { name: 'Cocktail Station', cat: 'Kitchen', h: 1.25, rect: [-0.6, -0.34, 0.6, 0.42], slots: [S(0, 0.78, P, 'cook', 'cook', { dur: [2, 5] })] },
   // ---------------- Retail ----------------
   shop_shelf: { name: 'Store Shelf', cat: 'Retail', h: 1.8, rect: [-1.0, -0.3, 1.0, 0.3], tint: true,
     slots: [S(-0.5, 0.7, P, 'browse', 'browse'), S(0.5, 0.7, P, 'browse', 'browse'), S(-0.5, -0.7, 0, 'browse', 'browse'), S(0.5, -0.7, 0, 'browse', 'browse')] },
@@ -267,6 +364,21 @@ export const CATALOG = {
   neon_vip: { name: 'Neon VIP', cat: 'Club', h: 2.5, rect: [-0.8, -0.08, 0.8, 0.08], wall: true, block: false, slots: [] },
   royal_palm: { name: 'Royal Palm', cat: 'Club', h: 3.6, rect: [-0.5, -0.5, 0.5, 0.5], slots: [] },
   velvet_rope: { name: 'Velvet Rope', cat: 'Club', h: 1.0, rect: [-0.95, -0.15, 0.95, 0.15], tint: true, slots: [] },
+  // ---------------- The radio studio (an interior module: shared/radio-studio.js; 2026-10-27: "where are the mics, the control
+  // boards, the big table ... dj area, vinyl records ... a nice real studio for broadcasting music"; render/furniture-studio.js).
+  // The hosts' places at the broadcast desk and the DJ's at the booth are posts (the desk menu puts an agent there).
+  broadcast_desk: { name: 'Broadcast Desk', cat: 'Studio', h: 1.3, rect: [-1.6, -0.6, 1.6, 1.15], seatPosts: true,   // (seatPosts: each seat its own post, its own ⋯: ui/post-menu.js)
+    slots: [-1.05, 0, 1.05].map(x => S(x, 0.85, P, 'sit', 'staff', { y: 0.05, az: 1.45, prop: 'headphones' })) },   // (its hosts wear headphones, as on the air)   // (sat at the mic; talking while their line is on air: render/agents.js)
+  studio_dj: { name: 'Studio DJ Booth', cat: 'Studio', h: 1.3, rect: [-1.2, -0.5, 1.2, 0.5], slots: [S(0, 0.78, P, 'dj', 'staff', { az: 1.2 })] },
+  guest_table: { name: 'Guest Table', cat: 'Studio', h: 1.25, rect: [-0.65, -1.27, 0.65, 1.27],   // (its two chairs within, their bases' spokes too)
+    slots: [S(0, 0.95, P, 'sit_talk', 'chat', { az: 1.3 }), S(0, -0.95, 0, 'sit_talk', 'chat', { az: -1.3 })] },
+  gear_rack: { name: 'Gear Rack', cat: 'Studio', h: 1.8, rect: [-0.28, -0.32, 0.28, 0.32], slots: [] },
+  vinyl_wall: { name: 'Vinyl Wall', cat: 'Studio', h: 2.45, rect: [-1.22, -0.15, 1.22, 0.15], wall: true, slots: [] },
+  acoustic_wall: { name: 'Acoustic Panels', cat: 'Studio', h: 2.62, rect: [-1.2, -0.07, 1.2, 0.08], wall: true, block: false, slots: [] },
+  on_air_sign: { name: 'ON AIR Sign', cat: 'Studio', h: 2.6, rect: [-0.5, -0.06, 0.5, 0.04], wall: true, block: false, slots: [] },
+  studio_clock: { name: 'Studio Clock', cat: 'Studio', h: 2.2, rect: [-0.28, -0.04, 0.28, 0.03], wall: true, block: false, slots: [] },
+  studio_monitors: { name: 'Studio Monitors', cat: 'Studio', h: 1.45, rect: [-0.8, -0.2, 0.8, 0.2], slots: [] },
+  record_crate: { name: 'Record Crate', cat: 'Studio', h: 0.35, rect: [-0.33, -0.23, 0.33, 0.23], slots: [] },
   // ---------------- Arcade (Floor Themes' arcade, 2026-10-23: "unique furniture items, more arcade games ... billiards,
   // maybe bowling, maybe riding one of those mechanical bulls ... look and feel fun"). The games are played by residents
   // (use 'play'; the dance machine 'dance'): their own games come later. Neon signs and murals hang on walls above the
@@ -415,7 +527,7 @@ export function itemDims(type) {
   const d = CATALOG[type]; if (!d) return { w: 1, d: 1 };
   return { w: d.rect[2] - d.rect[0], d: d.rect[3] - d.rect[1] };
 }
-export const CATEGORIES = ['Office', 'Lounge', 'Kitchen', 'Retail', 'Gym', 'Home', 'Fun', 'Arcade', 'Club', 'Decor', 'Signs', 'Outdoor', 'Structure'];
+export const CATEGORIES = ['Office', 'Lounge', 'Café', 'Kitchen', 'Retail', 'Gym', 'Home', 'Fun', 'Arcade', 'Club', 'Decor', 'Signs', 'Outdoor', 'Structure'];
 
 /** Floor finish presets used by zones. */
 export const FINISHES = {
@@ -435,7 +547,10 @@ export const FINISHES = {
   carpet_arcade: { color: '#191733', pattern: 7, name: 'Arcade carpet' },
   club_marble: { color: '#26252c', pattern: 4, name: 'Black marble' },
   vip_carpet: { color: '#3b1d2c', pattern: 1, name: 'VIP carpet' },
-  travertine: { color: '#dccfb9', pattern: 4, name: 'Travertine' },   // (warm stone: Floor Themes' lounge)
+  travertine: { color: '#dccfb9', pattern: 4, name: 'Travertine' },
+  pale_oak: { color: '#d6bd98', pattern: 2, name: 'Pale oak' },   // (Floor Themes' café: the Nordic roastery)
+  terracotta: { color: '#b8694a', pattern: 3, name: 'Terracotta' },   // (the garden café)
+  cream_tile: { color: '#ece4d4', pattern: 3, name: 'Cream tile' },   // (the bistro)   // (warm stone: Floor Themes' lounge)
   smoked_oak: { color: '#7a5c45', pattern: 2, name: 'Smoked oak' },
   warm_concrete: { color: '#968a7d', pattern: 5, name: 'Warm concrete' },   // (dark, with neon rings, dots and stars: Floor Themes' arcade)
 };

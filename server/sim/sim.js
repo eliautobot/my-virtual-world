@@ -8,6 +8,7 @@ import { Brain, makeAgent } from './agents.js';
 import { dialogLine } from './dialog.js';
 import { validatePerson, reassign } from './population.js';
 import { encodePlans } from '../../shared/proto.js';
+import { carAt, arcLengths, DRIVE } from '../../shared/car-route.js';
 import { simAt, hourAt, dayAt, worldSeconds, DEFAULT_DAY_SCALE, clamp, ctxB, ctxF, WEEKDAYS, mod } from '../../shared/constants.js';
 import { hashStr, RNG } from '../../shared/rng.js';
 import { appToArr } from '../../shared/appearance.js';
@@ -28,9 +29,10 @@ export class Sim {
     this.agentOk = o.agentOk || (() => true);   // demo mode (WP1.11): only 3 agents are agents; the rest are residents
     this.nav = new Nav(world);
     this.router = new Router(world, this.nav);
-    // Residents' drives (WP4.9): every browser draws the car along its lanes while the driver is at the wheel.
-    this.drives = new Map();
-    this.router.onDrive = rec => { this.drives.set(rec.i, rec); this.emit({ t: 'rcar', ...rec }); };
+    // Residents' drives (WP4.9): every browser draws the car along its lanes while the driver is at the wheel (one
+    // resident may have more than one planned: there and back, each its own)
+    this.drives = new Map(); this.carPaths = new WeakMap();
+    this.router.onDrive = rec => { this.drives.set(`${rec.i}:${rec.tIn ?? rec.t0}`, rec); this.emit({ t: 'rcar', ...rec }); };
     this.index = o.index || new WorldIndex(world);
     this.brain = new Brain(this);
     this.agents = people.map((p, i) => makeAgent(i, p, this.seed));
@@ -145,11 +147,23 @@ export class Sim {
   /** A job title as the public reads it: an agent's own title ("Agent at HQ") is never shown for a resident that is not shown as an agent. */
   publicTitle(j, ag) {
     if (ag) return j.title || '';
+    if (j.kind === 'post') return 'Staff';   // (an agent that passes for a citizen: its role stays its own)
     if (j.kind === 'vip') return 'Office worker';
     return (j.prev === 'vip' ? 'Newcomer' : j.title) || '';
   }
   /** The drives still under way or to come (for a browser that connects now). */
   activeDrives() { const now = this.now(), out = []; for (const [i, r] of this.drives) { if (r.t1 < now) this.drives.delete(i); else out.push(r); } return out; }
+  /** Residents' cars on the road now, by their timetables (shared/car-route.js): [{ x, z, len }] for the traffic to keep
+   *  clear of (server/world/vehicles.js) — from its waiting at the kerb to its standing there after. */
+  residentCarsNow() {
+    const now = this.now(), out = [];
+    for (const r of this.activeDrives()) {
+      if (!r.ks || now < r.t0) continue;
+      let D = this.carPaths.get(r); if (!D) this.carPaths.set(r, D = { pts: r.pts, S: arcLengths(r.pts), ks: r.ks, ts: r.ts });
+      const c = carAt(D, now); out.push({ x: c.x, z: c.z, len: DRIVE.carLen });
+    }
+    return out;
+  }
   peopleList() { return this.people.map((p, i) => this.publicPerson(p, i)); }
   agentInfo(i) {
     const a = this.agents[i]; if (!a || !a.plan) return null;
@@ -191,10 +205,10 @@ export class Sim {
   /** An AI agent stopping to talk with someone in person (a talk in the city, server/agent-talk/): it turns to (x, z) and
    *  stays `secs` — no line of its own and nothing shown to others (what it says is its answer, seen only by whom it talks
    *  with); while it talks it is not called away to work on a message (index.mjs: presence). False when it can't (asleep). */
-  hold(i, x, z, secs = this.brain.wm(10), label = '', withIdx = null) {
+  hold(i, x, z, secs = this.brain.wm(10), label = '', withIdx = null, withName = null) {
     const a = this.agents[i]; if (!a) return false;
     const marked = this.brain.bookmark(a);   // (after the talk it goes back to what it was doing: Brain.resumeActivity)
-    const ok = this.brain.talkTo(a, x, z, secs, label, withIdx);
+    const ok = this.brain.talkTo(a, x, z, secs, label, withIdx, withName);   // (withName: a player who walked up to it, by name)
     if (ok) a.talkUntil = this.now() + secs;
     else if (marked) a.resume = null;
     return ok;
@@ -211,11 +225,21 @@ export class Sim {
    *  of walking there (posted from the furniture itself: Brain.postNow). */
   setPost(i, post, o = {}) {
     const a = this.agents[i]; if (!a) return false;
-    if (post) a.p.post = { b: post.b, f: post.f, id: post.id, k: post.k, since: post.since }; else delete a.p.post;
+    // (its post is its job, its job record says so: one record that every reader agrees on — the Studio, the Mind and its
+    // problems, the venue's staff, the town's jobs; let go, it looks for work again: 2026-10-28, the product owner: "their
+    // assigned post is their job"; "fix any inconsistencies on how a post is reported as a job")
+    if (post) { a.p.post = { b: post.b, f: post.f, id: post.id, k: post.k, since: post.since }; a.p.job = this.postJob(a.p, a.p.post); }
+    else { delete a.p.post; if (a.p.job?.kind === 'post') a.p.job = { kind: 'free', title: a.p.role || 'Agent', seek: 1, prev: 'vip' }; }
     a.resume = null;
     if (!(post && o.now && this.brain.postNow(a))) this.brain.interruptSoon(a);
     this.emit({ t: 'person', i, person: this.publicPerson(a.p, i) });
     return true;
+  }
+  /** The job record of person p's post: the piece it serves at, around the clock, under its role ("Host at New Radio
+   *  Station"); pinned (its owner's choice: the city's placing never moves it). */
+  postJob(p, post) {
+    const place = this.brain.placeName(post.b, post.f) || this.world.buildings[post.b]?.name || 'its post';
+    return { kind: 'post', b: post.b, f: post.f, id: post.id, k: post.k, start: 0, end: 24, days: 127, title: `${p.role || 'Agent'} at ${place}`, pin: 1 };
   }
   /** AI agent i's work changed by its owner (posts.js work): re-planned, at its desk or counter at once when its shift is
    *  on (o.now: Brain.workNow); everyone sees its new work. */

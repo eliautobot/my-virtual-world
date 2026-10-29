@@ -100,7 +100,8 @@ test('memories write themselves from real events; relationships grow with every 
   if (rels.length) {
     for (const r of rels) { assert.ok(r.interactions >= 1 && r.affinity > 0 && r.affinity <= 1 && r.trust > 0 && r.trust <= 1); }
     assert.ok(mems.some(m => m.kind === 'person' && /^Met /.test(m.text)), 'meeting someone is remembered');
-    assert.ok(h.dbs.db.prepare("SELECT COUNT(*) AS n FROM agent_activity WHERE kind = 'chat' AND with_name IS NOT NULL").get().n >= 1);
+    // (co-workers know each other without a word: "Works with me at ..."; any other relation came from a chat)
+    if (rels.some(r => !/^Works with me/.test(r.note || ''))) assert.ok(h.dbs.db.prepare("SELECT COUNT(*) AS n FROM agent_activity WHERE kind = 'chat' AND with_name IS NOT NULL").get().n >= 1);
   }
   // short-term memories fade after SHORT_DAYS world days
   const day = h.life.today();

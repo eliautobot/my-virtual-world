@@ -16,7 +16,7 @@ const wrap = fn => async ctx => {
 const str = (v, max = 64) => (typeof v === 'string' ? v.slice(0, max) : '');
 const int = v => { const n = Number(v); return Number.isSafeInteger(n) ? n : null; };
 
-/** @param router @param d { play: PlayCore, onFinish?(account, result), fishMarket?: FishMarket, angler?: Angler } */
+/** @param router @param d { play: PlayCore, onFinish?(account, result), fishMarket?: FishMarket, angler?: Angler, cooks?: CookRecord } */
 export function addPlayRoutes(router, d) {
   const P = d.play;
   router.add({ method: 'GET', path: '/api/play', cap: 'world.view', handler: wrap(() => ({ modules: P.modules(), badges: P.catalog() })) });
@@ -39,6 +39,12 @@ export function addPlayRoutes(router, d) {
   }) });
   router.add({ method: 'POST', path: '/api/play/act', cap: 'play.use', handler: wrap(({ body, P: who }) => P.act(who.account, str(body.run), str(body.act, 24), body.body)) });
   router.add({ method: 'POST', path: '/api/play/abandon', cap: 'play.use', handler: wrap(({ body, P: who }) => P.abandon(who.account, str(body.run))) });
+  // Order Up's cook (server/play/cook.js): the Cookbook and the running totals (?id: another cook's, as their profile)
+  if (d.cooks) {
+    router.add({ method: 'GET', path: '/api/orderup/cook', cap: 'play.use', handler: wrap(({ url, P: who }) => { const q = url.searchParams.get('id'); return d.cooks.view(q ? int(q) : who.account.id); }) });
+    router.add({ method: 'POST', path: '/api/orderup/skill', cap: 'play.use', handler: wrap(({ body, P: who }) => d.cooks.skill(who.account.id, str(body.id, 16))) });
+    router.add({ method: 'POST', path: '/api/orderup/respec', cap: 'play.use', handler: wrap(({ P: who }) => d.cooks.respec(who.account.id)) });
+  }
   // the fish market at a dock's store (server/play/fish-market.js): what of your inventory it buys, and selling it
   const F = d.fishMarket;
   if (F) {
@@ -56,4 +62,22 @@ export function addPlayRoutes(router, d) {
     router.add({ method: 'POST', path: '/api/fishing/respec', cap: 'play.use', handler: wrap(({ P: who }) => A.respec(who.account)) });
     router.add({ method: 'GET', path: '/api/fishing/dex', cap: 'play.use', handler: wrap(({ P: who }) => A.dex(who.account)) });
   }
+}
+
+/**
+ * An agent's cooking (Order Up, 2026-10-28: server/play/kitchen-shifts.js): its level, rank, badges, Cookbook, skills and
+ * its shift now for anyone signed in (achievements are visible and comparable to players'); its skill points and who
+ * spends them for its owner. d: { agents, play: PlayCore, cooks: CookRecord, shifts: KitchenShifts, freeWillOn(agentId) }.
+ */
+export function addOrderUpAgentRoutes(router, d) {
+  const { agents, play, cooks, shifts } = d;
+  const mine = (P, id) => { const a = agents.get(Number(id)); if (!a) throw new PlayError(404, 'not_found', 'No such agent'); if (!agents.isOwner(P, a)) throw new PlayError(403, 'not_yours', 'Only its owner can do that'); return a; };
+  router.add({ method: 'GET', path: '/api/orderup/agent', cap: 'play.use', handler: wrap(({ url, P }) => {
+    const a = agents.get(Number(url.searchParams.get('id'))); if (!a) throw new PlayError(404, 'not_found', 'No such agent');
+    const pr = play.profile(-a.id, P.account?.id), c = cooks.view(-a.id), m = pr.modules.orderup;
+    return { agent: { id: a.id, name: a.name, emoji: a.emoji }, own: !!agents.isOwner(P, a), level: m.level, progress: m.progress, rank: pr.rank, xp: pr.xp, runs: m.runs,
+      best: m.best, badges: pr.badges, cookbook: { count: c.count, all: c.all }, stats: c.stats, skills: c.skills, mode: cooks.modeOf(-a.id), freeWill: !!d.freeWillOn(a.id), shift: shifts.view(a.id) };
+  }) });
+  router.add({ method: 'POST', path: '/api/orderup/agent-skill', cap: 'play.use', handler: wrap(({ body, P }) => cooks.skill(-mine(P, body.agent).id, str(body.id, 16))) });
+  router.add({ method: 'POST', path: '/api/orderup/agent-mode', cap: 'play.use', handler: wrap(({ body, P }) => ({ mode: cooks.setMode(-mine(P, body.agent).id, body.mode ?? null) })) });
 }

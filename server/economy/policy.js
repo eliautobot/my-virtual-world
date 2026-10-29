@@ -4,10 +4,10 @@
 // VC; rates are basis points (1/100 of a percent: 600 = 6%). Nothing here knows one installation.
 import { LedgerError } from './ledger.js';
 import { moduleOf } from '../../shared/work.js';
-import { FOOD_BY_ID } from '../../shared/food.js';
+import { FOOD_BY_ID, FOOD_VENUES } from '../../shared/food.js';
 
 /** The venues whose menus are food and drink (shared/food.js), set by each place. */
-export const FOOD_VENUES = new Set(['cafe', 'restaurant']);
+export { FOOD_VENUES };
 
 /** Commodities venues buy on the Global Market (§7): price per unit, how much it moves in a world hour, its label. */
 const COMMODITIES = {
@@ -37,6 +37,15 @@ const MENUS = {
     { id: 'game_tokens', label: 'Game tokens', icon: '🪙', price: 500, inputs: {} },
     { id: 'cola', label: 'Cola', icon: '🥤', price: 300, inputs: { drinks: 1 } },
     { id: 'lemon_soda', label: 'Lemon-lime soda', icon: '🥤', price: 300, inputs: { drinks: 1 } },
+    // its snack bar (2026-10-28: "junk food on arcades like popcorn, pizza, burgers, tacos, soda, water, juice")
+    { id: 'water', label: 'Still water', icon: '💧', price: 200, inputs: { drinks: 1 } },
+    { id: 'orange_juice', label: 'Orange juice', icon: '🧃', price: 400, inputs: { drinks: 1 } },
+    { id: 'popcorn', label: 'Popcorn', icon: '🍿', price: 400, inputs: { food: 1 } },
+    { id: 'pizza_slice', label: 'Pizza slice', icon: '🍕', price: 450, inputs: { food: 1 } },
+    { id: 'hot_dog', label: 'Hot dog', icon: '🍔', price: 750, inputs: { food: 1 } },
+    { id: 'cheeseburger', label: 'Cheeseburger', icon: '🍔', price: 1200, inputs: { food: 1 } },
+    { id: 'fries', label: 'Fries', icon: '🍔', price: 450, inputs: { food: 1 } },
+    { id: 'tacos', label: 'Street tacos', icon: '🌮', price: 1100, inputs: { food: 1 } },
   ],
   lounge_bar: [
     { id: 'martini', label: 'Martini', icon: '🍸', price: 1000, inputs: { drinks: 1 } },

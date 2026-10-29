@@ -59,6 +59,7 @@ function target() {
   let live = 0;
   for (const v of app?.nightMusic?.playing || []) live = Math.max(live, Number(v.gain) || 0);
   if (live > 0) k *= Math.max(0, 1 - live * 25);   // (a band or a DJ heard here at all: theirs is the music; their level is by distance, about 0.04 looking in from above)
+  if (app?.radio?.playing) return 0;   // (the radio is on: its music is the music)
   if (speaking) k *= 0.35;
   if (ducks.size) k *= 0.15;
   if (app?.arcade?.session || app?.machinePlay?.active) k *= 0.3;

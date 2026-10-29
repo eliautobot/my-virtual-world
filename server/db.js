@@ -2563,6 +2563,30 @@ const MIGRATIONS = [
      PRIMARY KEY (world_id, place)
    );`,
   },
+  // v56 (Order Up's progression, 2026-10-28 — PLAN-RESTAURANT-GAME.md "Progression", server/play/cook.js): a cook's running
+  // totals (stats) and skills, and the Cookbook (every dish a cook has served: how many, the best grade). A cook is an
+  // account (its id) or an agent (minus its id), kept the same way and scored by the same rules.
+  {
+    additive: true,
+    up: `CREATE TABLE IF NOT EXISTS ou_cooks (
+     world_id TEXT NOT NULL,
+     cook_id INTEGER NOT NULL,
+     stats TEXT NOT NULL DEFAULT '{}',
+     skills TEXT NOT NULL DEFAULT '{}',
+     updated INTEGER NOT NULL,
+     PRIMARY KEY (world_id, cook_id)
+   );
+   CREATE TABLE IF NOT EXISTS ou_cookbook (
+     world_id TEXT NOT NULL,
+     cook_id INTEGER NOT NULL,
+     item TEXT NOT NULL,
+     n INTEGER NOT NULL DEFAULT 0,
+     best REAL NOT NULL DEFAULT 0,
+     first_at INTEGER NOT NULL,
+     best_at INTEGER NOT NULL,
+     PRIMARY KEY (world_id, cook_id, item)
+   );`,
+  },
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 export const MIGRATION_INFO = Object.freeze(MIGRATIONS.map((m, i) => Object.freeze({ version: i + 1, additive: !!m.additive })));

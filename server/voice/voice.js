@@ -405,8 +405,9 @@ export class Voice {
     if (raw.length > 200000) throw new VoiceError(400, 'too_long', 'That text is too long to read');
     const text = b.plain === true ? raw.replace(/\s+/g, ' ').trim() : speakable(raw, Infinity);
     if (!text) throw new VoiceError(400, 'nothing', 'Nothing to say');
-    // a long answer is read in parts of at most MAX_CHARS, cut at sentences; text sent directly is one part
-    const parts = b.message !== undefined && b.message !== null ? pieces(text, MAX_CHARS) : [text];
+    // a long answer is read in parts of at most MAX_CHARS, cut at sentences; text sent directly is one part, unless it is
+    // an answer too (long: a provider's answer, which this installation keeps no copy of: its chat window sends its text)
+    const parts = (b.message !== undefined && b.message !== null) || b.long === true ? pieces(text, MAX_CHARS) : [text];
     if (parts[0].length > MAX_CHARS) throw new VoiceError(400, 'too_long', `At most ${MAX_CHARS} characters at a time; send it in parts`);
     const part = Math.max(0, Math.min(parts.length - 1, Number.isInteger(Number(b.part)) ? Number(b.part) : 0));
     const say = parts[part];

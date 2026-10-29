@@ -37,7 +37,7 @@ export function addVoiceRoutes(router, voice) {
       const b = body || {};
       const r = await voice.speak(P, { agent: id(b.agent), text: typeof b.text === 'string' ? b.text : undefined, session: id(b.session), message: b.message === undefined ? undefined : id(b.message),
         part: b.part, connection: b.connection === undefined || b.connection === null || b.connection === '' ? null : id(b.connection), voice: b.voice, model: b.model, speed: b.speed,
-        plain: b.plain === true });
+        plain: b.plain === true, long: b.long === true });
       return { status: 200, pre: { body: r.audio }, headers: { 'content-type': r.mime, 'cache-control': 'private, no-store', 'x-voice-seconds': String(r.seconds), 'x-voice-source': r.source,
         'x-voice-part': String(r.part), 'x-voice-parts': String(r.parts), ...(r.cached ? { 'x-voice-cached': '1' } : {}) } };
     } catch (e) { if (e instanceof VoiceError) return fail(e); throw e; }

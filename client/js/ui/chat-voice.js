@@ -180,9 +180,13 @@ export function attach(host) {
     const ra = V.RA = { id: m.id, abort: new AbortController(), queue: new SpeechQueue(), parts: 1, next: 1, lang: '', lv: 0 };
     mark(m.id, true);
     glowOn();
-    const session = host.session.id;
+    // an answer kept here is asked for by its id; a provider's answer (OpenClaw, Hermes: their history is the record, kept
+    // nowhere here, its id only this page's) by its words, in its agent's voice (2026-10-27: 🔊 did nothing in a chat with
+    // an OpenClaw agent, the server knowing no such message)
+    const kept = Number.isInteger(m.id) && m.id > 0 && m.source !== 'provider';
+    const what = kept ? { session: host.session.id, message: m.id } : { agent: host.agentId, text: m.text, long: true };
     const as = r => (r.browser ? (can.synth() ? { text: r.text, browserVoice: r.browserVoice, rate: r.rate, lang: ra.lang } : null) : r);
-    const fetchPart = k => speak({ session, message: m.id, part: k }, ra.abort.signal).then(as);
+    const fetchPart = k => speak({ ...what, part: k }, ra.abort.signal).then(as);
     const more = () => {
       if (V.RA !== ra) return;
       if (ra.next < ra.parts && ra.queue.waiting < 1) { const k = ra.next++; ra.queue.add(fetchPart(k), { k }); }
@@ -194,7 +198,7 @@ export function attach(host) {
     try {
       const o = await options(host.agentId).catch(() => null);
       ra.lang = o?.listen?.language || '';
-      first = as(await speak({ session, message: m.id, part: 0 }, ra.abort.signal));
+      first = as(await speak({ ...what, part: 0 }, ra.abort.signal));
     } catch (e) {
       if (V.RA !== ra || e.name === 'AbortError') return;
       // the voice service failed: the browser's own voice reads it (if it can)

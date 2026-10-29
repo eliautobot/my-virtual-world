@@ -15,6 +15,7 @@ import { Plan, truncatePlan, safeCutTime, evalPlan, continuePlan } from './plan.
 import { SUBWAY_SPEED } from './nav.js';
 import { pickOrder, courses as serveCourses, homeMeal as homeDish, onStove, deskLunch, picnic as picnicFood, guessCuisine, menuIds, FOOD_BY_ID } from '../../shared/food.js';
 import { NIGHTLIFE_OPEN, DRINKS, roleAt, ROLE_TITLE, ROLE_USE } from '../../shared/nightlife.js';
+import { shiftClock, worksOn } from '../../shared/shifts.js';
 
 const U = USE_ID;
 const NEEDS = ['hunger', 'energy', 'social', 'fun', 'hygiene'];
@@ -285,6 +286,7 @@ export class Brain {
     };
     if (info.order) act.order = info.order;   // what they ordered or made (shared/food.js ids): the bill, the activity's words
     if (Number.isInteger(info.talkWith)) act.talkWith = info.talkWith;   // whom it talks with (an AI's meet or say --to): its life's log
+    if (info.withName) act.withName = info.withName;   // a player who walked up to it, by name (server/agent-talk/): its life's log
     this.setAct(a, act);
     if (act.id >= 0 && act.k >= 0) this.holdFor(a, this.key(act.b, act.f, act.id, act.k), Math.min(act.travelEnd, act.holdStart), act.holdEnd);   // (its seat: held from its arrival until it gets up)
     if (this.sim.onAct) this.sim.onAct(a, act);   // the economy: purchases at venues, hours at work (server/economy/households.js)
@@ -690,10 +692,11 @@ export class Brain {
     const j = a.p.job;
     return !!j && SHOW_ROLES.has(j.role) && a.doneDay !== day && !!((j.days ?? 31) & (1 << mod(day, 7))) && h >= j.start && h < j.end - 0.05;
   }
-  onShift(a, P, h, day) {
+  onShift(a, P, h0, day0) {
     const j = a.p.job;
-    if (!j || j.kind === 'free' || a.doneDay === day) return false;
-    if (!((j.days ?? 31) & (1 << mod(day, 7)))) return false;
+    if (!j || j.kind === 'free' || j.kind === 'post') return false;   // (on post: its post reflex, around the clock)
+    const { h, day } = shiftClock(j, h0, day0);   // (the morning tail of an overnight shift: last night's)
+    if (a.doneDay === day || !worksOn(j, day)) return false;
     if (h >= j.end - 0.05) return false;
     if (h >= j.start) return true;
     const dest = this.jobDest(a);
@@ -722,9 +725,10 @@ export class Brain {
   }
 
   // ------------------------------------------------------------------ work
-  work(a, P, h, day, live) {
+  work(a, P, h0, day0, live) {
     const p = a.p, j = p.job;
-    if (j.kind === 'remote') return this.remoteWork(a, P, h, day);
+    if (j.kind === 'remote') return this.remoteWork(a, P, h0, day0);
+    const { h, day } = shiftClock(j, h0, day0);   // (in the shift's own hours: past 24 in an overnight shift's morning)
     const atWork = P.ctx >= 0 && ctxB(P.ctx) === j.b;
     if (!live && atWork) {
       if (j.kind !== 'staff' && a.lunchDay !== day && h >= p.sched.lunch && h < j.end - 0.6) {
@@ -746,7 +750,7 @@ export class Brain {
     const role = j.kind === 'staff' ? roleAt(this.W, j.b, j.f, j.id, j.k) : null, wuse = role && ROLE_USE[role] ? ROLE_USE[role] : j.kind === 'staff' ? 'staff' : 'work';
     if (role && j.role !== role) { j.role = role; j.title = `${ROLE_TITLE[role]} at ${this.placeName(j.b, j.f)}`; }
     const st = this.slotBegin(a, P, j.b, j.f, j.id, j.k, { use: wuse, travel, noReserve: true });
-    if (!st) { a.doneDay = day; return this.leisure(a, P, h, day); }
+    if (!st) { a.doneDay = day; return this.leisure(a, P, h0, day0); }
     // a performer there before the set: getting ready at the stage (a look at the phone, the set list) until it starts —
     // not playing yet (render: no music till then)
     const early = SHOW_ROLES.has(role) && !live ? this.hSecs(j.start - this.hour(P.t)) : 0;
@@ -754,7 +758,7 @@ export class Brain {
       const hs0 = this.slotHold(a, P, { ...st, use: U.staff ?? U.idle }, early, { anim: SEATED.has(st.anim) ? A.sit_phone : A.phone, prop: PROP.phone });
       this.act(a, 'work', 'staff', P, { ...this.slotInfo(st), ...hs0, place: this.placeName(j.b, j.f), label: 'Getting ready', icon: '🎧' });
     }
-    const untilEnd = Math.max(this.wm(3), this.hSecs(j.end - this.hour(P.t)));
+    const untilEnd = Math.max(this.wm(3), this.hSecs(j.end - shiftClock(j, this.hour(P.t), this.day(P.t)).h));
     let dur = live ? this.wm(15) : Math.min(untilEnd, this.wm(j.kind === 'staff' ? a.rng.float(60, 150) : a.rng.float(40, 110)));
     if (!live && untilEnd - dur < this.wm(12)) dur = untilEnd;
     const hs = this.slotHold(a, P, st, dur);
@@ -831,7 +835,7 @@ export class Brain {
     const ways = this.taskWays(a, P), j = a.p.job;
     const pick = (way, f = () => true) => ways.find(w => w.way === way && f(w));
     const cur = a.taskWay && ways.find(w => w.way === a.taskWay.way && w.b === a.taskWay.b && w.f === a.taskWay.f);
-    const inHoursNow = j && Number.isFinite(j.start) && h >= j.start - 0.5 && h < j.end;
+    const hj = j ? shiftClock(j, h, day).h : h, inHoursNow = j && Number.isFinite(j.start) && hj >= j.start - 0.5 && hj < j.end;
     const order = [cur, pick('desk', w => w.minutes === 0), pick('home', w => w.minutes === 0), pick('laptop', w => w.minutes === 0),
       inHoursNow ? pick('desk', w => w.minutes <= 20) : null, pick('laptop', w => w.minutes <= 12), pick('phone')];
     for (const w of order) if (w && this.taskDo(a, P, h, day, w)) return true;
@@ -1487,7 +1491,7 @@ export class Brain {
   /** Player walks up and talks: stop, face them, talk for a while. Returns true if the agent can talk now. */
   /** Turns to (px, pz) and talks a while; label: what it is doing, said from its side ("Talking with Nova"; default the
    *  greeting's own, as a player who walked up to it sees it). */
-  talkTo(a, px, pz, secs = 22, label = '', withIdx = null) {
+  talkTo(a, px, pz, secs = 22, label = '', withIdx = null, withName = null) {
     const now = this.sim.now();
     if (a.act && (a.act.use === 'sleep' || a.act.use === 'shower') && a.act.holdEnd > now) return false;
     const P = this.cut(a, now + 0.1);
@@ -1500,7 +1504,7 @@ export class Brain {
       P.hold(1.2, A.wave, U.greet, 0, yaw);
       P.hold(secs, A.talk, U.greet, 0, yaw);
     }
-    this.act(a, 'talk', 'greet', P, { ctx: P.ctx, holdStart: hs, holdEnd: P.t, ...(label ? { label } : {}), ...(Number.isInteger(withIdx) ? { talkWith: withIdx } : {}), place: P.ctx >= 0 ? this.placeName(ctxB(P.ctx), ctxF(P.ctx)) : '' });
+    this.act(a, 'talk', 'greet', P, { ctx: P.ctx, holdStart: hs, holdEnd: P.t, ...(label ? { label } : {}), ...(Number.isInteger(withIdx) ? { talkWith: withIdx } : {}), ...(withName ? { withName: String(withName).slice(0, 40) } : {}), place: P.ctx >= 0 ? this.placeName(ctxB(P.ctx), ctxF(P.ctx)) : '' });
     a.busyUntil = P.t;
     this.sim.commit(a, P);
     return true;
@@ -1758,14 +1762,14 @@ export class Brain {
   workNow(a) {
     const j = a.p.job;
     if (!j || j.b === undefined || j.id === undefined || !a.plan || a.p.post) return false;
-    const now = this.sim.now(), h = this.hour(now), day = this.day(now);
-    if (!((j.days ?? 127) & (1 << mod(day, 7))) || h < j.start || h >= j.end - 0.05) return false;
+    const now = this.sim.now(), h0 = this.hour(now), day0 = this.day(now), { h, day } = shiftClock(j, h0, day0, 127);
+    if (!worksOn(j, day, 127) || h < j.start || h >= j.end - 0.05) return false;
     if (this.heldBy(this.key(j.b, j.f, j.id, j.k), a.i)) return false;
     if (a.doneDay === day) a.doneDay = null;
     const P = this.cut(a, now, true);
     P.tele = true;
     let ok = false;
-    try { this.work(a, P, h, day, false); ok = !P.tele; } catch (e) { this.sim.noteError(e); }
+    try { this.work(a, P, h0, day0, false); ok = !P.tele; } catch (e) { this.sim.noteError(e); }
     P.tele = false;
     if (!ok) { P.hold(0.5, A.idle, U.idle); this.act(a, 'idle', 'idle', P, { holdStart: P.base, holdEnd: P.t }); }
     this.sim.commit(a, P);

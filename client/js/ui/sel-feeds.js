@@ -15,7 +15,7 @@ import { esc } from '../core/util.js';
 import { vc, coin } from './economy.js';
 import { KIND as THOUGHT, ERR as THOUGHT_ERR } from './mind.js';
 
-const ICON = { sleep: '😴', nap: '💤', home: '🏠', meal: '🍽️', cafe: '☕', visit: '🚪', park: '🌳', shop: '🛍️', gym: '🏋️', bar: '🍷', lounge: '🛋️', arcade: '🕹️', lounge_bar: '🍸', club: '💃', walk: '🚶', jog: '🏃', task: '💻', work: '💼', meeting: '👥', chat: '💬', talk: '🗣️' };
+const ICON = { sleep: '😴', nap: '💤', home: '🏠', meal: '🍽️', cafe: '☕', visit: '🚪', park: '🌳', shop: '🛍️', gym: '🏋️', bar: '🍷', lounge: '🛋️', arcade: '🕹️', lounge_bar: '🍸', club: '💃', walk: '🚶', jog: '🏃', task: '💻', work: '💼', meeting: '👥', chat: '💬', talk: '🗣️', post: '🛎️', radio: '🎙️' };
 const MONEY = { buy: '🛍️', settlement: '🧾', wage: '💼', rent: '🔑', transfer: '🤝', purchase: '🛒', fund: '🎁', draw: '↩', grant: '🎁', refund: '↺', tax: '🏛️', fee: '🏷️', property: '🏠', ad_income: '🪧', prize: '🏆' };
 const EVERY = 6000;   // how often the feeds of the selected person refresh
 const SHOW = 10;      // lines a feed shows; below the last, "See full feed" opens the Agent Studio (agents this account manages)

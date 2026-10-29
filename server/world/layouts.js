@@ -2,9 +2,12 @@
 // Interior layout generators. All coordinates are building-local (origin = footprint centre, +z = front/entrance).
 // Placement uses exact rectangle tests (items, reserved clearances, walls) so furniture can sit flush to walls.
 import { CATALOG } from '../../shared/catalog.js';
+import { CAFE_STYLES } from '../../shared/floor-themes.js';
 import { WALL_T } from '../../shared/constants.js';
-import { itemAABB } from '../../shared/geom.js';
+import { itemAABB, rectsOverlap } from '../../shared/geom.js';
+import { keepClear } from '../../shared/edit.js';
 import { RNG } from '../../shared/rng.js';
+import { kitchenLayout, PASS_BAND, kitchenNeeds, placeMenu } from '../../shared/kitchen-module.js';
 
 const P = Math.PI, H = Math.PI / 2;
 const IW = 0.06;               // interior wall half thickness
@@ -93,8 +96,10 @@ export class LevelBuilder {
   result() {
     const out = { name: this.name, items: this.items, walls: this.walls, zones: this.zones };
     if (this.venue) out.venue = this.venue;
+    if (this.style) out.style = this.style;   // (a café's style: shared/floor-themes.js CAFE_STYLES)
     if (this.units.length) out.units = this.units;
     if (this.doors.length) out.doors = this.doors;
+    if (this.mods?.length) { out.mods = this.mods; out.mnid = this.mods.length; }   // (its interior modules: shared/interior-modules.js)
     return out;
   }
 }
@@ -632,6 +637,384 @@ export function cafeFloor(L, o = {}) {
   if (ground) for (const x of [dr.x - 1.9, dr.x + 1.9]) L.add('plant', x, iz1 - 0.4);
   for (const [x, z] of [[ix0 + 0.4, iz0 + 0.4], [ix1 - 0.4, iz0 + 0.4]]) L.add('plant', x, z);
 }
+// The café redone (Floor Themes and the city's own cafés, 2026-10-26, the product owner: "the current Cafe floor
+// type/building layout needs to be redone from scratch ... highly detailed unique and distinct layouts that are nice to
+// visit and have style"): five styles (shared/floor-themes.js CAFE_STYLES; client/js/render/furniture-cafe.js), one plan
+// sized to any floor: the counter on the back wall (its pastry case and condiment bar beside it, menu boards over it,
+// room for the queue), the style's corner (the roaster, a reading nook by the hearth), a centrepiece on a big floor (a
+// communal table, a fountain), its walls (booths, books, shelves, palms), seats along the front windows, then tables
+// filling the room in the style's mix, plants in the corners and its lights or ivy over the tables.
+const CAFE_KIT = {
+  bistro: { floor: ['cream_tile', 'marble', 'cream_tile'], bar: 'wood_dark', counter: 'counter_bistro', body: ['#4a2c1f', '#5b2a22', '#2f3a2a', '#1f2c4a'],
+    seats: [['bistro_set', 6], ['cafe_table4', 2]], wallSeat: 'cafe_booth', front: 'bistro_set', backDeco: 'gilt_mirror', corner: 'cafe_palm', lounge: ['sofa', 'armchair', 'armchair'], rug: 'wood_dark' },
+  nordic: { floor: ['pale_oak'], bar: 'concrete', counter: 'counter_nordic', body: ['#c9a878', '#d8c4a0', '#b89a70'],
+    seats: [['bistro_set', 3], ['cafe_table', 3], ['cafe_table4', 1]], center: 'communal_table', feature: ['coffee_roaster', 'bean_sacks'], front: 'window_ledge',
+    corner: 'plant_tall', ceiling: 'hanging_ivy', lounge: ['sofa', 'armchair', 'armchair'], rug: 'wood' },
+  loft: { floor: ['concrete', 'warm_concrete'], bar: 'tile_dark', counter: 'counter_loft', body: ['#6b6e70', '#4a4e52', '#5a4a3a'],
+    seats: [['cafe_table', 4], ['cafe_table4', 2], ['bistro_set', 1]], wallSeat: 'cafe_booth', wallDeco: 'pipe_shelf', feature: ['bean_sacks'], front: 'window_ledge',
+    corner: 'plant_tall', ceiling: 'edison_pendants', lounge: ['sofa_l', 'armchair'], rug: 'wood_dark' },
+  library: { floor: ['wood_dark', 'smoked_oak'], bar: 'wood_dark', counter: 'counter_library', body: ['#3b2418', '#2a1a12'],
+    seats: [['cafe_table4', 3], ['bistro_set', 2], ['wingback_set', 2]], wallDeco: 'library_wall', nook: true, front: 'wingback_set', corner: 'floor_lamp', rug: 'carpet_warm' },
+  garden: { floor: ['terracotta'], bar: 'cream_tile', counter: 'counter_garden', body: ['#c49a62', '#b88c58'],
+    seats: [['rattan_set', 6], ['cafe_table4', 1]], center: 'fountain_tiered', wallDeco: 'cafe_palm', front: 'rattan_set', corner: 'cafe_palm', ceiling: 'hanging_ivy', lounge: ['rattan_set', 'cafe_palm', 'rattan_set'], rug: 'travertine' },
+};
+/** Order Up's kitchen (PLAN-RESTAURANT-GAME.md phase 1b, 2026-10-26: "make space for the kitchen for the gaming module"):
+ *  a room in a back corner, away from the elevator, about a third of the floor wide and 3.6 m deep, tiled, with a door
+ *  and a pass to the café, kept empty (the stations come in phase 2). null on a floor too small. */
+function cafeKitchen(L, D, cs, ax = 0) {   // ax: the entrance's or the elevator's x (a corner kitchen's inner wall on a metre's step from it)
+  const { ix0, ix1, iz0, iz1 } = L, W = ix1 - ix0, Dp = iz1 - iz0;
+  if (W < 12 || Dp < 10) return null;
+  const kw = Math.min(8.5, Math.max(4.4, W * 0.3)), kd = W >= 24 && Dp >= 18 ? 4.8 : 3.6;   // (a big floor's kitchen deeper: an island down the middle)
+  // (its stations follow what the café sells as it comes: shared/kitchen-module.js; a tight kitchen gives the menu's first)
+  const menu = placeMenu({ name: L.name, venue: 'cafe' }) || [];
+  return cafeKitchenAt(L, D, cs, ax, kw, kd, { needs: kitchenNeeds(menu), menu });
+
+}
+function cafeKitchenAt(L, D, cs, ax, kw, kd, { needs, menu }) {
+  const { ix0, ix1, iz0 } = L, W = ix1 - ix0;
+  const mid = (ix0 + ix1) / 2, z0 = iz0, z1 = iz0 + kd, cands = [];
+  const cside = cs ? ((cs.x0 + cs.x1) / 2 < mid ? -1 : 1) : 0;
+  if (cs && (cside > 0 ? ix1 - cs.x1 : cs.x0 - ix0) < 3.5) {   // an elevator by a side wall: the kitchen beside its core along the back wall (a service lift), a set width, so it keeps its place by the elevator when the floor is resized
+    const s = cside, cw = W >= 26 ? 7 : 5.6;
+    cands.push(s > 0 ? [cs.x0 - 0.6 - cw, cs.x0 - 0.6, s] : [cs.x1 + 0.6, cs.x1 + 0.6 + cw, s]);
+  }
+  for (const side of cs ? ((cs.x0 + cs.x1) / 2 < mid ? [1, -1] : [-1, 1]) : D('kside').chance(0.5) ? [1, -1] : [-1, 1]) {   // else in a back corner
+    const edge = side > 0 ? ix1 - kw : ix0 + kw, step = ax + side * Math.floor(side * (edge - ax));   // (the inner wall a whole number of metres from ax, towards the room: never narrower)
+    cands.push(side > 0 ? [step, ix1, side] : [ix0, step, side]);
+  }
+  for (const [x0, x1, side] of cands) {
+    if (x0 < ix0 - 1e-6 || x1 > ix1 + 1e-6 || x1 - x0 < 4.4) continue;
+    if (cs && cs.x0 < x1 + 0.55 && cs.x1 > x0 - 0.55 && cs.z0 < z1 + 0.6) continue;
+    if (keepClear(L.b, 1).some(c => rectsOverlap({ x0, x1, z0, z1: z1 + PASS_BAND }, c, 0))) continue;   // (clear of the elevator's doors, as an interior module must be)
+    const inner = side > 0 ? x0 : x1, km = inner + side * (x1 - x0 >= 7 ? 3.6 : 2.9);   // (the hatch a set way from the inner wall, past the door)
+    // the kitchen is an interior module (shared/kitchen-module.js, PLAN-RESTAURANT-GAME.md 6b K2): its walls (the door
+    // and the hatch in the front), its tiled floor and its stations laid by it, tagged with its record, which the floor
+    // keeps; its rectangle takes the strip in front of the hatch the pass reaches over
+    const rec = { id: `m${(L.mods || []).length + 1}`, kind: 'kitchen', name: 'Kitchen', x0, z0, x1, z1: z1 + PASS_BAND, face: 0, data: { side, kitchen: 'coffee', needs, menu } };   // (what the café sells as it comes: its stations, and what its Rushes order)
+    const k = kitchenLayout(L.b, rec), tag = (list, n0) => { for (let i = n0; i < list.length; i++) list[i][5] = rec.id; };
+    let n0 = L.walls.length; for (const w of k.walls) L.wall(w[0], w[1], w[2], w[3]); tag(L.walls, n0);
+    n0 = L.zones.length; for (const z of k.zones) L.zone(...z); tag(L.zones, n0);
+    for (const it of k.items) L.addFixed(it.t, it.x, it.z, it.r).mod = rec.id;
+    (L.mods || (L.mods = [])).push(rec);
+    L.reserve(x0, z0, x1, z1 + 1.0);
+    return { x0, x1, z0, z1, side, inner, mid: km };
+  }
+  return null;
+}
+/** The bistro (classic Parisian): the zinc bar along a side wall with its stools, banquettes along the windows and the
+ *  walls, little marble tables close together, posters and brass sconces, a coat stand and the papers by the door. */
+function bistroPlan(L, D, K, c) {
+  const { ix0, ix1, iz0, iz1 } = L, { A, put, kit, doorX, nearDoor } = c, H2 = H;
+  // (a clear aisle in front of a piece: its seats stay reachable when the tables fill the room)
+  const aisle = (it, depth = 1.0) => { if (!it) return it; const d = CATALOG[it.t], sn = Math.sin(it.r), co = Math.cos(it.r), hw = (d.rect[2] - d.rect[0]) / 2;
+    const pts = [[-hw, d.rect[3]], [hw, d.rect[3]], [-hw, d.rect[3] + depth], [hw, d.rect[3] + depth]].map(([lx, lz]) => [it.x + lx * co + lz * sn, it.z - lx * sn + lz * co]);
+    L.reserve(Math.min(...pts.map(q => q[0])), Math.min(...pts.map(q => q[1])), Math.max(...pts.map(q => q[0])), Math.max(...pts.map(q => q[1]))); return it; };
+  const barSide = kit ? -kit.side : (D('barside').chance(0.5) ? 1 : -1), wallX = barSide > 0 ? ix1 : ix0, inward = -barSide;
+  let bar = null;
+  for (let z = iz0 + 3.4; z < iz1 - 3.2 && !bar; z += 0.5) bar = put('zinc_bar', wallX + inward * 1.71, z, inward > 0 ? H2 : -H2, D('body').pick(K.body));
+  if (bar) {
+    L.zone(wallX, bar.z - 2.7, wallX + inward * 3.3, bar.z + 2.7, 'wood_dark');
+    for (const dz of [-1.8, 0, 1.8]) L.against(dz ? 'gilt_mirror' : 'menu_board', 'x', wallX, inward, bar.z + dz);
+    L.reserve(wallX + inward * 2.3, bar.z - 2.4, wallX + inward * 3.6, bar.z + 2.4);
+    L.tryAdd('pastry_vitrine', [[wallX + inward * 1.5, bar.z + barSide * 0 + 3.0, inward > 0 ? H2 : -H2], [wallX + inward * 1.5, bar.z - 3.0, inward > 0 ? H2 : -H2]]);
+  } else if (!put(K.counter, (ix0 + ix1) / 2, iz0 + 2.25)) L.add('cafe_counter', (ix0 + ix1) / 2, iz0 + 2.3, 0);
+  // the windows: banquettes either side of the door; the walls: banquettes with posters and sconces over them
+  for (let k = 0; k < 30; k++) { const x = (doorX ?? A.x) + (k % 2 ? 1 : -1) * (Math.floor(k / 2) * 4.4 + 2.2); if (x < ix0 + 2.2 || x > ix1 - 2.2 || nearDoor(x, 3.4)) continue; aisle(L.against('banquette_long', 'z', iz1, -1, x)); }
+  const sideX = barSide > 0 ? ix0 : ix1, sIn = barSide > 0 ? 1 : -1;
+  for (let z = (kit ? kit.z1 + 1.4 : iz0 + 1.5); z < iz1 - 3.0; z += 4.4) if (aisle(L.against('banquette_long', 'x', sideX, sIn, z + 2.2))) { L.against('poster_frame', 'x', sideX, sIn, z + 1.2); L.against('cafe_sconce', 'x', sideX, sIn, z + 2.2); L.against('poster_frame', 'x', sideX, sIn, z + 3.2); }
+  for (let x = ix0 + 1.2; x < ix1 - 1.2; x += 2.2) { if (kit && x > kit.x0 - 0.5 && x < kit.x1 + 0.5) continue; L.against((Math.round(x * 10) % 2) ? 'cafe_sconce' : 'poster_frame', 'z', iz0, +1, x); }
+  // a big floor's sides: lounges between the walls' pieces and the room; the room: marble bistro tables close together, a few for four
+  cafeSideZones(L, D, c, 'bistro', { half: 0.26, inset: barSide > 0 ? [2.4, 3.8] : [3.8, 2.4] });
+  for (const r of A.rows(2.6, 2.05, iz0 + 4.4)) for (const cc of A.cols(2.2, 0.9)) {
+    if (A.door(cc, r, 2.6)) continue;
+    const d = D('bt', cc.side, cc.k, r.r);
+    L.with(d, () => put(d.chance(0.82) ? 'bistro_set' : 'cafe_table4', cc.x, r.z, d.chance(0.5) ? 0 : H2, null, 0.1));
+  }
+  if (doorX != null) { put('coat_stand', doorX - 2.0, iz1 - 0.6); L.against('newspaper_rack', 'z', iz1, -1, doorX + 2.1); }
+  L.tryAdd('condiment_bar', kit ? [[kit.inner - kit.side * 0.9, kit.z1 + 1.4]] : [[ix0 + 1, iz0 + 1]]);
+  for (const [x, z] of [[ix0 + 0.45, iz1 - 0.45], [ix1 - 0.45, iz1 - 0.45]]) put('cafe_palm', x, z);
+}
+/** The book café (cozy): walls of books, bookshelf dividers making bays off the aisle, each bay its own room (a reading
+ *  table, wingbacks, a sofa) on its own rug, the fireplace lounge, a piano and a globe, lamps everywhere. */
+function libraryPlan(L, D, K, c) {
+  const { ix0, ix1, iz0, iz1 } = L, { A, cs, put, kit, doorX } = c, mid = (ix0 + ix1) / 2;
+  // the counter on the back wall, beside the kitchen's pass when there is one
+  const cx0 = Math.min(ix1 - 2.3, Math.max(ix0 + 2.3, kit ? kit.inner - kit.side * 3.2 : A.x));
+  let ctr = null;
+  for (let k = 0; k < 64 && !ctr; k++) { const x = cx0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.5; ctr = put(K.counter, x, iz0 + 2.25, 0, D('body').pick(K.body)); }
+  if (!ctr) for (let k = 0; k < 30 && !ctr; k++) ctr = L.add('cafe_counter', cx0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.5, iz0 + 2.3, 0);
+  if (ctr) { L.zone(ctr.x - 3.0, iz0, ctr.x + 3.0, iz0 + 3.4, 'smoked_oak'); L.reserve(ctr.x - 2.3, iz0 + 2.75, ctr.x + 2.3, iz0 + 4.0); L.against('menu_board', 'z', iz0, +1, ctr.x); L.tryAdd('pastry_vitrine', [[ctr.x + 2.9, iz0 + 2.25], [ctr.x - 2.9, iz0 + 2.25]]); }
+  // the walls: books from the counter to the front
+  for (const [wx, s] of [[ix0, 1], [ix1, -1]]) for (let z = iz0 + 1.7; z < iz1 - 1.6; z += 3.05) L.against('library_wall', 'x', wx, s, z);
+  // the bays: dividers out from each wall, a room between each pair
+  const bays = [];
+  for (const [wx, s] of [[ix0, 1], [ix1, -1]]) {
+    if ((kit && Math.sign(wx - mid) === kit.side) || ix1 - ix0 < 16) continue;   // (a narrow floor: no bays, the room stays open)
+    for (let z = iz0 + 4.6; z < iz1 - 2.5; z += 4.3) { const it = put('bookshelf_divider', wx + s * 1.95, z, H); if (it) bays.push({ wx, s, z: z + 2.15 }); }
+  }
+  bays.forEach((b, k) => L.with(D('bay', k), () => {
+    const x = b.wx + b.s * 2.3, z = b.z, kind = ['library_table', 'wingback_set', 'sofa'][k % 3];
+    L.zone(b.wx + b.s * 0.6, z - 1.9, b.wx + b.s * 3.9, z + 1.9, 'carpet_warm');
+    if (kind === 'sofa') { put('sofa', b.wx + b.s * 1.1, z, b.s > 0 ? H : -H); put('coffee_table', b.wx + b.s * 2.2, z, b.s > 0 ? H : -H); put('armchair', b.wx + b.s * 3.2, z, b.s > 0 ? -H : H); }
+    else put(kind, x, z, kind === 'wingback_set' ? (b.s > 0 ? H : -H) : H);
+    put('floor_lamp', b.wx + b.s * 0.55, z - 1.55);
+  }));
+  // the fireplace lounge on the front half of a wall, the piano and the globe
+  const hx = kit ? (kit.side > 0 ? ix1 : ix0) : ix1, hs = hx === ix1 ? -1 : 1, hz = Math.max(iz0 + 6, iz1 - 4.2);
+  if (L.against('hearth', 'x', hx, hs, hz)) { L.zone(hx + hs * 0.4, hz - 2.4, hx + hs * 4.4, hz + 2.4, 'carpet_warm'); put('wingback_set', hx + hs * 1.8, hz, hs > 0 ? H : -H); put('sofa', hx + hs * 3.6, hz, hs > 0 ? -H : H); L.tryAdd('globe_stand', [[hx + hs * 1.0, hz + 2.0], [hx + hs * 1.0, hz - 2.0]]); }
+  L.tryAdd('piano', [[mid + 3, iz1 - 2.2, P], [mid - 3, iz1 - 2.2, P]]);
+  // the reading room down the middle: long tables under the lamps
+  for (const r of A.rows(3.2, 2.6, iz0 + 4.6)) for (const cc of A.cols(2.6, 1.1)) { if (A.door(cc, r, 2.6)) continue; const d = D('rt', cc.side, cc.k, r.r); L.with(d, () => put(d.chance(0.6) ? 'library_table' : 'bistro_set', cc.x, r.z, d.chance(0.5) ? 0 : H, null, 0.15)); }
+  if (doorX != null) for (const x of [doorX - 1.9, doorX + 1.9]) put('plant_tall', x, iz1 - 0.45);
+}
+/** Calls fn(x, z, i, j) on a grid of px by pz over a rectangle (the centres in it; what doesn't fit, put refuses): its
+ *  columns on ax's (the entrance or the elevator: a floor a metre wider keeps its tables where they were), rows from z0. */
+function gridIn(x0, z0, x1, z1, px, pz, fn, ax = 0) {
+  const nz = Math.max(0, Math.floor((z1 - z0) / pz));
+  for (let k = Math.ceil((x0 - ax) / px - 1e-6); ax + k * px <= x1 + 1e-6; k++) for (let j = 0; j < nz; j++) fn(ax + k * px, z0 + pz / 2 + j * pz, k + 100, j);
+}
+/** x on a metre's step from ax (a counter by the kitchen stays put while the kitchen's edge moves a little). */
+const onStep = (x, ax) => ax + Math.round(x - ax);
+/** A back-wall counter for a plan: the style's own where it fits, else the Café Counter; its pastry case and menu. */
+function backCounter(L, D, K, c, x0) {
+  const { iz0 } = L, { put } = c;
+  let ctr = null;
+  for (let k = 0; k < 40 && !ctr; k++) ctr = put(K.counter, x0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.5, iz0 + 2.25, 0, D('body').pick(K.body));
+  for (let k = 0; k < 40 && !ctr; k++) ctr = L.add('cafe_counter', x0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.5, iz0 + 2.3, 0);
+  if (ctr) { L.zone(ctr.x - 3.0, iz0, ctr.x + 3.0, iz0 + 3.4, K.bar); L.reserve(ctr.x - 2.3, iz0 + 2.75, ctr.x + 2.3, iz0 + 4.0); L.against('menu_board', 'z', iz0, +1, ctr.x); L.tryAdd('pastry_vitrine', [[ctr.x + 2.9, iz0 + 2.25], [ctr.x - 2.9, iz0 + 2.25]]); }
+  return ctr;
+}
+/** The side rooms of a big café (phase 1b part 3, "make them all look really nice and pretty"): the dining room keeps to a
+ *  band about the entrance (upstairs the elevator) and each side beyond it becomes a place to sit back: a lounge of sofa
+ *  groups on rugs (in the garden café a terrace of tables under vine trellises between flower beds) behind the style's
+ *  dividers (with ways in), the style's pieces along its wall. Returns the dining band [x0, x1] (the whole floor when small). */
+const CAFE_ZONES = {
+  bistro: { floor: 'wood_dark', sofa: 'sofa', sc: '#7a2a2a', ac: '#6a4a3a', rug: '#7a2a2a', divider: 'cafe_palm', wall: ['gilt_mirror', 'poster_frame'], against: true },
+  nordic: { floor: 'pale_oak', sofa: 'sofa', sc: '#cfc7b8', ac: '#7a8a6a', rug: '#a8b0a0', over: 'paper_pendant', divider: 'planter_box', dc: '#d9d2c4', wall: ['plant_wall', 'slat_wall'], against: true },
+  loft: { floor: 'wood_dark', sofa: 'sofa_l', sc: '#5a3a2a', ac: '#3a3a3a', rug: '#4a5a6a', over: 'edison_pendants', divider: 'mesh_partition', wall: ['chalk_wall', 'neon_coffee'], against: true },
+  garden: { floor: 'terracotta', garden: true, divider: 'hedge_planter', dc: '#d9d2c4', wall: ['stone_urn', 'cafe_palm'] },
+};
+function cafeSideZones(L, D, c, sid, o = {}) {   // o.half: the band's half width as a share of the floor's (about a third); o.inset [left, right]: wall pieces of the plan's own kept clear
+  const { ix0, ix1, iz0, iz1 } = L, { put, kit, A } = c, Z = CAFE_ZONES[sid], ax = c.doorX ?? A.x, W = ix1 - ix0, half = Math.max(8, 2.4 * Math.round((o.half ?? 0.32) * W / 2.4)), band = [ix0, ix1];   // (the band's width in steps: a metre wider keeps it)
+  if (!Z || W < 26) return band;
+  for (const s of [-1, 1]) {
+    const inset = o.inset?.[s < 0 ? 0 : 1] || 0, edge = ax + s * half, wall = (s < 0 ? ix0 : ix1) - s * inset, x0 = Math.min(edge, wall), x1 = Math.max(edge, wall), d = -s, cx = edge + s * 2.3;   // (the groups by the room's edge)
+    if ((wall - edge) * s < 4.4) continue;   // (a side room at least 4.4 m wide, inside the walls)
+    const z0 = Math.max(iz0 + 4.6, kit && kit.x1 > x0 && kit.x0 < x1 ? kit.z1 + 1.4 : -1e9), z1 = iz1 - 1.4;
+    if (z1 - z0 < 5) continue;
+    band[s < 0 ? 0 : 1] = edge;
+    L.zone(x0, z0 - 0.6, x1, z1 + 0.6, Z.floor);
+    for (let k = 0, z = z0 + 0.9; z < z1 - 0.9; k++, z += 2.4) if (k % 3 !== 1) put(Z.divider, edge, z, H, Z.dc ?? null);   // (every third left open: the ways in)
+    for (let k = 0, z = z0 + 2.4; z <= z1 - 2.2; k++, z += 4.6) {
+      if (Z.garden) {
+        put('vine_trellis', cx, z); put('rattan_set', cx, z - 0.75, 0); put('rattan_set', cx, z + 0.75, 0);
+        put('flower_bed', cx, z - 2.0, 0, '#b9a48a'); if (k % 2 === 0) put('birdcage', cx + 1.0, z + 1.4);
+        continue;
+      }
+      if (!put(Z.sofa, cx - d * 1.2, z, d > 0 ? H : -H, Z.sc)) continue;
+      put('cafe_rug', cx, z, H, Z.rug); put('coffee_table', cx, z, H);
+      for (const o of [-0.78, 0.78]) put('armchair', cx + d * 1.15, z + o, d > 0 ? -H : H, Z.ac);
+      put('floor_lamp', cx - d * 1.25, z + (Z.sofa === 'sofa_l' ? 1.75 : 1.45));
+      if (Z.over) put(Z.over, cx, z);
+    }
+    if (!inset) for (let k = 0, z = z0 + 1.0; z < z1 - 0.5; k++, z += 2.8) { const t = Z.wall[k % Z.wall.length]; if (Z.against) L.against(t, 'x', wall, d, z); else put(t, wall + d * 0.5, z); }
+    L.reserve(x0, z0 - 0.6, x1, z1 + 0.6);
+  }
+  return band;
+}
+/** The roastery (Nordic modern): calm and open, an island bar in the room with the roaster behind it, long communal
+ *  tables in rows under hanging plants, a living plant wall, window ledges, a few large pieces and room to breathe. */
+function roasteryPlan(L, D, K, c) {
+  const { ix0, ix1, iz0, iz1 } = L, { put, kit, doorX, nearDoor, A } = c, mx = (doorX ?? A.x) + (kit ? -kit.side * 1.5 : 0);
+  const iz = iz0 + 6.2, roomy = iz1 - iz0 >= 18 && ix1 - ix0 >= 16;
+  let island = roomy ? put(K.counter, mx, iz, 0, D('body').pick(K.body)) : null;
+  if (island) {
+    L.zone(mx - 3.6, iz - 3.4, mx + 3.6, iz + 1.6, 'concrete');
+    put('coffee_roaster', mx - 1.4, iz - 2.0, P); put('bean_sacks', mx + 1.3, iz - 2.1);
+    L.tryAdd('pastry_vitrine', [[mx + 2.9, iz], [mx - 2.9, iz]]);
+    L.reserve(mx - 2.3, iz + 0.5, mx + 2.3, iz + 1.8);
+  } else if ((island = backCounter(L, D, K, c, kit ? onStep(kit.inner - kit.side * 3.2, A.x) : A.x))) { L.tryAdd('coffee_roaster', [[island.x - 3.6, iz0 + 1.0], [island.x + 3.6, iz0 + 1.0]]); L.tryAdd('bean_sacks', [[island.x + 3.4, iz0 + 2.4], [island.x - 3.4, iz0 + 2.4]]); }
+  const [bx0, bx1] = cafeSideZones(L, D, c, 'nordic');
+  if (island && roomy) for (let x = bx0 + 1.5; x < bx1 - 1.4; x += 2.6) if (!kit || x < kit.x0 - 1.4 || x > kit.x1 + 1.4) L.against('slat_wall', 'z', iz0, 1, x);   // (oak slats along the back wall behind the island)
+  const plantWall = kit ? (kit.side > 0 ? ix0 : ix1) : ix0, pw = plantWall === ix0 ? 1 : -1;
+  if ((pw > 0 ? bx0 : bx1) === plantWall) for (let z = iz0 + 1.6; z < iz1 - 1.4; z += 3.4) { if (!L.against('plant_wall', 'x', plantWall, pw, z)) put('cafe_palm', plantWall + pw * 0.5, z); put('cafe_palm', plantWall + pw * 0.5, z + 1.7); }
+  const rows0 = island && roomy ? island.z + 2.6 : iz0 + 4.6;
+  gridIn(bx0 + 1.6, rows0, bx1 - 1.6, iz1 - 2.4, 4.4, 2.6, (x, z, i, j) => { if (Math.abs(x - (doorX ?? 1e9)) < 2.6 && z > iz1 - 4) return; if (put(i % 3 === 2 ? 'bistro_set' : 'communal_table', x, z, 0, null, 0.15) && (i + j) % 2 === 0) put(i % 3 === 2 ? 'hanging_ivy' : 'paper_pendant', x, z); }, mx + 2.2);
+  for (let k = 0; k < 30; k++) { const x = (doorX ?? A.x) + (k % 2 ? 1 : -1) * (Math.floor(k / 2) * 2.75 + 1.4); if (x < bx0 + 1.5 || x > bx1 - 1.5 || nearDoor(x, 2.9)) continue; L.against('window_ledge', 'z', iz1, -1, x); }
+}
+/** The coffee lab (industrial modern): the steel bar on the back wall with the roaster as its lab, a raised platform of
+ *  high tables (window ledges back to back) on one side, booths under pipe shelving on the other, Edison bulbs over all. */
+function loftPlan(L, D, K, c) {
+  const { ix0, ix1, iz0, iz1 } = L, { put, kit, doorX, nearDoor, A } = c, mid = (ix0 + ix1) / 2;
+  const ctr = backCounter(L, D, K, c, kit ? onStep(kit.inner - kit.side * 3.2, A.x) : A.x);
+  if (ctr) {
+    put('coffee_roaster', ctr.x - (kit ? kit.side : 1) * 3.4, iz0 + 1.0, 0);
+    L.tryAdd('cold_brew_tower', [[ctr.x - 2.9, iz0 + 2.25], [ctr.x + 2.9, iz0 + 2.25], [ctr.x + (kit ? kit.side : 1) * 3.5, iz0 + 1.0]]);
+    for (const k of [1, 2]) L.against(k === 1 ? 'neon_coffee' : 'chalk_wall', 'z', iz0, 1, ctr.x + (kit ? -kit.side : 1) * (k === 1 ? 5.6 : 8.4));   // (the neon and the chalk wall along the back, away from the kitchen)
+  }
+  const [bx0, bx1] = cafeSideZones(L, D, c, 'loft'), bmid = (bx0 + bx1) / 2;
+  const pside = kit ? kit.side : 1, px0 = pside > 0 ? bmid + 0.5 : bx0 + 0.6, px1 = pside > 0 ? bx1 - 0.6 : bmid - 0.5, pz0 = iz0 + 5.0, pz1 = Math.min(iz1 - 1.2, iz0 + 5.0 + 9.3);
+  const wide = bx1 - bx0 >= 19.5;
+  if (wide && px1 - px0 > 5) { L.zone(px0, pz0, px1, pz1, 'tile_dark');
+    for (let k = 0, z = pz0 + 1.0; z < pz1 - 0.6; k++, z += 2.3) if (k % 3 !== 1) put('mesh_partition', pside > 0 ? px0 - 0.3 : px1 + 0.3, z, H);   // (the platform's mesh screens, with ways up)
+    gridIn(px0, pz0, px1, pz1, 3.0, 3.1, (x, z) => { if (nearDoor(x, 2.6) && z > iz1 - 3.5) return; if (put('window_ledge', x, z - 0.47, P, null, 0.05)) { put('window_ledge', x, z + 0.47, 0, null, 0.05); put('edison_pendants', x, z); } }, A.x + 1.5); }
+  const bw = pside > 0 ? bx0 : bx1, bs = pside > 0 ? 1 : -1, onWall = bw === ix0 || bw === ix1;
+  for (let z = iz0 + 4.8; z < iz1 - 2.2; z += 2.25) { if (put('cafe_booth', bw + bs * (onWall ? 1.04 : 1.4), z + 0.98, bs > 0 ? 0 : P) && onWall) L.against('pipe_shelf', 'x', bw, bs, z + 0.98 + 1.15); }
+  gridIn(pside > 0 ? bx0 + 3.0 : (wide ? bmid + 0.6 : bx0 + 0.8), iz0 + 5.0, pside > 0 ? (wide ? bmid - 0.6 : bx1 - 0.8) : bx1 - 3.0, iz1 - 1.6, 2.6, 2.6, (x, z, i, j) => { if (nearDoor(x, 2.6) && z > iz1 - 3.5) return; if (put((i + j) % 2 ? 'cafe_table4' : 'bistro_set', x, z, 0, null, 0.15) && (i + j) % 2) put('edison_pendants', x + 1.1, z); }, A.x);
+}
+/** The garden café (romantic classic): a courtyard: the fountain in the middle, stone paths crossing to it, four
+ *  gardens of rattan tables between palms and hanging ivy, planters all round, the rattan counter at the back. */
+function gardenPlan(L, D, K, c) {
+  const { ix0, ix1, iz0, iz1 } = L, { put, kit, doorX, A } = c;
+  const ctr = backCounter(L, D, K, c, kit ? onStep(kit.inner - kit.side * 3.2, A.x) : A.x);
+  const cz0 = iz0 + 4.4, mx = doorX ?? A.x, mz = (cz0 + iz1) / 2;
+  const [bx0, bx1] = cafeSideZones(L, D, c, 'garden');
+  if (ix1 - ix0 < 15 || iz1 - cz0 < 11) {   // (no room for a courtyard: a garden room of rattan tables among palms)
+    gridIn(ix0 + 1.0, cz0, ix1 - 1.0, iz1 - 1.0, 2.3, 2.1, (x, z, i, j) => { if ((i + j) % 4 === 3) put('cafe_palm', x, z); else if (put('rattan_set', x, z, 0, null, 0.1) && (i + j) % 3 === 0) put('hanging_ivy', x + 0.95, z); }, A.x);
+    for (const [wx, s] of [[ix0, 1], [ix1, -1]]) for (let z = iz0 + 1.0; z < iz1 - 0.8; z += 2.6) put('cafe_palm', wx + s * 0.5, z);
+    return;
+  }
+  put('fountain_tiered', mx, mz); L.zone(mx - 2.0, mz - 2.0, mx + 2.0, mz + 2.0, 'travertine');
+  L.zone(mx - 1.0, cz0, mx + 1.0, iz1, 'travertine'); L.zone(bx0 + 0.8, mz - 1.0, bx1 - 0.8, mz + 1.0, 'travertine');
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) put('stone_urn', mx + sx * 2.2, mz + sz * 2.2, 0, '#d9d2c4');   // (urns at the fountain's corners)
+  for (let z = cz0 + 1.2; z < iz1 - 1.6; z += 3.3) if (Math.abs(z + 1.0 - mz) > 3.4) for (const sx of [-1, 1]) put('hedge_planter', mx + sx * 1.38, z + 1.0, H, '#d9d2c4');   // (hedges along the paths, with ways through)
+  for (const s of [-1, 1]) for (let x = mx + s * 3.6; s < 0 ? x > bx0 + 1.6 : x < bx1 - 1.6; x += s * 3.3) for (const sz of [-1, 1]) put('hedge_planter', x + s * 1.0, mz + sz * 1.38, 0, '#d9d2c4');
+  L.reserve(mx - 2.6, mz - 2.6, mx + 2.6, mz + 2.6); L.reserve(mx - 1.0, cz0, mx + 1.0, iz1); L.reserve(bx0 + 0.8, mz - 1.0, bx1 - 0.8, mz + 1.0);
+  for (const [x0, x1] of [[bx0 + 1.2, mx - 1.2], [mx + 1.2, bx1 - 1.2]]) for (const [z0, z1] of [[cz0, mz - 1.1], [mz + 1.1, iz1 - 1.2]]) {
+    let arbour = false;
+    gridIn(x0, z0, x1, z1, 2.4, 2.1, (x, z, i, j) => { if ((i + j) % 4 === 3) put('cafe_palm', x, z); else if (put('rattan_set', x, z, (i + j) % 2 ? 0 : H, null, 0.12)) { if (!arbour && (i + j) % 4 === 1) arbour = !!put('vine_trellis', x, z); else if ((i + j) % 4 === 0) put('birdcage', x + 0.95, z); } }, mx + 1.2);
+  }
+  for (const [wx, s] of [[ix0, 1], [ix1, -1]]) if ((s > 0 ? bx0 : bx1) === wx) for (let z = iz0 + 1.0; z < iz1 - 0.8; z += 2.2) put('cafe_palm', wx + s * 0.5, z);
+  if (ctr) L.tryAdd('condiment_bar', [[ctr.x - 2.9, ctr.z + 1.4], [ctr.x + 2.9, ctr.z + 1.4]]);
+}
+export function cafeThemeFloor(L, o = {}) {
+  const base = L.rng.int(1, 2 ** 30), D = (...k) => dice(base, ...k);
+  const { ix0, ix1, iz0, iz1 } = L, dr = L.b.door, ground = o.ground !== false;
+  const sid = CAFE_KIT[o.style] ? o.style : D('style').pick(Object.keys(CAFE_KIT)), K = CAFE_KIT[sid];
+  L.name = o.name || CAFE_STYLES[sid].name; L.venue = 'cafe'; L.style = sid;
+  L.zone(ix0, iz0, ix1, iz1, D('floor').pick(K.floor));
+  placeCore(L);
+  if (ground) reserveEntrance(L, 3.2);
+  const A = anchorOf(L, ground, 1.2), cs = A.cs, W = ix1 - ix0;
+  const put = (t, x, z, r = 0, c = null, pad = 0.05) => L.add(t, x, z, r, c ? { c } : null, pad);
+  const doorX = ground && dr ? dr.x : null, nearDoor = (x, half) => doorX != null && Math.abs(x - doorX) < half;
+  // ---- Order Up's kitchen first (kept empty for the stations), then the style's own plan where it has one (phase 1b)
+  const kit = cafeKitchen(L, D, cs, A.x);
+  if (sid === 'bistro') { bistroPlan(L, D, K, { A, cs, put, kit, doorX, nearDoor }); return sid; }
+  if (sid === 'library') { libraryPlan(L, D, K, { A, cs, put, kit, doorX, nearDoor }); return sid; }
+  if (sid === 'nordic') { roasteryPlan(L, D, K, { A, cs, put, kit, doorX, nearDoor }); return sid; }
+  if (sid === 'loft') { loftPlan(L, D, K, { A, cs, put, kit, doorX, nearDoor }); return sid; }
+  if (sid === 'garden') { gardenPlan(L, D, K, { A, cs, put, kit, doorX, nearDoor }); return sid; }
+  // ---- the counter on the back wall, clear of the elevator; its queue kept free
+  let cx = A.x;
+  if (cs && cx + 3.0 > cs.x0 && cx - 3.0 < cs.x1) cx = cs.x0 - 3.3 >= ix0 + 2.6 ? cs.x0 - 3.3 : cs.x1 + 3.3;
+  cx = Math.min(ix1 - 2.4, Math.max(ix0 + 2.4, cx));
+  // (the long counter where it fits along the back wall, nearest the middle; else the short one; else a side wall: a café
+  // always has its order point)
+  const tryXs = [];
+  for (let k = 0; k < 40; k++) { const x = cx + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.5; if (x >= ix0 + 1.7 && x <= ix1 - 1.7) tryXs.push(x); }
+  let ctr = null;
+  L.with(D('counter'), () => {
+    const body = D('body').pick(K.body);
+    for (const x of tryXs) if ((ctr = put(K.counter, x, iz0 + 2.25, 0, body))) break;
+    if (!ctr) for (const x of tryXs) if ((ctr = L.add('cafe_counter', x, iz0 + 2.3, 0))) break;
+    if (!ctr) for (const [wx, side] of [[ix0, +1], [ix1, -1]]) { for (let z = iz0 + 3; z < iz1 - 2.5 && !ctr; z += 0.5) ctr = L.against(K.counter, 'x', wx, side, z) || L.against('cafe_counter', 'x', wx, side, z); if (ctr) break; }
+    if (!ctr || ctr.r) return;   // (on a side wall: no more round it)
+    cx = ctr.x;
+    L.zone(cx - 3.3, iz0, cx + 3.3, iz0 + 3.5, K.bar);
+    for (const dx of [-1.15, 1.15]) L.against('menu_board', 'z', iz0, +1, cx + dx);
+    L.tryAdd('pastry_vitrine', [[cx + 2.9, iz0 + 2.25], [cx - 2.9, iz0 + 2.25]]);
+    L.tryAdd('condiment_bar', [[cx - 2.85, iz0 + 2.3], [cx + 2.85, iz0 + 2.3], [cx - 2.9, iz0 + 3.6, H]]);
+    L.reserve(cx - 2.3, iz0 + 2.75, cx + 2.3, iz0 + 4.1);
+    if (K.backDeco) for (const x of [cx - 4.2, cx + 4.2]) if (x > ix0 + 0.8 && x < ix1 - 0.8 && !(cs && x > cs.x0 - 0.8 && x < cs.x1 + 0.8)) L.against(K.backDeco, 'z', iz0, +1, x);
+  });
+  const far = cx < (ix0 + ix1) / 2 ? +1 : -1;   // (the side away from the counter: the style's corner)
+  // ---- the open kitchen beside the counter (tiled, its worktops along the back wall: the playable kitchen comes here)
+  if (ctr && !ctr.r) L.with(D('kitchen'), () => {
+    const k0 = ctr.x - far * 3.6, ks = [];
+    for (const dx of [0, 1.9, 3.8]) { const x = k0 - far * dx; if (x < ix0 + 1 || x > ix1 - 1 || (cs && x > cs.x0 - 1.1 && x < cs.x1 + 1.1)) break; ks.push(x); }
+    if (ks.length >= 2) {
+      L.zone(Math.min(...ks) - 1.0, iz0, Math.max(...ks) + 1.0, iz0 + 2.6, 'tile');
+      ks.forEach((x, k) => L.against(['kitchen', 'counter', 'fridge'][k % 3], 'z', iz0, +1, x));
+      L.reserve(Math.min(...ks) - 1.0, iz0 + 1.0, Math.max(...ks) + 1.0, iz0 + 2.6);
+    }
+  });
+  // ---- the style's corner: the roaster and its sacks, or a reading nook by the hearth
+  if (K.feature) L.with(D('feature'), () => {
+    const x = far > 0 ? ix1 - 1.2 : ix0 + 1.2;
+    if (put(K.feature[0], x, iz0 + 1.0, far > 0 ? -H : H)) { L.zone(x - 1.4, iz0, x + 1.4, iz0 + 2.4, K.bar); if (K.feature[1]) L.tryAdd(K.feature[1], [[x - far * 1.6, iz0 + 0.5], [x, iz0 + 2.3]]); }
+    else if (K.feature[1]) L.tryAdd(K.feature[1], [[x, iz0 + 0.5], [x, iz0 + 2.3]]);
+  });
+  let nook = null;
+  if (K.nook) L.with(D('nook'), () => {
+    const wx = far > 0 ? ix1 : ix0, z = Math.min(iz1 - 2.0, Math.max(iz0 + 5.0, (iz0 + iz1) / 2));
+    if (L.against('hearth', 'x', wx, -far, z)) {
+      nook = { x: wx - far * 1.9, z };
+      L.zone(wx - far * 3.4, z - 1.7, wx, z + 1.7, K.rug);
+      put('wingback_set', wx - far * 1.75, z, far > 0 ? H : -H);
+      L.tryAdd('floor_lamp', [[wx - far * 0.4, z + 1.45], [wx - far * 0.4, z - 1.45]]);
+    }
+  });
+  // ---- the centrepiece on a big floor
+  let center = null;
+  const mz = (iz0 + 4.3 + iz1) / 2, mx = (ix0 + ix1) / 2 + (cs && Math.abs((ix0 + ix1) / 2 - (cs.x0 + cs.x1) / 2) < 3 ? far * 2.5 : 0);
+  if (K.center && W >= 11 && iz1 - iz0 >= 11) L.with(D('center'), () => {
+    if (put(K.center, mx, mz, K.center === 'communal_table' ? 0 : 0)) {
+      center = { x: mx, z: mz };
+      L.reserve(mx - 2.6, mz - 1.5, mx + 2.6, mz + 1.5);
+      if (K.center === 'fountain_tiered') L.zone(mx - 1.6, mz - 1.6, mx + 1.6, mz + 1.6, 'travertine');
+    }
+  });
+  // ---- the walls: booths along them, or books, shelves or palms
+  for (const side of [-1, 1]) L.with(D('wall', side), () => {
+    const wx = side < 0 ? ix0 : ix1;
+    for (let z = iz0 + 4.6; z < iz1 - 1.4; z += K.wallSeat ? 2.25 : 3.4) {
+      if (nook && Math.sign(wx - (ix0 + ix1) / 2) === Math.sign(nook.x - (ix0 + ix1) / 2) && Math.abs(z - nook.z) < 2.6) continue;
+      if (K.wallSeat) put(K.wallSeat, wx - side * 1.04, z + 0.98, side < 0 ? 0 : P);
+      else if (K.wallDeco) L.against(K.wallDeco, 'x', wx, -side, z + 1.4);
+    }
+    if (K.wallSeat && K.wallDeco) for (let z = iz0 + 3.9; z < iz0 + 4.6; z += 3) L.against(K.wallDeco, 'x', wx, -side, z);
+  });
+  // ---- the front windows: a ledge with stools (or tables) looking out, either side of the door
+  if (K.front) L.with(D('front'), () => {
+    const step = K.front === 'window_ledge' ? 2.75 : 2.2, mid = doorX != null ? doorX : A.x, xs = [];   // (from the door outward: a wider floor keeps them)
+    for (let k = 0; k < 40; k++) { const x = mid + (k % 2 ? 1 : -1) * (Math.floor(k / 2) * step + step / 2); if (x > ix0 + 1.5 && x < ix1 - 1.5) xs.push(x); }
+    for (const x of xs) {
+      if (nearDoor(x, 2.9)) continue;
+      if (K.front === 'window_ledge') L.against('window_ledge', 'z', iz1, -1, x);
+      else put(K.front, x, iz1 - 0.75, 0);
+    }
+  });
+  // ---- a lounge corner on a big floor: sofas and armchairs on a rug, away from the counter
+  if (K.lounge && W >= 22 && iz1 - iz0 >= 14) L.with(D('lounge'), () => {
+    const lx = far > 0 ? ix1 - 4.6 : ix0 + 4.6, lz = iz1 - 4.2;
+    if (nearDoor(lx, 5)) return;
+    L.zone(lx - 3.4, lz - 2.6, lx + 3.4, lz + 2.6, K.rug);
+    put('coffee_table', lx, lz);
+    const spots = [[lx, lz - 1.45, 0], [lx - 1.9, lz, H], [lx + 1.9, lz, -H], [lx, lz + 1.45, P]];
+    K.lounge.forEach((t, k) => put(t, spots[k][0], spots[k][1], spots[k][2], null, 0.02));
+    put(K.corner === 'floor_lamp' ? 'plant_tall' : K.corner, lx + far * 3.0, lz - 2.2);
+    L.reserve(lx - 3.4, lz - 2.6, lx + 3.4, lz + 2.6);
+  });
+  // ---- tables filling the room in the style's mix
+  const pick = d => { const tot = K.seats.reduce((t, s) => t + s[1], 0); let r = d.next() * tot; for (const [t, w] of K.seats) { r -= w; if (r <= 0) return t; } return K.seats[0][0]; };
+  const placed = [];
+  for (const r of A.rows(2.4, 2.75, iz0 + 4.6)) for (const c of A.cols(2.85, 1.1)) {
+    if (A.door(c, r, 2.6)) continue;
+    if ((c.k + r.r) % 4 === 3) { L.with(D('green', c.side, c.k, r.r), () => { if (D('green', c.side, c.k, r.r).chance(0.55)) put(K.corner === 'floor_lamp' ? 'plant_tall' : K.corner, c.x, r.z); }); continue; }   // (a planter, or room to breathe)
+    if (center && Math.abs(c.x - center.x) < 2.8 && Math.abs(r.z - center.z) < 1.9) continue;
+    const d = D('seat', c.side, c.k, r.r), t = pick(d);
+    const it = L.with(d, () => put(t, c.x, r.z, t === 'cafe_table' || t === 'wingback_set' ? (d.chance(0.5) ? 0 : H) : t === 'bistro_set' || t === 'rattan_set' ? (d.chance(0.5) ? 0 : H) : 0, null, 0.12)
+      || put('bistro_set', c.x, r.z, 0, null, 0.12));
+    if (it) placed.push(it);
+  }
+  // ---- corners, plants by the door, and the style's ceiling over the tables
+  for (const [x, z] of [[ix0 + 0.45, iz1 - 0.45], [ix1 - 0.45, iz1 - 0.45], [ix0 + 0.45, iz0 + 0.45], [ix1 - 0.45, iz0 + 0.45]]) L.with(D('corner', x, z), () => put(K.corner, x, z));
+  if (ground && doorX != null) for (const x of [doorX - 1.95, doorX + 1.95]) put(K.corner === 'floor_lamp' ? 'plant_tall' : K.corner, x, iz1 - 0.45);
+  if (K.ceiling) for (let k = 0; k < placed.length; k += 2) { const it = placed[k]; put(K.ceiling, it.x + 1.15, it.z, 0); }
+  return sid;
+}
+
 export function restaurantFloor(L, o = {}) {
   const base = L.rng.int(1, 2 ** 30), D = (...k) => dice(base, ...k);
   const { ix0, ix1, iz0, iz1 } = L, dr = L.b.door, ground = o.ground !== false;
@@ -1560,7 +1943,7 @@ export function themeFloor(L, theme, o = {}) {
     case 'club': return clubThemeFloor(L, { ground });
     case 'conference': return conferenceFloor(L, { ground });
     case 'lounge': return loungeThemeFloor(L, { ground });
-    case 'cafe': return cafeFloor(L, { ground });
+    case 'cafe': return cafeThemeFloor(L, { ground, style: o.style });
     case 'restaurant': return restaurantFloor(L, { ground });
     case 'shop': return shopFloor(L, { ground });
     case 'gym': return gymFloor(L, { ground });
@@ -1684,7 +2067,7 @@ export function parkLevel(L, o = {}) {
 export function buildLevel(b, f, rng, o = {}) {
   const L = new LevelBuilder(b, rng, b.type === 'park');
   const ground = f === 0;
-  if (o.theme && b.type !== 'park') { themeFloor(L, o.theme, { ground }); return L.result(); }   // a themed floor (Floor Themes)
+  if (o.theme && b.type !== 'park') { themeFloor(L, o.theme, { ground, style: o.style }); return L.result(); }   // a themed floor (Floor Themes; a café's style)
   switch (b.type) {
     case 'park': parkLevel(L, { name: b.name, dance: o.dance }); break;
     case 'office':
@@ -1705,7 +2088,7 @@ export function buildLevel(b, f, rng, o = {}) {
         else apartmentLobby(L);
       } else apartmentFloor(L, { plan: o.plan });
       break;
-    case 'cafe': cafeFloor(L, { name: ground ? b.name : b.name + ' Upstairs', ground }); break;
+    case 'cafe': cafeThemeFloor(L, { name: ground ? b.name : b.name + ' Upstairs', ground }); break;
     case 'restaurant': restaurantFloor(L, { name: ground ? b.name : b.name + ' Dining Room', ground }); break;
     case 'shop': shopFloor(L, { name: b.name, clothes: b.clothes, tackle: b.tackle, ground }); break;
     case 'gym': gymFloor(L, { name: b.name, ground }); break;

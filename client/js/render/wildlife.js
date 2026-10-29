@@ -16,6 +16,7 @@ import { MODELS, faunaMaterial } from './fauna-models.js';
 const RANGE = { low: 260, medium: 420, high: 600 };   // m around the camera's target
 const CAP = { firefly: 420, butterfly: 200, songbird: 220, 'reef-fish': 360 };
 const HIPS = { deer: 0.8, rabbit: 0.3, cow: 0.68, sheep: 0.42, horse: 0.98, crab: 0.3, dolphin: -1 };   // (dolphin −1: its flukes beat up and down, render/fauna-models.js)
+const STAND = { seagull: 0.31, bird: 0.19 };   // a landed bird's feet (a gull's legs) or belly below its middle, in its own size
 const MODE = { rest: 0, walk: 1, run: 2, fly: 3, glide: 4, swim: 5, hop: 6, glow: 7 };
 let app = null, species = [], packs = new Map(), groups = new Map(), lastPlan = 0, seed = 'world';
 const shared = { herds: new Map(), off: null, seen: 0 };   // herds from the server and its wildlife clock's offset
@@ -178,7 +179,7 @@ function pose(g, m, i, t, player) {
       const cx = a.x + Math.sin(t * w + 1.3) * R, cz = a.z + Math.sin(t * w * 1.7) * R * 0.7;
       const ox = Math.sin(t * 0.9 + r[0] * 6.28) * 3 + (r[1] - 0.5) * 6, oz = Math.cos(t * 0.8 + r[2] * 6.28) * 3 + (r[3] - 0.5) * 6;
       const gx = cx + ox, gz = cz + oz, gy = ground(gx, gz);
-      if (landed) { m.x = a.x + (r[1] - 0.5) * 10; m.z = a.z + (r[3] - 0.5) * 10; m.y = ground(m.x, m.z) + 0.02; m.mode = MODE.rest; m.rate = 1; m.yaw = r[0] * 6.28 + Math.sin(t * 0.5 + r[2] * 9) * 0.6; return; }
+      if (landed) { m.x = a.x + (r[1] - 0.5) * 10; m.z = a.z + (r[3] - 0.5) * 10; m.y = ground(m.x, m.z) + (STAND[sp.model] ?? 0.02) * sp.size * (0.85 + 0.3 * r[3]); m.mode = MODE.rest; m.rate = 1; m.yaw = r[0] * 6.28 + Math.sin(t * 0.5 + r[2] * 9) * 0.6; return; }
       m.x = gx; m.z = gz; m.y = gy + H[0] + (H[1] - H[0]) * (0.5 + 0.5 * Math.sin(t * 0.3 + r[0] * 6)) ;
       m.yaw = Math.atan2(-(Math.cos(t * w * 1.7) * w * 1.7 * R * 0.7), Math.cos(t * w + 1.3) * w * R);
       m.mode = Math.sin(t * 0.7 + r[1] * 6.28) > 0.55 ? MODE.glide : MODE.fly; m.rate = 2.6 + r[2]; return;

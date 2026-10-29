@@ -418,7 +418,7 @@ export class AgentWorld {
     if (social) out.friends = social.friendsOf(a.id, { max: 10 }).map(({ agent, ...f }) => f);
     const ctx = life.contextFor(a.id) || {};
     const nowH = c.hour, earlier = (ctx.earlier || []).filter(x => { const h = hoursOf(x.clock); return h === null || h <= nowH + 0.01; }).sort((x, y) => (hoursOf(x.clock) ?? 0) - (hoursOf(y.clock) ?? 0));
-    out.me.job = me.job.kind === 'free' ? null : { title: me.job.title, place: me.job.place, hours: me.job.start != null ? `${formatClock(me.job.start)} to ${formatClock(me.job.end)}` : undefined };
+    out.me.job = me.job.kind === 'free' ? null : { title: me.job.title, place: me.job.place, hours: me.job.kind === 'post' ? 'around the clock (on post)' : me.job.start != null ? `${formatClock(me.job.start)} to ${formatClock(me.job.end)}` : undefined };
     out.me.home = me.home?.place || null;
     out.places = this.places(sim, i, null, L.placesMax).map(({ venue, ...p }) => p);
     out.life = { personality: ctx.personality, purpose: ctx.purpose || undefined, earlierToday: earlier, remembers: ctx.memories };

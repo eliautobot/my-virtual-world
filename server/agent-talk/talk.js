@@ -29,8 +29,8 @@ export class Talk {
    * @param {{ dbs, agents, connections, sessions, transcripts, chat, setting: (path: string) => any, sim: () => object|null,
    *   ownerOf: (agent) => number|null, work?: object, log?: object, now?: () => number }} o
    */
-  constructor({ dbs, agents, connections, sessions, transcripts, chat, setting, sim, ownerOf, work = null, log = null, now = () => Date.now() }) {
-    Object.assign(this, { dbs, agents, connections, sessions, transcripts, chat, setting, simOf: sim, ownerOf, work, log, now });
+  constructor({ dbs, agents, connections, sessions, transcripts, chat, setting, sim, ownerOf, work = null, life = null, log = null, now = () => Date.now() }) {
+    Object.assign(this, { dbs, agents, connections, sessions, transcripts, chat, setting, simOf: sim, ownerOf, work, lifeOf: life, log, now });
     const db = dbs.db, w = dbs.worldId;
     this.w = w;
     this.q = {
@@ -96,14 +96,26 @@ export class Talk {
     if (this.q.visitorDay.get(this.w, a.id, P.account.id, dayAgo).n >= L.visitorPerDay) throw new TalkError(429, 'visitor_day_limit', `That's enough talking with ${a.name} for today: try again tomorrow`);
     if (this.q.agentDay.get(this.w, a.id, dayAgo, dayAgo).n >= L.agentVisitorPerDay) throw new TalkError(429, 'agent_day_limit', `${a.name} has talked with enough visitors today: try again tomorrow`);
     // it stops and turns to them (asleep, it doesn't: nobody talks with it then)
-    const i = this.bodyOf(a), sim = this.simOf();
+    const i = this.bodyOf(a), sim = this.simOf(), name = String(P.account.displayName || P.account.login || 'A visitor');
+    let place = '';
     if (i >= 0 && sim) {
       const me = sim.agents[i]?.plan ? sim.agentInfo(i) : null;
       const x = Number.isFinite(at?.x) ? at.x : (me?.pos.x ?? 0) + 1, z = Number.isFinite(at?.z) ? at.z : (me?.pos.z ?? 0) + 1;
       if (me?.act && (me.act.use === 'sleep' || me.act.use === 'nap')) throw new TalkError(409, 'asleep', `${a.name} is asleep`);
-      sim.hold(i, x, z);
+      sim.hold(i, x, z, undefined, '', null, name);   // (it turns to them; its day says who it talked with)
+      place = me?.act?.place || '';
     }
-    if (!s) { s = this.sessions.createTalk(P.account.id, a.id, `Talk with ${a.name}`); used = 0; }
+    if (!s) {
+      s = this.sessions.createTalk(P.account.id, a.id, `Talk with ${a.name}`); used = 0;
+      // a new conversation, remembered (2026-10-28, the product owner: "who they speak to [should] be recognized and
+      // remembered"): who it was with and where, and they get to know each other a step (server/agent-life/ conversation).
+      // Not the visitor's own words (a stranger's words never go into its memory as they are: what was worth keeping its
+      // own brain keeps, as itself); and nothing at all when its owner gives others only its work.
+      try {
+        const life = this.lifeOf?.(), me = life?.participant(a.id);
+        if (me && this.publicMode(a) === 'life') life.conversation({ who: [me, { kind: 'player', id: P.account.id, name }], place: place || null, label: 'Talked', kind: 'talk', line: false });
+      } catch (e) { this.log?.warn?.('[talk] remembering:', e.message); }
+    }
     const out = await this.chat.startRun(P, { input: t }, { a, s });
     return { runId: out.runId, ...this.window(s, used + 1, L) };
   }

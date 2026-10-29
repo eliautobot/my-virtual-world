@@ -83,3 +83,47 @@
   .mp { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; max-height: 72vh; border-radius: 14px 14px 0 0; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
   .mp-row { padding: 8px 6px; }
 }
+
+/* MVW Radio in a car or boat (audio/radio.js): a slim panel at the top, the station's colour on its edge */
+.radio-hud { position: fixed; top: 62px; left: 12px; z-index: 5; display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; max-width: min(460px, calc(100vw - 20px)); border-radius: 14px; background: rgba(14, 16, 24, 0.82); color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12); border-left: 4px solid var(--rh, #888); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35); backdrop-filter: blur(6px); }
+.radio-hud.hidden { display: none; }
+.radio-hud .rh-t { display: flex; flex-direction: column; min-width: 0; flex: 1; padding: 0 4px; line-height: 1.2; }
+.radio-hud .rh-s { font-size: 13px; color: var(--rh, #fff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.radio-hud .rh-n { font-size: 12px; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.radio-hud.talk .rh-n { white-space: normal; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; max-width: 340px; line-height: 1.35; }
+.radio-hud .rh-b { flex: none; width: 32px; height: 32px; border-radius: 10px; border: 0; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 14px; cursor: pointer; }
+.radio-hud .rh-b:hover { background: rgba(255, 255, 255, 0.2); }
+.radio-hud .rh-off.on { color: var(--rh, #fff); }
+.radio-hud.off .rh-s { color: #aaa; }
+/* phones: a 📻 button under the map (the radar, 112 px in the corner under the top bar); the panel slides out beside it
+   and tucks away again (audio/radio.js openPanel) */
+.radio-btn { display: none; }
+@media (max-width: 760px) {
+  .radio-btn { display: flex; align-items: center; justify-content: center; position: fixed; left: 10px; top: calc(var(--topbar-height, 44px) + 128px); z-index: 5;
+    width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(14, 16, 24, 0.82); color: #fff; font-size: 20px; box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35); }
+  .radio-btn.hidden { display: none; }
+  .radio-btn:not(.on) { opacity: 0.6; }
+  .radio-btn.open { background: rgba(40, 44, 60, 0.95); }
+  .radio-hud { top: calc(var(--topbar-height, 44px) + 124px); left: 62px; right: auto; max-width: calc(100vw - 74px); transform: translateX(calc(-100% - 70px)); opacity: 0;
+    pointer-events: none; transition: transform 0.25s ease, opacity 0.25s ease; }
+  .radio-hud.open { transform: none; opacity: 1; pointer-events: auto; }
+  .radio-hud .rh-b { width: 36px; height: 36px; }
+}
+
+/* in a radio studio: its own station plays, fixed (no stepping, no off) */
+.radio-hud.rh-studio .rh-b[data-d], .radio-hud.rh-studio .rh-off { display: none; }
+
+/* a radio studio's station window (ui/station-panel.js): the stage panel's window, in the station's colour */
+#stationpins { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
+#stationpins .sp-pin { pointer-events: auto; border: 2px solid #4aa3ff; font-size: 17px; }
+.mp.sp { border-top: 4px solid var(--sp, #4aa3ff); width: 400px; overflow: auto; }
+.mp.sp .sp-name { color: var(--sp, inherit); }
+.mp.sp .sp-line { white-space: normal; }
+.mp.sp .sp-now { margin: 8px 0; padding: 7px 10px; border-radius: 8px; background: rgba(255,255,255,.06); font-size: 13px; }
+.mp.sp .sp-sh { margin: 6px 0 4px; font-size: 12px; opacity: .8; } .mp.sp .sp-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.mp.sp .sp-list li { line-height: 1.35; } .mp.sp .sp-list small { opacity: .65; }   /* (its recent shows: station-panel.js paintShows) */
+.mp.sp .sp-show { cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: 0 -4px; } .mp.sp .sp-show:hover, .mp.sp .sp-show.on { background: rgba(255,255,255,.06); }
+.mp.sp .sp-said { margin: 4px 0 2px; padding-left: 8px; border-left: 2px solid var(--sp, #4aa3ff); } .mp.sp .sp-said p { margin: 0 0 3px; } .mp.sp .sp-said b { opacity: .85; }   /* (an opened show: what each said) */
+.mp.sp .rad-st { border-left: 0 !important; padding: 0 !important; background: none !important; }

@@ -46,7 +46,7 @@ export const ICON = {
   floor_neon: '✨', neon_arcade: '✨', neon_gameon: '✨', neon_prizes: '✨', neon_snacks: '✨', neon_joystick: '✨', neon_invader: '👾', pixel_mural: '👾', pixel_mural_maze: '👾', plant: '🌿', plant_tall: '🌱', floor_lamp: '💡', bench: '🪑',
   picnic_table: '🧺', tree: '🌳', tree_pine: '🌲', bush: '🌿', flowers: '🌷', fountain: '⛲',
 };
-const CAT_ICON = { Office: '💼', Lounge: '🛋️', Kitchen: '🍳', Retail: '🛍️', Gym: '🏋️', Home: '🏠', Fun: '🎲', Arcade: '🕹️', Club: '🎧', Decor: '🌿', Signs: '🪧', Outdoor: '🌳' };
+const CAT_ICON = { Office: '💼', Lounge: '🛋️', 'Café': '☕', Kitchen: '🍳', Retail: '🛍️', Gym: '🏋️', Home: '🏠', Fun: '🎲', Arcade: '🕹️', Club: '🎧', Decor: '🌿', Signs: '🪧', Outdoor: '🌳' };
 const TINTS = ['#f1f0ec', '#d8d2c4', '#b08560', '#6e4a31', '#3b3f45', '#6d7b8f', '#1f2a44', '#3d6fb6', '#2a9d8f', '#4f8a3c', '#e9c46a', '#e76f51', '#c0392b', '#8e44ad', '#e84393'];
 const TYPE_CAT = { office: 'Office', hq: 'Office', apartment: 'Home', cafe: 'Kitchen', restaurant: 'Kitchen', shop: 'Retail', gym: 'Gym', park: 'Outdoor' };
 const STYLE_NAME = { glass: 'Glass', brick: 'Brick', concrete: 'Concrete', modern: 'Modern', classic: 'Classic', stucco: 'Stucco' };
@@ -90,15 +90,28 @@ async function edit(ops) {
     return r;
   } catch (err) { app.toast(String(err.message || err).replace(/^floors_unpaid: /, ''), 'bad', 2800); return null; }
 }
-function wallSnap(B, it) {
-  const ib = interiorBounds(B), d = CATALOG[it.t], hz = Math.max(Math.abs(d.rect[1]), Math.abs(d.rect[3])) + 0.01;
-  const opts = [[ib.z1 - it.z, 'n'], [it.z - ib.z0, 's'], [ib.x1 - it.x, 'e'], [it.x - ib.x0, 'w']].sort((a, b) => a[0] - b[0]);
+/** A wall piece to the nearest wall within 1.6 m, its back flat on it, facing into the room: the outer walls, or (2026-10-27,
+ *  "i moved the fire extinguisher and now its not landing back on the wall correctly") an inner wall of the floor, either
+ *  side (a café kitchen's). Its back is the rect's -z edge (as the floors' layouts put them: layouts.js against). */
+export function wallSnap(B, it, L = null) {
+  const ib = interiorBounds(B), d = CATALOG[it.t], hz = Math.abs(d.rect[1]) + 0.01, IW = 0.06;
+  const opts = [[ib.z1 - it.z, 'n'], [it.z - ib.z0, 's'], [ib.x1 - it.x, 'e'], [it.x - ib.x0, 'w']];
+  for (const w of L?.walls || []) {   // (inner walls: axis-aligned segments; the side the piece is on)
+    const [x1, z1, x2, z2] = w;
+    if (Math.abs(z1 - z2) < 1e-3 && it.x >= Math.min(x1, x2) - 0.1 && it.x <= Math.max(x1, x2) + 0.1) opts.push([Math.abs(it.z - z1), it.z >= z1 ? 'is' : 'in', z1]);
+    else if (Math.abs(x1 - x2) < 1e-3 && it.z >= Math.min(z1, z2) - 0.1 && it.z <= Math.max(z1, z2) + 0.1) opts.push([Math.abs(it.x - x1), it.x >= x1 ? 'iw' : 'ie', x1]);
+  }
+  opts.sort((a, b) => a[0] - b[0]);
   if (opts[0][0] > 1.6) return it;
-  const o = { ...it }, side = opts[0][1];
+  const o = { ...it }, [, side, line] = opts[0];
   if (side === 'n') { o.z = ib.z1 - hz; o.r = Math.PI; }
   else if (side === 's') { o.z = ib.z0 + hz; o.r = 0; }
   else if (side === 'e') { o.x = ib.x1 - hz; o.r = -HALF; }
-  else { o.x = ib.x0 + hz; o.r = HALF; }
+  else if (side === 'w') { o.x = ib.x0 + hz; o.r = HALF; }
+  else if (side === 'is') { o.z = line + IW + hz; o.r = 0; }      // (on the wall's +z side, facing +z)
+  else if (side === 'in') { o.z = line - IW - hz; o.r = Math.PI; }
+  else if (side === 'iw') { o.x = line + IW + hz; o.r = HALF; }
+  else { o.x = line - IW - hz; o.r = -HALF; }
   return o;
 }
 
@@ -400,7 +413,7 @@ function updateFurnishGhost() {
   if (!p) { ghost.hide(); F.it = null; setStatus(); return; }
   const l = toLocal(tg.B, p.x, p.z);
   let it = { t: F.type, x: snap(l.x), z: snap(l.z), r: F.rot };
-  if (CATALOG[F.type].wall && tg.B.type !== 'park') it = wallSnap(tg.B, it);
+  if (CATALOG[F.type].wall && tg.B.type !== 'park') it = wallSnap(tg.B, it, levelOf(tg.b, tg.f));
   const reason = checkItem(tg.B, tg.f, levelOf(tg.b, tg.f), it);
   F.it = it; F.ok = !reason; F.reason = reason || '';
   ghost.setType(INDOOR_SIGNS[F.type] ? signGeoKey({ t: F.type, v: signStyle(F.type, F.sv[F.type]) }) : F.type); ghost.show(tg, it, F.ok);
@@ -454,7 +467,7 @@ function dragGhost() {
   const p = inter.floorPoint(cam.rayAt(ptr.x, ptr.y), tg.y); if (!p) return;
   const l = toLocal(tg.B, p.x, p.z), src = d.e.it;
   let it = { ...src, x: snap(l.x + d.gx), z: snap(l.z + d.gz), r: src.r || 0 };
-  if (CATALOG[src.t].wall && tg.B.type !== 'park') it = wallSnap(tg.B, it);
+  if (CATALOG[src.t].wall && tg.B.type !== 'park') it = wallSnap(tg.B, it, levelOf(tg.b, tg.f));
   const reason = checkItem(tg.B, tg.f, levelOf(tg.b, tg.f), it, src.id);
   d.it = it; d.ok = !reason; d.reason = reason || '';
   ghost.setType(signGeoKey(src) || src.t); ghost.show(tg, it, d.ok);

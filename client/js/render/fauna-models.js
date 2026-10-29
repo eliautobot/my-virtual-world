@@ -335,8 +335,22 @@ vec3 animate(vec3 p) {
   // wings: flap when flying, spread when gliding, folded at rest
   if (aPart > 0.5 && aPart < 2.5) {
     float side = aPart < 1.5 ? 1.0 : -1.0;
-    float a = mode > 2.5 && mode < 3.5 ? sin(t * 6.2832) * 0.95 : mode > 3.5 && mode < 4.5 ? 0.12 + sin(t * 1.3) * 0.06 : -1.25;
-    p = rotX(p, a * side);
+#ifdef FOLD
+    // a bird on the ground (2026-10-28, the product owner: landed birds held their wings up high): each wing folded back along the
+    // upper flank, its leading edge high by the back, its trailing edge lower on the side, narrowing to the tips over the
+    // tail. FOLD: the leading edge's height and distance out at the shoulder, the trailing edge's; FOLD_W: the wing's
+    // front edge, its chord and its span (the model's own wing)
+    if (mode < 0.5) {
+      float c = clamp((p.x - FOLD_W.x + FOLD_W.y) / FOLD_W.y, 0.0, 1.0), u = clamp((abs(p.z) - 0.08) / FOLD_W.z, 0.0, 1.0);
+      vec2 lead = vec2(FOLD.x - u * 0.07, FOLD.y * (1.0 - u * 0.5)), trail = vec2(FOLD.z + u * 0.02, FOLD.w * (1.0 - u * 0.35));
+      vec2 yz = mix(trail, lead, c);
+      p = vec3(0.24 - u * 0.9 + (c - 0.5) * 0.1, yz.x, side * (yz.y + (p.y - 0.08) * 0.5));
+    } else
+#endif
+    {
+      float a = mode > 2.5 && mode < 3.5 ? sin(t * 6.2832) * 0.95 : mode > 3.5 && mode < 4.5 ? 0.12 + sin(t * 1.3) * 0.06 : -1.25;   // (at rest: up, as a butterfly's)
+      p = rotX(p, a * side);
+    }
   }
   // legs swing about the hip when walking or running
   if (aPart > 2.5 && aPart < 6.5) {
@@ -358,14 +372,18 @@ vec3 animate(vec3 p) {
   if (mode > 6.5) vGlow = 0.5 + 0.5 * sin(t * 2.4);
   return p;
 }`;
+/** Birds that fold their wings at rest: [the leading edge's height and distance out at the shoulder, the trailing edge's
+ *  (on the body's own flank)], [the wing's front edge, its chord, its span] (the model's wing outline). */
+export const FOLD = { seagull: [[0.235, 0.165, 0.1, 0.225], [0.22, 0.58, 1.1]], bird: [[0.27, 0.2, 0.1, 0.265], [0.25, 0.67, 1.02]] };
 /** The material for a model: vertex animation, per-instance colour with painted markings. */
 export function faunaMaterial(model) {
   const glow = model === 'firefly';
   const m = glow ? new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })
     : new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0, side: ['butterfly', 'bird', 'fish', 'duck', 'reeffish', 'turtle', 'dolphin', 'seagull'].includes(model) ? THREE.DoubleSide : THREE.FrontSide });
+  const fold = FOLD[model];
   m.onBeforeCompile = sh => {
     sh.uniforms.uTime = GU.uTime;
-    sh.vertexShader = ANIM + '\n' + sh.vertexShader.replace('#include <begin_vertex>', 'vec3 transformed = animate(vec3(position));');
+    sh.vertexShader = (fold ? `#define FOLD vec4(${fold[0].map(v => v.toFixed(3)).join(', ')})\n#define FOLD_W vec3(${fold[1].map(v => v.toFixed(3)).join(', ')})\n` : '') + ANIM + '\n' + sh.vertexShader.replace('#include <begin_vertex>', 'vec3 transformed = animate(vec3(position));');
     sh.fragmentShader = `varying vec4 vTone;\nvarying vec3 vObj;\nvarying float vGlow;
 float fH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float fN(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);

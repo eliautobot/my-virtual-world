@@ -23,6 +23,7 @@ import { DRIVE_PHYSICS_KEY, drivePhysicsMode } from '../player/drive-physics.js'
 import { PERF_HUD_KEY } from './perfhud.js';
 import { residentsTab } from './residents-admin.js';
 import { agentLimitsTab } from './agent-limits.js';
+import { radioTab } from './radio-admin.js';
 import { econAdminTab, useEconAdmin } from './econ-admin.js';
 import { freeWillAdminTab, useFreeWillAdmin } from './free-will.js';
 import { mindAdmin, useMindAdmin } from './mind.js';
@@ -50,6 +51,7 @@ const TABS = [
   ['economy', '🪙 Economy', 'Economy', () => auth.can('economy.admin')],
   ['freewill', '🧠 Free Will & Mind', 'Free Will and the Mind', () => auth.can('freewill.admin')],
   ['limits', '🛡️ Agent limits', 'Agent limits', () => auth.can('freewill.admin')],
+  ['radio', '📻 Radio', 'MVW Radio', () => auth.can('freewill.admin')],
   // (everyone sees it: it says why things are locked in demo mode)
   ['licence', '🔑 License', 'License', () => true],
   ['about', 'ℹ️ About', 'About', () => true],
@@ -77,7 +79,7 @@ export function open(a, want = 'display') {
     ({
       display: displayTab, sound: soundTab, player: playerTab, account: accountTab, settings: generalTab,
       users: usersTab, invites: invitesTab, permissions: permissionsTab, audit: auditTab,
-      connections: connectionsTab, agents: (d2, b) => agentSlotsTab(d2, b, app), voice: voiceTab, data: dataTab, residents: residentsTab(app), promo: promoTab, economy: econAdminTab, freewill: freeWillAndMindTab, limits: agentLimitsTab, licence: licenceTab, about: aboutTab,
+      connections: connectionsTab, agents: (d2, b) => agentSlotsTab(d2, b, app), voice: voiceTab, data: dataTab, residents: residentsTab(app), promo: promoTab, economy: econAdminTab, freewill: freeWillAndMindTab, limits: agentLimitsTab, radio: radioTab, licence: licenceTab, about: aboutTab,
     })[k](d, body);
   };
   d.q('.st-tabs').onclick = e => { const b = e.target.closest('.tab'); if (b) show(b.dataset.tab); };
@@ -93,6 +95,9 @@ const SOUNDS = [
   ['volVoices', 'Agents\' voices', 'Voice conversations and 🔊 read aloud.'],
   ['volMedia', 'Videos and recordings', 'Voicemail, and audio and video in chats and on the PC.'],
   ['volMusic', 'Live music', 'The lounge\'s band and the club\'s DJ, when you are on their floor.'],
+  ['volEffects', 'Sound effects', 'Footsteps on every surface, jumps, landings and splashes, for you and the people near you.'],
+  ['volVehicles', 'Vehicles', 'Engines, tyres, skids and horns (H while driving or at a boat\'s wheel), the traffic around you, boats and ferries.'],
+  ['volRadio', 'Radio', 'MVW Radio while you drive or take a boat out: R changes the station, Shift+R goes back, the radio panel turns it off.'],
   ['volScore', 'Background music', 'The city\'s own music as you go about: by day, at dusk, at night and while you build. It makes way for live music and voices.'],
 ];
 function soundTab(d, body) {

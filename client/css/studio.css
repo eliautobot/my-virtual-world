@@ -634,3 +634,37 @@
 .vt-m b { font-size: 11px; color: var(--dim); }
 .vt-m.it span { color: var(--text); } .vt-m.them span { color: color-mix(in srgb, var(--text) 82%, var(--sc)); }
 .vt-blocks .btn { flex: none; }
+/* On the air (ui/studio-world.js airHtml): the shows it was on the radio in, one opened to what was said */
+.air-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 5px; }
+.air-row { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; padding: 6px 10px; border-radius: 10px; background: var(--btn); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.4; }
+.air-row:hover, .air-show.on .air-row { border-color: var(--accent, #4aa3ff); } .air-row:focus-visible { outline: 2px solid var(--accent, #4aa3ff); outline-offset: 1px; }
+.air-row small { opacity: .7; } .air-row small.dim { display: block; }
+.air-said { margin: 6px 2px 2px 10px; padding-left: 8px; border-left: 2px solid var(--accent, #4aa3ff); font-size: 12.5px; } .air-said p { margin: 0 0 4px; }
+/* an agent's Experience: every game of the world (2026-10-28: client/js/ui/studio-experience.js) */
+.xp-rank { font-weight: 700; }
+.xp-lv, .xp-gl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.xp-gl { font-size: 13px; font-weight: 400; }
+.xp-bar { display: inline-block; width: 120px; height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--sc) 15%, var(--line)); overflow: hidden; vertical-align: middle; }
+.xp-bar i { display: block; height: 100%; background: linear-gradient(90deg, #f0a030, #e8742a); }
+.xp-game > summary { cursor: pointer; list-style: none; }
+.xp-game > summary::-webkit-details-marker { display: none; }
+.xp-courses { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; font-size: 13px; }
+.xp-courses b { margin-right: 4px; }
+.xp-st { color: #e8a020; letter-spacing: 1px; }
+.xp-more, .xp-shift, .xp-last, .xp-book { margin: 0; }
+.xp-cook { display: grid; gap: 7px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--sc) 5%, transparent); }
+.xp-sk-h { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.xp-skills { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+.xp-skill { display: grid; grid-template-columns: 1fr auto 24px; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 8px; background: color-mix(in srgb, var(--sc) 6%, transparent); font-size: 13px; }
+.xp-pips { color: #e8742a; letter-spacing: 1px; font-size: 11px; }
+.xp-up { width: 22px; height: 22px; border: 0; border-radius: 50%; background: #e8742a; color: #fff; font-weight: 800; cursor: pointer; }
+.xp-mode { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.xp-mode select { max-width: 260px; }
+.xp-why { color: #e5534b; font-size: 12.5px; }
+.xp-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.xp-badge { padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; background: #ecdcc0; color: #2a2016; }
+.xp-badge.t-silver { background: #e3e7ee; } .xp-badge.t-gold { background: #f8e3a0; } .xp-badge.t-platinum { background: #cdeff3; }
+.xp-badge.off { opacity: .35; filter: grayscale(.6); }
+.xp-recent { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
+.xp-recent li { display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; align-items: center; }
+@media (max-width: 640px) { .xp-skills { grid-template-columns: 1fr; } .xp-recent li { grid-template-columns: 1fr auto; } }

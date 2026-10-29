@@ -149,7 +149,8 @@ function storeFront(f, K, G) {
   f.col('#b9ab92'); f.box(s0 - deep - 0.2, G, a - 0.2, s0, G + 0.12, b + 0.2);                          // the porch's deck
   f.col('#eee9dc'); for (let z = a; z <= b + 1e-6; z += (b - a) / Math.max(1, Math.round((b - a) / 4))) { f.box(s0 - deep - 0.12, G + 0.12, z - 0.12, s0 - deep + 0.12, G + H, z + 0.12); }
   f.col('#24405e'); f.quad([[s0 - deep - 0.5, G + H, a - 0.5], [s0 + 0.05, G + H + 0.45, a - 0.5], [s0 + 0.05, G + H + 0.45, b + 0.5], [s0 - deep - 0.5, G + H, b + 0.5]], [-0.15, 1, 0]);
-  f.box(s0 - deep - 0.55, G + H - 0.25, a - 0.5, s0 - deep - 0.45, G + H + 0.05, b + 0.5);
+  f.quad([[s0 - deep - 0.5, G + H - 0.06, a - 0.5], [s0 + 0.05, G + H + 0.39, a - 0.5], [s0 + 0.05, G + H + 0.39, b + 0.5], [s0 - deep - 0.5, G + H - 0.06, b + 0.5]], [0.15, -1, 0]);   // its underside (seen from the deck)
+  f.col('#24405e'); f.box(s0 - deep - 0.55, G + H - 0.25, a - 0.5, s0 - deep - 0.45, G + H + 0.05, b + 0.5);
   const mid = (a + b) / 2, sw = Math.min(6.5, (b - a) / 2 + 0.3); f.col('#c8312a'); f.box(s0 - deep - 0.62, G + H + 0.05, mid - sw, s0 - deep - 0.5, G + H + 1.0, mid + sw);   // the sign board
   f.col('#fff6da', 0, 2); for (const z of [a + 1, mid - 3, mid + 3, b - 1]) f.box(s0 - 0.4, G + H + 0.1, z - 0.2, s0 - 0.05, G + H + 0.25, z + 0.2);   // porch lights
   // the ice machine and the bait cooler by the door

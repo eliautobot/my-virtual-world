@@ -10,7 +10,8 @@
 import { makeGrid } from './city.js';
 import { GROUND_Y } from './constants.js';
 import { CATALOG } from './catalog.js';
-import { PAD, STRUCTURES, DOOR, ROAD_END, AIRCRAFT_SOLIDS, toWorldAt, toFrame, rectAt, standsAt } from './airport-layout.js';
+import { PAD, STRUCTURES, DOOR, ROAD_END, AIRCRAFT_SOLIDS, SURFACES as AIRPORT_SURFACES, LANDSIDE, toWorldAt, toFrame, rectAt, standsAt } from './airport-layout.js';
+import { RADIO_PAD, RADIO_STUDIO, RADIO_TOWER, RADIO_DOOR, RADIO_ROAD_END, RADIO_SURFACES } from './radio-layout.js';
 import { DOCKS, isDock, dockPads, dockDecks, dockWalls, dockWhy, dockLadders, slipsAt, waterOf, deckTop, dockDecor } from './dock-layout.js';
 import { roadProfile, profileAt, GATE_EASE } from './island-roads.js';
 import { alignmentGeometry, pointAt } from './roads.js';
@@ -36,6 +37,15 @@ export const WORLD_KINDS = Object.freeze({
     blurb: 'A lake dock: a launch ramp, a short pier with 5 small boats (2 anglers each), a car park and the Bait Shack. Players fish the lake trips from here.',
     pad: DOCKS.lakedock.pad, structures: [{ id: 'store', label: 'Bait Shack', ...storeRect(DOCKS.lakedock), h: 4.2, kind: 'store', building: true }], door: DOCKS.lakedock.door, roadEnd: DOCKS.lakedock.roadEnd, maxSlope: 5, roadReach: 1500,
     size: DOCKS.lakedock.size,
+  }),
+  // MVW Radio's home (shared/radio-layout.js; server/radio/): the studio its hosts work in, the broadcast tower
+  radio: Object.freeze({
+    kind: 'radio', label: 'Radio Station', icon: '📻', play: 'radio',
+    blurb: 'MVW Radio\'s home: a two-storey studio (its ON AIR sign lit while a host is on the air) where the stations\' hosts work, a 96 m broadcast tower with its aviation lights, satellite dishes and a car park. The stations play in every car and boat; their hosts are chosen in Settings → Radio.',
+    pad: RADIO_PAD, door: RADIO_DOOR, roadEnd: RADIO_ROAD_END, maxSlope: 5, roadReach: 1500,
+    structures: [{ id: 'studio', label: 'Studio', ...RADIO_STUDIO, kind: 'studio', building: true },
+      { id: 'tower', label: 'Broadcast tower', s0: RADIO_TOWER.s - RADIO_TOWER.base / 2, f0: RADIO_TOWER.f - RADIO_TOWER.base / 2, s1: RADIO_TOWER.s + RADIO_TOWER.base / 2, f1: RADIO_TOWER.f + RADIO_TOWER.base / 2, h: RADIO_TOWER.h, kind: 'mast' }],
+    size: '80 × 84 m',
   }),
 });
 function storeRect(K) { return { s0: K.store.s0, f0: K.store.f0, s1: K.store.s1, f1: K.store.f1 }; }
@@ -325,6 +335,7 @@ export function terminalSpec(m) {
   const rot = ((Math.round(m.rot * 180 / Math.PI) + (face > 0 ? 90 : 270)) % 360 + 360) % 360;
   const at = { block: null, rot, base: Math.round((m.y - GROUND_Y) * 100) / 100, module: m.id, rect: { x0: c.x - w / 2, x1: c.x + w / 2, z0: c.z - d / 2, z1: c.z + d / 2 } };
   if (K.dock) return { ...at, type: 'shop', floors: K.dock.store.floors, style: 'classic', tackle: true, sign: K.dock.store.name, name: `${m.name || K.label} ${K.dock.store.name}` };
+  if (m.kind === 'radio') return { ...at, type: 'office', floors: 2, style: 'glass', radio: true, sign: 'MVW RADIO', name: String(m.name || 'MVW Radio').slice(0, 28) };   // (offices: the hosts' desks)
   const name = String(m.name || K.label).slice(0, 28);   // one name: the terminal's, its sign's, the canopy's, the entrance sign's
   return { ...at, type: 'terminal', floors: 2, style: 'glass', name, sign: name };
 }
@@ -378,3 +389,30 @@ export function checkWorldModule(world, m, env, { ignoreId = null, lotsUnder = n
   }
   return null;
 }
+
+/** The ground's kinds of surface a module lays (its own words) as what is underfoot: a paved one, gravel; grass is the
+ *  ground's own (null). */
+const UNDERFOOT = { runway: 'concrete', taxiway: 'concrete', apron: 'concrete', parking: 'concrete', road: 'concrete', asphalt: 'concrete', paving: 'concrete', gravel: 'gravel', grass: null };
+/** Each kind's surfaces in its frame, [s0, f0, s1, f1, surface] in drawing order (later over earlier). */
+const GROUNDS = {
+  airport: [...AIRPORT_SURFACES, [LANDSIDE.front, LANDSIDE.f0, LANDSIDE.edge, LANDSIDE.f1, 'paving'], [LANDSIDE.parkEnd, LANDSIDE.entry[0], LANDSIDE.edge, LANDSIDE.entry[1], 'road']],
+  radio: RADIO_SURFACES,
+};
+/**
+ * What is underfoot at (x, z) on a world module's grounds (2026-10-28, the product owner: "the parking lot surfaces and
+ * concrete don't get recognized when the player walks over them"): 'concrete' (paving, a car park, a runway), 'gravel',
+ * or null (not on a module's surfaces: the ground's own, its biome). For footsteps (client/js/audio/footsteps.js).
+ */
+export function groundAt(world, x, z) {
+  for (const m of world?.worldModules || []) {
+    const G = GROUNDS[m.kind]; if (!G) continue;
+    const pad = WORLD_KINDS[m.kind]?.pad, p = toFrame(m, x, z);
+    if (pad && (Math.abs(p.s - (pad.sc || 0)) > pad.hs + 1 || Math.abs(p.f) > pad.hf + 1)) continue;
+    let got;
+    for (const [s0, f0, s1, f1, kind] of G) if (p.s >= s0 && p.s <= s1 && p.f >= f0 && p.f <= f1) got = kind;
+    if (got !== undefined) return UNDERFOOT[got] ?? null;
+  }
+  return null;
+}
+/** Whether a module of this kind lays its own grounds (its paving from door to road: render/terrain.js lays no yard path). */
+export const laysOwnGround = kind => !!GROUNDS[kind];

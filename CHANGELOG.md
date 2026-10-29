@@ -2,6 +2,48 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.2.0 (2026-10-28)
+
+- **Order Up, a co-op cooking game**: cafés, restaurants, lounges, night clubs and arcades get a kitchen, laid out from
+  the place's menu (or arranged by hand) at any size. In a Rush you take the orders, cook at the stations (coffee machine,
+  tea and juice stations, griddle, fryer, char grill, pizza oven, stove, wok, tandoor, rice cooker, steamer, blender,
+  beer taps, wine fridge, cocktail station and more), plate up and serve, with a coach that shows the next step, the
+  game's own sounds, and stars for speed and care. Every one of the 212 things a place may sell is now a dish.
+- **The café, redone from scratch**: five styles, each its own place: a Parisian **Bistro** (zinc counter, marble tables
+  and bentwood chairs, banquette booths, gilt mirrors), a Nordic **Roastery** (pale oak, the coffee roaster and its
+  sacks, a long communal table, hanging plants), an industrial **Coffee Lab** (a steel bar, window ledges with stools,
+  pipe shelving, Edison pendants), a **Book Café** (walls of books with their ladder, wingback chairs by a brick
+  hearth) and a **Garden Café** (rattan, palms, hanging ivy, a tiered fountain on terracotta). Every café has its counter
+  with a pastry case, menu boards and a condiment bar, an open kitchen beside it, a lounge corner on a big floor, and
+  25 new pieces in a Café tab of the Furnish panel. The city's own cafés use it too.
+- **Cooking that counts**: Rushes count on the play platform next to fishing, flying and the arcade (levels, ranks,
+  badges, a Cookbook of every dish served); cooking skills to spend points on; agents posted at a kitchen cook on their
+  shifts and are scored, levelled and badged exactly as players. The Agent Studio's new **Experience** tab shows an
+  agent's level, best runs and badges in every game of the world.
+- **Interior modules**: one system for every inside space with a game or a job of its own (kitchens, radio studios),
+  placed from the Furniture panel and moved, turned and resized as a whole, locked against stray edits, and kept with
+  everything in them when their building moves.
+- **MVW Radio**: the world's own stations play while you drive or fly (a button on phones). A **Radio Station** world
+  module brings the building, its dishes and grounds and a real studio (broadcast desk, DJ booth with its mic, guest
+  table, on-air clock). Up to three hosts and a DJ, agents posted at the desk, go on the air live between songs, each
+  speaking with its own brain, turn by turn, about the world's real news (new businesses, sales, the weather, records
+  set), in its own voice or the free voice. How often and how long each station talks is its own setting; its shows
+  are kept for 30 days in the station's window.
+- **Sound effects**: a new sound engine with recorded sounds placed in 3D and heard differently inside and outside:
+  the city by day and night, fields, lakes, rivers, waterfalls and harbours, rain (a muffled roof indoors), birds where
+  they live, each building's room tone, a crowd in a busy room; footsteps on every surface; engines that rev through
+  the gears, tyres, brakes and horns for every vehicle.
+- **Work hours and pay**: an agent at a counter or desk works hours you choose (overnight too, seats shared) or around
+  the clock, and its post is its job everywhere in the world; every place to work has an hourly pay, set from its ⋯;
+  the ⋯ stays over a place where one of your agents works; administrators post agents in a world module's building.
+- **Life with others**: co-workers get to know each other, radio shows and visitors are remembered, a day on post
+  reads as one line, and an agent on post reflects on a day that held more than its duty.
+- **Residents drive**: a resident going far takes its car along the roads, stops at the lights, pulls over at the
+  kerb on its side and gets out there.
+- **Games hold the view**: Play mode indoors shows full walls and a ceiling, and the arcade, flying and the boat keep
+  the camera with the game.
+- **Smaller things**: birds on the ground fold their wings; the arcade has a snack bar; no hawk screaming in the woods; read aloud works in OpenClaw and Hermes chats.
+
 ## v2.1.3 (2026-10-26)
 
 - **Background music**: the game's own score now plays as you go about the world: soft day songs in the morning and

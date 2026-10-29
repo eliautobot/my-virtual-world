@@ -6,7 +6,7 @@
 // Zooming on in past the nearest distance goes into first person (render/camera.js): the camera at the eyes, the body
 // facing the way it looks and hidden from its own camera, inside a building full-height walls and a ceiling.
 import { moduleBoxes, aircraftSolids, moduleDecks, moduleLadders, deckUnder } from '/shared/world-modules.js';
-import { S, bus, setFocus, bld, select, selectBuilding } from '../core/state.js';
+import { S, bus, setFocus, bld, select, selectBuilding, releaseView } from '../core/state.js';
 import { post } from '../core/net.js';
 import { h, esc, clamp, angDiff, isTouch } from '../core/util.js';
 import { GROUND_Y, WALL_T, floorAt, ctxOf } from '/shared/constants.js';
@@ -21,6 +21,7 @@ import { bridgePiers } from '/shared/island-roads.js';
 import { airPhase, landPhase, hipLift, LAND_T } from './jump-pose.js';
 import { elevatorStops } from '/shared/building.js';
 import { interiorBounds } from '/shared/edit.js';
+import { WALL_H } from '../render/interiors.js';
 import { CLIP, CLIP_DUR, CLIP_STRIDE, SEATED_CLIPS } from '../render/anim.js';
 import { PLAYER_APP } from '../render/agents.js';
 import { GU } from '../render/scene.js';
@@ -92,7 +93,7 @@ export function init(a) {
     runToggle = handbrakeToggle = false; keys.clear(); joy.x = joy.y = 0;
     const i = agents.extra.indexOf(P.extra); if (i >= 0) agents.extra.splice(i, 1);
     app.stage.camera.fov = 62; cam.rates = DRIVE_CAM_RATES; refreshVehicleHud();
-    app.toast(o.keys || 'W/S throttle, brake & reverse · A/D steer · Shift boost (from a stop: burnout) · Space handbrake · E exit when stopped', 'good', 6000);
+    app.toast(o.keys || 'W/S throttle, brake & reverse · A/D steer · Shift boost (from a stop: burnout) · Space handbrake · H horn · R radio · E exit when stopped', 'good', 6000);
   };
   P.onVehicleExit = point => {
     if (point && Number.isFinite(point.x) && Number.isFinite(point.z)) { P.x = point.x; P.y = point.y; P.z = point.z; P.ctx = -1; }
@@ -367,6 +368,23 @@ function deckCamera() {
     cam.goalPitch = pitch; cam.goalDist = d;
   } else if (P.camSave) { cam.goalDist = P.camSave.dist; cam.goalPitch = P.camSave.pitch; P.camSave = null; }
 }
+/** Indoors in Play mode the walls are full height under a ceiling (main.js wallMode), so the camera behind the player
+ *  stays in the room: under the ceiling, inside the outer walls, this side of any inner wall (camera.js distCap). */
+const _cl = { x: 0, z: 0 }, _cp = { x: 0, z: 0 };
+function roomCap(ox, sp, oz, dist) {
+  if (P.ctx < 0 || cam.fp) return dist;
+  const B = bld(P.ctx >> 6), f = P.ctx & 63;
+  if (!B || B.type === 'park') return dist;
+  const t = cam.target, ceil = floorAt(B, f) + WALL_H.fp - 0.3, ib = interiorBounds(B), gr = gridFor(B, f), m = 0.3;
+  let d = sp > 0.01 ? Math.min(dist, Math.max(0.35, (ceil - t.y) / sp)) : dist;
+  toLocal(B, t.x, t.z, _cp);
+  for (let s = 0.2; s < d + 0.2; s += 0.2) {
+    const u = Math.min(s, d), x = t.x + ox * u, z = t.z + oz * u, l = toLocal(B, x, z, _cl);
+    if (l.x < ib.x0 + m || l.x > ib.x1 - m || l.z < ib.z0 + m || l.z > ib.z1 - m || !inFootprint(B, x, z) || wallBetween(gr, _cp.x, _cp.z, l.x, l.z)) return Math.max(0.35, u - 0.3);
+    _cp.x = l.x; _cp.z = l.z;
+  }
+  return d;
+}
 /** Under a bridge's deck (well below it): the ground and water beneath it (GroundQuery.under), else null. */
 function underDeck() { return P.ctx < 0 && app.terrain?.ground?.under && !nearCity(P.x, P.z) ? app.terrain.ground.under(P.x, P.z, P.y) : null; }
 /** The top of a dock's deck under the player that the feet stand on (or step up to), else null. */
@@ -436,7 +454,7 @@ function eyes() {
   return _eye;
 }
 function onFirstPerson(on) {
-  if (S.focus.b >= 0) app.applyFocus();   // inside: full-height walls and a ceiling in first person (interiors.js 'fp')
+  if (S.focus.b >= 0) app.applyFocus();   // (the walls: full height under a ceiling in Play mode, main.js wallMode)
   if (on) app.toast('First person · zoom out to step back', '', 1800);
 }
 // ------------------------------------------------------------------ enter / leave play mode
@@ -469,11 +487,12 @@ function enter() {
   Object.assign(P, sp, { active: true, tyaw: sp.yaw, vx: 0, vz: 0, speed: 0, state: 'walk', slot: null, emote: null, tween: null, jumpT: -9, landT: -9, air: false, vy: 0, swim: false, diving: false, wade: false, clip: CLIP.idle, pclip: CLIP.idle, fadeT: -9 });
   P.y = groundY();
   if (P.ctx >= 0) setFocus(P.ctx >> 6, P.ctx & 63);
+  if (S.focus.b >= 0) app.applyFocus();   // full walls and a ceiling in Play mode (main.js wallMode)
   saved = { minDist: cam.minDist };
   cam.follow = () => ({ x: P.x, y: P.y + 1.1, z: P.z });
   cam.panEnabled = false; cam.keysEnabled = false; cam.eReserved = true; cam.minDist = 3;
   cam.goalDist = me && me.cam ? me.cam.dist : 13; cam.goalPitch = me && me.cam ? me.cam.pitch : 0.62;
-  cam.fpEye = eyes; cam.onFP = onFirstPerson;
+  cam.fpEye = eyes; cam.onFP = onFirstPerson; cam.distCap = roomCap;
   // look around: the mouse on a computer (captured now — entering Play is a click or a key), a finger on a touch screen
   cam.look = true;
   cam.lookPaused = () => !!(app.mapOpen || app.custOpen || document.querySelector('.modal-back, .auth-back') || cam.typing({ target: document.activeElement }));
@@ -493,7 +512,7 @@ function enter() {
 }
 function leave() {
   if (!P.active) return;
-  cam.setFP(false, true); cam.fpEye = null; cam.onFP = null;   // out of first person before the camera is saved
+  cam.setFP(false, true); cam.fpEye = null; cam.onFP = null; cam.distCap = null;   // out of first person before the camera is saved
   if (networked()) {
     sendState(nowS(), true);   // the last state, whatever the throttle says
     app.net.send({ t: 'pcam', dist: cam.goalDist, pitch: cam.goalPitch });
@@ -886,7 +905,7 @@ function buildHud(root) {
   E.pn = E.bar.querySelector('.pn');
   E.bar.querySelector('.look').onclick = () => app.openCustomizer?.({ kind: 'player' });
   E.bar.querySelector('.home').onclick = goHome;
-  E.bar.querySelector('.leave').onclick = () => { if (app.driving?.id) leaveDriving(); else app.setMode('explore'); };
+  E.bar.querySelector('.leave').onclick = () => { if (app.driving?.id) leaveDriving(); else { releaseView('Flying'); releaseView('Boat'); app.setMode('explore'); } };   // (Leave is a way out of the cockpit and off the boat: core/state.js holdView)
   E.elev = root.appendChild(h('<div id="elev" class="panel hidden"><div class="row" style="justify-content:space-between"><b class="et">🛗 Elevator</b><button class="btn small icon x" title="Close (Esc)">✕</button></div><div class="hint">Choose a floor</div><div class="grid"></div></div>'));
   E.elevT = E.elev.querySelector('.et'); E.elevGrid = E.elev.querySelector('.grid');
   E.elev.querySelector('.x').onclick = closeElevator;

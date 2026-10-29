@@ -6,6 +6,9 @@ import { itemAABB, footprint, rectsOverlap, toWorld, toLocal, segDist } from './
 import { buildGrid, flood, nearestFree } from './navgrid.js';
 import { levelEntries, elevatorStops, gatePoints, doorPoints } from './building.js';
 import { makeGrid, lotRect, blockAt, bandPoint, blockIJ, rotToSide } from './city.js';
+import { themeOf } from './floor-themes.js';
+import { FOOD_VENUES } from './food.js';
+import { NIGHTLIFE } from './nightlife.js';
 
 // (not the Marketing tools' billboards and street signs: they stand outdoors only)
 export const EDIT_TYPES = Object.keys(CATALOG).filter(t => !CATALOG[t].fixed && !CATALOG[t].outdoor && t !== 'door');
@@ -42,6 +45,7 @@ export function checkItem(b, f, level, it, ignoreId = null) {
   const def = CATALOG[it.t];
   if (!def) return 'Unknown item type';
   if (def.fixed || it.t === 'door') return 'That is part of the building';
+  if (KITCHEN_PIECE(it.t) && !kitchenFloor(b, f, level)) return KITCHEN_WHY;
   if (![it.x, it.z, it.r].every(Number.isFinite)) return 'Bad position';
   const bb = itemAABB(it, def.rect), ib = interiorBounds(b);
   if (bb.x0 < ib.x0 - 0.001 || bb.x1 > ib.x1 + 0.001 || bb.z0 < ib.z0 - 0.001 || bb.z1 > ib.z1 + 0.001) return 'Outside the floor';
@@ -106,7 +110,8 @@ export function followLayout(B, g, L) {
   });
   const end = (x, z) => { const [sx, sz] = f.shift(x, x, z, z, FOLLOW_WALL); return [r3e(x + sx - f.c.x), r3e(z + sz - f.c.z)]; };
   const walls = (L.walls || []).map(w => { const a = end(w[0], w[1]), b = end(w[2], w[3]); return [a[0], a[1], b[0], b[1], ...w.slice(4)]; });
-  return { ...L, items, ...(L.walls ? { walls } : {}) };
+  const mods = L.mods ? L.mods.map(m => ({ ...m, ...followBox(B, g, m) })) : null;   // (an interior module's rect: its sides go as its walls do)
+  return { ...L, items, ...(L.walls ? { walls } : {}), ...(mods ? { mods } : {}) };
 }
 
 /**
@@ -317,6 +322,27 @@ export function floorUse(B, f) {
   if (B.type === 'apartment') return f === 0 ? (B.mixed || 'apartment-lobby') : 'apartment';
   return B.type;
 }
+/** Order Up's kitchen pieces (its stations, the pass, the rail): they go only in a place that serves food. */
+export const KITCHEN_PIECE = t => String(t).startsWith('ou_');
+export const KITCHEN_WHY = 'Kitchens go only in cafés, restaurants, lounges, night clubs and arcades';
+/** The places that serve food or drink, where Order Up's kitchens go: cafés and restaurants (their cuisine's menu), the
+ *  nights out (shared/nightlife.js: a lounge's or a club's drinks and bar snacks, an arcade's junk food). */
+export const KITCHEN_VENUES = new Set([...FOOD_VENUES, ...NIGHTLIFE]);
+/** Whether floor f of B (its layout L) is a place that serves food or drink, where Order Up's kitchens go (the product
+ *  owner 2026-10-27: "placable in food only locations, meaning, Cafes, Dinners, Restaurants...etc, not an office space,
+ *  or residential space", then "lounges and clubs and even arcades should have a kitchen"): a floor themed as one
+ *  (shared/floor-themes.js: Café, Restaurant, Lounge, Night Club, Arcade), else what the floor is in its building or
+ *  laid out as (a café's or a restaurant's floors, the café or restaurant under a block of flats, a layout saved from
+ *  one). Not offices (nor a headquarters' Sky Lounge, nor an office lobby's coffee corner), flats, shops, gyms, parks
+ *  or the airport's cafés (its floors are its own). A diner, a pizzeria or a sushi bar is a restaurant of that cuisine. */
+export function kitchenFloor(B, f, L) {
+  if (!B || B.type === 'terminal' || B.type === 'park') return false;
+  const th = themeOf(L?.theme);
+  if (th) return KITCHEN_VENUES.has(th.venue);
+  const use = floorUse(B, f);
+  if (use === 'office-lobby') return false;
+  return KITCHEN_VENUES.has(L?.venue || use);
+}
 export const USE_NAME = { office: 'office floor', 'office-lobby': 'office lobby', apartment: 'apartment floor', 'apartment-lobby': 'apartment lobby', cafe: 'café', shop: 'shop', restaurant: 'restaurant', gym: 'gym', park: 'park' };
 /** A floor layout as it is saved: local to the floor, without the building's own pieces (the elevator, doors). */
 export function layoutToSave(L) {
@@ -325,6 +351,7 @@ export function layoutToSave(L) {
     name: L.name || '', items: L.items.filter(it => !own(it)).map(({ id, ...it }) => { void id; return it; }),
     walls: structuredClone(L.walls || []), zones: structuredClone(L.zones || []),
     ...(L.venue ? { venue: L.venue } : {}), ...(L.units ? { units: structuredClone(L.units) } : {}),
+    ...(L.mods?.length ? { mods: structuredClone(L.mods), mnid: L.mnid || 0 } : {}),   // (its interior modules: their pieces keep it.mod)
   };
 }
 /** Rectangle r ({ x0, z0, x1, z1 } in B's frame) in g's frame: an edge near a side that moves goes with it. */
@@ -352,7 +379,11 @@ export function fitSaved(B, f, rec, cur, full = true) {
   const ok = b => b.x1 - b.x0 >= 0.2 && b.z1 - b.z0 >= 0.2;
   const zones = (src.zones || []).map(z => { const b = clip(followBox(S0, g, { x0: z[0], z0: z[1], x1: z[2], z1: z[3] })); return ok(b) ? [b.x0, b.z0, b.x1, b.z1, ...z.slice(4)] : null; }).filter(Boolean);
   const units = src.units ? src.units.map(u => { const b = clip(followBox(S0, g, u)); return ok(b) ? { ...u, ...b } : null; }).filter(Boolean) : null;
-  r.layout = { name: src.name || '', items: r.layout.items, walls: r.layout.walls, zones, ...(src.venue ? { venue: src.venue } : {}), ...(units && units.length ? { units } : {}) };
+  // its interior modules: their rects follow the sides as their walls do; one whose pieces are all gone goes too
+  const left = new Set(r.layout.items.map(it => it.mod).filter(Boolean));
+  const mods = (src.mods || []).map(m => { const b = clip(followBox(S0, g, m)); return ok(b) && left.has(m.id) ? { ...m, ...b } : null; }).filter(Boolean);
+  r.layout = { name: src.name || '', items: r.layout.items, walls: r.layout.walls, zones, ...(src.venue ? { venue: src.venue } : {}), ...(units && units.length ? { units } : {}),
+    ...(mods.length ? { mods, mnid: Math.max(src.mnid || 0, cur?.mnid || 0) } : {}) };
   return r;
 }
 /** The floors of a plan that need a choice: kept without their misfits, or generated again. */

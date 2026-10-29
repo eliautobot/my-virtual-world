@@ -20,8 +20,8 @@
 @media (pointer: coarse) { .pp-pin { width: 38px; height: 38px; } .pp-dots i { width: 5px; height: 5px; } }
 @media (prefers-reduced-motion: reduce) { .pp-pin.pp-pulse::before, .pp-pin.pp-pulse::after, .pp-pin.pp-pulse .pp-dots { animation: none; } .pp-pin.pp-pulse::after { display: none; } .pp-pin.pp-pulse::before { transform: scale(1.25); opacity: .6; } }
 
-.pp-menu { position: fixed; left: 0; top: 0; z-index: 4; width: 252px; max-width: calc(100vw - 16px); padding: 8px; display: flex; flex-direction: column; gap: 4px;
-  pointer-events: auto; max-height: min(420px, calc(100vh - 16px)); overflow: auto; }
+.pp-menu { position: fixed; left: 0; top: 0; z-index: 4; width: 284px; max-width: calc(100vw - 16px); padding: 8px; display: flex; flex-direction: column; gap: 4px;
+  pointer-events: auto; max-height: min(560px, calc(100vh - 16px)); overflow: auto; }
 .pp-h { display: flex; align-items: center; gap: 8px; padding: 2px 2px 6px; border-bottom: 1px solid var(--line); margin-bottom: 2px; }
 .pp-h > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pp-h b { font-size: 13px; }
@@ -45,3 +45,36 @@
 .pp-mode { border: 1px solid var(--line); border-radius: 8px; padding: 6px 4px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 11.5px; }
 .pp-mode.on { background: var(--gold-soft); border-color: var(--gold); }
 .pp-mode:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: 1px; }
+/* work hours (2026-10-28): the usual shifts, from and to, the days; who covers which hours at a seat */
+.pp-hrs { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 4px; }
+.pp-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.pp-pre { min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 5px 4px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 11.5px; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.pp-pre small { font-size: 9.5px; opacity: .65; white-space: nowrap; }
+.pp-pre.on, .pp-day.on { background: var(--gold-soft); border-color: var(--gold); }
+.pp-times { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pp-times label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; opacity: .85; }
+.pp-times select { font: inherit; font-size: 12.5px; padding: 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg-1, var(--bg-0)); color: inherit; }
+.pp-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.pp-day { border: 1px solid var(--line); border-radius: 6px; padding: 4px 0; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 11.5px; }
+.pp-pre:focus-visible, .pp-day:focus-visible, .pp-times select:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: 1px; }
+.pp-sum { font-size: 11px; opacity: .8; } .pp-sum.bad { color: var(--bad, #f87171); opacity: 1; }
+.pp-save { align-self: flex-end; margin: 2px 4px 4px; }
+.pp-cov { display: flex; flex-direction: column; gap: 3px; padding: 2px 4px 6px; border-bottom: 1px solid var(--line); margin-bottom: 2px; }
+.pp-cbar { position: relative; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 3px 0 2px; }
+.pp-cbar i { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--text) 45%, transparent); }
+.pp-cbar i.mine { background: var(--gold); }
+.pp-cl { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; } .pp-cl small { opacity: .7; font-size: 11px; white-space: nowrap; }
+@media (pointer: coarse) { .pp-pre, .pp-day { padding: 8px 2px; } .pp-times select { padding: 7px 4px; font-size: 14px; } }
+/* a position's pay (2026-10-28): the amount an hour, quick amounts, what a week of it costs */
+.pp-paynow { margin-left: 6px; font-size: 10.5px; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pp-item:has(.pp-paynow) { min-width: 0; }
+.pp-pay { display: flex; flex-direction: column; gap: 6px; margin: 2px 4px 6px; }
+.pp-pay label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.pp-pay label span { display: flex; align-items: center; gap: 4px; }
+.pp-pay input { width: 86px; font: inherit; font-size: 14px; padding: 5px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg-1, var(--bg-0)); color: inherit; }
+.pp-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(56px, 1fr)); gap: 4px; }
+.pp-cost { font-size: 11.5px; } 
+/* a ⋯ over a place where one of your agents works or is on post: always there, smaller and quiet (2026-10-28) */
+.pp-pin.pp-mine:not(.on) { width: 26px; height: 26px; opacity: .78; }
+.pp-pin.pp-mine:not(.on) .pp-dots i { width: 3px; height: 3px; }
+@media (pointer: coarse) { .pp-pin.pp-mine:not(.on) { width: 32px; height: 32px; } }

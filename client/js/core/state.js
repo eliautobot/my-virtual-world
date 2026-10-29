@@ -12,6 +12,7 @@ export const S = {
   focus: { b: -1, f: 0 },           // interior view (building, floor)
   follow: false,                     // camera follows the selected agent (and auto-focuses where they go)
   mode: 'explore',                   // explore | furnish | build | play
+  hold: null,                        // a game holding the view ({ name, how }: holdView): the focus and the mode stay; bus 'held' when something tries
   player: null,
   quality: localStorage.getItem('mvw.quality') || (matchMedia('(pointer: coarse)').matches || Math.min(screen.width, screen.height) < 700 ? 'medium' : 'high'),
   labels: localStorage.getItem('mvw.labels') !== '0',
@@ -28,11 +29,18 @@ export function setWorld(w) {
 export function viewGrid(w = S.world) { const r = viewRect(w); return { minX: r.x0, maxX: r.x1, minZ: r.z0, maxZ: r.z1 }; }
 export function bld(b) { const B = S.world && S.world.buildings[b]; return B && !B.gone ? B : null; }
 export function levelOf(b, f) { const B = bld(b); return B && f >= 0 && f < B.floors ? S.world.levels[B.lv[f]] : null; }
+/** A game holds the view while it runs (the product owner 2026-10-27: "only quitting the cooking game or finishing the
+ *  game allows the game to be exited"; then the arcade, flying and the boat too): the focus and the mode stay (setFocus
+ *  here; ui.js lookInside, exitFocus, setMode), the world's shortcut keys wait (ui.js), and whatever tried is told how
+ *  to leave (bus 'held': ui.js says `how`). name: the game; how: its own way out. Only its own release lets go. */
+export function holdView(name, how) { if (!S.hold) S.hold = { name, how }; }
+export function releaseView(name) { if (S.hold?.name === name) S.hold = null; }
 export function setFocus(b, f = 0) {
   const B = bld(b);
   if (!B || B.type === 'park') { b = -1; f = 0; }
   else f = Math.max(0, Math.min(B.floors - 1, f | 0));
   if (S.focus.b === b && S.focus.f === f) return;
+  if (S.hold) { bus.emit('held', { b, f }); return; }   // (a game holds the view: only leaving it lets go, the product owner 2026-10-27)
   S.focus = { b, f };
   bus.emit('focus', S.focus);
 }

@@ -68,7 +68,8 @@ function drawDock(ctx, m, X, Z, s) {
 }
 /** The airports and docks as places on the maps: { kind: 'airport' | 'dock', name, x, z (its door), icon }. */
 export function airportPlaces(world) {
-  return modulesOf(world).filter(m => m.kind === 'airport' || DOCKS[m.kind]).map(m => {
+  return modulesOf(world).filter(m => m.kind === 'airport' || m.kind === 'radio' || DOCKS[m.kind]).map(m => {
+    if (m.kind === 'radio') { const p = toWorldAt(m, 9, -14); return { kind: 'dock', name: m.name || 'MVW Radio', x: p.x, z: p.z, icon: '📻', module: m.id }; }   // (shown with the docks: a place out of town)
     if (DOCKS[m.kind]) { const d = DOCKS[m.kind].door, p = toWorldAt(m, d.s, d.f); return { kind: 'dock', name: m.name || WORLD_KINDS[m.kind].label, x: p.x, z: p.z, icon: WORLD_KINDS[m.kind].icon, module: m.id }; }
     const p = toWorldAt(m, 200, -25); return { kind: 'airport', name: m.name || 'Airport', x: p.x, z: p.z, icon: '✈️', module: m.id };
   });

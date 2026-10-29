@@ -77,6 +77,8 @@ export const ICONS = {
   // --- actions
   x: ['M6.5 6.5l11 11M17.5 6.5l-11 11'],
   check: ['M4.5 12.5l5 5 10-10.5'],
+  power: ['M12 3.5v8', 'M7.2 6.3a7.5 7.5 0 1 0 9.6 0'],   // (on and off: the radio)
+  radio: ['M3.5 9h17v10.5h-17z', C(9, 14.25, 2.75), 'M14.5 12.5h3.5M14.5 16h3.5', 'M6.5 9l10-5'],   // (MVW Radio: a set with its dial and aerial)
   'check-circle': [C(12, 12, 9) + 'M8 12.3l2.8 2.8 5.2-5.6'],
   'x-circle': [C(12, 12, 9) + 'M9 9l6 6M15 9l-6 6'],
   plus: ['M12 5v14M5 12h14'],
@@ -388,7 +390,7 @@ export const ICONS = {
 
 /** emoji → icon name, or [name, tone]. Tones are the theme's colours (theme.css): good, bad, gold, dim. */
 export const EMOJI = {
-  '☰': 'menu', '🔔': 'bell-alert',
+  '☰': 'menu', '🔔': 'bell-alert', '📻': 'radio', '⏻': 'power',
   '✕': 'x', '✗': ['x', 'bad'], '✓': ['check', 'good'], '✔': ['check', 'good'], '✅': ['check-circle', 'good'], '❌': ['x-circle', 'bad'],
   '➕': 'plus', '＋': 'plus', '－': 'minus', '↶': 'undo', '↷': 'redo', '↩': 'return', '↺': 'reset', '↻': 'rotate', '⟳': 'rotate', '🔄': 'cycle', '♻': 'reset',
   '✏': 'pencil', '✎': 'pencil', '🗑': 'trash', '💾': 'save', '📂': 'folder', '📄': 'doc', '📋': 'clipboard', '🔍': 'search', '🔎': 'search',
@@ -423,6 +425,9 @@ export const EMOJI = {
   '🎣': 'rod', '🪝': 'hook', '🪱': 'worm', '🦐': 'shrimp', '🔪': 'knife', '🦑': 'squid', '🌀': 'spiral', '🎏': 'lure', '🥄': 'spoon', '🪼': 'jellyfish', '🐠': 'fish',
   '🍞': 'bread', '📡': 'sonar', '⚓': 'anchor', '🫧': 'bubbles', '💪': 'arm', '🍀': 'clover', '🪨': 'rock', '🪸': 'coral', '📉': 'chart-down', '🐦': 'bird', '🌑': 'moon',
   '🪷': 'lotus', '🫶': 'heart', '🦈': 'shark', '🐉': 'dragon', '🛶': 'canoe', '⛈': 'storm', '🥾': 'boot', '👟': 'boot', '🛞': 'tyre', '🥫': 'can', '🍾': 'bottle',
+  // (Order Up: its skills, badges and cuisines; a post's work hours)
+  '🎓': 'books', '🕐': 'clock', '🥡': 'noodles', '🧆': 'flatbread', '🦞': 'shrimp', '🧽': 'bubbles', '🎩': 'star', '👨‍🍳': 'utensils', '👨': 'user',
+  '📗': 'book-open', '📘': 'book-open', '📙': 'book-open', '🍲': 'bowl',
 };
 /** Symbols the interface uses as typography, not icons: arrows in prose ("Settings → Shop"), bullets, the 3D signs' logo glyph. */
 export const KEEP = ['→', '←', '↔', '⇄', '•', '·', '…', '◆'];

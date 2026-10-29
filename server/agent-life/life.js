@@ -48,6 +48,8 @@ export class AgentLife {
     this.byPerson = new Map();   // resident index → { agentId, key, name }
     this.byAgent = new Map();    // agent id → resident index
     this.open = new Map();       // agent id → the activity line in progress (not written yet)
+    this.noteQueue = new Map();  // what someone is to an agent, written where it has no note of its own yet (bond)
+    this.together = new Map();   // agent id → { day, seen: Set } the co-workers it was with today (workedWith)
     this.queue = [];             // finished activity lines to write
     this.memQueue = [];          // memories to write
     this.relQueue = new Map();   // `${agentId}|${kind}|${id}` → relation row to write
@@ -86,6 +88,7 @@ export class AgentLife {
         ON CONFLICT (world_id, agent_id, other_kind, other_id) DO UPDATE SET other_name = excluded.other_name, affinity = excluded.affinity, trust = excluded.trust,
           interactions = excluded.interactions, last_day = excluded.last_day, last_place = excluded.last_place, updated = excluded.updated`),
       noteRelation: db.prepare('UPDATE agent_relations SET note = ?, updated = ? WHERE world_id = ? AND agent_id = ? AND other_kind = ? AND other_id = ?'),
+      noteIfNone: db.prepare("UPDATE agent_relations SET note = $note, updated = $at WHERE world_id = $w AND agent_id = $a AND other_kind = $kind AND other_id = $id AND (note IS NULL OR note = '')"),
       // (agents and friends, server/agent-social/: a change of closeness, an ended friendship, its own block; fading with time apart)
       setRelation: db.prepare(`INSERT INTO agent_relations (world_id, agent_id, other_kind, other_id, other_name, affinity, trust, interactions, first_day, last_day, last_place, note, updated, ended_until, blocked, faded_day)
         VALUES ($w, $a, $kind, $id, $name, $aff, 0, 0, $day, $day, NULL, '', $at, $ended, $blocked, $day)
@@ -101,6 +104,10 @@ export class AgentLife {
         WHERE world_id = $w AND affinity != 0 AND last_day < $today - $after AND (faded_day IS NULL OR faded_day < $today)`),
       addActivity: db.prepare(`INSERT INTO agent_activity (world_id, agent_id, at, world_day, world_time, kind, label, place, place_key, minutes, with_name)
         VALUES ($w, $a, $at, $day, $time, $kind, $label, $place, $key, $min, $with)`),
+      // (a line carried on after a restart: its minutes grow where it is — observe below)
+      growActivity: db.prepare('UPDATE agent_activity SET minutes = $min, at = $at WHERE world_id = $w AND agent_id = $a AND id = $id'),
+      lastActivity: db.prepare('SELECT * FROM agent_activity WHERE world_id = ? AND agent_id = ? ORDER BY id DESC LIMIT 1'),
+      beyondDuty: db.prepare("SELECT COUNT(*) AS n FROM agent_activity WHERE world_id = ? AND agent_id = ? AND world_day BETWEEN ? AND ? AND kind NOT IN ('post', 'work', 'sleep', 'nap')"),
       activity: db.prepare('SELECT * FROM agent_activity WHERE world_id = ? AND agent_id = ? AND id < ? ORDER BY id DESC LIMIT ?'),
       todayActivity: db.prepare('SELECT * FROM agent_activity WHERE world_id = ? AND agent_id = ? AND world_day = ? ORDER BY id DESC LIMIT ?'),
       known: db.prepare('SELECT agent_id, place_key, COUNT(*) AS n, MAX(world_day) AS last FROM agent_activity WHERE world_id = ? AND place_key IS NOT NULL GROUP BY agent_id, place_key'),
@@ -171,7 +178,8 @@ export class AgentLife {
     if (!c) return;
     const e = this.byPerson.get(a.i), sim = this.sim;
     const day = this.worldDay(act.holdStart), minutes = Math.max(0, Math.round((act.holdEnd - act.holdStart) * sim.clock.dayScale / 60));
-    const cur = this.open.get(e.agentId);
+    if (c.kind === 'post' || c.kind === 'work') this.workedWith(e.agentId, a, act, day, c.place);
+    const cur = this.open.get(e.agentId) || this.resumeLine(e.agentId, c, act, day);
     // one line for consecutive parts of the same activity at the same place (a shift between breaks, browsing then buying)
     if (cur && cur.$kind === c.kind && cur.$place === (c.place || null) && cur.$day === day && c.kind !== 'chat') {
       cur.$min = Math.max(cur.$min, Math.round((act.holdEnd - cur.start) * sim.clock.dayScale / 60));
@@ -193,6 +201,95 @@ export class AgentLife {
     if (c.kind === 'visit') this.remember(e.agentId, { kind: 'event', text: c.label, importance: 2, place: c.place, day, time: row.$time });
   }
 
+  /** At work (its shift, its post) on the same floor as others at work there: colleagues get to know each other, a little
+   *  each day they work together (2026-10-28, the product owner: "sara and luke talk on the radio together yet they have no
+   *  recolection of who they are ... they dont report as freiends or aquentances"). Agents and residents alike; once a
+   *  pair a world day, a light step (a shift side by side is not a conversation), noted "Works with me at <place>". Both
+   *  ways when the other is an agent too: counted for both the same, whichever of them leaves work first. */
+  workedWith(agentId, a, act, day, place) {
+    const sim = this.sim, here = act.ctx >= 0 ? sim.brain.at.get(act.ctx) : null;
+    if (!here || here.size < 2) return;
+    const seenBy = id => { let t = this.together.get(id); if (!t || t.day !== day) this.together.set(id, t = { day, seen: new Set() }); return t.seen; };
+    const seen = seenBy(agentId), time = this.clockAt(act.holdStart), note = place ? `Works with me at ${place}` : 'Works with me';
+    const who = p => ({ kind: p.vip && p.agentId ? 'agent' : 'resident', id: p.id, name: p.name });
+    for (const j of here) {
+      if (j === a.i || seen.size >= 12) continue;
+      const q = sim.agents[j], qa = q?.act;
+      if (!q || q.p.retired || !qa || (qa.kind !== 'work' && qa.kind !== 'post') || qa.ctx !== act.ctx) continue;
+      const key = String(q.p.id); if (seen.has(key)) continue;
+      seen.add(key);
+      this.bond(agentId, who(q.p), day, time, place, { weight: 0.5, note });
+      const o = this.byPerson.get(j), back = o ? seenBy(o.agentId) : null, me = String(a.p.id);
+      if (back && !back.has(me) && back.size < 12) { back.add(me); this.bond(o.agentId, who(a.p), day, time, place, { weight: 0.5, note }); }
+    }
+  }
+  /**
+   * A conversation that happened (2026-10-28, the product owner: "shouldnt what they talk and what they talk about and who
+   * they speak to be recognized and remembered"): for each agent taking part, its own line in its day (line: false when
+   * its body's activity says so already), a memory of it — who with, what about — and everyone else taking part a step
+   * closer (they talked). who: [{ kind: 'agent' | 'resident' | 'player', id (its resident's, a player's account), name,
+   *  agentId (an agent's own: participant below) }]; label: what it was ('On the air',
+   * 'Talked'); about: what it was about, in a few words; kind: its line's kind ('radio', 'talk'); minutes: how long.
+   * → how many agents remembered it.
+   */
+  conversation({ who = [], place = null, label = 'Talked', about = '', kind = 'talk', minutes = 1, importance = 2, line = true } = {}) {
+    const sim = this.sim;
+    if (!sim || !this.byAgent) return 0;
+    const t = sim.now(), day = this.worldDay(t), time = this.clockAt(t), all = who.filter(x => x && x.name && x.id !== undefined && x.id !== null);
+    let n = 0;
+    for (const me of all) {
+      if (me.kind !== 'agent' || !this.byAgent.has(me.agentId)) continue;
+      const others = all.filter(x => x !== me), names = others.map(x => clean(x.name, 40));
+      const words = `${label}${names.length ? ` with ${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]}` : ''}${about ? `: ${clean(about, 90)}` : ''}`;
+      if (line) {
+        // (between what it was doing before and after: its line in progress ends here, the next one starts after)
+        const cur = this.open.get(me.agentId); if (cur) { this.queue.push(cur); this.open.delete(me.agentId); }
+        this.queue.push({ $w: this.w, $a: me.agentId, $at: this.now(), $day: day, $time: time, $kind: kind, $label: clean(words, 120), $place: place ? clean(place, 80) : null, $key: null,
+          $min: Math.max(1, Math.round(minutes)), $with: names[0] || null, start: t });
+      }
+      this.remember(me.agentId, { kind: 'event', text: words, importance, place, people: names, day, time });
+      for (const o of others) this.bond(me.agentId, { kind: o.kind, id: o.id, name: o.name }, day, time, place, { weight: 1 });
+      n++;
+    }
+    return n;
+  }
+  /** Whether agent agentId's life day `day` (from its waking: that world day and the next morning) had more than its duty:
+   *  a conversation, a show on the air, a visitor, anything it did besides working (2026-10-28, the product owner: an agent
+   *  on post reflects on its day "if an agent had an interaction or activity other than working on their post"). */
+  livedBeyondDuty(agentId, day) {
+    const cur = this.open.get(agentId);
+    if (cur && (cur.$day === day || cur.$day === day + 1) && !['post', 'work', 'sleep', 'nap'].includes(cur.$kind)) return true;
+    return this.q.beyondDuty.get(this.w, agentId, day, day + 1).n > 0;
+  }
+  /** Agent agentId as someone taking part in a conversation: { kind: 'agent', agentId, id (its resident's), name }, or null
+   *  (no body in the world). */
+  participant(agentId) {
+    const i = this.byAgent?.get(agentId), p = i !== undefined ? this.sim?.people?.[i] : null;
+    return p ? { kind: 'agent', agentId, id: p.id, name: p.name } : null;
+  }
+  /** What someone is to agent agentId ({ kind, id }): { affinity, interactions, note, words } or null (never met). */
+  relationTo(agentId, kind, id) {
+    const c = this.relCache.get(agentId)?.get(`${kind}|${id}`), row = c ? null : this.q.relation.get(this.w, agentId, kind, String(id));
+    const r = c || (row ? this.relRow(row) : null);
+    if (!r) return null;
+    const note = row ? row.note : this.q.relation.get(this.w, agentId, kind, String(id))?.note;
+    return { affinity: r.affinity, interactions: r.interactions, note: note || '', words: closenessLevel(r.affinity)?.label || null };
+  }
+  /** After a restart (its line in progress was written when the server stopped), the activity going on where it left
+   *  off carries that line on, not a new one: the same kind at the same place on the same world day, from no later than an
+   *  hour after it ended (2026-10-28: a day on post showed as seven lines, one for each restart). → the line, or null. */
+  resumeLine(agentId, c, act, day) {
+    const r = this.q.lastActivity.get(this.w, agentId);
+    if (!r || r.kind !== c.kind || (r.place || null) !== (c.place || null) || r.world_day !== day || c.kind === 'chat') return null;
+    const sim = this.sim, h = sim.brain.hour(act.holdStart), m = /(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(r.world_time || '');
+    if (!m) return null;
+    const h0 = (Number(m[1]) % 12) + (m[3].toUpperCase() === 'PM' ? 12 : 0) + Number(m[2]) / 60, end = h0 + (r.minutes || 0) / 60;
+    if (h < h0 || h > end + 1) return null;
+    const row = { $w: this.w, $a: agentId, $at: this.now(), $day: r.world_day, $time: r.world_time, $kind: r.kind, $label: r.label, $place: r.place, $key: r.place_key, $min: r.minutes || 0, $with: r.with_name,
+      $id: r.id, start: act.holdStart - (h - h0) * 3600 / sim.clock.dayScale };
+    this.open.set(agentId, row);
+    return row;
+  }
   visited(agentId, c, day, time) {
     let m = this.known.get(agentId);
     if (!m) this.known.set(agentId, m = new Map());
@@ -202,7 +299,18 @@ export class AgentLife {
   }
 
   met(agentId, a, o, day, time, place, { quiet = false, weight = 1 } = {}) {
-    const kind = o.p.vip && o.p.agentId ? 'agent' : 'resident', id = String(o.p.id), name = clean(o.p.name, 40);
+    this.bond(agentId, { kind: o.p.vip && o.p.agentId ? 'agent' : 'resident', id: o.p.id, name: o.p.name }, day, time, place, { weight });
+    if (!quiet) this.onMet?.(agentId, o);   // (the Mind: an agent with a brain of its own may say something — server/mind/mind.js onMet)
+  }
+  /**
+   * Agent agentId and someone else, a step closer (time together: a chat, a conversation on the air, a visit, a shift
+   * side by side): who: { kind: 'agent' | 'resident' | 'player', id, name }; weight: how much it counts (1 a conversation);
+   * note: what they are to it, written when it has none of its own yet ("Works with me at the café"). The first time is
+   * a memory ("Met Sara at ..."), and so is becoming friends.
+   */
+  bond(agentId, who, day, time, place, { weight = 1, note = null } = {}) {
+    const kind = who.kind, id = String(who.id), name = clean(who.name, 40);
+    if (!name || !['agent', 'resident', 'player'].includes(kind)) return;
     let cache = this.relCache.get(agentId);
     if (!cache) this.relCache.set(agentId, cache = new Map());
     const ck = `${kind}|${id}`;
@@ -225,7 +333,7 @@ export class AgentLife {
     this.relQueue.set(`${agentId}|${ck}`, { $w: this.w, $a: agentId, $kind: kind, $id: id, $name: name, $aff: r.affinity, $trust: r.trust, $n: r.interactions,
       $first: r.first, $last: day, $place: place ? clean(place, 80) : null, $at: this.now() });
     if (r.interactions === 1) this.remember(agentId, { kind: 'person', text: `Met ${name}${place ? ` at ${place}` : ''}`, importance: 2, place, people: [name], day, time });
-    if (!quiet) this.onMet?.(agentId, o);   // (the Mind: an agent with a brain of its own may say something — server/mind/mind.js onMet)
+    if (note) this.noteQueue.set(`${agentId}|${ck}`, { $w: this.w, $a: agentId, $kind: kind, $id: id, $note: clean(note, 140), $at: this.now() });
     for (const [step, words] of FRIEND_STEPS) {
       if (!frozen && before < step && r.affinity >= step) this.remember(agentId, { term: 'long', kind: 'person', text: `Became ${words} ${name}`, importance: 3, place, people: [name], day, time });
     }
@@ -242,14 +350,15 @@ export class AgentLife {
   }
 
   flush() {
-    if (!this.queue.length && !this.memQueue.length && !this.relQueue.size) return;
-    const acts = this.queue, mems = this.memQueue, rels = [...this.relQueue.values()];
-    this.queue = []; this.memQueue = []; this.relQueue.clear();
+    if (!this.queue.length && !this.memQueue.length && !this.relQueue.size && !this.noteQueue.size) return;
+    const acts = this.queue, mems = this.memQueue, rels = [...this.relQueue.values()], notes = [...this.noteQueue.values()];
+    this.queue = []; this.memQueue = []; this.relQueue.clear(); this.noteQueue.clear();
     try {
       this.dbs.tx(() => {
-        for (const r of acts) { const { start, ...row } = r; this.q.addActivity.run(row); }
+        for (const r of acts) { const { start, $id, ...row } = r; if ($id) this.q.growActivity.run({ $w: row.$w, $a: row.$a, $id, $min: row.$min, $at: row.$at }); else this.q.addActivity.run(row); }
         for (const m of mems) this.q.addMemory.run(m);
         for (const r of rels) this.q.putRelation.run(r);
+        for (const x of notes) this.q.noteIfNone.run(x);
       });
     } catch (e) { this.log?.error?.('[agent-life] writing failed:', e.message); }
   }
@@ -343,8 +452,13 @@ export class AgentLife {
   // ------------------------------------------------------------------------------------------- plans
   today() { return this.sim ? this.worldDay(this.sim.now()) : 0; }
   intentions(agentId) {
-    return this.q.intentions.all(this.w, agentId, this.now() - 86400000).map(r => ({ id: r.id, kind: r.kind, text: r.text, status: r.status, today: r.world_day !== null, source: r.source, created: r.created }));
+    // on post around the clock (server/agent-posts/) it can't go anywhere: its open plans wait, 'held', until its owner lets
+    // it go (2026-10-28: a posted agent still had its shopping and its walks open, and spoke of them)
+    const held = this.onPost(agentId);
+    return this.q.intentions.all(this.w, agentId, this.now() - 86400000).map(r => ({ id: r.id, kind: r.kind, text: r.text, status: held && r.status === 'open' ? 'held' : r.status, today: r.world_day !== null, source: r.source, created: r.created }));
   }
+  /** Whether agent agentId's resident is on post around the clock. */
+  onPost(agentId) { const i = this.byAgent?.get(agentId), sim = this.sim; return i !== undefined && !!sim?.people?.[i]?.post; }
   addIntention(agentId, { kind, text, today = false }, source = 'owner') {
     if (kind !== 'must' && kind !== 'want') throw new LifeError(400, 'bad_kind', 'A plan is a "must" or a "want"');
     const t = clean(text, 140);
@@ -476,8 +590,8 @@ export class AgentLife {
   activity(agentId, { before = null, limit = 60 } = {}) {
     this.flush();
     const rows = this.q.activity.all(this.w, agentId, Number(before) > 0 ? Number(before) : Number.MAX_SAFE_INTEGER, Math.max(1, Math.min(300, Number(limit) || 60)));
-    const out = rows.map(r => ({ id: r.id, when: r.world_time, day: r.world_day, kind: r.kind, label: r.label, place: r.place, minutes: r.minutes, with: r.with_name }));
     const cur = !before && this.open.get(agentId);
+    const out = rows.filter(r => !(cur && cur.$id === r.id)).map(r => ({ id: r.id, when: r.world_time, day: r.world_day, kind: r.kind, label: r.label, place: r.place, minutes: r.minutes, with: r.with_name }));   // (a line carried on: shown once, as now)
     if (cur) out.unshift({ id: null, when: cur.$time, day: cur.$day, kind: cur.$kind, label: cur.$label, place: cur.$place, minutes: cur.$min, with: cur.$with, now: true });
     return out;
   }
@@ -500,7 +614,7 @@ export class AgentLife {
     if (cur && cur.$day === day && cur.$kind !== 'sleep') earlier.push({ clock: cur.$time.split(' ').slice(1).join(' '), label: cur.$label });
     for (const r of this.q.todayActivity.all(this.w, agentId, day, 6)) {
       if (earlier.length >= 3) break;
-      if (r.kind === 'sleep' || r.kind === 'work') continue;
+      if (r.kind === 'sleep' || r.kind === 'work' || (cur && cur.$id === r.id)) continue;   // (a line carried on: once)
       earlier.push({ clock: r.world_time.split(' ').slice(1).join(' '), label: r.label });
     }
     const known = this.known.get(agentId);

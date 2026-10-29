@@ -17,6 +17,7 @@
 import { landValue } from '../../shared/land-value.js';
 import { makeGrid } from '../../shared/city.js';
 import { hashStr } from '../../shared/rng.js';
+import { isServiceDesk } from '../../shared/catalog.js';
 import { LedgerError, vc } from './ledger.js';
 import { subj, subjKey } from './economy.js';
 import { bp, incomeTax, bracketOf } from './policy.js';
@@ -339,6 +340,32 @@ export class Households {
    * days while it lasts (d.agentUnpaid; 2026-10-23: "if an agent is on an assigned post they cannot quit ... if the agent
    * gets assigned by the owner to a job ... the agent can send the message about them not having money").
    */
+  /**
+   * A position's pay (2026-10-28, the product owner: "every post should have a Pay"; "for world modules (admin controlled)
+   * the city pays. now for private/account businesses then the buisness or owner pays"): for seat k of piece id on floor f
+   * of building b → { payer: 'business' | 'city' | 'owner', name, rate (cents an hour now), usual (its role's wage there),
+   * set (its owner chose the rate), min, max }; null when the economy is off or there is no such piece. The settlement
+   * (plan below: payFor) pays the same: whoever works there, an agent or a resident.
+   */
+  payInfo(b, f, id, k) {
+    const e = this.e;
+    if (!e.enabled?.()) return null;
+    const W = e.d.world(), B = W?.buildings?.[b], L = B ? W.levels[B.lv?.[f]] : null, it = L?.items.find(x => x.id === id);
+    if (!it) return null;
+    // (by the seat's own use, as its worker's job is: a venue's staff — at a counter, a coffee machine, a stage — its
+    // business; a reception or a desk, the building's company)
+    const pol = e.policy(), bz = e.parts.businesses, use = e.d.sim?.()?.index?.entry(b, f, id)?.slots?.[k]?.use;
+    const staff = use ? use === 'staff' || use === 'cook' : isServiceDesk(it.t);   // (a kitchen's cook: its venue's staff, 2026-10-28)
+    const own = W.postPay?.[`${b}:${f}:${id}:${k}`], set = Number.isSafeInteger(own) && own >= 0;
+    const max = Math.max(...Object.values(pol.wages)) * 10;
+    let biz = null, role = staff ? 'receptionist' : 'office';
+    if (staff && L.venue && L.venue !== 'lobby' && VENUES.has(L.venue)) { biz = bz.at(b, f); role = pol.staffRole[L.venue] || 'cashier'; }
+    if (!biz) biz = bz.companyOf(b);
+    if (biz) { const usual = bz.wageOf(biz, role); return { payer: 'business', name: biz.name, rate: set ? own : usual, usual, set, min: pol.minWage, max }; }
+    const usual = pol.wages[role] ?? pol.minWage;
+    if (B.module) return { payer: 'city', name: 'the city', rate: set ? own : usual, usual, set, min: pol.minWage, max };
+    return { payer: 'owner', name: 'the owner', rate: set ? own : 0, usual, set, min: pol.minWage, max, free: true };   // (free: unpaid allowed, the place's own owner paying)
+  }
   agentPay(list) {
     const pol = this.e.policy(), after = pol.agents?.quitAfterDays ?? 3, avoid = pol.agents?.avoidDays ?? 7;
     const touched = [], quits = [], notes = [];
@@ -500,22 +527,57 @@ export class Households {
       const c = bz.companyOf(r.b);
       return c ? { biz: c, role: /reception|lobby/.test(it?.t || '') || venue === 'lobby' ? 'receptionist' : 'office' } : null;
     };
-    const work = [];   // { p, w, biz, role, hours }
+    // the position worked (2026-10-28, the product owner: "every post should have a Pay ... the user picks a payment amount
+    // for that post/position"): its own rate when its owner set one (world.postPay "b:f:id:k" → cents an hour, set from the
+    // piece's ⋯ menu: server/agent-posts/ setPay), else the usual wage; and who pays it: the business there; with none, a
+    // world module's (run by the administrators) the city, else whoever owns the place (the lot's holder, a flat's owner),
+    // and that only at a rate they set (else no one: unpaid, as before)
+    const Wd = e.d.world(), PAY = Wd?.postPay || {};
+    const seatOf = p => { const j = p.job; return j && j.b !== undefined && j.id !== undefined && (j.kind === 'office' || j.kind === 'vip' || j.kind === 'staff') ? j : p.post || null; };
+    const keyOf = r => `${r.b}:${r.f}:${r.id}:${r.k}`;
+    const payers = new Map();   // payer key → { key, wallet, name, biz? }
+    const payerOf = (k, make) => { let x = payers.get(k); if (!x) payers.set(k, x = make()); return x; };
+    const placeOwner = (b, f, id) => {
+      const B = Wd?.buildings?.[b]; if (!B) return null;
+      const L = Wd.levels[B.lv?.[f]], it = L?.items.find(x => x.id === id);
+      const u = it ? (L.units || []).findIndex(U => U && it.x >= U.x0 && it.x <= U.x1 && it.z >= U.z0 && it.z <= U.z1) : -1;
+      const rec = u >= 0 ? Wd.flats?.[`${b}:${f}:${u}`] : null;
+      if (rec?.owner?.kind === 'account') return subj('account', rec.owner.id);
+      const o = bz.ownerOfBuilding(B); return o.kind === 'municipality' ? null : subj(o.kind, o.id);
+    };
+    /** { payer, rate (cents an hour) } for person p working at seat r for business jb (or none). */
+    const payFor = (p, r, jb) => {
+      const own = r ? PAY[keyOf(r)] : undefined, set = Number.isSafeInteger(own) && own >= 0;
+      if (jb) return { payer: payerOf(`biz:${jb.biz.id}`, () => ({ key: `biz:${jb.biz.id}`, wallet: bz.wallet(jb.biz).id, name: jb.biz.name, biz: jb.biz })), rate: set ? own : bz.wageOf(jb.biz, jb.role) };
+      if (!r) return null;
+      const B = Wd?.buildings?.[r.b], it = B ? Wd.levels[B.lv?.[r.f]]?.items.find(x => x.id === r.id) : null;
+      const use = e.d.sim?.()?.index?.entry(r.b, r.f, r.id)?.slots?.[r.k]?.use, role = (use ? use === 'staff' : it && isServiceDesk(it.t)) ? 'receptionist' : 'office';
+      if (B?.module) return { payer: payerOf('city', () => ({ key: 'city', wallet: T, name: 'the city', city: true })), rate: set ? own : pol.wages[role] ?? pol.minWage };
+      if (!set || own <= 0) return null;
+      const o = placeOwner(r.b, r.f, r.id); if (!o) return null;
+      const k = `own:${subjKey(o)}`;
+      return { payer: payerOf(k, () => ({ key: k, wallet: e.walletFor(o, 'main').id, name: e.nameOf(o) })), rate: own };
+    };
+    const work = [];   // { p, w, payer, rate, role, hours, b }
     // the hours players and agents worked at a venue in its residents' place: those residents aren't paid for them
     const covered = e.parts.jobs?.covered(day) || new Map();
     for (const p of people) {
       if (!p || p.retired) continue;
-      const R = D.res.get(p.id), own = jobOf(p), jb = own || (R?.ph ? postJobOf(p) : null);
-      // hours on post count as its job's (its employer pays them, up to its shift); without a job, the post's business pays
+      const R = D.res.get(p.id), own = jobOf(p), jb = own || (R?.ph ? postJobOf(p) : null), seat = seatOf(p);
+      // hours on post count as its job's (its employer pays them, up to its shift); without a job, the post's place pays,
+      // for the hours it was on duty (on post around the clock: up to all of them)
       const worked = (own ? R?.h || 0 : 0) + (R?.ph || 0);
-      if (!jb || !(worked > 0)) continue;
-      let hours = Math.min(worked, own ? shiftHours(p) : POST_SHIFT);
-      const c = jb.biz.f !== -1 ? covered.get(jb.biz.id) || 0 : 0;
+      if (!(worked > 0)) continue;
+      const pay = payFor(p, own ? seat : p.post || seat, jb);
+      if (!pay || !(pay.rate > 0)) continue;
+      let hours = Math.min(worked, own ? shiftHours(p) : p.post ? 24 : POST_SHIFT);
+      const c = jb && jb.biz.f !== -1 ? covered.get(jb.biz.id) || 0 : 0;
       if (c > 0) { const cut = Math.min(c, hours); hours -= cut; covered.set(jb.biz.id, c - cut); sum.covered = (sum.covered || 0) + cut; }
       if (!(hours > 0)) continue;
       const s = e.personSubject(p); if (!s) continue;
-      work.push({ p, w: e.walletFor(s, 'main'), biz: jb.biz, role: jb.role, hours });
-      if (jb.biz.f === -1) hoursAt.set(jb.biz.id, (hoursAt.get(jb.biz.id) || 0) + hours);
+      const r = own ? seat : p.post || seat;
+      work.push({ p, w: e.walletFor(s, 'main'), payer: pay.payer, rate: pay.rate, role: jb?.role || null, hours, b: r?.b ?? -1 });
+      if (jb && jb.biz.f === -1) hoursAt.set(jb.biz.id, (hoursAt.get(jb.biz.id) || 0) + hours);
     }
     for (const biz of bz.open()) {
       const bw = bz.wallet(biz).id, r = book(biz.id);
@@ -538,22 +600,23 @@ export class Households {
 
     // 3. wages, paid pro rata by a business short of money (the rest is owed); income tax withheld
     const bill = new Map();
-    for (const x of work) { x.gross = Math.floor(x.hours * bz.wageOf(x.biz, x.role)); bill.set(x.biz.id, (bill.get(x.biz.id) || 0) + x.gross); }
+    for (const x of work) { x.gross = Math.floor(x.hours * x.rate); bill.set(x.payer.key, (bill.get(x.payer.key) || 0) + x.gross); }
     const ratio = new Map();
-    for (const [bid, total] of bill) {
-      const biz = bz.get(bid), bw = bz.wallet(biz).id;
+    for (const [pk, total] of bill) {
+      const P = payers.get(pk), bw = P.wallet, biz = P.biz;
       let can = Math.max(0, room(bw));
       // the city stands behind the businesses it owns
-      if (can < total && biz.owner_kind === 'municipality') { const help = Math.min(total - can, Math.max(0, room(T))); if (help > 0) { add(T, 'business support', -help); add(bw, 'city support', help); can += help; sum.support += help; } }
-      ratio.set(bid, total > 0 ? Math.min(1, can / total) : 1);
+      if (biz && can < total && biz.owner_kind === 'municipality') { const help = Math.min(total - can, Math.max(0, room(T))); if (help > 0) { add(T, 'business support', -help); add(bw, 'city support', help); can += help; sum.support += help; } }
+      ratio.set(pk, total > 0 ? Math.min(1, can / total) : 1);
     }
     const income = new Map();   // wallet → taxable income today
     const agentPay = [];        // an AI agent's pay today: whether its employer could pay it (agentPay below)
     for (const x of work) {
-      const bw = bz.wallet(x.biz).id, paid = Math.floor(x.gross * ratio.get(x.biz.id)), owed = x.gross - paid;
-      if (x.p.vip && x.p.agentId && x.gross > 0) agentPay.push({ p: x.p, biz: x.biz, gross: x.gross, paid });
-      if (paid > 0) { add(bw, 'wages', -paid); add(x.w.id, 'wages', paid); book(x.biz.id).wages += paid; sum.wages += paid; income.set(x.w.id, (income.get(x.w.id) || 0) + paid); }
-      if (owed > 0) { debts.push({ id: rid(), debtor: bw, creditor: x.w.id, kind: 'wages', amount: owed, ref: `day:${day}` }); book(x.biz.id).owed += owed; sum.owedWages += owed; }
+      const P = x.payer, bw = P.wallet, paid = Math.floor(x.gross * ratio.get(P.key)), owed = x.gross - paid;
+      // (who it is owed by, for its owner's notes: the business, the city, the owner of the place)
+      if (x.p.vip && x.p.agentId && x.gross > 0) agentPay.push({ p: x.p, biz: P.biz || { id: P.key, b: x.b, name: P.name }, gross: x.gross, paid });
+      if (paid > 0) { add(bw, 'wages', -paid); add(x.w.id, 'wages', paid); if (P.biz) book(P.biz.id).wages += paid; sum.wages += paid; income.set(x.w.id, (income.get(x.w.id) || 0) + paid); }
+      if (owed > 0) { debts.push({ id: rid(), debtor: bw, creditor: x.w.id, kind: 'wages', amount: owed, ref: `day:${day}` }); if (P.biz) book(P.biz.id).owed += owed; sum.owedWages += owed; }
     }
     // 4. remote work sold abroad, benefits for those without work
     let welfareWant = 0;
@@ -635,10 +698,10 @@ export class Households {
       if (biz.f !== -1 && profit > 0) { const tx = Math.min(bp(profit, pol.taxes.venueProfit), Math.max(0, room(bw))); if (tx > 0) { add(bw, 'profit tax', -tx); add(T, 'profit tax', tx); r.tax += tx; sum.taxProfit += tx; } }
       r.profit = wallets.get(bw)?.amount || 0;
       if (biz.owner_kind === 'municipality' && pol.business.cityDividend) {
-        const keep = Math.max(biz.f === -1 ? pol.endowment.company : pol.endowment.business, (bill.get(biz.id) || 0) * pol.business.workingCapitalDays), extra = room(bw) - keep;
+        const keep = Math.max(biz.f === -1 ? pol.endowment.company : pol.endowment.business, (bill.get(`biz:${biz.id}`) || 0) * pol.business.workingCapitalDays), extra = room(bw) - keep;
         if (extra > 0) { add(bw, 'dividend to the city', -extra); add(T, 'dividends', extra); sum.dividends += extra; r.other -= extra; }
       } else if (biz.settings?.autoDraw && biz.owner_kind !== 'municipality') {
-        const keep = Math.max(0, (bill.get(biz.id) || 0) * pol.business.workingCapitalDays), extra = room(bw) - keep;
+        const keep = Math.max(0, (bill.get(`biz:${biz.id}`) || 0) * pol.business.workingCapitalDays), extra = room(bw) - keep;
         if (extra > 0) { add(bw, 'drawn by the owner', -extra); add(bz.ownerWallet(biz).id, `profit from ${biz.name}`.slice(0, 40), extra); r.other -= extra; }
       }
     }

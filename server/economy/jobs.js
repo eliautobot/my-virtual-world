@@ -149,7 +149,8 @@ export class Jobs {
     const taken = new Map();
     for (const s of this.q.active.all(this.w)) { const k = `${s.biz}|${s.role}`; if (!taken.has(k)) taken.set(k, []); taken.get(k).push({ kind: s.worker_kind, name: this.e.nameOf(subj(s.worker_kind, s.worker_id)), mode: s.mode }); }
     const staff = new Map();
-    for (const p of people) { if (!p || p.retired || p.job?.kind !== 'staff') continue; const k = `${p.job.b}:${p.job.f}`; if (!staff.has(k)) staff.set(k, []); staff.get(k).push(p.name.split(' ')[0]); }
+    // (an agent on post there serves there too: its job record is its post's)
+    for (const p of people) { if (!p || p.retired || (p.job?.kind !== 'staff' && p.job?.kind !== 'post')) continue; const k = `${p.job.b}:${p.job.f}`; if (!staff.has(k)) staff.set(k, []); staff.get(k).push(p.name.split(' ')[0]); }
     return bz.open().filter(b => this.rolesAt(b.kind).length).map(b => {
       const slots = this.slotsOf(b), open = isOpen(b.kind, h);
       return { business: { id: b.id, name: b.name, kind: b.kind, b: b.b, f: b.f, rating: b.rating, owner: bz.ownerView(b) }, open, waiting: open ? this.waiting(b.id) : 0,

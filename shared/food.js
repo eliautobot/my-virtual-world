@@ -251,6 +251,7 @@ const ITEMS = [
   [53, 'lava_cake', 'Molten lava cake', 'desserts', 'dessert', 750, {}],
   [54, 'banana_split', 'Banana split', 'desserts', 'dessert', 750, {}],
   [55, 'pudding', 'Chocolate pudding', 'desserts', 'dessert', 500, {}],
+  [185, 'popcorn', 'Popcorn', 'desserts', 'snack', 400, {}],   // (2026-10-28: the arcade's: "junk food on arcades like popcorn, pizza, burgers, tacos, soda, water, juice")
   // ---------------------------------------------------------------- soft drinks & juices
   [56, 'cola', 'Cola', 'soft', 'drink', 300, D('soda', '#3a1a10', 'cold')],
   [57, 'lemon_soda', 'Lemon-lime soda', 'soft', 'drink', 300, D('soda', '#e6f0b8', 'cold')],
@@ -310,7 +311,7 @@ const EAT_CAT = { breakfast: 'knife', bakery: 'hand', deli: 'hands', burgers: 'h
   healthy: 'fork', desserts: 'fork', home: 'fork' };
 const EAT_ITEM = {
   avocado_toast: 'hand', breakfast_burrito: 'hands', yogurt_parfait: 'spoon', oatmeal: 'spoon', acai_bowl: 'spoon', bagel_lox: 'hand',
-  nuggets: 'hand', fries: 'hand', sweet_potato_fries: 'hand', onion_rings: 'hand',
+  nuggets: 'hand', fries: 'hand', sweet_potato_fries: 'hand', onion_rings: 'hand', popcorn: 'hand',
   calzone: 'knife',
   bruschetta: 'hand', minestrone: 'spoon', gelato: 'spoon',
   quesadilla: 'hand', nachos: 'hand', enchiladas: 'knife', chips_guac: 'hand', burrito_bowl: 'fork', churros: 'hand',
@@ -398,6 +399,9 @@ export const CUISINES = [
     menu: ['tomato_soup', 'caesar', 'bruschetta', 'spaghetti', 'salmon', 'steak_frites', 'roast_chicken', 'cheeseburger', 'risotto', 'choc_cake', 'cheesecake', 'red_wine', 'white_wine', 'beer', 'cola', 'sparkling', 'espresso'] },
 ];
 export const CUISINE_OF = Object.freeze(Object.fromEntries(CUISINES.map(c => [c.id, c])));
+/** The kinds of place whose menus are food and drink, each with a cuisine (the economy's menus; Order Up's kitchens go
+ *  there: shared/edit.js kitchenFloor). */
+export const FOOD_VENUES = new Set(['cafe', 'restaurant']);
 for (const c of CUISINES) for (const id of c.menu) if (!FOOD_BY_ID[id]) throw new Error(`food: cuisine ${c.id} lists unknown item ${id}`);
 
 /** What a place's name says it serves (the world's own names: shared/names.js), first match wins. */
@@ -413,13 +417,17 @@ const NAME_HINTS = [
   [/ice cream|gelat|sweet|sugar|cake|scoop|dessert/i, 'desserts'], [/roast|espresso|brew|bean|drip|pour|latte|grounds|coffee/i, 'coffee_house'],
 ];
 // a name that says nothing: the restaurants spread over these, the cafés stay cafés
+/** The kinds a café may be (the rest are restaurants'). */
+export const CAFE_KINDS = new Set(['cafe', 'coffee_house', 'bakery', 'brunch', 'desserts']);
 const SPREAD = ['restaurant', 'italian', 'burger', 'pizza', 'asian', 'mexican', 'seafood', 'japanese', 'grill', 'indian', 'diner', 'healthy', 'bistro', 'mediterranean'];
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 
 /** The cuisine a place starts as: from its name, else by venue (cafés: Café; restaurants spread by the seed). */
 export function guessCuisine(name, venue, seed = 0) {
   const s = String(name || '').replace(/\s+(dining room|upstairs|downstairs|terrace)$/i, '');   // a place's other floors are the same kind
-  for (const [re, id] of NAME_HINTS) if (re.test(s)) return id;
+  // (a café stays a café: its name picks only among the cafés' kinds, so a "Garden Café" or a "Bistro" café floor isn't a
+  // restaurant; its kitchen follows its menu, shared/kitchen-module.js)
+  for (const [re, id] of NAME_HINTS) if (re.test(s) && (venue !== 'cafe' || CAFE_KINDS.has(id))) return id;
   if (venue === 'cafe') return 'cafe';
   return SPREAD[hash(`${s}:${seed}`) % SPREAD.length];
 }

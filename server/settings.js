@@ -474,6 +474,9 @@ export const SETTINGS = Object.freeze([
   { path: 'sound.media', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 100, label: 'Videos and recordings' },
   { path: 'sound.music', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 80, label: 'Live music' },
   { path: 'sound.score', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 40, label: 'Background music' },
+  { path: 'sound.effects', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 80, label: 'Sound effects' },
+  { path: 'sound.vehicles', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 80, label: 'Vehicles' },
+  { path: 'sound.radio', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 70, label: 'Radio' },
   // Off switches and levels for the heavy parts of the living world (WP4.9/4.17/4.18, spec §7.1 X8): drawn on this
   // account's screens only; the world itself is the same for everyone.
   { path: 'display.wildlife', scope: 'account', tier: 0, type: 'enum', values: ['off', 'fewer', 'normal'], default: 'normal', label: 'Wildlife' },

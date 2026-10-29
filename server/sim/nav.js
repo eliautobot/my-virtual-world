@@ -17,6 +17,7 @@ import { addressOf } from '../../shared/city.js';
 import { docksOf } from '../../shared/ferries.js';
 import { worldRoads, cityRoadSet } from '../../shared/city-roads.js';
 import { tangentAt } from '../../shared/roads.js';
+import { roadRoute, routePath } from '../../shared/car-route.js';
 import { stationY } from '../../shared/stations.js';
 
 export const SUBWAY_SPEED = 18;
@@ -240,6 +241,33 @@ export class Nav {
     const from = end(A), to = end(B), len = Math.max(0, r.cost * WALK_SPEED - from.d - to.d);
     const time = len / RIDE_SPEED + RIDE_EXTRA;
     return { cost: (from.d + to.d) / WALK_SPEED + time, time, from, to };
+  }
+  /**
+   * A resident's drive from access A to B (2026-10-28, the product owner: its body went "straight (not through roads)"
+   * while its car took the lanes; then "a real driving route", the lights): the quickest way along the roads from the
+   * road beside A to the road beside B, its lanes, its stops and what rules each (shared/car-route.js) — the city's
+   * junction plans and the island's (signals, stop signs, stop bars), kept while the roads stay as they are.
+   * { pts, S, vmax, stops, len, plans } or null.
+   */
+  carRoute(A, B) {
+    const W = this.world;
+    if (!this._carNet || this._carNet.grid !== W.grid || this._carNet.roads !== W.roads || this._carNet.terrain !== W.terrain) {
+      const net = worldRoads(W), plans = new Map();
+      this.walk();
+      for (const [k, P] of this._walk?.island?.roads?.plans || []) plans.set(k, P);
+      const set = W.grid ? cityRoadSet(W.grid, W.roads) : null;
+      if (set) for (const [k, P] of set.plans) plans.set(k, P);
+      this._carNet = { grid: W.grid, roads: W.roads, terrain: W.terrain, net, plans };
+    }
+    const C = this._carNet, Wk = this.walk();
+    const end = E => (E.walk ? (Wk && E.node >= 0 ? { x: Wk.X[E.node], z: Wk.Z[E.node] } : null) : { x: E.bx, z: E.bz });
+    const a = end(A), b = end(B);
+    if (!a || !b) return null;
+    try {
+      const legs = roadRoute(C.net, a.x, a.z, b.x, b.z, { grid: this.g });
+      const path = legs && routePath(C.net, legs, { plans: C.plans, grid: this.g });
+      return path ? { ...path, plans: C.plans } : null;
+    } catch (e) { this.lastCarError = e.message; return null; }
   }
   /**
    * The lanes a resident's car follows from access A to B (WP4.9): the route's walking points moved from the footpath
