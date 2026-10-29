@@ -2,6 +2,16 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.2.1 (2026-10-29)
+
+- **New default volumes**: every kind of sound starts from a quieter, balanced mix (master 100 %, world 15 %, aircraft
+  and games 50 %, agents' voices 85 %, videos and recordings 35 %, live music 30 %, background music 15 %, sound effects
+  10 %, vehicles 10 %, radio 30 %). Volumes a player never changed move to the new mix once; ones a player chose stay.
+- **Reset in Settings → Sound**: one button at the bottom puts every volume back to its default.
+- **The radio**: it is on each time you get in a car, a boat or an aircraft, and its panel always shows the station that
+  is playing (in a world with its own stations it played the first one while the panel said "Radio off"). **R** turns
+  it off and on again, **Shift+R** goes to the next station; the panel's ⏻ ◀ ▶ work as before.
+
 ## v2.2.0 (2026-10-28)
 
 - **Order Up, a co-op cooking game**: cafés, restaurants, lounges, night clubs and arcades get a kitchen, laid out from

@@ -115,6 +115,7 @@ svg.mvi.t-dim { color: var(--dim); }
 .snd-list { max-width: 640px; } .snd-list.off { opacity: .5; }
 .snd-l { margin-top: 14px; } .snd-l:first-child { margin-top: 6px; }
 .snd-on { font-weight: 600; }
+.snd-reset-row { gap: 10px; align-items: center; margin-top: 16px; } .snd-reset-row .hint { margin: 0; }
 #topbar .soundb[aria-pressed="true"] { color: var(--dim); }
 .sep { height: 1px; background: var(--line); margin: 10px 0; }
 .dim { color: var(--dim); }

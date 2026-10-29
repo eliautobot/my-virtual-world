@@ -8,6 +8,7 @@ import { AuthError, LIMITS } from './auth/accounts.js';
 import { isCredentialName, redact } from './redact.js';
 import { SECRET_PREFIX, aadInstall, aadAccount } from './secret-holders.js';
 import { AGENT_APPS, AGENT_APP_OFFERS } from '../shared/agent-apps.js';
+import { SOUND_DEFAULTS as SD } from '../shared/sound-defaults.js';
 
 export const TIER_NAMES = Object.freeze({ 0: 'preferences', 1: 'secrets', 2: 'infrastructure' });
 const PATH_RE = /^[a-z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)+$/;
@@ -466,17 +467,17 @@ export const SETTINGS = Object.freeze([
   // Sound (2026-10-20, Settings → Sound; client/js/audio/mixer.js): a master volume and one per kind of sound, in % —
   // the world (wind, rain, waves, birds, the city), aircraft and games, agents' voices, videos and recordings. They
   // follow the account; the top bar's sound on/off stays with each device. (display.sound, the old Ambient sound, is
-  // kept for older releases: a device that had it starts the world's volume from it.)
-  { path: 'sound.master', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 100, label: 'Master volume' },
-  { path: 'sound.world', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 70, label: 'World sounds' },
-  { path: 'sound.aircraft', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 70, label: 'Aircraft and games' },
-  { path: 'sound.voices', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 100, label: 'Agents\' voices' },
-  { path: 'sound.media', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 100, label: 'Videos and recordings' },
-  { path: 'sound.music', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 80, label: 'Live music' },
-  { path: 'sound.score', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 40, label: 'Background music' },
-  { path: 'sound.effects', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 80, label: 'Sound effects' },
-  { path: 'sound.vehicles', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 80, label: 'Vehicles' },
-  { path: 'sound.radio', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: 70, label: 'Radio' },
+  // kept for older releases: a device that had it starts the world's volume from it.) The defaults: shared/sound-defaults.js.
+  { path: 'sound.master', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: SD.master, label: 'Master volume' },
+  { path: 'sound.world', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: SD.world, label: 'World sounds' },
+  { path: 'sound.aircraft', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: SD.aircraft, label: 'Aircraft and games' },
+  { path: 'sound.voices', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: SD.voices, label: 'Agents\' voices' },
+  { path: 'sound.media', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: SD.media, label: 'Videos and recordings' },
+  { path: 'sound.music', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: SD.music, label: 'Live music' },
+  { path: 'sound.score', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: SD.score, label: 'Background music' },
+  { path: 'sound.effects', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: SD.effects, label: 'Sound effects' },
+  { path: 'sound.vehicles', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: SD.vehicles, label: 'Vehicles' },
+  { path: 'sound.radio', scope: 'account', tier: 0, type: 'number', min: 0, max: 100, step: 5, default: SD.radio, label: 'Radio' },
   // Off switches and levels for the heavy parts of the living world (WP4.9/4.17/4.18, spec §7.1 X8): drawn on this
   // account's screens only; the world itself is the same for everyone.
   { path: 'display.wildlife', scope: 'account', tier: 0, type: 'enum', values: ['off', 'fewer', 'normal'], default: 'normal', label: 'Wildlife' },

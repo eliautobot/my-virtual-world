@@ -103,12 +103,15 @@ Changed in Settings by an account holding the capability named; *install* settin
 | `display.agentEmoji` | account | enum | normal | `account.self` | Agents' emoji |
 | `display.sound` | account | enum | normal | `account.self` | Ambient sound |
 | `sound.master` | account | number | 100 | `account.self` | Master volume |
-| `sound.world` | account | number | 70 | `account.self` | World sounds |
-| `sound.aircraft` | account | number | 70 | `account.self` | Aircraft and games |
-| `sound.voices` | account | number | 100 | `account.self` | Agents' voices |
-| `sound.media` | account | number | 100 | `account.self` | Videos and recordings |
-| `sound.music` | account | number | 80 | `account.self` | Live music |
-| `sound.score` | account | number | 40 | `account.self` | Background music |
+| `sound.world` | account | number | 15 | `account.self` | World sounds |
+| `sound.aircraft` | account | number | 50 | `account.self` | Aircraft and games |
+| `sound.voices` | account | number | 85 | `account.self` | Agents' voices |
+| `sound.media` | account | number | 35 | `account.self` | Videos and recordings |
+| `sound.music` | account | number | 30 | `account.self` | Live music |
+| `sound.score` | account | number | 15 | `account.self` | Background music |
+| `sound.effects` | account | number | 10 | `account.self` | Sound effects |
+| `sound.vehicles` | account | number | 10 | `account.self` | Vehicles |
+| `sound.radio` | account | number | 30 | `account.self` | Radio |
 | `display.wildlife` | account | enum | normal | `account.self` | Wildlife |
 | `display.weatherFx` | account | enum | on | `account.self` | Rain and lightning |
 | `display.traffic` | account | enum | normal | `account.self` | Traffic |

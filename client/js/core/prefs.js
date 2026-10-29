@@ -7,6 +7,7 @@
 // Emits bus 'prefs' (names) when the account's values replace the device's.
 import { S, bus } from './state.js';
 import { auth } from './auth.js';
+import { SOUND_DEFAULTS } from '/shared/sound-defaults.js';
 
 const local = {
   get: k => localStorage.getItem(k),
@@ -42,17 +43,17 @@ const PREFS = {
   favourites: { path: 'display.favourites', get: () => local.get('mvw.favs') || '', apply: v => local.set('mvw.favs', v || null) },
   sound: { path: 'display.sound', get: () => local.get('mvw.sound') || 'normal', apply: v => { local.set('mvw.sound', v && v !== 'normal' ? v : null); bus.emit('sound', v || 'normal'); } },
   // Sound (Settings → Sound; audio/mixer.js): a master volume and one per kind of sound, 0–100 %. (The world's starts from
-  // the old Ambient sound on a device that had one.)
-  volMaster: vol('master', 100),
-  volWorld: vol('world', () => OLD_WORLD[local.get('mvw.sound')] ?? 70),
-  volAircraft: vol('aircraft', 70),
-  volVoices: vol('voices', 100),
-  volMedia: vol('media', 100),
-  volMusic: vol('music', 80),
-  volScore: vol('score', 40),
-  volEffects: vol('effects', 80),
-  volVehicles: vol('vehicles', 80),
-  volRadio: vol('radio', 70),
+  // the old Ambient sound on a device that had one.) The defaults: shared/sound-defaults.js (Settings → Sound → Reset).
+  volMaster: vol('master', SOUND_DEFAULTS.master),
+  volWorld: vol('world', () => OLD_WORLD[local.get('mvw.sound')] ?? SOUND_DEFAULTS.world),
+  volAircraft: vol('aircraft', SOUND_DEFAULTS.aircraft),
+  volVoices: vol('voices', SOUND_DEFAULTS.voices),
+  volMedia: vol('media', SOUND_DEFAULTS.media),
+  volMusic: vol('music', SOUND_DEFAULTS.music),
+  volScore: vol('score', SOUND_DEFAULTS.score),
+  volEffects: vol('effects', SOUND_DEFAULTS.effects),
+  volVehicles: vol('vehicles', SOUND_DEFAULTS.vehicles),
+  volRadio: vol('radio', SOUND_DEFAULTS.radio),
   // the living world's off switches and levels (spec §7.1 X8)
   wildlife: { path: 'display.wildlife', get: () => local.get('mvw.wildlife') || 'normal', apply: v => { local.set('mvw.wildlife', v && v !== 'normal' ? v : null); bus.emit('display', 'wildlife'); } },
   weatherFx: { path: 'display.weatherFx', get: () => local.get('mvw.weatherFx') || 'on', apply: v => { local.set('mvw.weatherFx', v && v !== 'on' ? v : null); bus.emit('display', 'weatherFx'); } },
@@ -72,6 +73,12 @@ export function setPref(name, value) {
   const d = PREFS[name];
   d.apply(value);
   if (auth.account && syncedFor === auth.account.id) save({ [d.path]: value });
+}
+/** Changes several preferences at once (Settings → Sound → Reset): on this device and, signed in, in one save. */
+export function setPrefs(map) {
+  const values = {};
+  for (const [name, value] of Object.entries(map)) { const d = PREFS[name]; d.apply(value); values[d.path] = value; }
+  if (auth.account && syncedFor === auth.account.id) save(values);
 }
 function save(values) {
   auth.call('/api/account/settings', { values }).catch(err => console.warn('[prefs] not saved:', err.message));

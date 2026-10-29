@@ -17,7 +17,7 @@ test('the current database goes back to schema 2 with nothing lost, takes an old
   const dir = tempDir('mvw-schema-');
   try {
     let s = openDb(dir);
-    assert.equal(SCHEMA_VERSION, 56);
+    assert.equal(SCHEMA_VERSION, 57);
     assert.ok(MIGRATION_INFO.slice(1).every(m => m.additive), 'every migration after the first only adds things');
     const now = Date.now();
     s.db.prepare(`INSERT INTO accounts (world_id, login, display_name, display_key, role, password_hash, password_changed, created, updated)
@@ -61,6 +61,7 @@ test('the current database goes back to schema 2 with nothing lost, takes an old
     s.db.prepare("INSERT INTO music_tracks (id, world_id, title, artist, genre, seconds, file, bytes, source, status, created, updated) VALUES ('t1', ?, 'Velvet Hour', 'MVW Originals', 'jazz', 154, 'a.mp3', 100, 'import', 'approved', ?, ?)").run(s.worldId, now, now);
     s.db.prepare("INSERT INTO music_decks (world_id, place, state_json, updated) VALUES (?, '1:1:7', '{\"family\":\"lounge\"}', ?)").run(s.worldId, now);
     s.db.prepare("INSERT INTO ou_cookbook (world_id, cook_id, item, n, best, first_at, best_at) VALUES (?, 1, 'latte', 3, 96, ?, ?)").run(s.worldId, now, now);
+    assert.deepEqual(downgradeSchema(s.db, 56), { ok: true, from: 57, to: 56, changed: true }, 'what releases before the sound\'s new defaults need');
     assert.deepEqual(downgradeSchema(s.db, 55), { ok: true, from: 56, to: 55, changed: true }, 'what releases before Order Up\'s cooks and Cookbook need');
     assert.deepEqual(downgradeSchema(s.db, 54), { ok: true, from: 55, to: 54, changed: true }, 'what releases before the city\'s music need');
     assert.deepEqual(downgradeSchema(s.db, 53), { ok: true, from: 54, to: 53, changed: true }, 'what releases before agents\' work sessions on their PC need');
@@ -116,8 +117,8 @@ test('the current database goes back to schema 2 with nothing lost, takes an old
       VALUES ((SELECT value FROM meta WHERE key = 'world_id'), 'h1', 1, 'c', ?, ?, ?, NULL, 'old release')`).run(now, now, now);
     assert.equal(raw.prepare('SELECT needs_twofa FROM sessions').get().needs_twofa, 0, 'the added column has a default');
     raw.close();
-    s = openDb(dir);   // the newer release again: migrates 2 -> 56 over the tables that already exist
-    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 56);
+    s = openDb(dir);   // the newer release again: migrates 2 -> 57 over the tables that already exist
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 57);
     assert.equal(s.db.prepare('SELECT best FROM ou_cookbook').get().best, 96, 'the Cookbook survived');
     assert.equal(s.db.prepare('SELECT title FROM music_tracks').get().title, 'Velvet Hour', 'the music library survived');
     assert.equal(s.db.prepare('SELECT peer FROM phone_takeovers').get().peer, '+15552010042', 'a take-over survived');
@@ -161,8 +162,8 @@ test('a migration that changed existing data blocks the downgrade', () => {
     const r = downgradeSchema(s.db, 2, info);
     assert.equal(r.ok, false);
     assert.match(r.why, /migration 3 changed existing data/);
-    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 56, 'nothing changed');
-    assert.deepEqual(downgradeSchema(s.db, 56), { ok: true, from: 56, to: 56, changed: false });
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 57, 'nothing changed');
+    assert.deepEqual(downgradeSchema(s.db, 57), { ok: true, from: 57, to: 57, changed: false });
     s.db.exec('PRAGMA user_version = 99');
     assert.match(downgradeSchema(s.db, 2).why, /newer than this tool knows/);
     s.db.exec('PRAGMA user_version = 42');

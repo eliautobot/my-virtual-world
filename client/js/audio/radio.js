@@ -5,9 +5,11 @@
 // worked out from the library and the server's clock (onAir), so everyone on a station hears the same song at the same
 // second: the song streams from the library (/api/music/file, from where the station is in it) and keeps to the clock
 // (sought again when it drifts); between songs the station's ident (its voice over its jingle); the tuning static when
-// you change station; talk radio sounds like AM (band-limited). R next station, Shift+R the one before; the panel at
-// the top left (station, what plays, ◀ ⏻ ▶); on phones a 📻 button under the map slides it open, and it tucks away
-// again after a few seconds untouched. Its volume is Radio (Settings → Sound); the background music
+// you change station; talk radio sounds like AM (band-limited). It is on each time you get in (2026-10-29, the product
+// owner: "by default when a user gets into a vehicle ... the radio is on and the ui reflects that"); R turns it off and on
+// again, Shift+R the next station; the panel at the top left (station, what plays, ◀ ⏻ ▶) shows the station that plays
+// (a world without the one last tuned to plays its first: the panel said "Radio off" over it); on phones a 📻 button under
+// the map slides it open, and it tucks away again after a few seconds untouched. Its volume is Radio (Settings → Sound); the background music
 // makes way while it plays. The hosts' talk (R2): breaks over the next song; 2-3 hosts at a studio's desk (ST5) make it
 // a conversation, line by line, each in its own voice, and the one speaking talks at the desk (S.radioTalk: render/agents.js).
 import { S, bus } from '../core/state.js';
@@ -17,8 +19,8 @@ import { getJSON } from '../core/net.js';
 import { auth } from '../core/auth.js';
 import { toLocal, inRect } from '/shared/geom.js';
 
-const KEY = 'mvw.radio';
-let app = null, room = null, el = null, cur = null, lastT = 0, inside = false, identAt = '', bar = null, btn = null, shut = 0;
+const KEY = 'mvw.radio';   // (the station last tuned to, on this device)
+let app = null, room = null, el = null, cur = null, lastT = 0, inside = false, identAt = '', bar = null, btn = null, shut = 0, on = true, aboard = false;
 const OPEN_MS = 6000;   // (phones: how long the panel stays open after the last touch)
 // the hosts (server/radio/): who hosts each station, the breaks written for the slots coming up; the break on air
 const R = { stations: null, hosts: new Map(), breaks: new Map(), loadedAt: 0 }; let brk = null;
@@ -26,8 +28,12 @@ const R = { stations: null, hosts: new Map(), breaks: new Map(), loadedAt: 0 }; 
 const list = () => R.stations || STATIONS;
 const setStations = arr => { R.stations = arr; R.hosts = new Map(arr.map(s => [s.id, s.hostNames?.length ? s.hostNames : null])); };
 const DUCK = 0.22;   // (the song while the host talks over it)
-const saved = () => { try { return localStorage.getItem(KEY) || 'sunday'; } catch { return 'sunday'; } };
+const saved = () => { try { const v = localStorage.getItem(KEY); return v && v !== 'off' ? v : 'sunday'; } catch { return 'sunday'; } };   // ('off' from before 2026-10-29: on/off is the ride's now)
 const save = v => { try { localStorage.setItem(KEY, v); } catch { /* private mode */ } };
+/** The station the radio plays: the one last tuned to, else (a world without it) the world's first. */
+const tuned = () => stationById(saved(), list()) || (R.stations ? list()[0] || null : null);
+/** What is on: its studio's station in a studio, else the tuned station while the radio is on. */
+const playingSt = () => room ? room.st : on ? tuned() : null;
 
 export function init(a) {
   app = a;
@@ -36,7 +42,7 @@ export function init(a) {
   window.addEventListener('keydown', e => {
     if (e.code !== 'KeyR' || e.repeat || !inside || e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '') || document.activeElement?.isContentEditable) return;
     if (room) return;   // (a studio plays its own station)
-    step(e.shiftKey ? -1 : 1);
+    if (e.shiftKey) step(1); else setOn(!on);
   });
   setTimeout(loadHosts, 4000);   // (the hosts: the Radio Station's ON AIR sign shows them, render/radio-station.js)
   bus.on('msg:radio', m => {
@@ -45,8 +51,9 @@ export function init(a) {
     paint();
   });
   a.radio = {
-    get playing() { return !!cur && !cur.dead && inside && (room || saved() !== 'off') && level('radio') > 0; }, get room() { return room && { station: room.st.id, name: room.st.name, mod: room.m.id }; },
-    get station() { return saved(); }, get now() { return cur && { kind: cur.kind, track: cur.track?.id || null, title: cur.track?.title || null, station: cur.st }; },
+    get playing() { return !!cur && !cur.dead && inside && (room || on) && level('radio') > 0; }, get room() { return room && { station: room.st.id, name: room.st.name, mod: room.m.id }; },
+    get on() { return on; }, toggle: () => setOn(!on),
+    get station() { return on ? tuned()?.id || saved() : 'off'; }, get now() { return cur && { kind: cur.kind, track: cur.track?.id || null, title: cur.track?.title || null, station: cur.st }; },
     get drift() { return cur?.el && cur.want != null ? +(cur.el.currentTime - cur.want).toFixed(2) : null; },
     tune: id => tune(id), step, off: () => tune('off'),
     get onAir() { return brk && { key: brk.b.key, host: (brk.line?.host || brk.b.host)?.name, line: brk.i, lines: breakLines(brk.b).length, voice: brk.line?.audio ? 'file' : 'free' }; }, get talking() { return [...(S.radioTalk || [])]; }, get breaks() { return [...R.breaks.keys()]; }, get hosts() { return Object.fromEntries(R.hosts); }, get stations() { return list().map(s => ({ id: s.id, name: s.name, freq: s.freq, band: s.band, talkEvery: talkOf(s).every, talkLength: talkOf(s).length })); }, get all() { return list(); },
@@ -69,21 +76,32 @@ function studioHere() {
   }
   return null;
 }
-/** The next (dir 1) or previous (-1) station; from off, the first. */
+/** The next (dir 1) or previous (-1) station, turning the radio on. */
 function step(dir) {
   const L = list(); if (!L.length) return;
-  const i = L.findIndex(s => s.id === saved());
+  const i = L.findIndex(s => s.id === tuned()?.id);
   const n = i < 0 ? (dir > 0 ? 0 : L.length - 1) : (i + dir + L.length) % L.length;
   tune(L[n].id);
 }
+/** Tunes to a station (and on), or 'off'. */
 function tune(id) {
-  const was = saved(); save(id || 'off');
-  if (id === was) return;
+  if (!id || id === 'off') { setOn(false); return; }
+  const was = on ? tuned()?.id : null; save(id); on = true;
+  if (id === was) { paint(); return; }
+  changed(true);
+}
+/** The radio off or on (R, ⏻); on, the station last tuned to. */
+function setOn(v) {
+  if (on === !!v) return;
+  on = !!v;
+  changed(on);
+}
+function changed(sound) {
   stop(0.25); endBreak();
   const fx = app.sfx;
-  if (fx?.ready && inside) fx.play(id === 'off' ? 'radio-click' : 'radio-tune', { kind: 'radio', space: 'any', gain: id === 'off' ? 0.7 : 0.45 });
+  if (fx?.ready && inside) fx.play(sound ? 'radio-tune' : 'radio-click', { kind: 'radio', space: 'any', gain: sound ? 0.45 : 0.7 });
   paint(); openPanel(true);
-  setTimeout(() => tick(true), id === 'off' ? 0 : 450);
+  setTimeout(() => tick(true), sound ? 450 : 0);
 }
 
 // ------------------------------------------------------------------ playing
@@ -123,10 +141,13 @@ function startSong(st, air) {
 function tick() {
   const fx = app.sfx, was = inside;
   const wasRoom = room?.m.id;
-  room = vehicleOn() ? null : studioHere();
-  inside = vehicleOn() || !!room;
+  const veh = vehicleOn();
+  if (veh && !aboard) on = true;   // (getting in: the radio is on)
+  aboard = veh;
+  room = veh ? null : studioHere();
+  inside = veh || !!room;
   if (was !== inside || wasRoom !== room?.m.id) paint();
-  const id = saved(), st = room ? room.st : id === 'off' ? null : stationById(id, list()) || (R.stations && id !== 'off' ? list()[0] || null : null);
+  const st = playingSt();
   if (!inside || !st || !fx?.ready || !S.music?.ready || level('radio') === 0 || document.hidden) { if (cur) stop(inside ? 0.6 : 1.2); endBreak(); return; }
   if (performance.now() - R.loadedAt > 60000) { R.loadedAt = performance.now(); loadHosts(); }
   const songs = stationTracks(S.music.tracks.values(), st), t = app.net.realNow(), air = onAir(songs, st.id, t, st.order, talkOf(st).every);
@@ -252,9 +273,9 @@ function openPanel(on) {
 function paint() {
   if (!bar) {
     bar = document.createElement('div'); bar.className = 'radio-hud hidden'; bar.setAttribute('role', 'region'); bar.setAttribute('aria-label', 'Radio');
-    bar.innerHTML = '<button class="rh-b" data-d="-1" title="Previous station (Shift+R)" aria-label="Previous station">◀</button><div class="rh-t"><b class="rh-s"></b><span class="rh-n"></span></div><button class="rh-b" data-d="1" title="Next station (R)" aria-label="Next station">▶</button><button class="rh-b rh-off" title="Radio on or off" aria-label="Radio on or off">⏻</button>';
+    bar.innerHTML = '<button class="rh-b" data-d="-1" title="Previous station" aria-label="Previous station">◀</button><div class="rh-t"><b class="rh-s"></b><span class="rh-n"></span></div><button class="rh-b" data-d="1" title="Next station (Shift+R)" aria-label="Next station">▶</button><button class="rh-b rh-off" title="Radio on or off (R)" aria-label="Radio on or off">⏻</button>';
     bar.insertAdjacentHTML('beforeend', '<button class="rh-b rh-set hidden" title="This station: what it plays, its hosts, its name" aria-label="Station settings">⚙</button>');
-    bar.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (b.classList.contains('rh-set')) { if (room) import('../ui/station-panel.js').then(M => M.openStation(app, room.st.id)); return; } if (room) return; if (b.classList.contains('rh-off')) tune(saved() === 'off' ? (list()[0]?.id || 'sunday') : 'off'); else step(Number(b.dataset.d)); });
+    bar.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (b.classList.contains('rh-set')) { if (room) import('../ui/station-panel.js').then(M => M.openStation(app, room.st.id)); return; } if (room) return; if (b.classList.contains('rh-off')) setOn(!on); else step(Number(b.dataset.d)); });
     (document.getElementById('ui') || document.body).appendChild(bar);
     // phones: a 📻 button under the map slides the panel open; it tucks away again after a few seconds untouched
     btn = document.createElement('button'); btn.className = 'radio-btn hidden'; btn.title = 'Radio'; btn.setAttribute('aria-label', 'Radio'); btn.textContent = '📻';
@@ -264,15 +285,15 @@ function paint() {
   }
   bar.classList.toggle('hidden', !inside); btn.classList.toggle('hidden', !inside);
   if (!inside) openPanel(false);
-  btn.classList.toggle('on', !!room || !!stationById(saved(), list()));
+  btn.classList.toggle('on', !!playingSt());
   if (!inside) return;
-  const st = room ? room.st : stationById(saved(), list());
+  const st = playingSt();   // (the station that plays: the panel never says off over it)
   bar.classList.toggle('rh-studio', !!room);   // (in its studio: the station is fixed, no ◀ ▶ ⏻; ⚙ its settings for administrators)
   bar.querySelector('.rh-set').classList.toggle('hidden', !room || !['owner', 'admin'].includes(auth.me?.role));
   bar.style.setProperty('--rh', st?.color || '#888');
   bar.classList.toggle('off', !st);
   bar.querySelector('.rh-s').textContent = st ? `${room ? '🎙️ In the studio · ' : ''}${st.freq} ${st.band} · ${st.name}` : 'Radio off';
-  bar.querySelector('.rh-n').textContent = !st ? 'R to turn it on' : level('radio') === 0 ? 'Volume at 0 (Settings → Sound → Radio)'
+  bar.querySelector('.rh-n').textContent = !st ? 'R or ⏻ turns it on' : level('radio') === 0 ? 'Volume at 0 (Settings → Sound → Radio)'
     : brk ? `🎙 ${(brk.line?.host || brk.b.host)?.name || 'The host'}: ${brk.line?.text || '…'}` : cur?.kind === 'song' ? `${cur.track.title || 'Untitled'}${cur.track.artist ? ` · ${cur.track.artist}` : ''}` : cur?.kind === 'ident' ? (R.hosts.get(st.id) || st.dj ? `${st.line} · with ${[...(R.hosts.get(st.id) || []).map(h => h.name), ...(st.dj ? [`DJ ${st.dj.name}`] : [])].join(', ')}` : st.line) : 'Tuning…';
   bar.querySelector('.rh-off').classList.toggle('on', !!st);
   bar.classList.toggle('talk', !!brk && level('radio') > 0);   // (the host's words as a caption while they talk)

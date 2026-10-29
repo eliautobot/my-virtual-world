@@ -10,7 +10,8 @@ import { auth } from '../core/auth.js';
 import { h, esc } from '../core/util.js';
 import { S, bus } from '../core/state.js';
 import { post } from '../core/net.js';
-import { pref, setPref, previewPref } from '../core/prefs.js';
+import { pref, setPref, setPrefs, previewPref } from '../core/prefs.js';
+import { SOUND_DEFAULTS } from '/shared/sound-defaults.js';
 import { soundOn, setSoundOn } from '../audio/mixer.js';
 import { THEMES, apply, AGENT_EMOJI, applyAgentEmoji, TRANSPARENCY_MAX, TRANSPARENCY_STEP, transparencyOf } from '../core/theme.js';
 import { authDialog } from './account.js';
@@ -97,7 +98,7 @@ const SOUNDS = [
   ['volMusic', 'Live music', 'The lounge\'s band and the club\'s DJ, when you are on their floor.'],
   ['volEffects', 'Sound effects', 'Footsteps on every surface, jumps, landings and splashes, for you and the people near you.'],
   ['volVehicles', 'Vehicles', 'Engines, tyres, skids and horns (H while driving or at a boat\'s wheel), the traffic around you, boats and ferries.'],
-  ['volRadio', 'Radio', 'MVW Radio while you drive or take a boat out: R changes the station, Shift+R goes back, the radio panel turns it off.'],
+  ['volRadio', 'Radio', 'MVW Radio in a car, a boat or an aircraft: on as you get in, R turns it off and on, Shift+R changes the station (or the radio panel\'s ⏻ ◀ ▶).'],
   ['volScore', 'Background music', 'The city\'s own music as you go about: by day, at dusk, at night and while you build. It makes way for live music and voices.'],
 ];
 function soundTab(d, body) {
@@ -109,8 +110,13 @@ function soundTab(d, body) {
     <div class="snd-list${on ? '' : ' off'}">${SOUNDS.map(([k, label, about]) => `<label class="snd-l">${esc(label)}<span class="row snd-row"><input type="range" class="snd" data-k="${k}" min="0" max="100" step="5" value="${pref(k)}" aria-describedby="snd-${k}">
       <output class="snd-v">${pref(k)}%</output></span></label>
       <p class="hint" id="snd-${k}">${esc(about)}</p>`).join('')}</div>
-    <p class="hint">The volumes follow your account; sound on or off stays with this device. Sound starts after your first click or key (the browser's rule), and a voice conversation turns the world down while you talk.</p>`;
+    <p class="hint">The volumes follow your account; sound on or off stays with this device. Sound starts after your first click or key (the browser's rule), and a voice conversation turns the world down while you talk.</p>
+    <div class="row snd-reset-row"><button type="button" class="btn snd-reset">Reset</button><span class="hint">Every volume back to its default.</span></div>`;
     body.querySelector('.snd-all').onchange = e => { setSoundOn(e.target.checked); say(app, e.target.checked ? 'Sound on' : 'Sound off'); paint(); };
+    body.querySelector('.snd-reset').onclick = () => {   // (the defaults: shared/sound-defaults.js)
+      setPrefs(Object.fromEntries(SOUNDS.map(([k]) => [k, SOUND_DEFAULTS[k.slice(3).toLowerCase()]])));
+      say(app, 'Volumes back to their defaults'); paint();
+    };
     for (const r of body.querySelectorAll('.snd')) {
       const out = r.parentElement.querySelector('.snd-v');
       r.oninput = () => { out.textContent = `${r.value}%`; previewPref(r.dataset.k, Number(r.value)); };

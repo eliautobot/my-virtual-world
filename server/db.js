@@ -2587,6 +2587,24 @@ const MIGRATIONS = [
      PRIMARY KEY (world_id, cook_id, item)
    );`,
   },
+  // v57 (the sound's defaults, 2026-10-29 — shared/sound-defaults.js; the product owner: "make those same levels the
+  // default"): a page stores the volumes it starts with when an account first signs in, so every account kept the first
+  // defaults (world 70, aircraft 70, voices 100, videos 100, live music 80, background music 40, effects 80, vehicles 80,
+  // radio 70). A volume still at its first default moves to the new one; one the player changed stays theirs. (Master was
+  // and is 100.) Values only: an older release runs on it as before.
+  {
+    additive: true,
+    up: `UPDATE account_settings SET value = CASE key
+       WHEN 'sound.world' THEN '15' WHEN 'sound.aircraft' THEN '50' WHEN 'sound.voices' THEN '85' WHEN 'sound.media' THEN '35'
+       WHEN 'sound.music' THEN '30' WHEN 'sound.score' THEN '15' WHEN 'sound.effects' THEN '10' WHEN 'sound.vehicles' THEN '10'
+       WHEN 'sound.radio' THEN '30' END
+      WHERE json_valid(value) AND json_type(value) IN ('integer', 'real') AND (
+        (key = 'sound.world' AND json_extract(value, '$') = 70) OR (key = 'sound.aircraft' AND json_extract(value, '$') = 70)
+        OR (key = 'sound.voices' AND json_extract(value, '$') = 100) OR (key = 'sound.media' AND json_extract(value, '$') = 100)
+        OR (key = 'sound.music' AND json_extract(value, '$') = 80) OR (key = 'sound.score' AND json_extract(value, '$') = 40)
+        OR (key = 'sound.effects' AND json_extract(value, '$') = 80) OR (key = 'sound.vehicles' AND json_extract(value, '$') = 80)
+        OR (key = 'sound.radio' AND json_extract(value, '$') = 70));`,
+  },
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 export const MIGRATION_INFO = Object.freeze(MIGRATIONS.map((m, i) => Object.freeze({ version: i + 1, additive: !!m.additive })));

@@ -80,7 +80,7 @@ export function openStation(a, id) {
   paintHead(); paintNow(); paintShows();
   const body = panel.querySelector('.sp-body');
   if (isAdmin()) radioTab(null, body, { only: id }).then(() => paintHead());
-  else body.innerHTML = '<p class="hint">Walk into the studio to hear it, or tune to it on the radio in a car, a boat or an aircraft (R).</p>';
+  else body.innerHTML = '<p class="hint">Walk into the studio to hear it, or tune to it on the radio in a car, a boat or an aircraft (Shift+R changes the station).</p>';
 }
 function close() { panel?.remove(); panel = null; openId = null; }
 function paintHead() {

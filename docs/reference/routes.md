@@ -2,7 +2,7 @@
 
 Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand. Proprietary - see [LICENSE](../../LICENSE).
 
-458 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
+472 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
 
 | Method | Path | Capability | Lowest role | Re-auth |
 |---|---|---|---|---|
@@ -63,10 +63,12 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | GET | `/api/agent-posts/floor` | `agents.profile` | member |  |
 | POST | `/api/agent-posts/here` | `agents.profile` | member |  |
 | POST | `/api/agent-posts/leave` | `agents.profile` | member |  |
+| POST | `/api/agent-posts/pay` | `agents.profile` | member |  |
 | GET | `/api/agent-posts/spots` | `agents.profile` | member |  |
 | GET | `/api/agent-posts/work` | `agents.profile` | member |  |
 | POST | `/api/agent-posts/work` | `agents.profile` | member |  |
 | POST | `/api/agent-posts/work/auto` | `agents.profile` | member |  |
+| POST | `/api/agent-posts/work/hours` | `agents.profile` | member |  |
 | GET | `/api/agent-providers` | `connections.use` | member |  |
 | POST | `/api/agent-providers/call` | `connections.use` | member |  |
 | POST | `/api/agent-providers/detect` | `connections.manage` | admin |  |
@@ -283,6 +285,12 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | POST | `/api/notifications/push/test` | `account.self` | member |  |
 | POST | `/api/notifications/push/unsubscribe` | `account.self` | member |  |
 | POST | `/api/notifications/read` | `account.self` | member |  |
+| GET | `/api/orderup/agent` | `play.use` | member |  |
+| POST | `/api/orderup/agent-mode` | `play.use` | member |  |
+| POST | `/api/orderup/agent-skill` | `play.use` | member |  |
+| GET | `/api/orderup/cook` | `play.use` | member |  |
+| POST | `/api/orderup/respec` | `play.use` | member |  |
+| POST | `/api/orderup/skill` | `play.use` | member |  |
 | POST | `/api/owner/transfer` | `owner.transfer` | owner | yes |
 | GET | `/api/pc` | `agents.pc` | member |  |
 | GET | `/api/pc/activity` | `agents.pc` | member |  |
@@ -429,6 +437,12 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | GET | `/api/providers/tasks/one` | `chat.use` | member |  |
 | POST | `/api/providers/tasks/steer` | `chat.use` | member |  |
 | POST | `/api/providers/watch` | `chat.use` | member |  |
+| GET | `/api/radio/admin` | `freewill.admin` | admin |  |
+| POST | `/api/radio/admin` | `freewill.admin` | admin |  |
+| GET | `/api/radio/audio/*` | `world.view` | guest |  |
+| GET | `/api/radio/show` | `world.view` | guest |  |
+| GET | `/api/radio/shows` | `agents.profile` | member |  |
+| GET | `/api/radio/state` | `world.view` | guest |  |
 | GET | `/api/ready` | `public` | guest |  |
 | POST | `/api/redo` | `property.hold` | member |  |
 | POST | `/api/revert` | `world.revert` | admin |  |
