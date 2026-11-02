@@ -40,9 +40,53 @@ export const previewHtml = (shape, i = 0, caption = null) => {   // caption: the
   return `<figure class="ab-fig ${S.frame}"${narrow}><canvas data-ad="${i}" data-aspect="${S.a}"${S.frame === 'cloth' ? ' data-hem="1"' : ''}></canvas><figcaption>${esc(caption ?? S.label)}</figcaption></figure>`;
 };
 
-/** Uploads a picture (a File) to `url`; resolves its address or throws. */
-export async function uploadPicture(url, file) {
-  if (file.size > 2 * 1024 * 1024) throw new Error('Pictures are at most 2 MB');
+/** What the file pickers offer: anything the browser may open (fitPicture turns it into what the server keeps). */
+export const PICTURE_ACCEPT = 'image/*,.svg';
+const KEPT = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const LONGEST = 2400;   // px: more than any sign shows (bestPx)
+/** The picture as the server keeps it: a PNG, JPEG, WebP or GIF of at most `max` bytes and LONGEST px. Any other picture
+ *  the browser can open (an SVG logo, AVIF, BMP, a large photo) is drawn and saved again as WebP (its transparency kept),
+ *  smaller until it fits. A GIF that already fits stays as it is (it may move). */
+export async function fitPicture(file, max = 2 * 1024 * 1024) {
+  const type = String(file.type || '').toLowerCase(), svg = type === 'image/svg+xml' || /\.svg$/i.test(file.name || '');
+  let img = null, w = 0, h = 0;
+  const url = URL.createObjectURL(file);
+  try {
+    img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    w = img.naturalWidth; h = img.naturalHeight;
+    if (svg) {   // drawn sharp at the largest size; an SVG without a size takes its viewBox's shape
+      const vb = new DOMParser().parseFromString(await file.text(), 'image/svg+xml').documentElement.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
+      const a = vb?.length === 4 && vb[2] > 0 && vb[3] > 0 ? vb[2] / vb[3] : w > 0 && h > 0 ? w / h : 1;
+      [w, h] = a >= 1 ? [LONGEST, LONGEST / a] : [LONGEST * a, LONGEST];
+    }
+  } catch { img = null; } finally { URL.revokeObjectURL(url); }
+  if (!img || !(w > 0 && h > 0)) {
+    if (KEPT.has(type) && file.size <= max) return file;
+    throw new Error('This picture can\'t be opened here. Save it as a PNG or JPEG and try again.');
+  }
+  if (KEPT.has(type) && file.size <= max && Math.max(w, h) <= LONGEST) return file;
+  if (type === 'image/gif' && file.size <= max) return file;
+  let k = Math.min(1, LONGEST / Math.max(w, h));
+  for (let q = 0.92, n = 0; n < 8; n++) {
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(res => c.toBlob(res, 'image/webp', q));
+    if (blob && blob.type === 'image/webp' && blob.size <= max) return new File([blob], (file.name || 'picture').replace(/\.[^.]*$/, '') + '.webp', { type: 'image/webp' });
+    if (blob && blob.type !== 'image/webp') {   // (a browser that can't write WebP: PNG, then JPEG)
+      const png = await new Promise(res => c.toBlob(res, 'image/png'));
+      if (png && png.size <= max) return new File([png], 'picture.png', { type: 'image/png' });
+      const jpg = await new Promise(res => c.toBlob(res, 'image/jpeg', q));
+      if (jpg && jpg.size <= max) return new File([jpg], 'picture.jpg', { type: 'image/jpeg' });
+    }
+    if (q > 0.7) q -= 0.1; else k *= 0.75;
+  }
+  throw new Error(`This picture is too large even made smaller; pictures are at most ${Math.round(max / 1048576)} MB`);
+}
+
+/** Uploads a picture (a File) to `url`, fitted first (fitPicture, at most `max` bytes); resolves its address or throws. */
+export async function uploadPicture(url, file, { max = 2 * 1024 * 1024 } = {}) {
+  file = await fitPicture(file, max);
   const send = () => fetch(url, { method: 'POST', headers: { 'content-type': file.type, ...(auth.csrf ? { 'x-csrf-token': auth.csrf } : {}) }, body: file });
   let r = await send(), j = await r.json().catch(() => ({}));
   if (r.status === 403 && j.code === 'csrf') { await auth.refresh(); r = await send(); j = await r.json().catch(() => ({})); }
@@ -75,8 +119,8 @@ export function designer(root, o = {}) {
         <button type="button" class="btn small" data-a="crop">✂️ Crop</button><button type="button" class="btn small" data-a="reset">↺ Reset</button></div>
       <p class="hint pt-hint"></p></div>
     <div class="seg ab-format"><button type="button" class="btn small" data-format="logo">🔤 Logo &amp; title</button><button type="button" class="btn small" data-format="image">🖼️ Full picture</button></div>
-    <div class="ab-pic" data-pic="imageSrc"><input type="file" class="ab-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden><button type="button" class="btn small" data-a="pick"></button><span class="dim ab-picname"></span><button type="button" class="btn small hidden" data-a="nopic">Remove</button></div>
-    <div class="ab-pic" data-pic="imageTallSrc"><input type="file" class="ab-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden><button type="button" class="btn small" data-a="pick">📷 Upload the tall picture</button><span class="dim ab-picname"></span><button type="button" class="btn small hidden" data-a="nopic">Remove</button></div>
+    <div class="ab-pic" data-pic="imageSrc"><input type="file" class="ab-file" accept="${PICTURE_ACCEPT}" hidden><button type="button" class="btn small" data-a="pick"></button><span class="dim ab-picname"></span><button type="button" class="btn small hidden" data-a="nopic">Remove</button></div>
+    <div class="ab-pic" data-pic="imageTallSrc"><input type="file" class="ab-file" accept="${PICTURE_ACCEPT}" hidden><button type="button" class="btn small" data-a="pick">📷 Upload the tall picture</button><span class="dim ab-picname"></span><button type="button" class="btn small hidden" data-a="nopic">Remove</button></div>
     <p class="hint ab-pichint"></p>
     <label class="fld">Title <input class="input ab-in" data-k="title" maxlength="${AD_LIMITS.title}" placeholder="${esc(o.placeholder || "e.g. Joe's Pizza — open late")}"></label>
     <label class="fld">Message <small class="dim">(shown when someone taps it)</small><textarea class="input ab-in" data-k="message" maxlength="${AD_LIMITS.message}" rows="2" placeholder="What people should know"></textarea></label>

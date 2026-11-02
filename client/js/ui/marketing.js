@@ -13,7 +13,7 @@ import { getJSON, post } from '../core/net.js';
 import { CATALOG } from '/shared/catalog.js';
 import { AD_ASSETS, AD_ASSET_TYPES, billboardType, stationHasAds } from '/shared/signs.js';
 import { makeDecorTool } from './decor-tools.js';
-import { uploadPicture } from './designer.js';
+import { uploadPicture, PICTURE_ACCEPT } from './designer.js';
 
 let app = null, root = null, tool = null;
 const M = { size: 'standard', mount: 'centre', open: { assets: true, metro: false, air: false, ads: true } };
@@ -107,7 +107,7 @@ function renderAir() {
   const g = (o, k) => `<div class="mk-g" data-g="${k}">
       <label class="fld">Text<input class="input g-text" maxlength="120" value="${esc(o.text || '')}" placeholder="Your message"></label>
       <div class="row wrap"><label>Background <input type="color" class="g-bg" value="${o.backgroundColor || '#ffffff'}"></label><label>Text <input type="color" class="g-fg" value="${o.textColor || '#111827'}"></label></div>
-      <div class="row wrap"><input type="file" class="g-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden><button type="button" class="btn small" data-gpic="${k}">📷 Picture</button><span class="dim g-pic">${o.imageSrc ? 'a picture is set' : 'none'}</span>${o.imageSrc ? `<button type="button" class="btn small" data-gclr="${k}">Remove</button>` : ''}</div>
+      <div class="row wrap"><input type="file" class="g-file" accept="${PICTURE_ACCEPT}" hidden><button type="button" class="btn small" data-gpic="${k}">📷 Picture</button><span class="dim g-pic">${o.imageSrc ? 'a picture is set' : 'none'}</span>${o.imageSrc ? `<button type="button" class="btn small" data-gclr="${k}">Remove</button>` : ''}</div>
       <label class="fld">Link (optional)<input class="input g-url" maxlength="300" value="${esc(o.websiteUrl || '')}" placeholder="example.com"></label></div>`;
   el.innerHTML = `<label class="check"><input type="checkbox" class="air-on"${C.enabled ? ' checked' : ''}> They fly</label>
     <label class="fld">Hours of the day <span class="row"><input type="number" class="input air-from" min="0" max="24" step="0.5" value="${P.schedule.from}" style="width:70px"> to <input type="number" class="input air-to" min="0" max="24" step="0.5" value="${P.schedule.to}" style="width:70px"></span></label>
@@ -169,7 +169,7 @@ async function onChange(e) {
   if (t.classList.contains('g-file')) {
     const f = t.files?.[0], k = t.closest('.mk-g').dataset.g; if (!f) return;
     grabAir();
-    try { setPic(k, await uploadPicture('/api/promo-aircraft/image', f)); } catch (x) { app.toast(x.message, 'bad', 3000); }
+    try { setPic(k, await uploadPicture('/api/promo-aircraft/image', f, { max: 3 * 1024 * 1024 })); } catch (x) { app.toast(x.message, 'bad', 3000); }
     renderAir();
   }
 }

@@ -53,7 +53,13 @@ import {
 import { BOTH_R, BOTH_LIFT, BITE_TIP, toolTip, toolDir, TABLE_TOP, DISH_AHEAD, WRIST_MAX, STOVE_PAN, PREP_BOARD } from '../../shared/eating.js';
 import { steer, claw, punch, foos, whack, flippers, hockey } from '../../shared/arcade-motion.js';
 import { MIC, BASS, BASS_SHAPE, bassPt, bassDir, stringZ, PHONES } from '../../shared/stage.js';
+import { BOOK_HANDS, PHONE_HAND, thingFrame, pointOf, dirOf } from '../../shared/held.js';
 
+// a book or a phone held (shared/held.js): the middle of the thing from the shoulders' middle (offsets for an arm of 0.46 m,
+// as L.at), its face turned to the eyes; a hand's hold on it: its palm on the thing's back at the hand's place there
+const BOOK_FACE = V(0, 0.8, -0.6), PHONE_FACE = V(0.12, 0.85, -0.5);
+const fromShoulders = (L, v) => add(scale(add(L.LeftArm, L.RightArm), 0.5), scale(v, L.k));
+const holdOn = (F, hand, grip, pole) => ({ p: [0, 0, 0], target: pointOf(F, hand.at), along: dirOf(F, hand.along), palm: hand.palm ? dirOf(F, hand.palm) : F.n, grip, pole, bend: 1.5 });
 const { values: o } = parseArgs({ options: { only: { type: 'string' }, check: { type: 'boolean' }, verify: { type: 'boolean' }, 'no-twist': { type: 'boolean' }, dir: { type: 'string' }, set: { type: 'string' } } });
 const DIR = path.resolve(o.dir || 'client/assets/chars');
 
@@ -181,10 +187,11 @@ export const HOLDS = [
       return { Right: { at: L.at('Right', [0.06, -0.25 + 0.012 * Math.sin(TAU * 2 * u), 0.27 + 0.02 * sw]), along: V(0.35, 0.12, 1), palm: V(1, 0.05, -0.3), grip: 0.85, pole: V(-0.45, -1, -0.35) } };
     },
   },
-  { // a phone looked at while walking: held up in front of the chest, the head bowed to it
+  { // a phone looked at while walking: in the right hand before the chest, its screen to the eyes, the head bowed to it
     name: 'hold_walk_phone', base: 'walk', step: 1,
     pose(u, L) {
-      return { head: 0.32, Right: { at: L.at('Right', [0.11, -0.26 + 0.01 * Math.sin(TAU * 2 * u), 0.27]), along: V(0.55, 0.45, 0.7), palm: V(0.25, 0.55, -0.8), grip: 0.5, pole: V(-0.4, -1, -0.25) } };
+      const F = thingFrame(fromShoulders(L, [-0.07, -0.27 + 0.008 * Math.sin(TAU * 2 * u), 0.27]), PHONE_FACE);
+      return { head: 0.34, Right: holdOn(F, PHONE_HAND, 0.62, V(-0.4, -1, -0.25)) };
     },
   },
   { // standing with a cup or a coffee in hand
@@ -193,13 +200,12 @@ export const HOLDS = [
       return { Right: { at: L.at('Right', [0.06, -0.24 + 0.01 * Math.sin(TAU * 3 * u), 0.26]), along: V(0.35, 0.12, 1), palm: V(1, 0.05, -0.3), grip: 0.85, pole: V(-0.45, -1, -0.35) } };
     },
   },
-  { // standing, looking at a phone held in both hands (texting, reading, working on it)
+  { // standing, looking at a phone in the right hand (texting, reading, working on it): its screen to the eyes, the
+    // fingers round its far edge; the other arm as it hangs
     name: 'hold_phone', base: 'idle', step: 2,
     pose(u, L) {
-      const tap = 0.006 * Math.sin(TAU * 9 * u);
-      return { head: 0.42,
-        Right: { at: L.at('Right', [0.12, -0.27 + tap, 0.26]), along: V(0.6, 0.45, 0.65), palm: V(0.2, 0.6, -0.78), grip: 0.45, pole: V(-0.4, -1, -0.2) },
-        Left: { at: L.at('Left', [-0.12, -0.28 - tap, 0.25]), along: V(-0.6, 0.45, 0.65), palm: V(-0.2, 0.6, -0.78), grip: 0.45, pole: V(0.4, -1, -0.2) } };
+      const F = thingFrame(fromShoulders(L, [-0.07, -0.27 + 0.004 * Math.sin(TAU * 2 * u), 0.27]), PHONE_FACE);
+      return { head: 0.42, Right: holdOn(F, PHONE_HAND, 0.62, V(-0.4, -1, -0.2)) };
     },
   },
   { // standing with a drink, two sips a cycle: the cup comes up to the mouth and tips
@@ -212,13 +218,11 @@ export const HOLDS = [
       return { head: -0.08 * sip, Right: { at: lerpPt(low.at, L.sipWrist(along, palm), sip), along: lerpDir(low.along, along, sip), palm: lerpDir(low.palm, palm, sip), grip: 0.85, pole: V(-0.5, -1, -0.15) } };
     },
   },
-  { // seated, looking at a phone in both hands
+  { // seated, looking at a phone in the right hand, the left resting on the thigh
     name: 'hold_sit_phone', base: 'sit_idle', step: 2,
     pose(u, L) {
-      const tap = 0.006 * Math.sin(TAU * 7 * u);
-      return { head: 0.45,
-        Right: { at: L.at('Right', [0.12, -0.3 + tap, 0.27]), along: V(0.6, 0.45, 0.65), palm: V(0.2, 0.6, -0.78), grip: 0.45, pole: V(-0.4, -1, -0.15) },
-        Left: { at: L.at('Left', [-0.12, -0.31 - tap, 0.26]), along: V(-0.6, 0.45, 0.65), palm: V(-0.2, 0.6, -0.78), grip: 0.45, pole: V(0.4, -1, -0.15) } };
+      const F = thingFrame(fromShoulders(L, [-0.06, -0.29 + 0.004 * Math.sin(TAU * 2 * u), 0.27]), PHONE_FACE);
+      return { head: 0.45, Right: holdOn(F, PHONE_HAND, 0.62, V(-0.4, -1, -0.15)), Left: L.restLap() };
     },
   },
   { // seated with a drink at a table: held low, a sip now and then
@@ -231,13 +235,14 @@ export const HOLDS = [
       return { head: -0.06 * sip, Right: { at: lerpPt(low.at, L.sipWrist(along, palm), sip), along: lerpDir(low.along, along, sip), palm: lerpDir(low.palm, palm, sip), grip: 0.85, pole: V(-0.5, -1, -0.1) } };
     },
   },
-  { // seated, reading an open book held in both hands; a page turned once a cycle
+  { // seated, reading an open book held in both palms from below, its pages to the eyes (shared/held.js: the same book
+    // render/char-props.js draws), breathing
     name: 'hold_sit_read', base: 'sit_idle', step: 2,
     pose(u, L) {
-      const turn = smooth(1 - Math.abs(u - 0.8) / 0.06);
-      return { head: 0.38,
-        Right: { at: L.at('Right', [0.08, -0.33, 0.27]), along: V(0.3, 0.35, 0.9), palm: V(0.45, 0.8, -0.4), grip: 0.35, pole: V(-0.4, -1, -0.1) },
-        Left: { at: L.at('Left', [-0.08 - 0.06 * turn, -0.33 + 0.03 * turn, 0.27]), along: V(-0.3, 0.35, 0.9), palm: V(-0.45, 0.8, -0.4), grip: 0.35, pole: V(0.4, -1, -0.1) } };
+      const F = thingFrame(fromShoulders(L, [0, -0.3 + 0.004 * Math.sin(TAU * u), 0.3]), BOOK_FACE);
+      return { head: 0.42,
+        Right: holdOn(F, BOOK_HANDS.Right, 0.04, V(-0.5, -1, -0.1)),
+        Left: holdOn(F, BOOK_HANDS.Left, 0.04, V(0.5, -1, -0.1)) };
     },
   },
   // ---- doing things with the hands (2026-10-07: cooking, washing up, browsing a shelf, a machine, the gym played the

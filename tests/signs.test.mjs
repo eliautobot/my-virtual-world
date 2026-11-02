@@ -205,3 +205,19 @@ test('billboards and signs show their own content; signs inside never take ads',
     assert.equal((await fetch(Wd.s.url + '/api/commerce/status')).status, 404, 'there is no shop');
   } finally { await Wd.close(); }
 });
+
+test('a sign\'s picture over the API: uploaded by the one who designs it, checked by its bytes, served back', async () => {
+  const s = await startServer({ population: 60 });
+  try {
+    const owner = await ownerSession(s);
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a5d40000000049454e44ae426082', 'hex');
+    const send = (body, type = 'image/png') => fetch(`${s.url}/api/signs/image`, { method: 'POST', headers: { 'content-type': type, cookie: owner.cookie, 'x-csrf-token': owner.csrf }, body });
+    const up = await send(png), uj = await up.json();
+    assert.equal(up.status, 200, JSON.stringify(uj)); assert.match(uj.imageSrc, /^\/signs\/s\d+-[a-f0-9]{16}\.png$/);
+    const back = await fetch(`${s.url}${uj.imageSrc}`);
+    assert.equal(back.status, 200); assert.equal(back.headers.get('content-type'), 'image/png');
+    assert.equal((await send(Buffer.from('<svg onload=alert(1)>'))).status, 400, 'not the picture it says it is');
+    assert.equal((await send('<svg/>', 'image/svg+xml')).status, 415);
+    assert.equal((await fetch(`${s.url}/api/signs/image`, { method: 'POST', headers: { 'content-type': 'image/png' }, body: png })).status, 401, 'signed in only');
+  } finally { await s.stop(); }
+});

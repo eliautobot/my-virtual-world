@@ -1003,7 +1003,9 @@ D.reception = f => {
   f.tint(); f.box(-1.5, 0, 0.25, 1.5, 1.15, 0.45); f.box(-1.5, 0, -0.45, -1.35, 1.15, 0.25); f.box(1.35, 0, -0.45, 1.5, 1.15, 0.25);
   f.col('#e5e2dc'); f.box(-1.55, 1.15, 0.2, 1.55, 1.19, 0.5); f.col(C.woodL); f.box(-1.35, 0.72, -0.45, 1.35, 0.76, 0.25);
   f.col('#c9a45a', 0, 3); f.box(-1.2, 0.6, 0.45, 1.2, 0.66, 0.46);
-  bigMonitor(f, -0.3, 0.02, P); f.col('#3a3f47'); f.box(-0.5, 0.76, -0.35, -0.1, 0.775, -0.22);
+  // (the monitor and keyboard straight ahead of the seat (0, -0.85), as far from it as a workstation's: the typing hands land on the keys)
+  bigMonitor(f, 0, -0.08, P); f.col('#1f2329'); f.box(-0.19, 0.76, -0.43, 0.19, 0.773, -0.3);
+  f.col('#454b55'); f.box(-0.18, 0.773, -0.42, 0.18, 0.776, -0.31);
   potPlant(f, 1.05, -0.2, 0.5, '#e8e4dc');
   officeChair(f, 0, -0.85, 0, '#26313f');
 };
@@ -1070,7 +1072,7 @@ export const SCREENS = Object.freeze({
   desk_home: { kind: 'laptop', quads: [lapQuad(-0.05, 0.755, -0.05)] },
   // (a meeting table's two laptops: nobody's PC — plain screens only, render/pc-screens.js)
   meeting_table: { kind: 'laptop', plain: true, quads: [lapQuad(-0.9, 0.76, 0.3, P), lapQuad(0.9, 0.76, -0.3, 0)] },
-  reception: { kind: 'monitor', quads: [quadAt(-0.3, 0, 0.02, P, 0, MON.y0 + MON.h / 2, MON.z + 0.0004, MON.w, MON.h)] },
+  reception: { kind: 'monitor', quads: [quadAt(0, 0, -0.08, P,0, MON.y0 + MON.h / 2, MON.z + 0.0004, MON.w, MON.h)] },
   tv_wall: { kind: 'tv', quads: [quadAt(0, 0, -0.016, 0, 0, 1.5, 0.0005, 1.82, 0.92)] },
 });
 

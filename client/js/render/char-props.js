@@ -27,6 +27,7 @@ import { FOOD, FOOD_BY_N } from '/shared/food.js';
 import { EAT_CLIP, BOTH_R, BOTH_LIFT, HELD_SCALE, BITE_TIP, TOOL_Z, TOOL_LEN, toolDir } from '/shared/eating.js';
 import { lin } from './furniture.js';
 import { PHONES } from '/shared/stage.js';
+import { BOOK, PHONE, BOOK_HANDS, PHONE_HAND, gripOn } from '/shared/held.js';
 
 const HAND_R = 0, HAND_L = 1, DESK = 2, HANG = 3, HEAD = 4;
 const SCREEN = '#8cc6ff';
@@ -47,26 +48,38 @@ function coffee(f, x, z, y0 = 0) {
   f.col('#b88752'); f.cyl(x, z, 0.0335, y0 + 0.04, y0 + 0.085, 14, 0.0358);
   f.col('#2a2a2c'); f.cyl(x, z, 0.0385, y0 + 0.116, y0 + 0.127, 14, 0.035);
 }
+/** Draws fn in a held thing's own frame (shared/held.js: w, h, n as x, y, z), from the right hand's grip on it. */
+const onThing = (f, hand, fn) => {
+  const g = gripOn(hand);
+  within(f, basis(g.x, g.y, g.z, g.o).invert(), fn);
+};
+// a phone (shared/held.js PHONE) in the right hand's palm, its screen to the eyes (2026-11-02: it lay along the fingers,
+// smaller than these hands, and they closed over it)
 function phone(f) {
-  f.col('#15161a'); f.box(-0.036, -0.055, 0, 0.036, 0.095, 0.0085);
-  f.col(SCREEN, 0, 1); f.box(-0.032, -0.049, 0.0085, 0.032, 0.089, 0.0094);
+  const W = PHONE.w / 2, H = PHONE.h / 2, T = PHONE.t;
+  onThing(f, PHONE_HAND, () => {
+    f.col('#15161a'); f.box(-W, -H, 0, W, H, T);
+    f.col(SCREEN, 0, 1); f.box(-W + 0.004, -H + 0.007, T, W - 0.004, H - 0.006, T + 0.0007);
+    f.col('#2a2d33'); f.box(-W + 0.008, H - 0.03, -0.0015, -W + 0.026, H - 0.01, 0);   // (the camera's bump on its back)
+  });
 }
 function bookClosed(f) {
   f.col('#8c2f2f'); f.box(-0.066, -0.05, 0, 0.066, 0.13, 0.026);
   f.col('#f1ece0'); f.box(-0.06, -0.044, 0.003, 0.069, 0.124, 0.023);
 }
-// open, lying across both palms (the right hand's grip frame with the palm up: x outward, toward the body's right): the
-// spine between the hands, a little lower, each page rising to its edge; the left page reaches the other hand
+// open (shared/held.js BOOK), in both palms from below, its pages to the eyes in a shallow V, the spine lowest: drawn
+// from the right hand's grip on it (BOOK_HANDS), the left hand's clip holds the other page where the same numbers put it
 function bookOpen(f) {
-  const SPINE = -0.115;
-  const page = w => within(f, new THREE.Matrix4().makeRotationY(w > 0 ? -0.12 : 0.12).setPosition(SPINE, 0, -0.01), () => {
-    const a = Math.min(0, w), b = Math.max(0, w), pa = w > 0 ? 0 : w + 0.004, pb = w > 0 ? w - 0.004 : 0;
-    f.col('#2d4a6b'); f.box(a, -0.06, 0, b, 0.15, 0.004);
-    f.col('#f3eee2'); f.box(pa, -0.055, 0.004, pb, 0.145, 0.016);
-    f.col('#b9b3a6');
-    for (let k = 0; k < 7; k++) { const y = -0.035 + k * 0.024; f.box(pa + 0.014, y, 0.0162, pb - 0.014, y + 0.006, 0.0166); }
+  const { w: PW, h: PH, cover: C, pages: T, open: A } = BOOK;
+  onThing(f, BOOK_HANDS.Right, () => {
+    for (const s of [1, -1]) within(f, new THREE.Matrix4().makeRotationY(-s * A), () => {
+      const a = s > 0 ? 0 : -PW, b = s > 0 ? PW : 0, pa = s > 0 ? 0.002 : -PW + 0.004, pb = s > 0 ? PW - 0.004 : -0.002;
+      f.col('#2d4a6b'); f.box(a, -PH / 2, 0, b, PH / 2, C);
+      f.col('#f3eee2'); f.box(pa, -PH / 2 + 0.005, C, pb, PH / 2 - 0.005, C + T);
+      f.col('#b9b3a6');
+      for (let k = 0; k < 9; k++) { const y = -PH / 2 + 0.025 + k * 0.019; f.box(pa + 0.014, y, C + T + 0.0002, pb - 0.014, y + 0.005, C + T + 0.0006); }
+    });
   });
-  page(0.135); page(-0.135);
 }
 function paddle(f) {
   f.col('#b58a5a'); f.rod([-0.045, 0.018, 0.016], [0.07, 0.018, 0.016], 0.014, 8);

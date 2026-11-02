@@ -2,6 +2,22 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.2.3 (2026-11-02)
+
+- **Pictures on signs**: logos and images go on signs again. Any picture your browser can open is fitted before it is
+  uploaded: a large photo or logo is made smaller, and an SVG, AVIF or BMP is turned into a WebP with its transparency
+  kept. This covers signs inside, rooftop billboards, the Marketing tools' billboards and street signs, the banner
+  planes, blimps and balloons. The file picker now offers every kind of picture.
+- **Talking to staff**: in Play mode you can talk to someone working across a counter, a bar or up on a stage (a
+  bartender, the DJ, a barista, a receptionist) from the other side, up to 3.6 m away. Whoever you look at comes first:
+  look at the bartender to talk, look at a bar stool to sit. Everyone else can be talked to from a little further too.
+- **First person**: the view is now as wide as a person sees (about 95 degrees across) instead of the overhead camera's
+  narrow lens, so rooms and people look the right size. It goes back to normal when you step out of first person.
+- **Books and phones**: someone reading holds the open book in both palms from below, its pages toward their eyes. A
+  phone sits in the right hand with the fingers round its edge and the screen toward the eyes; seated, the other hand
+  rests on the thigh. Every character was updated.
+- **Reception desk**: the monitor and keyboard are straight ahead of the seat, so the receptionist's hands are on the keys.
+
 ## v2.2.2 (2026-10-29)
 
 - **Servers on your own network**: an administrator can connect a voice service or a brain that runs on this machine or

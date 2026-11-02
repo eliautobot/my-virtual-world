@@ -87,7 +87,7 @@ export function init(a) {
   P.onVehicleEnter = (o = {}) => {   // a car, or an aircraft (player/flight.js: o.keys, its own help)
     if (!P.active) return;
     cam.setFP(false);   // first person is on foot only (its angle back before the walking camera is kept)
-    driveCam ||= { dist: cam.goalDist, pitch: cam.goalPitch, yaw: cam.goalYaw, fov: app.stage.camera.fov, minDist: cam.minDist };
+    driveCam ||= { dist: cam.goalDist, pitch: cam.goalPitch, yaw: cam.goalYaw, fov: cam.fovBase ?? app.stage.camera.fov, minDist: cam.minDist };
     P.state = 'drive'; P.slot = null; P.emote = null; P.tween = null; P.vx = P.vz = 0;
     if (E.prompt) { E.prompt.classList.add('hidden'); E.prompt._h = null; }   // (the prompt that offered it)
     runToggle = handbrakeToggle = false; keys.clear(); joy.x = joy.y = 0;
@@ -701,18 +701,35 @@ function findTarget() {
   let best = null, bd = 1e9;
   if (P.state === 'use') { best = { k: 'stand' }; }
   else if (!P.tween) {
+    const f = P.ctx & 63, list = P.ctx >= 0 ? inter.foc.entries : [...inter.park.entries, ...decorNear(P.x, P.z)];
+    // the places people work at across a counter, a bar or up on a stage (a 'staff' slot: a bartender, the DJ, a barista,
+    // a receptionist): someone there is talked to from the other side, and first when the player faces them
+    const posts = [];
+    for (const e of list) {
+      if (Math.abs(e.x - P.x) > 6 || Math.abs(e.z - P.z) > 6) continue;
+      if (P.ctx >= 0 && (e.b !== (P.ctx >> 6) || e.f !== f)) continue;
+      const def = CATALOG[e.t]; if (!def?.slots) continue;
+      const c = Math.cos(e.yaw), s = Math.sin(e.yaw);
+      for (const sl of def.slots) if (sl.use === 'staff') posts.push(e.x + sl.x * c + sl.z * s, e.z - sl.x * s + sl.z * c);
+    }
+    const fx = Math.sin(P.yaw), fz = Math.cos(P.yaw);
+    let faced = 0;   // how straight ahead the person at a post being looked at is (a seat must be straighter ahead to win)
     for (let n = 0; n < agents.nDrawn; n++) {
       const i = agents.drawn[n];
       if (Math.abs(agents.ry[i] - P.y) > 1.2) continue;
-      const d = Math.hypot(agents.rx[i] - P.x, agents.rz[i] - P.z) + 0.25;
-      if (d < 2.0 && d < bd) { bd = d; best = { k: 'talk', i }; }
+      const dx = agents.rx[i] - P.x, dz = agents.rz[i] - P.z, raw = Math.hypot(dx, dz);
+      let d = raw + 0.25, reach = 2.2;
+      for (let k = 0; k < posts.length; k += 2) if (Math.hypot(agents.rx[i] - posts[k], agents.rz[i] - posts[k + 1]) < 0.7) { reach = 3.6; break; }
+      if (d >= reach) continue;
+      const look = raw > 0.01 ? (dx * fx + dz * fz) / raw : 0;
+      if (reach > 2.2 && look > 0.8 && look > faced) { faced = look; bd = 0.01; best = { k: 'talk', i }; continue; }   // looked at: first
+      if (d < bd) { bd = d; best = { k: 'talk', i }; }
     }
     for (const r of app.remote?.byPid.values() || []) {   // other players: E opens the chat box to talk to them
       if (r.you || r.gone || r.ctx !== P.ctx || Math.abs(r.extra.y - P.y) > 1.2) continue;
       const d = Math.hypot(r.extra.x - P.x, r.extra.z - P.z) + 0.25;
       if (d < 2.6 && d < bd) { bd = d; best = { k: 'player', pid: r.pid, name: r.name }; }
     }
-    const f = P.ctx & 63, list = P.ctx >= 0 ? inter.foc.entries : [...inter.park.entries, ...decorNear(P.x, P.z)];
     for (const e of list) {
       if (Math.abs(e.x - P.x) > 4 || Math.abs(e.z - P.z) > 4) continue;
       if (P.ctx >= 0 && (e.b !== (P.ctx >> 6) || e.f !== f)) continue;
@@ -721,7 +738,12 @@ function findTarget() {
       for (const sl of def.slots) {
         const sx = e.x + sl.x * c + sl.z * s, sz = e.z - sl.x * s + sl.z * c;
         const al = sl.ax ?? sl.x, bl = sl.az ?? sl.z, ax = e.x + al * c + bl * s, az = e.z - al * s + bl * c;
-        const d = Math.min(Math.hypot(sx - P.x, sz - P.z), Math.hypot(ax - P.x, az - P.z));
+        let d = Math.min(Math.hypot(sx - P.x, sz - P.z), Math.hypot(ax - P.x, az - P.z));
+        if (faced) {   // (a bar stool in front of the bartender: the one looked at more directly)
+          const r = Math.hypot(sx - P.x, sz - P.z);
+          if (d >= 1.15 || r < 0.01 || ((sx - P.x) * fx + (sz - P.z) * fz) / r <= faced) continue;
+          d = 0;
+        }
         if (d >= 1.15 || d >= bd) continue;
         let taken = false;
         for (let n = 0; n < agents.nDrawn && !taken; n++) { const i = agents.drawn[n]; taken = Math.hypot(agents.rx[i] - sx, agents.rz[i] - sz) < 0.4; }

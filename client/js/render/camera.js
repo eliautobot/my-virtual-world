@@ -283,7 +283,16 @@ export class CityCamera {
       const u = this.fpK * this.fpK * (3 - 2 * this.fpK);
       c.position.set(c.position.x + (eye.x - c.position.x) * u, c.position.y + (eye.y - c.position.y) * u, c.position.z + (eye.z - c.position.z) * u);
       c.lookAt(_v.set(c.position.x - ox, c.position.y - sp, c.position.z - oz));
-    } else c.lookAt(this.target);
+      // and a lens as wide as a person sees (about 95° across, held between 58° and 80° high on any screen shape): the
+      // orbit's narrow lens from the eyes looks like standing with one's nose against everything
+      this.fovBase ??= c.fov;
+      const a = (this.dom.clientWidth || innerWidth) / (this.dom.clientHeight || innerHeight) || 1;
+      const fpFov = clamp(2 * Math.atan(Math.tan(95 * Math.PI / 360) / a) * 180 / Math.PI, 58, 80);
+      c.fov = this.fovBase + (fpFov - this.fovBase) * u;
+    } else {
+      c.lookAt(this.target);
+      if (this.fovBase != null) { c.fov = this.fovBase; this.fovBase = null; }
+    }
     c.near = clamp(d * 0.015, 0.08, 6);
     // held at a pose (pinTo): from the orbit's own place and aim to the held one, eased; close up, so a near plane to match
     if (this.pin && this.pinK > 0) {
