@@ -41,7 +41,12 @@ const wanted = kind => kind !== 'male' && kind !== 'female' && (!ONLY || ONLY.ha
 const cache = {};
 const extraList = {};
 /** The clips added to the baked characters (assets/chars/<set>-clips.json: 'extra', and the nights out's 'venue'), or null. */
-function extraClips(set = 'extra') { return (extraList[set] ??= fetch(`/assets/chars/${set}-clips.json`).then(r => (r.ok ? r.json() : null)).catch(() => null)); }
+function extraClips(set = 'extra') { return (extraList[set] ??= charUrl(`${set}-clips.json`).then(u => fetch(u)).then(r => (r.ok ? r.json() : null)).catch(() => null)); }
+// The characters' folder version (server/asset-compress.js, 2026-11-02): every file of theirs is asked for at it, so the
+// browser keeps them (a return visit downloads none) and the server sends them compressed.
+let charVer = null;
+const charV = () => (charVer ??= fetch('/assets/chars/version.json', { cache: 'no-cache' }).then(r => (r.ok ? r.json() : {})).then(j => j.v || '').catch(() => ''));
+const charUrl = async name => { const v = await charV(); return `/assets/chars/${name}${v ? `?v=${v}` : ''}`; };
 // Character assets load in a worker when the browser allows (main-thread fallback otherwise).
 let worker = null, workerFailed = false, nextJob = 0;
 const jobs = new Map();
@@ -78,11 +83,11 @@ function loadKind(kind, mapSize = 2048, normalSize = mapSize) {
     const { man } = base;
     let normalMap = null, colorMap = null;
     if (man.baseColor) {
-      colorMap = await loadMap(`/assets/chars/${man.baseColor}`, mapSize);
+      colorMap = await loadMap(await charUrl(man.baseColor), mapSize);
       colorMap.flipY = false; colorMap.colorSpace = THREE.SRGBColorSpace; colorMap.anisotropy = 4;
     }
     if (man.normalMap) {
-      normalMap = await loadMap(`/assets/chars/${man.normalMap}`, normalSize).catch(() => null);
+      normalMap = await loadMap(await charUrl(man.normalMap), normalSize).catch(() => null);
       if (normalMap) { normalMap.flipY = false; normalMap.colorSpace = THREE.NoColorSpace; }
     }
     return { ...base, normalMap, colorMap };
@@ -92,10 +97,16 @@ function loadKind(kind, mapSize = 2048, normalSize = mapSize) {
 function loadBase(kind) {
   if (cache[kind]) return cache[kind];
   cache[kind] = (async () => {
-    const done = await viaWorker({ op: 'base', kind });
+    const [ju, bu] = await Promise.all([charUrl(`${kind}.json`), charUrl(`${kind}.bin`)]);
+    // the clips added after the bake (tools/chars/extra-clips.mjs: 'extra', then the nights out's 'venue'): their frames
+    // come down with the model and are joined to its own in the worker (2026-11-02: joining several MB here, on the main
+    // thread, as each model arrived was one of the first half minute's hitches on a phone)
+    const adds = [];
+    for (const set of ['extra', 'venue']) { const xs = await extraClips(set), ef = xs?.kinds?.[kind]; if (ef) adds.push({ set, url: await charUrl(`${kind}.${set}.bin`), ef, clips: xs.clips }); }
+    const done = await viaWorker({ op: 'base', kind, json: ju, bin: bu, adds });
     const [man, bin] = done ? [done.man, done.bin] : await Promise.all([
-      fetch(`/assets/chars/${kind}.json`).then(r => { if (!r.ok) throw new Error(kind + '.json ' + r.status); return r.json(); }),
-      fetch(`/assets/chars/${kind}.bin`).then(r => { if (!r.ok) throw new Error(kind + '.bin ' + r.status); return r.arrayBuffer(); }),
+      fetch(ju).then(r => { if (!r.ok) throw new Error(kind + '.json ' + r.status); return r.json(); }),
+      fetch(bu).then(r => { if (!r.ok) throw new Error(kind + '.bin ' + r.status); return r.arrayBuffer(); }),
     ]);
     const view = e => {
       const C = { float32: Float32Array, uint8: Uint8Array, uint16: Uint16Array, uint32: Uint32Array }[e.type];
@@ -116,15 +127,17 @@ function loadBase(kind) {
       g.userData.tris = L.tris;
       return g;
     });
-    let a = man.anim, animData = view(a.data);
+    let a = man.anim, animData = done?.anim ? new Uint16Array(done.anim) : view(a.data);
     // clips added after the bake (tools/chars/extra-clips.mjs: swimming, the walk and run with their loops mended, which
-    // take the place of the bake's by name below, and holding things): their frames follow the bake's own
+    // take the place of the bake's by name below, and holding things): their frames follow the bake's own — joined by
+    // the worker (done.applied), or here when there is no worker
     const ex = await extraClips();
     let added = false, head = null;
-    for (const set of ['extra', 'venue']) {   // (then the nights out's: tools/chars/extra-clips.mjs --set venue)
+    if (done) { added = done.applied.includes('extra'); if (done.applied.includes('venue')) head = (await extraClips('venue'))?.heads?.[kind] || null; }
+    else for (const set of ['extra', 'venue']) {   // (then the nights out's: tools/chars/extra-clips.mjs --set venue)
       const xs = set === 'extra' ? ex : await extraClips(set), ef = xs?.kinds?.[kind];
       if (!ef) continue;
-      const eb = await fetch(`/assets/chars/${kind}.${set}.bin`).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
+      const eb = await fetch(adds.find(x => x.set === set).url).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
       if (eb && eb.byteLength === ef * man.bones * 24) {
         const base = a.frames * man.bones * 12, h = Math.ceil((a.frames + ef) * man.bones * 3 / a.w), merged = new Uint16Array(h * a.w * 4);
         merged.set(animData.subarray(0, base)); merged.set(new Uint16Array(eb), base);
@@ -372,6 +385,7 @@ export class Characters {
     // loading: all 44 were fetched, ~350 MB, and kept on the GPU, though the residents wear 24). Current residents and
     // explicit selections get priority. An explicit ?only= list still limits diagnostics.
     this.demand = new Uint32Array(KINDS.length);
+    this.near = new Float32Array(KINDS.length);   // (how much someone on screen waited for each model: push, below)
     const todo = [];
     const pending = new Map();
     const complete = new Map();
@@ -386,10 +400,14 @@ export class Characters {
     };
     const pump = () => {
       while (active < concurrency && todo.length) {
-        todo.sort((a, b) => this.demand[b] - this.demand[a] || a - b);
+        todo.sort((a, b) => this.near[b] - this.near[a] || this.demand[b] - this.demand[a] || a - b);   // (on screen first, then the most worn)
         const k = todo.shift(); active++;
-        loadKind(KINDS[k], this.mapSize, this.normalSize).then(d => this.upload(d)).then(d => {
-          this.initKind(k, d); this.loadedCount = (this.loadedCount || 0) + 1;
+        // (its maps go up one at a time, then the model itself appears as a step of its own: its first draw sends its
+        // mesh to the GPU, kept out of a frame that also uploads a map — stepUploads paces them all)
+        loadKind(KINDS[k], this.mapSize, this.normalSize).then(d => this.upload(d)).then(d => (!this.renderer ? this.initKind(k, d) : new Promise((res, rej) => this.uploads.push(() => {
+          try { this.initKind(k, d); res(d); } catch (err) { rej(err); }
+        })))).then(() => {
+          this.loadedCount = (this.loadedCount || 0) + 1;
           complete.get(k)(this.kinds[k]);
         }).catch(err => {
           failed = this.loadError = err; complete.get(k)(null);
@@ -499,6 +517,15 @@ export class Characters {
     this.warmKept = g;
     return g;
   }
+  /** A loaded model to draw someone with while theirs loads: the first loaded of the same build (women f…, men m…),
+   *  else any loaded one, else -1. */
+  standInFor(k) {
+    const g = KINDS[k]?.[0] === 'f' ? 'f' : 'm', o = this.standIns || (this.standIns = {});
+    if (o[g] != null && this.kinds[o[g]]) return o[g];
+    for (let j = 2; j < KINDS.length; j++) if (this.kinds[j] && KINDS[j][0] === g) return (o[g] = j);
+    for (let j = 2; j < KINDS.length; j++) if (this.kinds[j]) return j;
+    return -1;
+  }
   initKind(k, d) {
     const kind = KINDS[k];
     const mats = { map: this.makeMaterial(kind, d, false, true), plain: this.makeMaterial(kind, d, false, false), depth: this.makeMaterial(kind, d, true, false) };
@@ -568,17 +595,28 @@ export class Characters {
     this.appTex.needsUpdate = true;
   }
   begin() { this.stepUploads(); for (const s of this.stage.flat()) s.n = 0; this.props.begin(); this.hl.length = 0; }
-  /** One upload at most, after a frame that kept to this device's normal pace (or when nothing went up for 250 ms),
-   *  then spaced so uploads average under ~4 ms a frame. Judged against the device's own typical frame time, so a
-   *  device that is always a little slower still loads steadily and only spikes are skipped. */
+  /** One upload at most (a map, or a model appearing), after a frame that kept to this device's normal pace (or when
+   *  nothing went up for 250 ms), then spaced so uploads average under ~4 ms a frame. Judged against the device's own
+   *  typical frame time, so a device that is always a little slower still loads steadily and only spikes are skipped.
+   *  The GPU's share (2026-11-02, measured on a phone: an upload costs the main thread ~1 ms, its real cost lands on the
+   *  GPU a frame or two later, so they went up back to back and the first half minute hitched ~40 times): the two frames
+   *  after each upload are watched — when they come late clearly more often than this device's frames usually do, the
+   *  wait before the next doubles (from 2 up to 40 frames); uploads that pass unnoticed bring it back down (to none). */
   stepUploads() {
-    if (!this.uploads.length) return;
+    if (!this.uploads.length) { this.cool = 0; return; }
     const now = performance.now(), gap = now - (this.lastBegin ?? now); this.lastBegin = now;
-    if (gap > 0 && gap < 250) this.typGap = this.typGap ? this.typGap + (gap - this.typGap) * 0.1 : gap;
+    if (gap > 0 && gap < 250 && !(this.watch > 0)) this.typGap = this.typGap ? this.typGap + (gap - this.typGap) * 0.1 : gap;   // (the device's own pace, not an upload's)
+    const late = gap > Math.max(24, (this.typGap || 16) * 1.6);
+    if (this.watch > 0) {   // (a frame just after an upload: how often those come late, against how often any frame does)
+      this.watch--; this.latePost = (this.latePost ?? 0) + ((late ? 1 : 0) - (this.latePost ?? 0)) * 0.2;
+      if (late && this.latePost > (this.lateBase ?? 0) + 0.25) { this.cool = Math.min(20, Math.max(2, (this.cool || 0) * 2)); this.skip = Math.max(this.skip, this.cool); this.watch = 0; }
+      else if (!this.watch) this.cool = Math.max(0, (this.cool || 0) - 1);
+    } else this.lateBase = (this.lateBase ?? 0) + ((late ? 1 : 0) - (this.lateBase ?? 0)) * 0.05;
     if (this.skip > 0) { this.skip--; return; }
     if (gap > Math.max(20, (this.typGap || 0) * 1.25) && now - (this.lastUpload ?? -1e9) < 250) return;
     this.uploads.shift()();
-    const end = performance.now(); this.lastUpload = end; this.skip = Math.min(8, Math.floor((end - now) / 4));
+    const end = performance.now(); this.lastUpload = end;
+    this.skip = Math.max(this.cool || 0, Math.min(8, Math.floor((end - now) / 4))); this.watch = 2;
   }
   /**
    * A point of a hand's grip frame (tools/chars/extra-clips.mjs: x the index finger's side, y along the fingers, z out of
@@ -607,7 +645,14 @@ export class Characters {
   /** k = lod index into this.lods; cA/cB are MVW clip ids (anim.js CLIP), mapped to Tripo clips here. prop: what they hold
    *  (shared/anims.js PROP), drawn with them up close (render/char-props.js); item: the food or drink item (shared/food.js). */
   push(k, x, y, z, yaw, cA, pA, cB, pB, w, app, prop, flags, item = 0, ghost = false) {
-    const kind = app < this.kindOf.length ? this.kindOf[app] : 0;
+    let kind = app < this.kindOf.length ? this.kindOf[app] : 0;
+    // their own model still on its way (2026-11-02: "characters don't show up initially"): drawn meanwhile as one of the
+    // same build that has loaded, and their own asked for first — the people on screen before the rest of the city
+    if (!this.kinds[kind]) {
+      if (this.near) this.near[kind] += k === 0 ? 4 : k === 1 ? 2 : 1;
+      kind = this.standInFor(kind);
+      if (kind < 0) return;
+    }
     const s = this.room(kind, k);
     if (!s) return;
     let a = OLD2T[cA] ?? 0, b = OLD2T[cB] ?? 0;

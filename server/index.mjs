@@ -7,7 +7,9 @@ import { defaultChar } from '../shared/appearance.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { AssetCompressor } from './asset-compress.js';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { generateWorld, markLevelModes, themeVenues } from './world/generate.js';
@@ -996,6 +998,11 @@ function staticHeaders(pathname) {
   return SECURITY_HEADERS;
 }
 const gzCache = new Map();
+// The characters' files compressed in the background (in the system's temporary folder, or MVW_ASSET_CACHE) and kept a
+// year at their version (server/asset-compress.js)
+const CHAR_DIR = path.join(ROOT, 'client/assets/chars');
+const charPack = new AssetCompressor({ dir: CHAR_DIR, cache: CFG.assetCache || path.join(os.tmpdir(), `mvw-asset-cache-${crypto.createHash('sha1').update(CHAR_DIR).digest('hex').slice(0, 10)}`), log });
+setTimeout(() => charPack.warm(), 2000).unref();
 function sendJSON(req, res, code, obj, pre = null, extra = null) {
   const body = pre ? pre.body : JSON.stringify(obj);
   const acceptGz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
@@ -1043,7 +1050,12 @@ function contentEtag(file, st, done) {
   pending.then(done);
 }
 function serveStatic(req, res, pathname) {
-  for (const [prefix, dir, cache] of STATIC) {
+  if (pathname === '/assets/chars/version.json') {   // the characters' folder version, for ?v= (server/asset-compress.js)
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache', ...SECURITY_HEADERS });
+    res.end(JSON.stringify({ v: charPack.version }));
+    return true;
+  }
+  for (let [prefix, dir, cache] of STATIC) {
     if (!pathname.startsWith(prefix)) continue;
     let rel;
     try { rel = decodeURIComponent(pathname.slice(prefix.length)); } catch {
@@ -1059,10 +1071,23 @@ function serveStatic(req, res, pathname) {
     const ext = path.extname(file).toLowerCase();
     const type = MIME[ext] || 'application/octet-stream';
     const sec = staticHeaders(pathname);
-    contentEtag(file, st, etag => {
-      if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag, 'cache-control': cache, ...sec }); return res.end(); }
+    // the characters' files: kept a year when asked for at the folder's version, sent compressed (server/asset-compress.js)
+    const chars = file.startsWith(CHAR_DIR + path.sep);
+    if (chars && charPack.version && new URL(req.url, 'http://x').searchParams.get('v') === charPack.version) cache = 'public, max-age=31536000, immutable';
+    const packed = chars ? charPack.pick(file, req.headers['accept-encoding'] || '') : null;
+    contentEtag(file, st, etag0 => {
+      const etag = packed ? etag0.replace(/"$/, `-${packed.encoding}"`) : etag0;
+      if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag, 'cache-control': cache, ...(chars ? { vary: 'Accept-Encoding' } : {}), ...sec }); return res.end(); }
       const text = /^(text|application\/json)/.test(type) || ext === '.svg';
-      const h = { 'content-type': type, etag, 'cache-control': cache, ...sec };
+      const h = { 'content-type': type, etag, 'cache-control': cache, ...(chars ? { vary: 'Accept-Encoding' } : {}), ...sec };
+      if (packed) {
+        let size; try { size = fs.statSync(packed.path).size; } catch { size = -1; }
+        if (size >= 0) {
+          res.writeHead(200, { ...h, 'content-encoding': packed.encoding, 'content-length': size });
+          if (req.method === 'HEAD') res.end(); else fs.createReadStream(packed.path).pipe(res);
+          return;
+        }
+      }
       if (text && /\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
         let c = gzCache.get(file);
         if (!c || c.etag !== etag) { c = { etag, gz: zlib.gzipSync(fs.readFileSync(file)) }; gzCache.set(file, c); }

@@ -89,3 +89,38 @@ test('instance room starts small per character and detail, doubles when needed a
   assert.equal(s.P[255 * 4], 255, 'and those pushed before it grew');
   assert.equal(f.c.stage[f.kinds.indexOf('f01')][0].cap, 256, 'other characters untouched');
 });
+
+// 2026-11-02 (measured on a phone: an upload costs the main thread ~1 ms and the GPU a frame or two later): uploads whose
+// following frames come late, more often than this device's frames usually do, are spaced further apart; a model's
+// appearance is a step of its own, never in the frame of a map's upload.
+test('uploads that make the next frames late are spaced out; a model appears in a frame of its own', async () => {
+  const run = async lag => {
+    const clock = { t: 0, now() { return this.t; } }, f = fixture(true, { clock });
+    let sinceUpload = 99, done = 0, both = 0;
+    for (let i = 0; i < 300; i++) {
+      await tick();
+      clock.t += lag && sinceUpload < 2 ? 70 : 16;   // (the GPU's share of the last upload lands on the next frames)
+      const n = f.uploads.length, m = f.frames.length; f.c.begin();
+      const up = f.uploads.length - n, made = f.frames.length - m;
+      if (up && made) both++;
+      sinceUpload = up ? 0 : sinceUpload + 1; done += up;
+    }
+    return { done, both };
+  };
+  const free = await run(false), laggy = await run(true);
+  assert.equal(free.both + laggy.both, 0, 'never a map and a model in one frame');
+  assert.ok(free.done >= 90, `uploads the GPU doesn't feel keep going (${free.done} in 300 frames)`);
+  assert.ok(laggy.done < free.done / 2, `uploads it does feel are spaced out (${laggy.done} against ${free.done})`);
+  assert.ok(laggy.done >= 12, `and still go on (${laggy.done})`);
+});
+
+test('someone whose model is still loading is drawn as a loaded one of the same build', () => {
+  const f = fixture(false), K = f.kinds, c = f.c, i = n => K.indexOf(n);
+  c.kinds = [];
+  assert.equal(c.standInFor(i('f05')), -1, 'nothing loaded yet: not drawn');
+  c.kinds[i('m03')] = {};
+  assert.equal(c.standInFor(i('f05')), i('m03'), 'only a man loaded: drawn as him rather than not at all');
+  c.kinds[i('f02')] = {}; c.standIns = {};
+  assert.equal(c.standInFor(i('f05')), i('f02'), 'a woman as a woman');
+  assert.equal(c.standInFor(i('m10')), i('m03'), 'a man as a man');
+});

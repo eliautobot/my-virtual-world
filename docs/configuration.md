@@ -11,6 +11,7 @@ listed in [reference/settings.md](reference/settings.md)). `.env.example` has ev
 | `PORT` | `8570` | HTTP port |
 | `HOST` | `0.0.0.0` | Address to listen on; set `127.0.0.1` behind a proxy on the same machine |
 | `MVW_DATA` | `./data` | The data folder |
+| `MVW_ASSET_CACHE` | the system temp folder | Where the compressed copies of the characters' files are kept (about 0.5 GB, rebuilt after a restart; skipped when that disk has under 1 GB free) |
 | `MVW_KEY_FILE` | (none) | Absolute path of the key file (outside the data folder); or `MVW_SECRET_KEY` |
 | `MVW_SECRET_KEY` | (none) | The key itself, base64 (instead of a file) |
 | `MVW_SECRET_KEY_PREVIOUS` | (none) | The previous key during a rotation (with `MVW_SECRET_KEY`) |

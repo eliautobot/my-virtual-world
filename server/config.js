@@ -20,6 +20,7 @@ export const SERVER_SETTINGS = Object.freeze([
   'MVW_COOKIE_NAME', 'MVW_KEY_FILE', 'MVW_SECRET_KEY', 'MVW_SECRET_KEY_PREVIOUS', 'MVW_KEY_POLL_MS',
   'MVW_WS_PER_ADDRESS', 'MVW_WS_MAX', 'MVW_PROVIDER_MEDIA_CACHE_MB', 'MVW_GATEWAY_IS_LOCAL',
   'MVW_PROVIDER_TEST', 'MVW_PROVIDER_RUN_TIMEOUT_MS', 'MVW_TWILIO_TEST_URL', 'MVW_PROBLEM_SCAN_MS', 'MVW_CHROME', 'MVW_HOUSING', 'MVW_STARTER_MAP', 'MVW_SOUNDTRACK', 'MVW_RADIO',
+  'MVW_ASSET_CACHE',
 ]);
 /** Older names that still work, with a warning (C102): none at present. */
 export const LEGACY_SETTINGS = Object.freeze({});
@@ -170,6 +171,13 @@ export function loadConfig({ env = process.env, root, release = null, routeTable
   // the agents' built-in real browser (server/pc/chrome.js): the Chrome it runs — a path, or "off" (the reader only); unset:
   // the one installed on this machine
   cfg.chrome = text('MVW_CHROME', '', 500);
+  // where the characters' files are kept compressed (server/asset-compress.js): the system's temporary folder by default
+  cfg.assetCache = null;
+  if (given('MVW_ASSET_CACHE')) {
+    const d = raw('MVW_ASSET_CACHE');
+    if (path.isAbsolute(d)) cfg.assetCache = path.resolve(d);
+    else errors.push(`MVW_ASSET_CACHE must be an absolute path, not "${shorten(d)}"`);
+  }
 
   // Live-stream connections per client address and in total (DECISIONS C71).
   cfg.wsPerAddress = int('MVW_WS_PER_ADDRESS', 20, 1, 100000);

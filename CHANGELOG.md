@@ -2,6 +2,18 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.2.4 (2026-11-02)
+
+- **Faster loading of people**: the characters' files are sent compressed (about half the size) and the browser keeps
+  them, so a return visit downloads none of them and everyone appears in seconds. The server compresses them once in the
+  background and keeps the copies in the system's temporary folder (setting `MVW_ASSET_CACHE` chooses another place); it
+  skips this when that disk has less than 1 GB free.
+- **Nobody invisible while loading**: someone whose own look is still on its way is shown with one that has loaded until
+  theirs arrives, and the people on screen load first.
+- **Smoother first minutes**: each character's animations are joined in the background instead of on the main thread,
+  each character appears as a step of its own, and loading slows itself down on a device whose frames come late after
+  it, instead of stuttering.
+
 ## v2.2.3 (2026-11-02)
 
 - **Pictures on signs**: logos and images go on signs again. Any picture your browser can open is fitted before it is
