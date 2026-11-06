@@ -44,6 +44,8 @@ async function renderer(saved = WORLD, mode = 'ok') {
   const context = { THREE: { Vector3, Vector4, Vector2: Vector3, Group: class {},
     MeshStandardMaterial: Material, MeshDepthMaterial: Material, RGBADepthPacking: 3201 },
     NCL: TRIPO_CLIPS.length, KINDS: ['male', 'female', ...TEXTURED], wanted: () => false, COMMON, SKIN_GLSL,
+    // (the light on people: render/light.js)
+    LIGHT: { on: true }, ROOM_PARS: '', STREET_PARS: '',
     // (the things characters hold: render/char-props.js, not under test here)
     CharProps: class { begin() {} end() {} push() {} initKind() {} setShadows() {} count() { return 0; } }, shapeFor: () => 0,
     loadKind: () => { throw new Error('rig audit must not load assets'); },

@@ -9,6 +9,8 @@ import { Characters } from './characters.js';
 import { CLIP, CLIP_DUR, CLIP_STRIDE } from './anim.js';
 import { holdClip, eatClip } from './char-props.js';
 import { FoodTable, sideDrink } from './food-table.js';
+import { ContactShadows } from './contact-shadows.js';
+import { LIGHT } from './light.js';
 import { arrToApp } from '/shared/appearance.js';
 import { USE_ID } from '/shared/catalog.js';
 import { evalDecoded as evalPlan } from '/shared/proto.js';
@@ -53,6 +55,7 @@ export class Agents {
     this.group = new THREE.Group();
     this.group.add(this.chars.group, this.ring);
     this.food = new FoodTable(this.group);   // what people eat and drink, on their tables (render/food-table.js)
+    this.blobs = new ContactShadows(this.group);   // the soft shade under people indoors and at night (render/contact-shadows.js)
   }
   /** Feet on a drawn road's surface (shared/island-roads.js top: lanes, gutters, curbs and sidewalks as drawn). A walk's
    *  points carry heights a dozen metres apart, so between them a walker would slope through a curb, and a crossing's
@@ -132,8 +135,11 @@ export class Agents {
   update(dt, now) {
     const net = this.net, plans = net.plans, pver = net.planVer;
     const chars = this.chars;
-    chars.begin(); this.food.begin();
-    if (!net.clock) { chars.end(); this.food.end(); return; }
+    chars.begin(); this.food.begin(); this.blobs.begin();
+    if (!net.clock) { chars.end(); this.food.end(); this.blobs.end(0, 0); return; }
+    // the shade under people (render/light.js LIGHT): always on the floor looked into, out of doors after dark (or with no
+    // sun shadows at all)
+    const night = this.stage.state.night, blobOut = !LIGHT.on ? 0 : Math.min(0.5, (this.stage.q.shadows ? 0 : 0.3) + 0.42 * night), blobIn = LIGHT.on ? 0.42 : 0;
     const t = net.simNow(), N = Math.min(plans.length, pver.length);
     this.ensure(N);
     const cam = this.stage.camera, cp = cam.position, q = this.stage.q;
@@ -246,6 +252,7 @@ export class Agents {
       // what is on the table in front of it is)
       const ghost = this.hideFn ? this.hideFn(i, x, y, z) : false;
       chars.push(lod, x, y, z, yw, a, ph, w > 0 ? this.pclip[i] : a, this.pph[i], w, i, prop, (i === sel ? 2 : i === hov ? 1 : 0) | (indoor ? 4 : 0), item, ghost);
+      if (lod < 2 && !ghost && (indoor ? blobIn : blobOut)) this.blobs.add(x, y, z, indoor);
       if (item && lod < 2) {
         // (typing at a table, the drink by the laptop stands on the same top as the laptop: a bar's counter is higher)
         const fy = p.anim[k] === CLIP.sit_type ? y + chars.deskLift(chars.kindOf[i] ?? 0, i, x, y, z, p.yaw[k]) : y;
@@ -258,8 +265,9 @@ export class Agents {
       const dx = e.x - cp.x, dy = e.y + 0.9 - cp.y, dz = e.z - cp.z, d2 = dx * dx + dy * dy + dz * dz;
       const lod = d2 < L0 ? 0 : d2 < L1 ? 1 : 2;
       chars.push(lod, e.x, e.y, e.z, e.yaw, e.clip, e.ph, e.pclip ?? e.clip, e.pph ?? 0, e.w ?? 0, e.app, e.prop || 0, e.flags || 0);
+      if (lod < 2 && ((e.flags & 4) ? blobIn : blobOut)) this.blobs.add(e.x, e.y, e.z, !!(e.flags & 4));
     }
-    chars.end(); this.food.end();
+    chars.end(); this.food.end(); this.blobs.end(blobIn, blobOut);
     this.nDrawn = nd;
     Object.assign(this.stats, { out, inside, moving, under, drawn: nd, t });
     // selection ring

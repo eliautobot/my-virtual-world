@@ -124,6 +124,10 @@ const SanitizeShader = {
 export const GU = {
   uTime: { value: 0 }, uNight: { value: 0 }, uDay: { value: 1 }, uHour: { value: 12 },
   uFocusB: { value: -1 }, uCutY: { value: 1e6 }, uIndoor: { value: 0 },
+  // the floor looked into (render/interiors.js setFocus, render/room-light.js; render/light.js): its height, its ceiling's light
+  // after dark and how much of it falls in pools (offices, shops), 0
+  uRoom: { value: new THREE.Vector4(-1e6, 0.75, 0, 0) },
+  uRoomMap: { value: null }, uRoomXf: { value: new THREE.Vector4(0, 0, 1, 0) }, uRoomBox: { value: new THREE.Vector4(0, 0, 1, 1) },   // and its light map (render/room-light.js)
   uFade: { value: new THREE.Vector4(0, 0, 0, 0) }, uCamP: { value: new THREE.Vector3() },
   uInB: { value: -1 },   // the building the camera is inside, all of it hidden (render/buildings.js cameraIn), or -1
   // the music on the floor looked into (render/venue-motion.js): its beat (beats since the song began) and whether one plays
@@ -370,12 +374,12 @@ export class Stage {
    * the bloom's render target — linear, not tone-mapped — so its materials compile with that target bound (compiled for
    * the canvas, every one of them was built again in the first frame: 4.6 s on the phone, 2026-10-04); the passes after
    * the scene (bloom, output, sharpen) and Medium's upscale compile here too, so none waits for the first time
-   * automatic resolution drops.
+   * automatic resolution drops. obj: only these (stand-ins for what is drawn later: render/warm.js), lit by the scene.
    */
-  compileForDrawing(camera = this.camera) {
+  compileForDrawing(camera = this.camera, obj = this.scene) {
     const r = this.renderer;
     r.setRenderTarget(this.composer ? this.composer.renderTarget1 : null);
-    const done = r.compileAsync(this.scene, camera);
+    const done = r.compileAsync(obj, camera, this.scene);
     r.setRenderTarget(null);
     return done;
   }

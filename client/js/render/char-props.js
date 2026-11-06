@@ -28,6 +28,8 @@ import { EAT_CLIP, BOTH_R, BOTH_LIFT, HELD_SCALE, BITE_TIP, TOOL_Z, TOOL_LEN, to
 import { lin } from './furniture.js';
 import { PHONES } from '/shared/stage.js';
 import { BOOK, PHONE, BOOK_HANDS, PHONE_HAND, gripOn } from '/shared/held.js';
+import { LIGHT, ROOM_PARS, STREET_PARS } from './light.js';
+import { standIns } from './warm.js';
 
 const HAND_R = 0, HAND_L = 1, DESK = 2, HANG = 3, HEAD = 4;
 const SCREEN = '#8cc6ff';
@@ -633,19 +635,20 @@ const PLACE = /* glsl */`
   transformed = chRot(transformed) + iPos.xyz;
   if (prHide > 0.5) transformed = vec3(0.0, -1000.0, 0.0);
 }`;
-const FRAG_PARS = /* glsl */`
+// (a function: with the old light, ?light=0, the text the old light had: render/light.js)
+const FRAG_PARS = () => /* glsl */`
 varying vec4 vC;
 varying float vIn;
 varying vec3 vLiq;
-uniform float uIndoor;
+${LIGHT.on ? 'varying vec3 vWP;\n' : ''}uniform float uIndoor;
 uniform float uNight;
-`;
+${LIGHT.on ? `${ROOM_PARS}\n${STREET_PARS}\n` : ''}`;
 
 const TINT_U = { value: (() => { const t = new THREE.DataTexture(TINT, 256, 1, THREE.RGBAFormat, THREE.FloatType); t.needsUpdate = true; return t; })() };
 
 // ------------------------------------------------------------------ renderer
 export class CharProps {
-  /** shared: the characters' uniforms (uApp, uIndoor, uNight). */
+  /** shared: the characters' uniforms (uApp, uIndoor, uNight, the floor looked into's uRoom, uRoomMap, uRoomXf, uRoomBox). */
   constructor(group, shared, shadows) {
     this.group = group; this.shared = shared; this.shadows = shadows;
     this.kinds = [];   // per character model: { mats, sets: per set of shapes { mesh, g, iPos, iAnim, iMisc } } once it has loaded
@@ -663,29 +666,33 @@ export class CharProps {
       // (the head's frame: from the nights out's clips, venue-clips.json; without it what is worn shrinks to nothing)
       uGrip: { value: [m4(gr.R), m4(gr.L), gr.H ? m4(gr.H) : new THREE.Matrix4().makeScale(0, 0, 0)] }, uDesk: { value: new THREE.Vector3(...(gr.desk || [0, 0.755, 0.55])) },
       uBones: { value: new THREE.Vector3(bone('RightHand'), bone('LeftHand'), bone('Spine2')) }, uHead: { value: bone('Head') },
-      uApp: this.shared.uApp, uIndoor: this.shared.uIndoor, uNight: this.shared.uNight, uTint: TINT_U,
+      uApp: this.shared.uApp, uIndoor: this.shared.uIndoor, uNight: this.shared.uNight, uTint: TINT_U, uRoom: this.shared.uRoom, uRoomMap: this.shared.uRoomMap, uRoomXf: this.shared.uRoomXf, uRoomBox: this.shared.uRoomBox, uLightMap: this.shared.uLightMap, uLightRect: this.shared.uLightRect, uLightMap2: this.shared.uLightMap2, uLightRect2: this.shared.uLightRect2,
     };
     this.desks[k] = U.uDesk.value;
     const mats = { color: this.material(U, false), depth: this.material(U, true) };
     this.kinds[k] = { mats, sets: [] };
     for (let set = 0; set < SETS; set++) this.build(k, set);
   }
+  /** Stand-ins for what people hold and its shadow (render/warm.js: compiled at load). */
+  standIns(out) { return standIns(this.material({}, false), { depth: this.material({}, true) }, out); }
   material(U, depth) {
     const m = depth ? new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }) : new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0 });
     m.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, U);
-      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + (depth ? '#define CHAR_DEPTH\n' : '') + VERT)
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + (depth ? '#define CHAR_DEPTH\n' : LIGHT.on ? 'varying vec3 vWP;\n' : '') + VERT)
         .replace('#include <begin_vertex>', '#include <begin_vertex>\npropCompute();' + PLACE);
       if (!depth) {
         sh.vertexShader = sh.vertexShader.replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\npropCompute();\nobjectNormal = chRot(mat3(prM) * objectNormal);')
-          .replace('#include <begin_vertex>\npropCompute();', '#include <begin_vertex>');
-        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + FRAG_PARS)
+          .replace('#include <begin_vertex>\npropCompute();', '#include <begin_vertex>')
+          .replace('#include <project_vertex>', LIGHT.on ? '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;' : '#include <project_vertex>');
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + FRAG_PARS())
           .replace('#include <color_fragment>', '#include <color_fragment>\nfloat prEmit = floor(vC.w * 0.5 + 0.01);\ndiffuseColor.rgb *= mod(vC.w + 0.01, 2.0) > 0.5 ? vLiq * vC.rgb : vC.rgb;')
           .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nif (prEmit > 0.5) roughnessFactor = 0.3;')
-          .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\nif (prEmit > 0.5) totalEmissiveRadiance += vC.rgb * (0.5 + 0.55 * uNight);\ntotalEmissiveRadiance += diffuseColor.rgb * uIndoor * vIn * 0.45;');
+          .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\nif (prEmit > 0.5) totalEmissiveRadiance += vC.rgb * (0.5 + 0.55 * uNight);\n' + (LIGHT.on ? 'if (vIn > 0.5) totalEmissiveRadiance += diffuseColor.rgb * 0.5 * roomLight(normal, vWP, uNight);\nelse if (uNight > 0.01) totalEmissiveRadiance += diffuseColor.rgb * streetLight(normal, vWP, uNight);' : 'totalEmissiveRadiance += diffuseColor.rgb * uIndoor * vIn * 0.45;'))
+          .replace('#include <aomap_fragment>', LIGHT.on ? '#include <aomap_fragment>\nif (vIn > 0.5) reflectedLight.indirectDiffuse *= roomShade(vWP, uNight);' : '#include <aomap_fragment>');
       }
     };
-    m.customProgramCacheKey = () => `mvw-char-props-${depth ? 'd' : 'c'}`;
+    m.customProgramCacheKey = () => `mvw-char-props-${depth ? 'd' : 'c' + LIGHT.on}`;
     return m;
   }
   /** (Re)builds model k's mesh of a set of shapes round its staging buffers. */

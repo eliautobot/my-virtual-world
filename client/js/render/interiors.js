@@ -17,6 +17,9 @@ import { dressContext, dressPools, dressHost, dressBudget, floorSeed } from '/sh
 import { surfacesOf, surfaceHit, fillCuts } from '/shared/surfaces.js';
 import { ABO_KINDS } from '/shared/abo-kinds.js';
 import { QB } from './qb.js';
+import { GU } from './scene.js';
+import { buildRoomMap, clearRoomMap } from './room-light.js';
+import { standIns } from './warm.js';
 import { STY, FACADE, facadeCols, isStore } from './buildings.js';
 
 export const WALL_H = { up: 3.25, cut: 1.2, down: 0.12, fp: 3.25 };   // fp: first person in Play mode (with a ceiling)
@@ -87,6 +90,15 @@ export class Interiors {
     this.sel = null;   // the piece picked to edit: outlined (highlight, outlineDraw)
     this.selMask = { mat: maskMaterial(), list: [] };
     this.rebuildParks();
+  }
+  /** Stand-ins for the materials a floor looked into is drawn with, as it draws them (render/warm.js: compiled at load). */
+  standIns(out) {
+    standIns(this.furnMat, { instanced: true, colors: true }, out);   // its furniture (flatMat: the same shader, no shadow)
+    for (const receive of [true, false]) standIns(this.glassMat, { instanced: true, colors: true, cast: false, receive }, out);   // its glass (moving parts' too)
+    standIns(this.floorMat, { cast: false }, out);
+    standIns(this.shellMat, {}, out);   // its walls and fittings
+    standIns(this.shellGlass, { cast: false }, out);
+    return out;
   }
   clear(set) {
     for (const m of set.meshes) { this.group.remove(m); if (m.isInstancedMesh) m.dispose(); else m.geometry.dispose(); }
@@ -337,10 +349,12 @@ export class Interiors {
     this.clear(this.foc);
     this.sel = null;
     const B = b >= 0 ? this.world.buildings[b] : null;
+    clearRoomMap();
     if (!B || B.gone || B.type === 'park') return (this.cutY = 1e6);
     const lvIdx = B.lv[f], L = this.world.levels[lvIdx];
     if (!L) return (this.cutY = 1e6);
     const H = WALL_H[mode] ?? WALL_H.cut, y0 = floorAt(B, f);
+    this.roomMs = buildRoomMap(B, f, L, y0);   // (its light: render/room-light.js, render/light.js)
     const fq = new QB({ aPat: 1, aFC: 3, aL: 2 });
     this.zones(fq, B, L, y0 + 0.006);
     const fb = new FB();

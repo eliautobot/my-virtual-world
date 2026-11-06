@@ -14,6 +14,8 @@ import { TRIPO_CLIPS, T, OLD_TO_TRIPO, TRIPO_FALLBACK, TRIPO_EXACT } from './cha
 import { COMMON, SKIN_GLSL, packClips } from './char-glsl.js';
 import { CharProps, shapeFor, GEAR_CLIP, onTable, deskPoint, DESK_TOP, DESK_LID } from './char-props.js';
 import { MASK_COL } from './outline.js';
+import { LIGHT, ROOM_PARS, STREET_PARS } from './light.js';
+import { standIns } from './warm.js';
 import { TEXTURED } from '/assets/chars/index.js';
 
 export const KINDS = ['male', 'female', ...TEXTURED];
@@ -273,14 +275,18 @@ transformed = chRot(transformed) + iPos.xyz;
 if (charHide > 0.5) transformed = vec3(0.0, -1000.0, 0.0);`;
 
 // Fragment colour: every surface is real geometry (body, garments, hair); the part id picks the appearance colour.
-const FRAG_PARS = /* glsl */`
+// (a function: with the old light, ?light=0, the text the old light had: render/light.js)
+const FRAG_PARS = () => /* glsl */`
 ${COMMON}
 varying vec3 vBind;
 varying vec4 vMask;
 varying vec4 vLimb;
 flat varying float vApp;
 flat varying float vPart;
-uniform float uIndoor;
+${LIGHT.on ? `varying vec3 vWP;
+uniform float uIndoor, uNight;
+${ROOM_PARS}
+${STREET_PARS}` : 'uniform float uIndoor;'}
 uniform vec4 uLand;   // waist, neck joint y
 float aa(float d, float w) { float e = fwidth(d) + 1e-5; return 1.0 - smoothstep(w - e, w + e, d); }
 vec3 charDetail(int part, vec3 c, int a) {
@@ -333,11 +339,13 @@ float charRough() {
   return part == 0 ? 0.62 : part == 1 ? 0.55 : part == 6 ? 0.7 : part == 4 ? 0.6 : 0.88;
 }
 `;
-const RIM = /* glsl */`
-{
-  // (selected or hovered: outlined instead — render/outline.js)
-  totalEmissiveRadiance += diffuseColor.rgb * uIndoor * vLimb.w * 0.45;
-}
+// The light on a person (render/light.js): indoors the room's (vLimb.w: on the floor looked into), out of doors after dark
+// the street lamps' and a cool edge; selected or hovered: outlined instead (render/outline.js)
+const RIM = () => LIGHT.on ? /* glsl */`
+if (vLimb.w > 0.5) totalEmissiveRadiance += diffuseColor.rgb * 0.5 * roomLight(normal, vWP, uNight);
+else if (uNight > 0.01) totalEmissiveRadiance += diffuseColor.rgb * streetLight(normal, vWP, uNight) + nightRim(normal, uNight);
+` : /* glsl */`
+totalEmissiveRadiance += diffuseColor.rgb * uIndoor * vLimb.w * 0.45;
 `;
 
 // ------------------------------------------------------------------------------------------------ renderer
@@ -355,6 +363,10 @@ export class Characters {
     this.group = new THREE.Group();
     this.appUniform = { value: null };
     this.indoor = { value: 0 };
+    // the floor looked into (render/light.js): its height and its light map (render/room-light.js), set by main.js
+    this.roomU = { value: [-1e6, 0.75, 0, 0] }; this.roomMap = { value: null }; this.roomXf = { value: [0, 0, 1, 0] }; this.roomBox = { value: [0, 0, 1, 1] };
+    // the street lamps' light maps (render/city.js, render/island-roads.js), set by main.js
+    this.lampMap = { value: null }; this.lampRect = { value: [-1e7, -1e7, 1, 1] }; this.lampMap2 = { value: null }; this.lampRect2 = { value: [-1e7, -1e7, 1, 1] };
     this.night = { value: 0 };   // (the held screens glow at night: render/char-props.js)
     this.uTime = { value: 0 };
     this.lidForce = { value: -1 };
@@ -364,7 +376,8 @@ export class Characters {
     this.rigBatchU = { batch1: pair(), batch2: pair() };
     this.rigU = this.rigBatchU.batch1;
     this.rigReady = this.loadRig();
-    this.uniforms = { uIndoor: this.indoor, uApp: this.appUniform, uNight: this.night };
+    this.uniforms = { uIndoor: this.indoor, uApp: this.appUniform, uNight: this.night, uRoom: this.roomU, uRoomMap: this.roomMap, uRoomXf: this.roomXf, uRoomBox: this.roomBox,
+      uLightMap: this.lampMap, uLightRect: this.lampRect, uLightMap2: this.lampMap2, uLightRect2: this.lampRect2 };
     this.props = new CharProps(this.group, this.uniforms, shadows);
     this.appData = null;
     this.kindOf = new Uint8Array(0);
@@ -449,7 +462,7 @@ export class Characters {
   makeMaterial(kind, d, depth, withMap, mask = false) {
     const U = {
       uAnim: { value: d.tex }, uClip: { value: d.clip },
-      uApp: this.appUniform, uIndoor: this.indoor, uTime: this.uTime, uLidForce: this.lidForce, uRig: this.rigBatchU[rigBatchForKind(kind, d.man)][kind[0] === 'f' ? 'female' : 'male'],
+      uApp: this.appUniform, uIndoor: this.indoor, uNight: this.night, uRoom: this.roomU, uRoomMap: this.roomMap, uRoomXf: this.roomXf, uRoomBox: this.roomBox, uLightMap: this.lampMap, uLightRect: this.lampRect, uLightMap2: this.lampMap2, uLightRect2: this.lampRect2, uTime: this.uTime, uLidForce: this.lidForce, uRig: this.rigBatchU[rigBatchForKind(kind, d.man)][kind[0] === 'f' ? 'female' : 'male'],
       uLand: { value: new THREE.Vector4(d.man.land.waist, d.man.land.neckY ?? d.man.land.neck, 0, 0) },
     };
     const tx = !!d.colorMap;
@@ -471,26 +484,29 @@ export class Characters {
     if (!depth && withMap && d.normalMap) m.normalScale = new THREE.Vector2(1, -1);   // glTF normal maps without tangents: flip green (as GLTFLoader does)
     m.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, U);
-      let v = sh.vertexShader.replace('#include <common>', '#include <common>\n' + (depth ? '#define CHAR_DEPTH\n' : '') + VERT_PARS);
+      // (the world position only where the new light reads it: the shadow's shader keeps its old text, render/light.js)
+      let v = sh.vertexShader.replace('#include <common>', '#include <common>\n' + (depth ? '#define CHAR_DEPTH\n' : LIGHT.on ? 'varying vec3 vWP;\n' : '') + VERT_PARS);
       if (depth) v = v.replace('#include <begin_vertex>', '#include <begin_vertex>\ncharCompute();' + PLACE);
       else {
         v = v.replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\ncharCompute();\nobjectNormal = chRot(mat3(charM) * objectNormal);')
-          .replace('#include <begin_vertex>', '#include <begin_vertex>' + PLACE);
-        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + FRAG_PARS);
+          .replace('#include <begin_vertex>', '#include <begin_vertex>' + PLACE)
+          .replace('#include <project_vertex>', LIGHT.on ? '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;' : '#include <project_vertex>');
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + FRAG_PARS());
         if (!tx) sh.fragmentShader = sh.fragmentShader
           .replace('#include <color_fragment>', 'diffuseColor.rgb *= charPaint();')
           .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = charRough();')
           .replace('#include <normal_fragment_maps>', 'if (vPart < 0.5) {\n#include <normal_fragment_maps>\n}');
         if (tx) sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\nif (vPart > 10.5) diffuseColor.rgb = mix(diffuseColor.rgb * 0.92, vec3(0.03, 0.02, 0.02), smoothstep(0.86, 0.97, vLimb.y));')
         sh.fragmentShader = sh.fragmentShader
-          .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + RIM);
+          .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + RIM())
+          .replace('#include <aomap_fragment>', LIGHT.on ? '#include <aomap_fragment>\nif (vLimb.w > 0.5) reflectedLight.indirectDiffuse *= roomShade(vWP, uNight);' : '#include <aomap_fragment>');
       }
       sh.vertexShader = v;
     };
     // Bone/paint/shading code is identical between model IDs. Share programs
     // by actual shader variant, not by filename, avoiding a compile hitch for
     // every new Customizer choice. Per-material uniforms remain independent.
-    m.customProgramCacheKey = () => `mvw-tripo-${tx ? 'textured' : 'painted'}-${depth ? 'd' : withMap ? 'n' : 'p'}`;
+    m.customProgramCacheKey = () => `mvw-tripo-${tx ? 'textured' : 'painted'}-${depth ? 'd' : withMap ? 'n' : 'p'}${depth ? '' : LIGHT.on}`;
     return m;
   }
   upload(d) {
@@ -506,16 +522,23 @@ export class Characters {
    * Stand-ins for the characters' shaders — the clothed body (colour map, and normal map when they load one) and its
    * shadow's depth — to compile with the world's at load (render: main.js). The characters arrive after the loading
    * screen, and compiling their shader then held a frame 130–400 ms on the phone (2026-10-04). Kept afterwards, so
-   * three.js keeps the programs for the real characters.
+   * three.js keeps the programs for the real characters. (Their shadow's: standIns.)
    */
   warmGroup() {
     const tex = cs => { const t = new THREE.DataTexture(new Uint8Array(4), 1, 1); t.colorSpace = cs; t.needsUpdate = true; return t; };
     const anim = new THREE.DataTexture(new Uint16Array(4), 1, 1, THREE.RGBAFormat, THREE.HalfFloatType); anim.needsUpdate = true;
-    const d = { tex: anim, off: new Float32Array(NCL), len: new Float32Array(NCL), clip: packClips(new Float32Array(NCL), new Float32Array(NCL)), man: { land: { waist: 1, neck: 1.5 } }, colorMap: tex(THREE.SRGBColorSpace), normalMap: this.normalSize ? tex(THREE.NoColorSpace) : null };
+    const d = this.warmD = { tex: anim, off: new Float32Array(NCL), len: new Float32Array(NCL), clip: packClips(new Float32Array(NCL), new Float32Array(NCL)), man: { land: { waist: 1, neck: 1.5 } }, colorMap: tex(THREE.SRGBColorSpace), normalMap: this.normalSize ? tex(THREE.NoColorSpace) : null };
     const g = new THREE.Group(), geo = new THREE.PlaneGeometry(0.01, 0.01);
-    for (const m of [this.makeMaterial('f01', d, false, true), this.makeMaterial('f01', d, true, false)]) { const mesh = new THREE.Mesh(geo, m); mesh.frustumCulled = false; mesh.position.y = -9999; g.add(mesh); }
+    for (const m of [this.makeMaterial('f01', d, false, true)]) { const mesh = new THREE.Mesh(geo, m); mesh.frustumCulled = false; mesh.position.y = -9999; g.add(mesh); }
     this.warmKept = g;
     return g;
+  }
+  /** Stand-ins for their shadows (render/warm.js: as the shadow pass draws them, their depth material with their colour
+   *  map, compiled at load) and for what they hold (render/char-props.js). After warmGroup. */
+  standIns(out) {
+    const d = this.warmD;
+    standIns(this.makeMaterial('f01', d, false, true), { depth: this.makeMaterial('f01', d, true, false) }, out);
+    return this.props.standIns(out);
   }
   /** A loaded model to draw someone with while theirs loads: the first loaded of the same build (women f…, men m…),
    *  else any loaded one, else -1. */

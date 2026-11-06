@@ -10,7 +10,9 @@ function fixture() {
   class Vector { constructor(...values) { this.values = values; } }
   const context = {
     THREE: { MeshStandardMaterial: Material, MeshDepthMaterial: Material, Vector2: Vector, Vector4: Vector, RGBADepthPacking: 3201 },
-    VERT_PARS: 'VERT', FRAG_PARS: 'FRAG', PLACE: 'PLACE', RIM: 'RIM', rigBatchForKind,
+    VERT_PARS: 'VERT', FRAG_PARS: () => 'FRAG', PLACE: 'PLACE', RIM: () => 'RIM', rigBatchForKind,
+    // (render/light.js)
+    LIGHT: { on: true },
   };
   vm.createContext(context);
   const source = fs.readFileSync(new URL('../client/js/render/characters.js', import.meta.url), 'utf8');
@@ -20,7 +22,7 @@ function fixture() {
   const renderer = Object.create(context.C.prototype);
   const pair = () => ({ male: {}, female: {} });
   const rigBatchU = { batch1: pair(), batch2: pair() };
-  Object.assign(renderer, { appUniform: {}, indoor: {}, uTime: {}, lidForce: {}, rigU: rigBatchU.batch1, rigBatchU });
+  Object.assign(renderer, { appUniform: {}, indoor: {}, night: {}, roomU: {}, roomMap: {}, roomXf: {}, roomBox: {}, lampMap: {}, lampRect: {}, lampMap2: {}, lampRect2: {}, uTime: {}, lidForce: {}, rigU: rigBatchU.batch1, rigBatchU });
   const data = token => ({ tex: token, off: [], len: [], colorMap: {}, normalMap: {}, man: { land: { waist: 0.9, neckY: 1.6 } } });
   return { renderer, data };
 }

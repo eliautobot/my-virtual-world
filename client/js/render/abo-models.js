@@ -11,17 +11,21 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CATALOG } from '/shared/catalog.js';
 import { aboParts } from '/shared/abo-replace.js';
 import { aboId, ABO_PREFIX } from '/shared/abo-items.js';
-import { commonUniforms, WP_VERT, FRAG_PARS } from './mats.js';
+import { commonUniforms, WP_VERT, FRAG_PARS, roomPars } from './mats.js';
+import { LIGHT, indoorFill, indoorShade, streetLit } from './light.js';
 import { onFile } from './surface-items.js';
+import { standIns, compileStandIns } from './warm.js';
 import { dressContext, dressPools, floorSeed } from '/shared/dress.js';
 
 const BASE = '/assets/abo/m/';
 const KEEP_MS = 45000;   // a model no floor shows any more is let go after this
-let loader = null, ktx2 = null;
+let loader = null, ktx2 = null, stage = null;
 const models = new Map();   // id -> { state: 'loading' | 'ready' | 'failed', prims: [{ geo, mat }], refs, waiters, drop }
 
-/** Ready the loaders for the renderer (its texture formats). */
-export function aboInit(renderer) {
+/** Ready the loaders for the renderer (its texture formats); st: the stage (render/scene.js), whose renderer compiles a
+ *  model's shaders once it has loaded, before it is drawn (render/warm.js). */
+export function aboInit(renderer, st = null) {
+  stage = st;
   if (loader) return;
   ktx2 = new KTX2Loader().setTranscoderPath('/vendor/three/examples/jsm/libs/basis/').detectSupport(renderer);
   loader = new GLTFLoader().setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder);
@@ -33,12 +37,13 @@ function furnish(src, flat) {   // the model's material, lit like render/mats.js
     commonUniforms(sh);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP;')
       .replace('#include <project_vertex>', `#include <project_vertex>\n${WP_VERT}`);
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${FRAG_PARS}`)
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${FRAG_PARS}${roomPars(true)}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.8, 0.55) * lampLight(vWP) * uNight * 1.6;
-totalEmissiveRadiance += diffuseColor.rgb * uIndoor;`);
+${streetLit('1.6')}
+${indoorFill()}`)
+      .replace('#include <aomap_fragment>', indoorShade());
   };
-  m.customProgramCacheKey = () => 'mvw-abo';
+  m.customProgramCacheKey = () => 'mvw-abo' + LIGHT.on;
   if (flat) Object.assign(m, { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });   // (a rug over the floor's finish)
   return m;
 }
@@ -49,8 +54,8 @@ export function aboModel(id, done) {
 }
 /** A goods model by its file (shared/goods-items.js goodsFiles; a library piece's dressing copy): as aboModel, held and
  *  let go by its file (aboHold, aboRelease). */
-export function goodsModel(url, done) { return modelAt(url, url, () => false, done); }
-function modelAt(key, url, isFlat, done) {
+export function goodsModel(url, done) { return modelAt(url, url, () => false, done, true); }
+function modelAt(key, url, isFlat, done, goods = false) {
   let r = models.get(key);
   if (!r) {
     r = { id: key, state: 'loading', prims: [], refs: 0, waiters: new Set(), drop: 0 };
@@ -65,9 +70,13 @@ function modelAt(key, url, isFlat, done) {
         o.geometry.computeBoundingSphere();
         r.prims.push({ geo: o.geometry, local: o.matrixWorld.clone(), mat: furnish(o.material, flat) });
       });
-      r.state = 'ready';
-      for (const f of r.waiters) f(r);
-      r.waiters.clear();
+      const ready = () => { r.state = 'ready'; for (const f of r.waiters) f(r); r.waiters.clear(); };
+      if (!stage) return ready();
+      // its shaders compiled before it is drawn, as render/interiors.js draws it (instanced; a piece's shadow, not a goods
+      // thing's or a rug's): in the background, not in the frame its floor is first opened (render/warm.js)
+      const out = { draw: [], shadow: [] };
+      for (const p of r.prims) standIns(p.mat, { geo: p.geo, instanced: true, cast: !flat && !goods }, out);
+      compileStandIns(stage, out).then(ready, ready);
     }, undefined, () => { r.state = 'failed'; for (const f of r.waiters) f(r); r.waiters.clear(); });
   }
   if (done && r.state === 'loading') r.waiters.add(done);

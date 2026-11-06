@@ -17,6 +17,7 @@ import { Buildings } from './render/buildings.js';
 import { Interiors } from './render/interiors.js';
 import { GOODS, DRESS } from './render/surface-items.js';
 import { aboInit, aboPrefetch, dressPrefetch } from './render/abo-models.js';
+import { compileStandIns } from './render/warm.js';
 import { Doors } from './render/doors.js';
 import { Agents } from './render/agents.js';
 import { SignAtlas } from './render/qb.js';
@@ -116,7 +117,7 @@ async function boot() {
   const blds = app.blds = new Buildings(S.world, g, atlas);
   stage.scene.add(blds.group);
   progress(0.6, 'Furnishing…', 'furnish'); await nextFrame();
-  aboInit(stage.renderer);   // (the Amazon furniture's models: render/abo-models.js)
+  aboInit(stage.renderer, stage);   // (the Amazon furniture's models: render/abo-models.js)
   GOODS.lod = stage.q.name === 'high' ? 'm' : 'd';   // (things on pieces: the lean model on high, the light copy otherwise)
   DRESS.q = stage.q.name;   // (the dressing's rules and budgets at this quality: shared/dress.js DRESS_Q)
   const inter = app.inter = new Interiors(S.world, atlas);
@@ -194,7 +195,9 @@ async function boot() {
     stage.update(S.hour, cam.target, cam.dist, now / 1000);
     if (stage.q.shadows) city.updateShadowSplit(stage.sun.target.position.x, stage.sun.target.position.z, stage.sun.shadow.camera.right);
     GU.uIndoor.value = 0.1 + 0.32 * stage.state.night;
-    agents.chars.uniforms.uIndoor.value = GU.uIndoor.value; agents.chars.uniforms.uNight.value = GU.uNight.value;
+    { const u = agents.chars.uniforms; u.uIndoor.value = GU.uIndoor.value; u.uNight.value = GU.uNight.value;
+      u.uRoom.value = GU.uRoom.value; u.uRoomMap.value = GU.uRoomMap.value; u.uRoomXf.value = GU.uRoomXf.value; u.uRoomBox.value = GU.uRoomBox.value;
+      u.uLightMap.value = GU.uLightMap.value; u.uLightRect.value = GU.uLightRect.value; u.uLightMap2.value = GU.uLightMap2.value; u.uLightRect2.value = GU.uLightRect2.value; }
     city.update(sim, net.realNow());
     if (app.terrain) app.terrain.update(stage.camera);
     blds.update(stage.state.night);
@@ -224,8 +227,11 @@ async function boot() {
   progress(0.93, 'Lighting up the world…', 'lighting');
   const warm = app.terrain?.warmGroup?.(); if (warm) stage.scene.add(warm);   // tiles' shaders too (render/terrain.js)
   const chWarm = agents.chars.warmGroup?.(); if (chWarm) stage.scene.add(chWarm);   // and the characters', who arrive later
+  // and what the first floor looked into is drawn with, people's shadows and what they hold, food on tables (stand-ins:
+  // render/warm.js), so opening the first buildings compiles nothing (it held ~1.2 s on the phone, 2026-11-06)
+  const stand = { draw: [], shadow: [] }; inter.standIns(stand); agents.chars.standIns(stand); agents.food.standIns(stand);
   // (compiled the way this quality draws them, render/scene.js; the phone needs ~5 s for them all, so up to 10 s here)
-  await Promise.race([stage.compileForDrawing(), new Promise(r => setTimeout(r, 10000))]).catch(() => {});
+  await Promise.race([Promise.all([stage.compileForDrawing(), compileStandIns(stage, stand)]), new Promise(r => setTimeout(r, 10000))]).catch(() => {});
   if (warm) { stage.scene.remove(warm); warm.userData.dispose(); }
   if (chWarm) stage.scene.remove(chWarm);
   stage.warmPasses();

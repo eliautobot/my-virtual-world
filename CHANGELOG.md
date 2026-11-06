@@ -2,6 +2,14 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.4.0 (2026-11-06)
+
+- **Lighting on things**: rooms are lit from above with shaped light, the floor you look into gets its own room light,
+  and at night people in the street are lit by the lamps with a soft rim. Things and people get a soft shade where they
+  touch the floor. Adding `?light=0` to the address shows the old light.
+- **Buildings open without a pause**: the lighting's shaders are prepared while the world loads, so opening a building
+  has nothing left to prepare.
+
 ## v2.3.1 (2026-11-05)
 
 - **Goods load faster on a return visit**: the browser now keeps the goods' models and pictures for a day, like the

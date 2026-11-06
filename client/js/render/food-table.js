@@ -5,6 +5,7 @@
 // is wanted. render/agents.js says each frame who has what (place()), from the item their plan carries (shared/proto.js).
 import * as THREE from 'three';
 import { makeFurnMat } from './mats.js';
+import { standIns } from './warm.js';
 import { foodGeometry } from './food-models.js';
 import { FOOD_BY_N } from '/shared/food.js';
 import { CLIP } from './anim.js';
@@ -63,6 +64,8 @@ export class FoodTable {
     this.solid = new Batch(this.group, makeFurnMat({ lit: true, indoor: true }), cap);
     this.glass = new Batch(this.group, makeFurnMat({ glass: true }), cap);
   }
+  /** Stand-ins for the food's materials as drawn (render/warm.js: compiled at load). */
+  standIns(out) { for (const b of [this.solid, this.glass]) standIns(b.mat, { batched: true, cast: false }, out); return out; }
   begin() { this.solid.begin(); this.glass.begin(); }
   /** Item n at a spot in someone's frame: (lx left, ly up, lz ahead) from (x, y, z), turned yaw. cook: the pan/pot;
    *  eat: being eaten — 'hand' (a piece of it in the hands) or 'tools' (the cutlery in the hands, not by the plate). */

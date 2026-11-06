@@ -4,6 +4,7 @@
 // materials for cutaway, and the occluder fade (screen-door dither between the camera and the focused building).
 import * as THREE from 'three';
 import { GU } from './scene.js';
+import { LIGHT, ROOM_PARS, indoorFill, indoorShade, streetLit } from './light.js';
 
 export const GLSL = /* glsl */`
 float h11(float p) { p = fract(p * .1031); p *= p + 33.33; p *= p + p; return fract(p); }
@@ -46,6 +47,7 @@ export function commonUniforms(sh) {
   Object.assign(sh.uniforms, {
     uNight: GU.uNight, uTime: GU.uTime, uFocusB: GU.uFocusB, uCutY: GU.uCutY, uFade: GU.uFade, uCamP: GU.uCamP, uInB: GU.uInB, uBeat: GU.uBeat, uBeatOn: GU.uBeatOn,
     uLightMap: GU.uLightMap, uLightRect: GU.uLightRect, uLightMap2: GU.uLightMap2, uLightRect2: GU.uLightRect2, uIndoor: GU.uIndoor, uHour: GU.uHour,
+    uRoom: GU.uRoom, uRoomMap: GU.uRoomMap, uRoomXf: GU.uRoomXf, uRoomBox: GU.uRoomBox,   // (the floor looked into: render/light.js)
   });
 }
 export const FRAG_PARS = `uniform float uNight, uTime, uCutY, uIndoor, uHour, uBeat, uBeatOn; uniform sampler2D uLightMap, uLightMap2; uniform vec4 uLightRect, uLightRect2; varying vec3 vWP;
@@ -54,6 +56,9 @@ float lampMap(sampler2D m, vec4 r, vec2 p) { vec2 q = (p - r.xy) / r.zw; if (q.x
 // the street lamps' light on whatever is under them: the city's (render/city.js) and the island roads' (render/island-roads.js)
 float lampLight(vec3 wp) { return lampMap(uLightMap, uLightRect, wp.xz) + lampMap(uLightMap2, uLightRect2, wp.xz); }
 `;
+// The room's light (render/light.js) for a material drawn on the floor looked into, with the new light only: every other
+// shader's text stays as it was, so a browser that compiled it before (its GPU shader cache) has it at once.
+export const roomPars = indoor => indoor && LIGHT.on ? ROOM_PARS : '';
 
 /**
  * Object material. Geometry attribute aC = (linear rgb, flags): flags = tint(1) + emit*2
@@ -77,7 +82,7 @@ vFC = aC; ${WP_VERT}${withB ? ' vBi = aB;' : ''}`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
 varying vec4 vFC;${withB ? ' varying float vBi;' : ''}
-${FRAG_PARS}`)
+${FRAG_PARS}${roomPars(indoor)}`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
 ${withB ? 'if (abs(vBi - uFocusB) < 0.5 && vWP.y > uCutY + 0.02) discard;' : ''}
 ${fade ? `if (fadeOut(vWP, ${withB ? 'vBi' : '-3.0'})) discard;` : ''}`)
@@ -101,12 +106,13 @@ if (fEmit > 0.5) {
   else if (fEmit < 9.5) { float bf = uBeatOn > 0.5 ? pow(1.0 - fract(uBeat), 3.0) : 0.35 + 0.35 * sin(uTime * 2.5); totalEmissiveRadiance += fBase * (0.18 + 1.9 * bf) * (0.7 + 1.1 * uNight); }   // on the beat: a flash with every beat of the music playing here (a strobe, a podium's ring)
   else { float k = h21(floor(vWP.xz * 1.14) + 3.1); float lit = uBeatOn > 0.5 ? step(fract(k * 3.7 + floor(uBeat) * 0.381), 0.3) * pow(1.0 - fract(uBeat), 1.4) : 0.5 + 0.5 * sin(uTime * 4.0 + k * 6.28); totalEmissiveRadiance += fBase * (0.12 + 1.9 * lit) * (0.8 + 1.2 * uNight); }   // with the beat: tiles lit a different few at each beat (an LED dance floor)
 }
-${lit ? 'totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.8, 0.55) * lampLight(vWP) * uNight * 1.6;' : ''}
-${indoor ? 'totalEmissiveRadiance += diffuseColor.rgb * uIndoor;' : ''}`);
+${lit ? streetLit('1.6', indoor) : ''}
+${indoor ? indoorFill() : ''}`);
+    if (indoor) sh.fragmentShader = sh.fragmentShader.replace('#include <aomap_fragment>', indoorShade());
     if (!glass) sh.fragmentShader = sh.fragmentShader.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
 if (fEmit > 0.5) roughnessFactor = 0.35;`);
   };
-  m.customProgramCacheKey = () => `mvw-furn-${glass}-${withB}-${fade}-${lit}-${indoor}`;
+  m.customProgramCacheKey = () => `mvw-furn-${glass}-${withB}-${fade}-${lit}-${indoor}${indoor ? LIGHT.on : ''}`;
   return m;
 }
 
@@ -137,7 +143,7 @@ export function makeFloorMat({ lit = true, indoor = false } = {}) {
       .replace('#include <common>', '#include <common>\nattribute float aPat; attribute vec3 aFC; attribute vec2 aL; varying float vPat; varying vec3 vFCol; varying vec2 vL; varying vec3 vWP;')
       .replace('#include <project_vertex>', `#include <project_vertex>\nvPat = aPat; vFCol = aFC; vL = aL; ${WP_VERT}`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying float vPat; varying vec3 vFCol; varying vec2 vL;\n${FRAG_PARS}`)
+      .replace('#include <common>', `#include <common>\nvarying float vPat; varying vec3 vFCol; varying vec2 vL;\n${FRAG_PARS}${roomPars(indoor)}`)
       .replace('#include <color_fragment>', `
 vec2 p = vL; vec3 c = vFCol; float fr = 0.8; float pat = vPat;
 float aw = max(fwidth(p.x), fwidth(p.y));
@@ -184,9 +190,10 @@ else if (pat < 2.5) {
 }
 diffuseColor.rgb *= c;`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = fr;')
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${lit ? 'totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.8, 0.55) * lampLight(vWP) * uNight * 2.0;' : ''}\n${indoor ? 'totalEmissiveRadiance += diffuseColor.rgb * uIndoor;' : ''}`);
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${lit ? streetLit('2.0', indoor) : ''}\n${indoor ? indoorFill() : ''}`);
+    if (indoor) sh.fragmentShader = sh.fragmentShader.replace('#include <aomap_fragment>', indoorShade());
   };
-  m.customProgramCacheKey = () => 'mvw-floor-' + lit + '-' + indoor;
+  m.customProgramCacheKey = () => 'mvw-floor-' + lit + '-' + indoor + (indoor ? LIGHT.on : '');
   return m;
 }
 
