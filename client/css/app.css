@@ -231,6 +231,20 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .item-btn:hover { background: var(--line); }
 .item-btn.on { border-color: var(--hl-line); background: var(--on-1); }
 .item-btn .em { font-size: 18px; display: block; margin-bottom: 2px; }
+/* the Furnish panel's Amazon library (ui/editors.js renderAbo) */
+#furnp .items { max-height: 360px; }
+.abo-lib { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 5px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+.abo-head { font-size: 12px; }
+.abo-q { width: 100%; box-sizing: border-box; font-size: 12px; padding: 5px 7px; border-radius: 8px; border: 1px solid var(--line); background: var(--ghost); color: inherit; }
+.abo-subs { display: flex; flex-wrap: wrap; gap: 4px; }
+.abo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 5px; }
+.abo-tile { border-radius: 9px; background: var(--ghost); border: 1px solid var(--line); cursor: pointer; font-size: 11px; text-align: center; padding: 3px; overflow: hidden; }
+.abo-tile:hover { background: var(--line); }
+.abo-tile.on { border-color: var(--hl-line); background: var(--on-1); }
+.abo-tile img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #eceae6; border-radius: 6px; }
+.abo-tile span { display: block; line-height: 1.2; margin-top: 2px; max-height: 2.4em; overflow: hidden; }
+.abo-grid .abo-more { grid-column: 1 / -1; }
+.abo-credit { font-size: 10.5px; line-height: 1.35; }
 .hint { color: var(--dim); font-size: 12px; margin-top: 6px; }
 kbd { background: var(--line); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; font-size: 11px; font-family: inherit; }
 
@@ -1029,6 +1043,10 @@ body.demo-locked #buildp::after, body.demo-locked #furnp::after { margin: 6px 0 
 #placebar .pb-head { font-size: 14px; } #placebar .pb-dims { color: var(--dim); }
 #placebar .pb-why { font-weight: 600; } #placebar .pb-why.bad { color: var(--bad); }
 #placebar .pb-btns { display: flex; gap: 8px; justify-content: flex-end; }
+/* a thing to put on a piece, on a phone: its bar over the world (ui/editors.js renderOnBar) */
+#onbar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 20px); z-index: 5; padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; }
+#onbar b { flex: 1 0 100%; text-align: center; font-size: 13px; } #onbar .dim { flex: 1 0 100%; text-align: center; font-size: 12px; }
+#onbar .btn { min-height: 40px; min-width: 44px; padding: 6px 12px; }
 #placebar .pb-btns .btn { min-height: 40px; padding: 8px 16px; font-size: 14px; }
 @media (max-width: 760px) { #placebar { bottom: calc(8px + var(--kb, 0px)); padding-bottom: calc(10px + env(safe-area-inset-bottom)); } #placebar .pb-btns .btn { flex: 1; min-height: 46px; } }
 body.placing #floatbtns, body.placing #minimap { opacity: .35; pointer-events: none; }

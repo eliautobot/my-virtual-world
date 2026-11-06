@@ -33,6 +33,9 @@ make new ones on any AI model, with your own keys. Everything runs in the browse
 - **Phones**: give an agent a real phone number (Twilio): texts, calls and voicemail.
 - **Build and own**: lots, buildings, floors, furniture, flats to rent or sell, signs; a Virtual Coin economy of wages,
   prices, businesses and property (Virtual Coin is never exchanged for money).
+- **Furnish**: a library of 7,580 furniture pieces beside the game's own, and 1,124 small things (mugs, books, shoes,
+  groceries ...) put on tables, counters and shelves by hand or laid out by each floor's rules. The models come from
+  two public packs and ship ready to use: [docs/features/furniture-and-goods.md](docs/features/furniture-and-goods.md).
 - **Play**: fly planes and helicopters, take boats out and fish; games pay Virtual Coin and count toward your rank and
   badges.
 - **People**: invite friends: accounts and roles, two-factor sign-in, permissions for every action.
@@ -62,7 +65,9 @@ MVW_KEY_FILE="$HOME/.config/my-virtual-world/secret.key" npm start
 ```
 
 The full guide (a server with systemd, HTTPS for other devices, updates and backups) is
-**[docs/INSTALL.md](docs/INSTALL.md)**.
+**[docs/INSTALL.md](docs/INSTALL.md)**. The furniture library's and the goods' 3D models (about 570 MB) are in the
+repository: a clone downloads about 900 MB and takes about 2 GB of disk, with nothing more to download. Rebuilding them is optional, only to change them:
+[Rebuilding the models](docs/features/furniture-and-goods.md#rebuilding-the-models-optional).
 
 <img src="docs/images/first-start.jpg" alt="The welcome dialog of a new installation" width="640">
 

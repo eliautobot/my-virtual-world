@@ -1046,6 +1046,47 @@ addClubFurniture(D);   // the night club's pieces (render/furniture-club.js)
 addStudioFurniture(D);   // the radio studio's pieces (render/furniture-studio.js)
 export const FURN_DEF = D;
 
+// MVW's own things on a piece drawn with an Amazon model (shared/abo-replace.js props): the monitor, keyboard and mug on a
+// desk, the laptops on a meeting table, the TV on its stand, the lamp on a nightstand; at the same places as above
+const PROPS = {
+  desk: f => {
+    f.col('#30343b'); f.box(-0.44, 0.755, -0.02, 0.44, 0.759, 0.31);
+    f.col('#1f2329'); f.box(-0.22, 0.759, 0.07, 0.16, 0.772, 0.2); f.col('#454b55'); f.box(-0.21, 0.772, 0.08, 0.15, 0.775, 0.19);
+    f.col('#1f2329'); f.box(0.24, 0.759, 0.1, 0.3, 0.781, 0.19);
+    bigMonitor(f, 0, -0.16); mug(f, -0.55, 0.755, 0.12);
+  },
+  desk_exec: f => {
+    laptop(f, 0, 0.77, 0.0); f.col(C.paper); f.box(0.4, 0.77, -0.2, 0.65, 0.785, 0.1);
+    f.col(C.dark); f.cyl(-0.72, -0.25, 0.08, 0.77, 0.79, 10); f.rod([-0.72, 0.79, -0.25], [-0.62, 1.1, -0.2], 0.012);
+    f.col(C.lamp, 0, 2); f.lathe(-0.6, -0.17, [[0.04, 1.14], [0.1, 1.06], [0.1, 1.05], [0.03, 1.13]], 10);
+  },
+  desk_home: f => { laptop(f, -0.05, 0.755, -0.05); mug(f, 0.35, 0.755, 0.05, '#e76f51'); },
+  meeting_table: f => {
+    laptop(f, -0.9, 0.76, 0.3, P); laptop(f, 0.9, 0.76, -0.3, 0); mug(f, 0.15, 0.76, 0.35); mug(f, -0.3, 0.76, -0.38);
+    f.col(C.paper); f.box(0.3, 0.76, -0.45, 0.52, 0.765, -0.15);
+  },
+  coffee_table: f => { f.col('#c0392b'); f.box(-0.35, 0.42, -0.1, -0.1, 0.43, 0.15); f.col('#2f5d8c'); f.box(-0.33, 0.43, -0.08, -0.12, 0.44, 0.12); mug(f, 0.25, 0.42, 0.05); },
+  tv_stand: f => {
+    f.col(C.black); f.box(-0.05, 0.5, -0.1, 0.05, 0.6, -0.04); f.box(-0.25, 0.5, -0.15, 0.25, 0.51, 0.0);
+    f.box(-0.78, 0.6, -0.08, 0.78, 1.3, -0.04);
+    f.col('#4f86c6', 0, 1); f.box(-0.75, 0.63, -0.04, 0.75, 1.27, -0.036);
+    f.col('#bfe0ff', 0, 1); f.box(-0.5, 0.85, -0.036, 0.1, 1.1, -0.033);
+  },
+  nightstand: f => {
+    f.col('#dcd6cc'); f.lathe(0.05, -0.05, [[0.07, 0.55], [0.08, 0.62], [0.03, 0.7], [0.02, 0.78]], 10);
+    f.col(C.lamp, 0, 2); f.lathe(0.05, -0.05, [[0.1, 0.95], [0.15, 0.76], [0.16, 0.76], [0.11, 0.95]], 12);
+    f.col('#2f5d8c'); f.box(-0.18, 0.55, 0.0, -0.02, 0.58, 0.18);
+  },
+};
+const propsCache = new Map();
+/** { geo, glass } of MVW's own things on a piece of type drawn with an Amazon model, or null when it has none. */
+export function propsGeometry(type) {
+  if (!PROPS[type]) return null;
+  let g = propsCache.get(type);
+  if (!g) { const f = new FB(); PROPS[type](f); propsCache.set(type, g = f.build()); }
+  return g;
+}
+
 const cache = new Map();
 /** { geo, glass } for a catalog type (built lazily, cached). */
 /**
@@ -1076,14 +1117,42 @@ export const SCREENS = Object.freeze({
   tv_wall: { kind: 'tv', quads: [quadAt(0, 0, -0.016, 0, 0, 1.5, 0.0005, 1.82, 0.92)] },
 });
 
+// A shelf piece holding things put by hand (shared/surfaces.js fillCuts): drawn by the same builder with MVW's own fill
+// (books, goods, shoes, jars) taken out where a thing stands, so the thing is not drawn inside it ("books pushed aside").
+// Every drawing call (quad, box, cyl ...) that lies wholly in one cut [y, top, x0, z0, x1, z1] (standing on its shelf,
+// under its top, narrower than 0.6 m: not a board, a side or a post) is dropped. Key: 'type#fill:' + the cuts in cm.
+const PRIMS = ['quad', 'box', 'boxC', 'lathe', 'cyl', 'rod', 'sph'];
+class CutFB extends FB {
+  constructor(cuts) { super(); this.cuts = cuts; this.depth = 0; }
+}
+const lens = b => [b.P.length, b.N.length, b.C.length, b.I.length, Object.fromEntries(Object.entries(b.X).map(([k, v]) => [k, v.length]))];
+for (const k of PRIMS) CutFB.prototype[k] = function (...a) {
+  if (this.depth) return FB.prototype[k].apply(this, a);
+  const bufs = [this.o, this.g], before = bufs.map(lens);
+  this.depth++; const r = FB.prototype[k].apply(this, a); this.depth--;
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+  bufs.forEach((b, i) => { for (let j = before[i][0]; j < b.P.length; j += 3) { const x = b.P[j], y = b.P[j + 1], z = b.P[j + 2]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z; if (z > z1) z1 = z; } });
+  if (x0 === Infinity || x1 - x0 > 0.6) return r;
+  const cut = this.cuts.some(c => y0 >= c[0] - 0.012 && y1 <= c[1] && x1 > c[2] && x0 < c[4] && z1 > c[3] && z0 < c[5]);
+  if (cut) bufs.forEach((b, i) => { const [p, n, c, ix, X] = before[i]; b.P.length = p; b.N.length = n; b.C.length = c; b.I.length = ix; for (const q in b.X) b.X[q].length = X[q] || 0; });
+  return r;
+};
+/** The key of piece type t drawn with its fill cut where things stand (cuts: shared/surfaces.js fillCuts), or t. */
+export function fillKey(t, cuts) {
+  return cuts?.length ? `${t}#fill:${cuts.map(c => c.map(v => Math.round(v * 100)).join(',')).join(';')}` : t;
+}
+
 export function furnitureGeometry(type) {
-  let g = cache.get(type);
+  const key = type;
+  let g = cache.get(key);
   if (!g) {
+    const at = type.indexOf('#fill:'), cuts = at > 0 ? type.slice(at + 6).split(';').map(c => c.split(',').map(v => +v / 100)) : null;
+    if (cuts) type = type.slice(0, at);
     const fn = D[type] || signBuilder(type);
-    const f = new FB();
+    const f = cuts ? new CutFB(cuts) : new FB();
     if (fn) fn(f); else { f.col('#9aa0a8'); f.box(-0.3, 0, -0.3, 0.3, 0.6, 0.3); }
     g = f.build();
-    cache.set(type, g);
+    cache.set(key, g);
   }
   return g;
 }

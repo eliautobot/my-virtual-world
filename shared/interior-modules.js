@@ -34,6 +34,7 @@
 //   check(B, f, L, rec)     → its own rule for this record (optional), or null
 // A client asks a floor's module records what is playable or what runs there (modsAt), never a marker piece.
 import { CATALOG } from './catalog.js';
+import { aboDefault } from './abo-replace.js';
 import { interiorBounds, keepClear, levelConnected } from './edit.js';
 import { doorway } from './walls.js';
 import { itemAABB, rectsOverlap } from './geom.js';
@@ -183,7 +184,8 @@ export function layModule(B, f, L, rec) {
     const bb = itemAABB({ ...it, r: it.r || 0 }, CATALOG[it.t].rect);
     if (bb.x0 < rec.x0 - 0.05 || bb.x1 > rec.x1 + 0.05 || bb.z0 < rec.z0 - 0.05 || bb.z1 > rec.z1 + 0.05) continue;   // (a piece that doesn't fit this size is left out)
     const old = reuse.get(it.t)?.shift();
-    out.items.push({ ...it, x: r2(it.x), z: r2(it.z), r: r2(it.r || 0), id: old ?? nid++, mod: rec.id });
+    const m = it.m || aboDefault(it.t);   // (its Amazon counterpart's look, where it has one: shared/abo-replace.js)
+    out.items.push({ ...it, ...(m ? { m } : {}), x: r2(it.x), z: r2(it.z), r: r2(it.r || 0), id: old ?? nid++, mod: rec.id });
   }
   out.nid = nid;
   for (const w of got.walls || []) out.walls.push([...w.slice(0, 5).map((v, i) => (i < 4 ? r2(v) : v)), rec.id]);

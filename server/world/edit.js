@@ -13,6 +13,9 @@
 import crypto from 'node:crypto';
 import { RNG } from '../../shared/rng.js';
 import { CATALOG, TYPE_LIST } from '../../shared/catalog.js';
+import { aboChoiceOk } from '../../shared/abo-replace.js';
+import { checkOn, cleanOn, refitOn, keepOn, surfacesOf, ON_LEVEL_MAX } from '../../shared/surfaces.js';
+import { storeKindOk } from '../../shared/store-goods.js';
 import { checkItem, levelConnected, checkBuilding, normalizeSpec, interiorPlan, conflictGroups, planWords, levelMode, floorsName, piecesWords, followCore, floorUse, fitSaved, USE_NAME, ROOF_KINDS, BUILD_STYLES } from '../../shared/edit.js';
 import { GROUND_Y, floorY, ctxOf, ctxB, MAX_FLOORS } from '../../shared/constants.js';
 import { doorPoints } from '../../shared/building.js';
@@ -183,10 +186,11 @@ export class Editor {
       if (why) throw Object.assign(new Error(why), { forbidden: true });
     }
     switch (o.op) {
-      case 'item.add': case 'item.move': case 'item.del': case 'item.tint': case 'item.sign': return this.itemOp(o, st);
+      case 'item.add': case 'item.move': case 'item.del': case 'item.tint': case 'item.sign': case 'item.look': case 'item.on': return this.itemOp(o, st);
       case 'wall.add': case 'wall.del': case 'wall.door': case 'wall.edit': return this.wallOp(o, st);
       case 'lvl.clear': case 'lvl.regen': case 'lvl.reset': case 'lvl.apply': case 'lvl.theme': return this.levelOp(o, st);
       case 'lvl.name': return this.levelName(o, st);
+      case 'lvl.goods': return this.levelGoods(o, st);
       case 'flat.set': case 'flat.invite': case 'flat.uninvite': return this.flatOp(o, st);
       case 'flat.add': case 'flat.del': return this.flatPlanOp(o, st);
       case 'flat.lease': return this.flatLease(o, st);
@@ -298,7 +302,7 @@ export class Editor {
     const lv = this.editable(B, f, o.scope, st, { byHand: false }), L = this.world.levels[lv], where = { b: B.idx, f };
     this.touch(st, `lv:${lv}`);
     const floors = B.lv.map((x, k) => (x === lv ? k : -1)).filter(k => k >= 0), name = floorsName(B, floors);
-    const keep = { b: L.b ?? B.idx, ...(L.ground ? { ground: 1 } : {}) };
+    const keep = { b: L.b ?? B.idx, ...(L.ground ? { ground: 1 } : {}), ...(L.goods ? { goods: L.goods } : {}) };   // (a shop keeps what it sells)
     if (o.op === 'lvl.clear') {
       const fixed = L.items.filter(it => CATALOG[it.t]?.fixed || it.t === 'door');
       this.setLevel(L, { ...keep, name: B.type === 'park' ? L.name : 'Empty floor', items: structuredClone(fixed), walls: [], zones: [], mode: 'empty' });
@@ -312,7 +316,7 @@ export class Editor {
       this.setLevel(L, { ...freshLevel(B, floors[0], roll, theme.id, style), ...keep });
       this.note(st, `Made ${name} ${/^[aeiou]/i.test(theme.name) ? 'an' : 'a'} ${theme.name} · ${B.name}`, where);
     } else if (o.op === 'lvl.apply') {
-      const items = fit.layout.items.map((it, k) => ({ ...it, id: k + 1 }));
+      const items = fit.layout.items.map((it, k) => { const n = { ...it, id: k + 1 }; if (Array.isArray(n.on)) n.on = keepOn(n, n.on).on; return n; });   // (the things on its pieces that still fit)
       this.setLevel(L, { ...keep, ...fit.layout, items, nid: items.length + 1, mode: 'custom' });
       this.note(st, `Laid out ${name} as “${rec.name}”${fit.remove.length ? ` without ${piecesWords(fit.remove)}` : ''} · ${B.name}`, where);
     } else {
@@ -561,6 +565,7 @@ export class Editor {
   }
   itemOp(o, st) {
     const B = this.bld(o.b), f = this.floorOf(B, o.f);
+    if (o.op === 'item.on' && o.scope === 'all') throw new Error('Things on a piece are put floor by floor');   // (each floor its own)
     const lv = this.editable(B, f, o.scope, st, { furniture: true });
     const L = this.world.levels[lv];
     const where = { b: B.idx, f };
@@ -568,8 +573,13 @@ export class Editor {
       const t = String(o.t || o.item?.t || '');
       if (!TYPE_LIST.includes(t)) throw new Error('Unknown item type');
       if (CATALOG[t].outdoor) throw new Error(`The ${itemName(t).toLowerCase()} stands outdoors only (Marketing)`);
+      if (CATALOG[t].goods && !CATALOG[t].floorOk) throw new Error(`The ${itemName(t).toLowerCase()} goes on a table or a shelf`);   // (shared/goods-items.js: on surfaces, item.on; a few also stand on the floor, never in the way)
       const src = o.item || o;
       const it = { t, x: r3(+src.x), z: r3(+src.z), r: r3(+src.r || 0) };
+      if (src.m !== undefined && src.m !== null) {   // drawn with its Amazon counterpart (shared/abo-replace.js): this type's own model only
+        if (!aboChoiceOk(t, src.m)) throw new Error('Unknown model for that piece');
+        it.m = src.m;
+      }
       if (CATALOG[t].tint) it.c = HEX.test(src.c) ? src.c.toLowerCase() : isIndoorSign(t) ? SIGN_ACCENT : '#8a8f99';
       if (isIndoorSign(t)) {   // a sign: its face's size, its style and its settings (the owner's design, or ads)
         sizeSign(it, src, B.type === 'park');
@@ -606,6 +616,18 @@ export class Editor {
       this.softTouch(st, B, lv, it, null);
       this.note(st, `Removed ${itemName(it.t)} · ${floorName(B, f)}`, where);
       return { id: it.id, lv };
+    }
+    if (o.op === 'item.on') return this.itemOn(o, st, B, f, lv, L, it);
+    if (o.op === 'item.look') {   // MVW's own look, or its Amazon counterpart's (m: 'a:<id>', null: MVW's)
+      const was = { t: it.t, m: it.m };
+      if (o.m === null || o.m === undefined || o.m === '') delete it.m;
+      else if (aboChoiceOk(it.t, o.m)) it.m = o.m;
+      else throw new Error('Unknown model for that piece');
+      // its surfaces change with its look: the things on it put on the new ones, those that no longer fit taken off
+      let dropped = 0;
+      if (Array.isArray(it.on) && it.on.length) { const r = refitOn(was, it, it.on); it.on = r.on; dropped = r.dropped; }
+      this.note(st, `Changed the look of ${itemName(it.t)} · ${floorName(B, f)}`, where);
+      return { id: it.id, lv, ...(dropped ? { dropped } : {}) };
     }
     if (o.op === 'item.tint') {
       if (!CATALOG[it.t].tint || !HEX.test(o.c)) throw new Error('This item cannot be recolored');
@@ -649,6 +671,55 @@ export class Editor {
     const turned = old.x === it.x && old.z === it.z;
     this.note(st, `${turned ? 'Turned' : 'Moved'} ${itemName(it.t)} · ${floorName(B, f)}`, where);
     return { id: it.id, lv };
+  }
+  /**
+   * item.on: the things on piece o.id (shared/surfaces.js): o.on its whole new list ({ t, s, x, z, r } in the piece's own
+   * frame), null: none of its own (its dressing generated again); o.ds its dressing's reroll (0..9999). With o.to
+   * ({ id, on }) another piece of the floor changes in the same step (a thing moved from one piece to another).
+   */
+  itemOn(o, st, B, f, lv, L, it) {
+    const take = (host, on) => {
+      if (on === undefined) return undefined;
+      if (on === null) return null;
+      if (!surfacesOf(host).length) throw new Error(`Nothing can be put on the ${itemName(host.t).toLowerCase()}`);
+      const list = cleanOn(on);
+      if (list instanceof Error) throw list;
+      const why = checkOn(host, list);
+      if (why) throw new Error(why);
+      return list;
+    };
+    const set = (host, on) => { if (on === null) delete host.on; else if (on !== undefined) host.on = on; };
+    const next = take(it, o.on);
+    let other = null, nextOther;
+    if (o.to !== undefined && o.to !== null) {
+      const k2 = L.items.findIndex(i => i.id === (o.to.id | 0));
+      if (k2 < 0 || L.items[k2] === it) throw new Error('No such item');
+      other = L.items[k2];
+      if (CATALOG[other.t]?.fixed) throw new Error('That is part of the building');
+      const own2 = other.mod ? modsOf(L).find(x => x.id === other.mod) : null;
+      if (own2 && INTERIOR_KINDS[own2.kind]?.locked) throw new Error(`That is part of ${own2.name || `the ${INTERIOR_KINDS[own2.kind].label.toLowerCase()}`}: move, resize or remove it as a whole`);
+      nextOther = take(other, o.to.on);
+    }
+    if (o.ds !== undefined && !(Number.isInteger(o.ds) && o.ds >= 0 && o.ds <= 9999)) throw new Error('Bad reroll');
+    // at most ON_LEVEL_MAX things put by hand on one floor's pieces
+    const count = x => (x === it ? (next === undefined ? it.on : next) : x === other ? (nextOther === undefined ? other.on : nextOther) : x.on)?.length || 0;
+    if (L.items.reduce((a, x) => a + count(x), 0) > ON_LEVEL_MAX) throw new Error(`At most ${ON_LEVEL_MAX} things on the pieces of one floor`);
+    set(it, next);
+    if (o.ds !== undefined) { if (o.ds) it.ds = o.ds; else delete it.ds; }
+    if (other) { this.touch(st, `i:${lv}:${other.id}`); set(other, nextOther); }
+    this.note(st, `${other ? 'Moved things between' : 'Changed the things on'} ${itemName(it.t)}${other ? ` and ${itemName(other.t)}` : ''} · ${floorName(B, f)}`, { b: B.idx, f });
+    return { id: it.id, lv, n: it.on ? it.on.length : null };
+  }
+  /** lvl.goods: what shop floor f sells (shared/store-goods.js; null: the default from the building and its name). */
+  levelGoods(o, st) {
+    const B = this.bld(o.b), f = this.floorOf(B, o.f);
+    if (o.goods !== null && o.goods !== undefined && o.goods !== '' && !storeKindOk(o.goods)) throw new Error('Unknown kind of shop');
+    const lv = this.editable(B, f, o.scope, st, { byHand: false }), L = this.world.levels[lv];
+    if (L.venue !== 'shop') throw new Error('Only a shop floor sells goods');
+    this.touch(st, `lv:${lv}`);
+    if (o.goods) L.goods = o.goods; else delete L.goods;
+    this.note(st, `${B.name}: ${floorName(B, f)} sells ${o.goods || 'what its name says'}`, { b: B.idx, f });
+    return { lv, goods: L.goods || null };
   }
   // ------------------------------------------------------------------ buildings
   bldSet(o, st) {

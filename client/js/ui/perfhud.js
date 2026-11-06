@@ -1,7 +1,9 @@
 // My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Optional performance readout (Settings → General): frame rate, the slowest recent frame, slow frames, character
 // loading, the driving physics in use, ping and the longest wait for car data (sent late by the server, or arrived
-// late: held up on the way or by this device), so performance on a particular device can be seen and reported.
+// late: held up on the way or by this device), so performance on a particular device can be seen and reported; on a
+// floor looked into, its dressing (the small things on its furniture: render/interiors.js dressStats) as drawn: things,
+// models (each one draw), triangles, and whether only the nearest pieces are dressed (the near band).
 import { bus } from '../core/state.js';
 
 export const PERF_HUD_KEY = 'mvw.perfHud';
@@ -11,6 +13,10 @@ export function init(app) {
   let el = null, timer = null;
   const dts = [];
   bus.on('postframe', (dt, now) => { if (!el) return; dts.push([now, dt * 1000]); while (dts.length && now - dts[0][0] > WINDOW_MS) dts.shift(); });
+  const goods = () => {
+    const g = app.inter?.foc?.entries?.length ? app.inter.dressStats?.() : null;
+    return g?.hosts ? `\ngoods ${g.things} things · ${g.models} models · ${Math.round(g.tris / 1000)}k tris · near band ${g.band ? 'on' : 'off'}${g.waiting ? ` · ${g.waiting} waiting` : ''}` : '';
+  };
   const render = () => {
     const worst = dts.reduce((m, d) => Math.max(m, d[1]), 0), slow = dts.filter(d => d[1] > 33).length;
     const ch = app.agents?.chars, loaded = ch?.kinds?.filter(Boolean).length || 0, queued = ch?.uploads?.length || 0;
@@ -18,7 +24,7 @@ export function init(app) {
     const cg = d?.carGap?.(), cars = cg ? `\ncar data gap ${Math.round(cg.ms)} ms${cg.ms > 150 ? (cg.server ? ' (sent late)' : ' (arrived late)') : ''} · car buffer ${Math.round(d.otherDelay?.value || 0)} ms` : '';
     el.textContent = `${Math.round(app.fps || 0)} fps · slowest ${Math.round(worst)} ms · slow frames ${slow}/5 s\n`
       + `characters ${loaded}${queued ? ` (+${queued} uploading)` : ''} · driving ${physics} · ping ${Math.round((app.net?.rtt || 0) * 1000)} ms`
-      + (app.autoRes ? ` · resolution ${Math.round(app.autoRes.scale * 100)}%${app.autoRes.on ? '' : ' (fixed)'}` : '') + cars;
+      + (app.autoRes ? ` · resolution ${Math.round(app.autoRes.scale * 100)}%${app.autoRes.on ? '' : ' (fixed)'}` : '') + cars + goods();
   };
   const set = on => {
     if (on && !el) {

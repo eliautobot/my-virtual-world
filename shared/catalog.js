@@ -6,6 +6,10 @@
 // ax/az approach point (defaults to the slot itself), prop held while using, dur [min,max] world minutes.
 import { barStools, barStaff } from './bar-shape.js';
 import { SINGER, BASSIST } from './stage.js';
+import { ABO_ITEMS } from './abo-items.js';
+import { ABO_KINDS } from './abo-kinds.js';
+import { GOODS_ITEMS } from './goods-items.js';
+import { applyKinds } from './goods-tags.js';
 
 const P = Math.PI, H = Math.PI / 2;
 function S(x, z, yaw, anim, use, o = {}) { return { x, z, yaw, anim, use, ...o }; }
@@ -451,6 +455,12 @@ export const CATALOG = {
   reception: { name: 'Reception Desk', cat: 'Office', h: 1.15, rect: [-1.5, -0.45, 1.5, 0.45], tint: true,
     slots: [S(0, -0.85, 0, 'sit_type', 'staff', { az: -1.35, y: 0 }), S(-0.8, 0.8, P, 'talk', 'reception', { az: 1.05, dur: [1, 3] })] },
 };
+// the Amazon furniture library (shared/abo-items.js), after MVW's own pieces: their types ('a:<id>') after MVW's in TYPE_LIST
+Object.assign(CATALOG, ABO_ITEMS);
+// then the goods (shared/goods-items.js: small things for tables, counters and shelves; 'g:<id>' and 'a:<id>'), appended
+Object.assign(CATALOG, GOODS_ITEMS);
+// every piece's size class, goods tags and sub-group (shared/goods-tags.js)
+applyKinds(CATALOG, ABO_KINDS);
 
 // Activities: label + icon shown in the UI, and how needs change per world hour spent (or per use when `once`).
 export const USES = {

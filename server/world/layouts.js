@@ -2,6 +2,7 @@
 // Interior layout generators. All coordinates are building-local (origin = footprint centre, +z = front/entrance).
 // Placement uses exact rectangle tests (items, reserved clearances, walls) so furniture can sit flush to walls.
 import { CATALOG } from '../../shared/catalog.js';
+import { aboDefault } from '../../shared/abo-replace.js';
 import { CAFE_STYLES } from '../../shared/floor-themes.js';
 import { WALL_T } from '../../shared/constants.js';
 import { itemAABB, rectsOverlap } from '../../shared/geom.js';
@@ -94,6 +95,8 @@ export class LevelBuilder {
     return null;
   }
   result() {
+    // furnished with the Amazon counterparts of MVW's pieces where they have one (shared/abo-replace.js)
+    for (const it of this.items) { const m = aboDefault(it.t); if (m && !it.m) it.m = m; }
     const out = { name: this.name, items: this.items, walls: this.walls, zones: this.zones };
     if (this.venue) out.venue = this.venue;
     if (this.style) out.style = this.style;   // (a café's style: shared/floor-themes.js CAFE_STYLES)

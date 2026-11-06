@@ -33,3 +33,4 @@ with `{ demo: true }`.
 | `tools/admin.mjs` | Account and key administration ([operations](operations.md)) |
 | `tools/deploy/` | Backups, restores, release builds and promotion for a native install |
 | `tools/chars/`, `tools/brand/`, `tools/wp4/` | Asset pipelines and world-building tools |
+| `tools/abo-build.mjs`, `tools/goods-build.mjs`, `tools/surf-build.mjs` | The furniture library's and the goods' models, and their surfaces ([furniture and goods](features/furniture-and-goods.md#rebuilding-the-models-optional)) |

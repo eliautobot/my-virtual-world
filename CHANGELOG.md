@@ -2,6 +2,33 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.3.0 (2026-11-05)
+
+- **A furniture library**: 7,580 pieces from the Amazon Berkeley Objects (lounge, decor, home, kitchen, office, outdoor,
+  gym) in the Furnish panel beside the game's own, with pictures, sub-groups and a search. People sit, sleep and walk on
+  them as on the game's own pieces.
+- **The world's furniture redrawn**: 45 of the game's own pieces (sofas, armchairs, desks, dining sets, beds, cabinets
+  ...) are drawn with a library counterpart fitted to the same size and seats, once, when the server first starts on this
+  version; a selected piece switches back to its own look from its bar. The models load in the background after the
+  world is ready, the most used first.
+- **Goods on furniture**: 1,124 small things (all 1,033 Google Scanned Objects and 91 small things of the Amazon
+  library) in a new Goods category of the Furnish panel, in 12 sub-groups with a search. Put them on any top, shelf,
+  counter or cabinet: the ghost shows where it fits or why not, R turns, [ and ] step between shelves, and things are
+  selected, dragged from piece to piece, turned, removed and undone. Moving a piece carries its things. On a phone a
+  thing being placed gets its own bar (Turn, Shelf, Done) over the world. The server checks every thing.
+- **Rooms furnished by rules**: desks, kitchen counters, nightstands, TV stands, bookshelves, café counters and shop
+  shelves dress themselves with fitting things, by the floor's kind (office, home, café, restaurant, bar, gym, park,
+  terminal, 17 kinds of shop): one mug on a desk, never the same thing twice on one top, a shoe shop's shoes in rows.
+  The same for everyone, within a budget per graphics quality. Fill, Empty and Reroll in a piece's bar; a shop floor's
+  **Sells:** chooses what its shelves hold. The performance overlay shows a floor's goods.
+- **The models ship ready to use**: the library's and the goods' models and pictures (about 19,100 files, 570 MB) are
+  in the repository, so a clone, a Docker build or an update has them with nothing more to download. Rebuilding them
+  from the two public packs is optional, only to change them:
+  [Rebuilding the models](docs/features/furniture-and-goods.md#rebuilding-the-models-optional). Their CC BY 4.0
+  attribution is in `client/assets/abo/` and `client/assets/gso/`, THIRD-PARTY-NOTICES.md and ASSETS-LICENSE.md.
+- **Updating**: `git pull` brings about 570 MB of models the first time; the first start on this version redraws the
+  world's furniture once (see above).
+
 ## v2.2.4 (2026-11-02)
 
 - **Faster loading of people**: the characters' files are sent compressed (about half the size) and the browser keeps

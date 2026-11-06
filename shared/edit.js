@@ -11,7 +11,7 @@ import { FOOD_VENUES } from './food.js';
 import { NIGHTLIFE } from './nightlife.js';
 
 // (not the Marketing tools' billboards and street signs: they stand outdoors only)
-export const EDIT_TYPES = Object.keys(CATALOG).filter(t => !CATALOG[t].fixed && !CATALOG[t].outdoor && t !== 'door');
+export const EDIT_TYPES = Object.keys(CATALOG).filter(t => !CATALOG[t].fixed && !CATALOG[t].outdoor && !CATALOG[t].abo && !CATALOG[t].goods && t !== 'door');   // (MVW's own: the Amazon library is listed apart, shared/abo-items.js; the goods go on surfaces, shared/goods-items.js)
 export const BUILD_TYPES = ['office', 'apartment', 'cafe', 'restaurant', 'shop', 'gym', 'park'];
 export const BUILD_STYLES = ['glass', 'brick', 'concrete', 'modern', 'classic', 'stucco'];
 export const ROOF_KINDS = ['hvac', 'garden', 'water_tower', 'helipad', 'none'];

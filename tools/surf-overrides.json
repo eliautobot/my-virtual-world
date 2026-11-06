@@ -1,0 +1,5 @@
+{
+  "B075YP3881": { "why": "kitchen cart: three solid trays inside rails (mm; P5 probe of its upward faces)", "add": [[120, -340, -150, 340, 150, 280, "shelf", 1], [420, -340, -150, 340, 150, 300, "shelf", 1], [740, -340, -150, 340, 150, 0, "top", 1]] },
+  "B07B83KVGH": { "why": "kitchen cart: three solid trays inside rails", "add": [[120, -340, -150, 340, 150, 280, "shelf", 1], [420, -340, -150, 340, 150, 300, "shelf", 1], [740, -340, -150, 340, 150, 0, "top", 1]] },
+  "B07LC9HXSF": { "why": "vanity: its top in front of the mirror", "add": [[400, -180, -20, 180, 180, 0, "top", 1]] }
+}

@@ -15,6 +15,8 @@ import { UnderwaterFX } from './render/underwater-fx.js';
 import { City } from './render/city.js';
 import { Buildings } from './render/buildings.js';
 import { Interiors } from './render/interiors.js';
+import { GOODS, DRESS } from './render/surface-items.js';
+import { aboInit, aboPrefetch, dressPrefetch } from './render/abo-models.js';
 import { Doors } from './render/doors.js';
 import { Agents } from './render/agents.js';
 import { SignAtlas } from './render/qb.js';
@@ -114,7 +116,11 @@ async function boot() {
   const blds = app.blds = new Buildings(S.world, g, atlas);
   stage.scene.add(blds.group);
   progress(0.6, 'Furnishing…', 'furnish'); await nextFrame();
+  aboInit(stage.renderer);   // (the Amazon furniture's models: render/abo-models.js)
+  GOODS.lod = stage.q.name === 'high' ? 'm' : 'd';   // (things on pieces: the lean model on high, the light copy otherwise)
+  DRESS.q = stage.q.name;   // (the dressing's rules and budgets at this quality: shared/dress.js DRESS_Q)
   const inter = app.inter = new Interiors(S.world, atlas);
+  inter.dressTarget = () => cam.target;   // (a big store's nearest shelves are dressed: Interiors.dressShow)
   stage.scene.add(inter.group);
   const doors = app.doors = new Doors(stage.scene, app);   // the focused floor's doors, opening as people come near
   bus.on('focus:applied', () => doors.build(S.focus, wallMode()));
@@ -123,6 +129,7 @@ async function boot() {
   bus.on('doors', () => doors.sync());
   bus.on('frame', dt => app.blds?.doorsTick?.(app, Math.min(0.1, dt)));   // the facades' entrance doors
   bus.on('frame', dt => doors.update(Math.min(0.1, dt)));
+  bus.on('frame', () => inter.dressTick());
   app.hooks = app.hooks || { key: [], click: [], hover: [] };
   app.hooks.click.push(e => {   // a click or tap on a door holds it open or lets it close (exploring or playing)
     if (S.mode !== 'explore' && S.mode !== 'play') return false;
@@ -268,6 +275,7 @@ async function boot() {
   });
   requestAnimationFrame(loop);
   app.ready = true;
+  aboPrefetch(S.world, 1500, () => dressPrefetch(S.world, DRESS.q));   // (the Amazon models the world's pieces use, then the dressing's, readied in the background: render/abo-models.js)
   bus.emit('ready');   // (a link from a notification opens what it is about: ui/notify.js)
 }
 boot().catch(err => { console.error('[mvw] boot failed', err); progress(0, 'Failed to start: ' + (err && err.message || err), 'error'); });

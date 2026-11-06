@@ -1,6 +1,8 @@
 // My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Procedural city generator: blocks -> lots -> buildings -> floor layouts (shared templates), parks, stations, trees.
 import { RNG } from '../../shared/rng.js';
+import { aboDefault } from '../../shared/abo-replace.js';
+import { keepOn } from '../../shared/surfaces.js';
 import { makeGrid, blockRect, lotRect, blockIndex, streetTreePositions, SIDE_CORNERS, cornerPoint } from '../../shared/city.js';
 import { CATALOG } from '../../shared/catalog.js';
 import { WALL_T, WALK_BAND, SIDEWALK } from '../../shared/constants.js';
@@ -277,6 +279,29 @@ export function freshLevel(b, f, roll, theme = null, style = null) {
 /** Themed floors laid out before they were places of their own (2026-10-23: arcades, lounges and clubs were a building's
  *  staff lounge) take their theme's venue kind, so the city comes to them (server/sim/windex.js, server/economy). Every
  *  boot, cheap; returns how many changed. */
+/** MVW's pieces drawn with their Amazon counterparts (shared/abo-replace.js), once per world (world.aboLooks): every placed
+ *  piece that has one gets its model choice (m). Returns how many pieces it changed. */
+export function aboLooks(world) {
+  if (world.aboLooks) return 0;
+  let n = 0;
+  for (const L of world.levels || []) for (const it of L?.items || []) { const m = aboDefault(it.t); if (m && !it.m) { it.m = m; n++; } }
+  world.aboLooks = 1;
+  return n;
+}
+/** The things on pieces (shared/surfaces.js `on`) checked at every boot: an entry whose type is gone, that no longer
+ *  fits its piece's surfaces (they were found again, a look changed) or overlaps another is taken off; a bad reroll goes.
+ *  Returns how many entries were taken off. */
+export function surfaceItems(world) {
+  let n = 0;
+  for (const L of world.levels || []) for (const it of L?.items || []) {
+    if (it.ds !== undefined && !(Number.isInteger(it.ds) && it.ds > 0 && it.ds <= 9999)) delete it.ds;
+    if (it.on === undefined) continue;
+    if (!Array.isArray(it.on)) { delete it.on; n++; continue; }
+    const r = keepOn(it, it.on);
+    if (r.dropped) { it.on = r.on; n += r.dropped; }
+  }
+  return n;
+}
 export function themeVenues(world) {
   const want = { arcade: 'arcade', lounge: 'lounge_bar', club: 'club' };
   let n = 0;

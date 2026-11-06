@@ -457,9 +457,12 @@ async function main(argv) {
   const src = fs.mkdtempSync(path.join(os.tmpdir(), 'mvw-install-src-'));
   try {
     section('The exported tree');
-    const tar = spawnSync('git', ['-C', ROOT, 'archive', '--format=tar', o.ref], { maxBuffer: 1 << 30 });
-    const x = tar.status === 0 ? spawnSync('tar', ['-x', '-C', src], { input: tar.stdout }) : tar;
-    if (!check(x.status === 0, `git archive ${o.ref} exports the tree`, String(x.stderr || '').trim())) return 1;
+    // Through a file beside the folder: the tree (with the furniture and goods models) is over 1 GB, too much to hold.
+    const tarFile = `${src}.tar`;
+    const tar = spawnSync('git', ['-C', ROOT, 'archive', '--format=tar', '-o', tarFile, o.ref]);
+    const x = tar.status === 0 ? spawnSync('tar', ['-x', '-f', tarFile, '-C', src]) : tar;
+    fs.rmSync(tarFile, { force: true });
+    if (!check(x.status === 0, `git archive ${o.ref} exports the tree`, String(x.stderr || x.error || '').trim())) return 1;
     const allow = JSON.parse(fs.readFileSync(path.join(src, 'tools', 'neutrality-allow.json'), 'utf8'));
     const sr = scanTree(src, { allow, privateText });
     check(!sr.findings.length && !sr.unused.length, `the neutrality scan${privateText ? ' with the private list' : ''} finds nothing tied to one installation`,

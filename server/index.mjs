@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { generateWorld, markLevelModes, themeVenues } from './world/generate.js';
+import { generateWorld, markLevelModes, themeVenues, aboLooks, surfaceItems } from './world/generate.js';
 import { joinCityEdge } from '../shared/city-roads.js';
 import { addPropertyRoutes } from './property-routes.js';
 import { createEconomy, subj as econSubj } from './economy/index.js';
@@ -307,6 +307,10 @@ if (meta.worldId && meta.worldId !== world.worldId) {
 }
 world.version = world.version || 1;
 // Floor modes (procedural floor layouts, 2026-10-04): which floors are generated and which were changed by hand, once.
+const aboLooked = aboLooks(world);   // (MVW's pieces drawn with their Amazon counterparts, once: shared/abo-replace.js)
+if (aboLooked) log(`[boot] Amazon furniture: ${aboLooked} placed pieces drawn with their Amazon counterparts`);
+const offSurfaces = surfaceItems(world);   // (things on pieces that no longer fit them: shared/surfaces.js)
+if (offSurfaces) log(`[boot] surfaces: ${offSurfaces} things taken off pieces they no longer fit`);
 const levelModesMarked = markLevelModes(world);
 if (levelModesMarked) log(`[boot] floor layouts: ${levelModesMarked} marked generated or changed by hand`);
 const themedVenues = themeVenues(world);   // (arcades, lounges and clubs: places the city visits)
@@ -553,7 +557,7 @@ function saveNow() { store.flushAll(); wdb.sweep(); flushWorld(); exportWorld();
 if (worldFile || peopleFile) wdb.replace(worldFile ? world : null, peopleFile ? people : null);
 wdb.sweep();
 flushWorld();
-if (worldFile || peopleFile || worldIdAdded || levelModesMarked || roadsJoined || !fs.existsSync(store.file('world'))) { exportWorld(); saveMeta(); }
+if (worldFile || peopleFile || worldIdAdded || levelModesMarked || aboLooked || roadsJoined || !fs.existsSync(store.file('world'))) { exportWorld(); saveMeta(); }
 else exportedRev = wdb.rev;
 setInterval(saveMeta, 30000).unref();
 setInterval(() => save(), 300000).unref();   // anything nobody named, every five minutes
@@ -968,7 +972,7 @@ function renameAgentBody(a) {
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json',
-  '.md': 'text/markdown; charset=utf-8', '.py': 'text/x-python; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.mp3': 'audio/mpeg' };   // /skill.md and the Python example of the Agent API (WP2.14)
+  '.md': 'text/markdown; charset=utf-8', '.py': 'text/x-python; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.mp3': 'audio/mpeg', '.glb': 'model/gltf-binary', '.wasm': 'application/wasm' };   // /skill.md and the Python example of the Agent API (WP2.14)
 const STATIC = [
   ['/vendor/three/', path.join(ROOT, 'node_modules/three/'), 'public, max-age=86400'],
   // The official Rapier build, loaded by a driver's browser only while driving (decision A20).
@@ -979,6 +983,7 @@ const STATIC = [
   ['/promo/', path.join(DATA, 'promo/'), 'public, max-age=86400'],   // promotional aircraft graphics (WP4.11)
   ['/signs/', path.join(DATA, 'signs/'), 'public, max-age=86400'], // pictures on owners' signs and the Marketing tools' own content
   ['/assets/sfx/', path.join(ROOT, 'client/assets/sfx/'), 'public, max-age=86400'],   // the game's sound effects (audio/engine.js)
+  ['/assets/abo/', path.join(ROOT, 'client/assets/abo/'), 'public, max-age=86400'],   // the Amazon furniture's models and pictures (tools/abo-build.mjs)
   ['/', path.join(ROOT, 'client/'), 'no-cache'],
 ];
 // No framing by other sites (the sign-in dialog), no MIME sniffing, no full URLs in Referer headers to other sites.
@@ -1078,7 +1083,7 @@ function serveStatic(req, res, pathname) {
     contentEtag(file, st, etag0 => {
       const etag = packed ? etag0.replace(/"$/, `-${packed.encoding}"`) : etag0;
       if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag, 'cache-control': cache, ...(chars ? { vary: 'Accept-Encoding' } : {}), ...sec }); return res.end(); }
-      const text = /^(text|application\/json)/.test(type) || ext === '.svg';
+      const text = /^(text|application\/json)/.test(type) || ext === '.svg' || ext === '.wasm';   // (the KTX2 transcoder: 527 KB, about half sent gzipped)
       const h = { 'content-type': type, etag, 'cache-control': cache, ...(chars ? { vary: 'Accept-Encoding' } : {}), ...sec };
       if (packed) {
         let size; try { size = fs.statSync(packed.path).size; } catch { size = -1; }

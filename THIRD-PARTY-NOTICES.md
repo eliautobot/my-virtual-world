@@ -49,3 +49,30 @@ The license texts of the npm packages are installed with them under `node_module
 
 The characters in `client/assets/chars/` (their meshes, skeletons, textures and animation) were made for My Virtual
 World with Tripo (<https://www.tripo3d.ai>) and are project-owned creative assets under [ASSETS-LICENSE.md](ASSETS-LICENSE.md).
+
+The Amazon furniture library (`client/assets/abo/m/`, `client/assets/abo/t/`, listed in `shared/abo-catalog.js`) is
+from the **Amazon Berkeley Objects** (ABO) dataset by Amazon.com
+(<https://amazon-berkeley-objects.s3.amazonaws.com/index.html>), licensed
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (copy: `client/assets/abo/LICENSE-CC-BY-4.0.txt`). The dataset
+was built by Matthieu Guillaumin, Thomas Dideriksen, Kenan Deng, Himanshu Arora, Arnab Dhua, Xi (Brian) Zhang, Tomas
+Yago-Vicente (Amazon.com), Jasmine Collins, Shubham Goel and Jitendra Malik (UC Berkeley). We use CodePawl's web copy
+(<https://huggingface.co/datasets/codepawl/abo-glb>, revision c6ac661), which re-encodes the textures, compresses the
+geometry and simplifies it. We changed the models further (`tools/abo-build.mjs`): the textures resized to 256 px,
+normal maps removed, geometry simplified (that copy's level 2 or 3), quantized and compressed; the pictures resized.
+The models are named by colour, material and kind, not by product. Amazon does not endorse My Virtual World, and
+product and brand names belong to their owners. Details: `client/assets/abo/ATTRIBUTION.md`. The same dataset's small
+things (cables, hubs, stands, notebooks, pans, bowls, canisters, frames ...) are among the goods below, in the same
+folder, and lighter copies of its small decor (`client/assets/abo/d/`) are made by `tools/goods-build.mjs`.
+
+The goods (`client/assets/gso/m/`, `client/assets/gso/d/`, `client/assets/gso/t/`, listed in `shared/goods-catalog.js`)
+are from **Google Scanned Objects** by Google Research (Copyright 2020 Google LLC,
+<https://research.google/blog/scanned-objects-by-google-research-a-dataset-of-3d-scanned-common-household-items/>,
+<https://app.gazebosim.org/GoogleResearch/fuel/models>), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+(copy: `client/assets/gso/LICENSE-CC-BY-4.0.txt`). Paper: Downs et al., "Google Scanned Objects: A High-Quality Dataset
+of 3D Scanned Household Items", ICRA 2022. We use CodePawl's web copy
+(<https://huggingface.co/datasets/codepawl/scanned-objects-glb>, revision fdb214f), which converts and compresses the
+scans and makes simpler copies. We changed them further (`tools/goods-build.mjs`): that copy's level 2 shape (level 3
+when level 2 is heavy) with level 3's 256 px textures, normal maps removed, turned to face +z and stood on the ground,
+quantized and compressed; a lighter copy simplified to at most 400 triangles; the pictures resized. They are named by
+colour and what they are, never by product or brand. Brands, logos and product names printed on the scanned packaging
+belong to their owners; Google does not endorse My Virtual World. Details: `client/assets/gso/ATTRIBUTION.md`.

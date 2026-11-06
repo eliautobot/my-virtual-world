@@ -20,6 +20,16 @@ import { beyondCity, checkIslandBuilding, baseFor, ROAD_CLEAR } from '/shared/is
 import { doorReason } from '/shared/door-access.js';
 import { pointAt as pointAtS } from '/shared/roads.js';
 import { furnitureGeometry } from '../render/furniture.js';
+import { aboGhost, goodsGhost } from '../render/abo-models.js';
+import { onPose } from '../render/surface-items.js';
+import { GOODS_LIB, GOODS_CAT, goodsFiles } from '/shared/goods-items.js';
+import { GOODS_SUBS } from '/shared/goods-tags.js';
+import { surfacesOf, checkOn, onType, nudgeIn, hostClass, ON_LEVEL_MAX } from '/shared/surfaces.js';
+import { dressContext, storeKind, storeDefault } from '/shared/dress.js';
+import { ruleFor } from '/shared/dress-rules.js';
+import { STORE_KINDS } from '/shared/store-goods.js';
+import { ABO_LIB, ABO_SUBS } from '/shared/abo-items.js';
+import { aboDefault } from '/shared/abo-replace.js';
 import { initLibrary, saveLayout, openLibrary } from './floor-library.js';
 import { initFloorThemes, openThemes, nameFloor } from './floor-themes.js';
 import { themeOf, themeWhy } from '/shared/floor-themes.js';
@@ -46,7 +56,7 @@ export const ICON = {
   floor_neon: '✨', neon_arcade: '✨', neon_gameon: '✨', neon_prizes: '✨', neon_snacks: '✨', neon_joystick: '✨', neon_invader: '👾', pixel_mural: '👾', pixel_mural_maze: '👾', plant: '🌿', plant_tall: '🌱', floor_lamp: '💡', bench: '🪑',
   picnic_table: '🧺', tree: '🌳', tree_pine: '🌲', bush: '🌿', flowers: '🌷', fountain: '⛲',
 };
-const CAT_ICON = { Office: '💼', Lounge: '🛋️', 'Café': '☕', Kitchen: '🍳', Retail: '🛍️', Gym: '🏋️', Home: '🏠', Fun: '🎲', Arcade: '🕹️', Club: '🎧', Decor: '🌿', Signs: '🪧', Outdoor: '🌳' };
+const CAT_ICON = { Goods: '🧺', Office: '💼', Lounge: '🛋️', 'Café': '☕', Kitchen: '🍳', Retail: '🛍️', Gym: '🏋️', Home: '🏠', Fun: '🎲', Arcade: '🕹️', Club: '🎧', Decor: '🌿', Signs: '🪧', Outdoor: '🌳' };
 const TINTS = ['#f1f0ec', '#d8d2c4', '#b08560', '#6e4a31', '#3b3f45', '#6d7b8f', '#1f2a44', '#3d6fb6', '#2a9d8f', '#4f8a3c', '#e9c46a', '#e76f51', '#c0392b', '#8e44ad', '#e84393'];
 const TYPE_CAT = { office: 'Office', hq: 'Office', apartment: 'Home', cafe: 'Kitchen', restaurant: 'Kitchen', shop: 'Retail', gym: 'Gym', park: 'Outdoor' };
 const STYLE_NAME = { glass: 'Glass', brick: 'Brick', concrete: 'Concrete', modern: 'Modern', classic: 'Classic', stucco: 'Stucco' };
@@ -57,16 +67,17 @@ export const NEW_DEF = {
   shop: { w: 14, d: 14, floors: 1, style: 'stucco' }, gym: { w: 18, d: 18, floors: 2, style: 'concrete' }, park: { w: 30, d: 24, floors: 1, style: 'modern' },
 };
 const COLOR_KEYS = [['wall', 'Walls'], ['trim', 'Trim'], ['glass', 'Glass'], ['roof', 'Roof'], ['accent', 'Accent']];
-const SNAP = 0.25, HALF = Math.PI / 2, STEP15 = Math.PI / 12;
+const SNAP = 0.25, HALF = Math.PI / 2, STEP15 = Math.PI / 12, STEP45 = Math.PI / 4;
 const snap = v => Math.round(v / SNAP) * SNAP;
 const normA = a => Math.atan2(Math.sin(a), Math.cos(a));
 export const floorsCap = t => (t === 'office' || t === 'apartment' || t === 'hq' ? MAX_FLOORS : t === 'park' ? 1 : 4);
 
 let app, cam, inter;
-const F = { type: null, cat: null, rot: 0, tint: '#6d7b8f', it: null, ok: false, reason: '', sel: null, drag: null, dirty: true, scopeAll: false, tgKey: '',
+const F = { type: null, cat: null, abo: { sub: '', q: '', n: 60 }, rot: 0, tint: '#6d7b8f', it: null, ok: false, reason: '', sel: null, drag: null, dirty: true, scopeAll: false, tgKey: '',
+  on: null, step: 0, stepAt: '',   // a thing being put on a piece: { e (the piece's entry), it, list, why }; the shelf step ([ ])
   sv: {}, sc: SIGN_ACCENT };   // a new sign's style (by type) and light colour
 const BS = { tab: 'edit', form: { type: 'office', ...NEW_DEF.office }, rot: 0, spec: null, ok: false, reason: '', pending: -1, delArm: 0, dirty: true };
-const ptr = { x: 0, y: 0, in: false, moved: false };
+const ptr = { x: 0, y: 0, in: false, moved: false, alt: false };
 const lastCam = new THREE.Vector3();
 const E = {};
 let ghost, bghost;
@@ -130,14 +141,31 @@ class ItemGhost {
   setType(t) {
     if (t === this.type) return;
     this.type = t;
+    if (t && t.startsWith('on:')) {   // a thing on a piece, or a goods item on the floor: its own small model (a box until loaded)
+      this.mesh.geometry = goodsGhost(t.slice(3), g => { if (this.type === t && g) this.mesh.geometry = g; }) || new THREE.BufferGeometry();
+      return;
+    }
+    const [tt, m] = t ? t.split('~') : [];   // 'sofa~a:<id>': an MVW piece drawn with its Amazon counterpart (its model choice)
+    if (tt && (tt.startsWith('a:') || m)) {   // an Amazon piece: its model (a box until it has loaded: render/abo-models.js)
+      this.mesh.geometry = aboGhost(tt, g => { if (this.type === t && g) this.mesh.geometry = g; }, m || null) || new THREE.BufferGeometry();
+      return;
+    }
     this.mesh.geometry = (t && (furnitureGeometry(t).whole?.() || furnitureGeometry(t).geo)) || new THREE.BufferGeometry();   // (with its moving parts at rest)
   }
   show(tg, it, ok) {
-    const [x0, z0, x1, z1] = itemRect(it, CATALOG[it.t].rect), cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;   // (a sign's geometry is made at its size)
-    const w = toWorld(tg.B, it.x, it.z), yaw = bRot(tg.B) + (it.r || 0), c = Math.cos(yaw), s = Math.sin(yaw);
-    this.mesh.position.set(w.x, tg.y + 0.012, w.z); this.mesh.rotation.set(0, yaw, 0);
-    this.pad.position.set(w.x + cx * c + cz * s, tg.y + 0.03, w.z - cx * s + cz * c); this.pad.rotation.set(0, yaw, 0);
-    this.pad.scale.set(Math.max(0.1, x1 - x0), 1, Math.max(0.1, z1 - z0));
+    const w = toWorld(tg.B, it.x, it.z);
+    this.showAt(w.x, tg.y + 0.012, w.z, bRot(tg.B) + (it.r || 0), itemRect(it, CATALOG[it.t].rect), ok, 0.018);   // (a sign's geometry is made at its size)
+  }
+  /** On piece entry e, as thing it ({ t, s, x, z, r }) would stand on its surface. */
+  showOn(e, it, ok) {
+    const P = onPose(e, it); if (!P) { this.hide(); return; }
+    this.showAt(P.x, P.y + 0.002, P.z, P.yaw, CATALOG[it.t].rect, ok, 0.003);
+  }
+  showAt(x, y, z, yaw, rect, ok, padUp) {
+    const [x0, z0, x1, z1] = rect, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, c = Math.cos(yaw), s = Math.sin(yaw);
+    this.mesh.position.set(x, y, z); this.mesh.rotation.set(0, yaw, 0);
+    this.pad.position.set(x + cx * c + cz * s, y + padUp, z - cx * s + cz * c); this.pad.rotation.set(0, yaw, 0);
+    this.pad.scale.set(Math.max(0.02, x1 - x0), 1, Math.max(0.02, z1 - z0));
     const col = ok ? 0x5ee08f : 0xff6b6b;
     this.mat.color.set(ok ? 0xdcffe8 : 0xffd4d4); this.mat.emissive.set(col).multiplyScalar(0.3); this.padMat.color.set(col);
     this.mesh.visible = this.pad.visible = true;
@@ -178,7 +206,7 @@ export function init(a) {
   buildFurnish(slot('l:buildings.furnish') || root); buildBuild(slot('l:buildings.build') || root);
   app.hooks.key.push(onKey); app.hooks.click.push(onClick); app.hooks.hover.push(onHover);
   canvas.addEventListener('pointerdown', onDown);
-  canvas.addEventListener('pointermove', e => { ptr.x = e.clientX; ptr.y = e.clientY; ptr.in = true; ptr.moved = true; });
+  canvas.addEventListener('pointermove', e => { ptr.x = e.clientX; ptr.y = e.clientY; ptr.in = true; ptr.moved = true; ptr.alt = e.altKey; });
   canvas.addEventListener('pointerleave', () => { ptr.in = false; ptr.moved = true; });
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
@@ -201,7 +229,7 @@ function onWorld(ev) {
 }
 function onMode(m, prev) {
   if (prev === 'furnish') {
-    if (F.drag) { inter.setHidden(F.drag.e, false); F.drag = null; }
+    if (F.drag) { unhide(F.drag); F.drag = null; }
     setType(null); selectItem(null); ghost.hide();
   }
   if (prev === 'build') bghost.hide();
@@ -223,13 +251,16 @@ function onHover() {
 function onKey(e) {
   const k = e.key;
   if (S.mode === 'furnish') {
-    if (k === 'r' || k === 'R') {
-      if (F.type) { F.rot = normA(F.rot + (e.shiftKey ? -HALF : HALF)); F.dirty = true; } else if (F.sel) rotateSel(e.shiftKey ? -HALF : HALF);
+    if (k === 'r' || k === 'R') {   // (a thing on a piece turns by 45°, Shift: 15°)
+      if (F.type) { F.rot = normA(F.rot + (onType(F.type) ? (e.shiftKey ? STEP15 : STEP45) : (e.shiftKey ? -HALF : HALF))); F.dirty = true; }
+      else if (selThing()) rotateThing(e.shiftKey ? STEP15 : STEP45);
+      else if (F.sel) rotateSel(e.shiftKey ? -HALF : HALF);
       return true;
     }
-    if ((k === 'Delete' || k === 'Backspace') && F.sel) { deleteSel(); return true; }
+    if ((k === '[' || k === ']') && ((F.type && onType(F.type)) || F.drag?.thing)) { F.step += k === ']' ? 1 : -1; F.dirty = true; if (F.drag?.moved) dragGhost(); return true; }   // the shelf below / above
+    if ((k === 'Delete' || k === 'Backspace') && F.sel) { if (selThing()) deleteThing(); else deleteSel(); return true; }
     if (k === 'Escape') {
-      if (F.drag) { inter.setHidden(F.drag.e, false); F.drag = null; ghost.hide(); F.dirty = true; return true; }
+      if (F.drag) { unhide(F.drag); F.drag = null; ghost.hide(); F.dirty = true; return true; }
       if (F.resize) { endResize(false); return true; }
       if (F.type) { setType(null); return true; }
       if (F.sel) { selectItem(null); return true; }
@@ -259,19 +290,36 @@ function buildFurnish(root) {
   E.fitems = el.querySelector('.items'); E.fsel = el.querySelector('.selbar'); E.fstat = el.querySelector('.status');
   E.ffloor = el.querySelector('.floorbar');
   E.ffloor.onclick = e => { const b = e.target.closest('[data-lop]'); if (b && !b.disabled) floorOp(b); };
+  E.ffloor.onchange = e => { if (e.target.matches('select.sells')) setSells(e.target.value); };
   el.querySelector('.done').onclick = () => app.setMode('explore');
   E.fscopeC.onchange = () => { F.scopeAll = E.fscopeC.checked; };
-  const cats = CATEGORIES.filter(c => EDIT_TYPES.some(t => CATALOG[t].cat === c));
+  const cats = [...CATEGORIES.filter(c => EDIT_TYPES.some(t => CATALOG[t].cat === c)), GOODS_CAT];   // (Goods: the small things put on tables, desks, counters and shelves)
   E.fcats.innerHTML = cats.map(c => `<button class="btn small" data-c="${c}">${CAT_ICON[c] || ''} ${c}</button>`).join('');
   E.fcats.onclick = e => { const b = e.target.closest('[data-c]'); if (b) setCat(b.dataset.c); };
-  E.fitems.onclick = e => { const b = e.target.closest('[data-t]'); if (b) setType(F.type === b.dataset.t ? null : b.dataset.t); };
+  E.fitems.onclick = e => {
+    const sb = e.target.closest('[data-sub]'); if (sb) { F.abo.sub = sb.dataset.sub; F.abo.n = ABO_PAGE; renderAbo(); return; }   // (the Amazon library's sub-groups)
+    if (e.target.closest('.abo-more')) { F.abo.n += ABO_PAGE; renderAbo(); return; }
+    const b = e.target.closest('[data-t]'); if (b) setType(F.type === b.dataset.t ? null : b.dataset.t);
+  };
+  E.fitems.addEventListener('input', e => { if (e.target.matches('.abo-q')) { F.abo.q = e.target.value; F.abo.n = ABO_PAGE; renderAbo(); } });
   E.fsel.onclick = e => {
     const b = e.target.closest('[data-a]'); if (!b || b.tagName === 'INPUT') return;
     const a = b.dataset.a;
-    if (a === 'rot') rotateSel(HALF); else if (a === 'del') deleteSel();
+    if (a === 'rot') { if (selThing()) rotateThing(STEP45); else rotateSel(HALF); } else if (a === 'del') { if (selThing()) deleteThing(); else deleteSel(); }
     else if (a === 'sign') { const e2 = selEntry(); if (e2) import('./sign-design.js').then(m => m.editIndoorSign(app, { b: e2.b, f: e2.f, id: e2.id })); }
+    else if (a === 'look') lookSel(b.dataset.v || null);
+    else if (a === 'dfill' || a === 'dempty' || a === 'droll') dressOp(a);
+    else if (a === 'nrot') { F.rot = normA(F.rot + STEP45); F.dirty = true; } else if (a === 'step') { F.step += +b.dataset.v; F.dirty = true; }
     else if (a === 'tint') tintSel(b.dataset.v); else if (a === 'ntint') { F.tint = b.dataset.v; renderSel(); }
     else if (a === 'nsv') { F.sv[F.type] = b.dataset.v; F.dirty = true; renderSel(); } else if (a === 'nsc') { F.sc = b.dataset.v; renderSel(); }
+  };
+  // on a phone the Furnish panel is a drawer over most of the world: a thing to put on a piece (or one selected on it) gets
+  // its own bar over the world instead (Turn, the shelf below or above, Done), the drawer closed so the pieces can be seen
+  E.onbar = document.getElementById('ui').appendChild(h('<div id="onbar" class="panel hidden" role="toolbar" aria-label="A thing on a piece"></div>'));
+  E.onbar.onclick = e => {
+    const b = e.target.closest('[data-a]'); if (!b) return;
+    if (b.dataset.a === 'done') { if (F.type) setType(null); else selectItem(null); app.docks?.open('left', true); return; }
+    E.fsel.onclick(e);
   };
   E.fsel.addEventListener('change', e => {
     const t = e.target; if (!t.matches('input[type=color]')) return;
@@ -281,14 +329,42 @@ function buildFurnish(root) {
 function setCat(c) {
   F.cat = c;
   for (const b of E.fcats.children) b.classList.toggle('on', b.dataset.c === c);
+  F.abo = { sub: '', q: '', n: ABO_PAGE };
+  if (c === GOODS_CAT) {   // the goods (shared/goods-items.js): sub-groups, a search, pictures, a page at a time, like the Amazon library
+    E.fitems.innerHTML = `<div class="abo-lib goods-lib"><div class="abo-head"><b>Goods</b> <span class="dim">${GOODS_LIB.length.toLocaleString()} things for tables, desks, counters and shelves</span></div>
+<input class="abo-q" type="search" placeholder="Search goods (mug, shoe, toy, cable...)" autocomplete="off">
+<div class="chips abo-subs"></div><div class="abo-grid"></div>
+<div class="abo-credit dim">3D models: Google Scanned Objects by Google LLC and Amazon Berkeley Objects by Amazon.com, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, converted by CodePawl and changed by us (<a href="/assets/gso/ATTRIBUTION.md" target="_blank" rel="noopener">credits</a>, <a href="/assets/abo/ATTRIBUTION.md" target="_blank" rel="noopener">Amazon credits</a>). Not endorsed by Google or Amazon.</div></div>`;
+    renderAbo();
+    return;
+  }
+  const n = ABO_LIB.filter(x => x.cat === c).length;
   E.fitems.innerHTML = EDIT_TYPES.filter(t => CATALOG[t].cat === c)
-    .map(t => `<div class="item-btn${F.type === t ? ' on' : ''}" data-t="${t}" title="${esc(CATALOG[t].name)}"><span class="em">${ICON[t] || '📦'}</span>${esc(CATALOG[t].name)}</div>`).join('');
+    .map(t => `<div class="item-btn${F.type === t ? ' on' : ''}" data-t="${t}" title="${esc(CATALOG[t].name)}"><span class="em">${ICON[t] || '📦'}</span>${esc(CATALOG[t].name)}</div>`).join('')
+    // the Amazon library's pieces of this category (shared/abo-items.js): sub-groups, a search, pictures, a page at a time
+    + (n ? `<div class="abo-lib"><div class="abo-head"><b>Amazon library</b> <span class="dim">${n.toLocaleString()} pieces</span></div>
+<input class="abo-q" type="search" placeholder="Search ${esc(c.toLowerCase())} (sofa, oak, velvet...)" autocomplete="off">
+<div class="chips abo-subs"></div><div class="abo-grid"></div>
+<div class="abo-credit dim">3D models: Amazon Berkeley Objects by Amazon.com, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, converted by CodePawl and resized by us (<a href="/assets/abo/ATTRIBUTION.md" target="_blank" rel="noopener">credits</a>). Not endorsed by Amazon.</div></div>` : '');
+  if (n) renderAbo();
+}
+const ABO_PAGE = 60;
+/** The Amazon library's part of the category: its sub-group chips, then the pieces matching the search, a page at a time. */
+function renderAbo() {
+  const box = E.fitems.querySelector('.abo-lib'); if (!box) return;
+  const A = F.abo, c = F.cat, words = A.q.toLowerCase().split(/\s+/).filter(Boolean), goods = c === GOODS_CAT;
+  const all = goods ? GOODS_LIB : ABO_LIB.filter(x => x.cat === c), subs = goods ? GOODS_SUBS.filter(x => all.some(g => g.sub === x)) : ABO_SUBS[c] || [];
+  box.querySelector('.abo-subs').innerHTML = ['', ...subs].map(x => `<span class="chip${A.sub === x ? ' on' : ''}" data-sub="${esc(x)}">${x ? esc(x) : 'All'}${goods && x ? ` <span class="dim">${all.filter(g => g.sub === x).length}</span>` : ''}</span>`).join('');
+  const list = all.filter(x => (!A.sub || x.sub === A.sub) && words.every(w => (x.name + ' ' + x.sub + (x.tags ? ' ' + x.tags.join(' ') : '')).toLowerCase().includes(w)));
+  const pic = x => (goods ? goodsFiles(x.t).t : `/assets/abo/t/${x.id}.webp`), tip = x => x.name + (goods && CATALOG[x.t].floorOk ? ' · also stands on the floor' : '');
+  box.querySelector('.abo-grid').innerHTML = list.slice(0, A.n).map(x => `<div class="abo-tile${F.type === x.t ? ' on' : ''}" data-t="${x.t}" title="${esc(tip(x))}"><img loading="lazy" decoding="async" alt="" src="${pic(x)}"><span>${esc(x.name)}</span></div>`).join('')
+    + (list.length > A.n ? `<button class="btn small abo-more">Show more (${(list.length - A.n).toLocaleString()} more)</button>` : list.length ? '' : '<div class="dim">Nothing matches.</div>');
 }
 function setType(t) {
   F.type = t && CATALOG[t] ? t : null;
-  for (const b of E.fitems.children) b.classList.toggle('on', b.dataset.t === F.type);
-  if (F.type) { selectItem(null); ghost.setType(F.type); } else ghost.hide();
-  F.it = null; F.ok = false; F.reason = ''; F.dirty = true;
+  for (const b of E.fitems.querySelectorAll('[data-t]')) b.classList.toggle('on', b.dataset.t === F.type);
+  if (F.type) { selectItem(null); ghost.setType(CATALOG[F.type].goods ? 'on:' + F.type : F.type); } else ghost.hide();
+  F.it = null; F.on = null; F.step = 0; F.ok = false; F.reason = ''; F.dirty = true;
   renderSel();
 }
 function selEntry() { return F.sel ? inter.findEntry(F.sel.b, F.sel.f, F.sel.id) : null; }
@@ -304,8 +380,23 @@ function selectItem(e) {
   inter.highlight(e || null);
   renderSel();
 }
+/** The thing selected on a piece: { e (the piece's entry), k, o (the thing) }, or null. */
+function selThing() {
+  if (F.sel?.k === undefined) return null;
+  const e = selEntry(), o = e && onList(e)[F.sel.k];
+  return o && o.t === F.sel.t ? { e, k: F.sel.k, o } : null;
+}
+function selectThing(e, k) {
+  F.sel = { b: e.b, f: e.f, id: e.id, k, t: onList(e)[k].t };
+  inter.highlightOn(e, k);
+  renderSel();
+}
 function reselect() {
-  if (F.sel) {
+  if (F.sel?.k !== undefined) {
+    const T = selThing();
+    if (!T || !ownItem(target(), T.e)) { F.sel = null; inter.highlight(null); }
+    else if (!(F.drag && F.drag.moved)) inter.highlightOn(T.e, T.k);
+  } else if (F.sel) {
     const e = selEntry();
     if (!e || !ownItem(target(), e)) { F.sel = null; inter.highlight(null); }
     else if (!(F.drag && F.drag.moved)) inter.highlight(e);
@@ -322,21 +413,42 @@ function renderSel() {
     const L = stylesOf(F.type), v = signStyle(F.type, F.sv[F.type]) || L[0].id;
     html = `<span class="dim">Style:</span><span class="chips">${L.map(x => `<span class="chip${x.id === v ? ' on' : ''}" data-a="nsv" data-v="${x.id}" title="${esc(x.blurb)}">${esc(x.label)}${x.light ? ' 💡' : ''}</span>`).join('')}</span>${signLit(F.type, v) ? `<span class="dim">Light:</span>${swatches('nsc', F.sc, SIGN_LIGHTS)}` : ''}`;
   }
+  else if (F.type && onType(F.type)) html = `<b>🧺 ${esc(CATALOG[F.type].name)}</b><button class="btn small" data-a="nrot" title="Turn (R: 45°, Shift+R: 15°)">⟳ Turn</button><button class="btn small" data-a="step" data-v="-1" title="The shelf below ([)">Shelf ▼</button><button class="btn small" data-a="step" data-v="1" title="The shelf above (])">Shelf ▲</button>`;   // (buttons for a phone: no keys)
   else if (F.type && CATALOG[F.type].tint) html = `<span class="dim">Color:</span>${swatches('ntint', F.tint)}`;
+  else if (!F.type && selThing()) {   // a thing on a piece
+    const T = selThing(), d = CATALOG[T.o.t];
+    html = `<b>🧺 ${esc(d.name)}</b><span class="dim">on the ${esc(CATALOG[T.e.t].name.toLowerCase())}</span><button class="btn small" data-a="rot" title="Turn (R: 45°, Shift+R: 15°)">⟳ Turn</button><button class="btn small danger" data-a="del" title="Remove (Del)">🗑 Remove</button>`;
+  }
   else if (!F.type && F.sel) {
     const e = selEntry(), d = e && CATALOG[e.t];
-    if (d) html = `<b>${ICON[e.t] || ''} ${esc(d.name)}</b>${INDOOR_SIGNS[e.t] ? `<span class="dim">${(F0 => sizeText(F0.w, F0.h))(signFace(e.it))}</span><button class="btn small primary" data-a="sign" title="Its size, style, design, ads">🪧 Sign settings</button>` : ''}<button class="btn small" data-a="rot" title="Rotate (R)">⟳ Rotate</button><button class="btn small danger" data-a="del" title="Remove (Del)">🗑 Remove</button>${!d.tint ? '' : !INDOOR_SIGNS[e.t] ? swatches('tint', e.c) : signLit(e.t, e.it.v) ? `<span class="dim">Light:</span>${swatches('tint', e.c, SIGN_LIGHTS)}` : ''}`;
+    const host = !!e && !!surfacesOf(e.it).length, own = Array.isArray(e?.it?.on), dr = host && dressable(e), n = host ? onList(e).length : 0;   // (a piece things go on: how many it holds, its own or by the rules)
+    const how = !host ? '' : own ? (n ? ' (by hand)' : ' (emptied)') : dr ? ' (generated)' : '';
+    const dress = dr || own ? `<button class="btn small" data-a="dfill"${own ? '' : ' disabled'} title="Let the rules fill it again (its own things go)">🧺 Fill</button><button class="btn small" data-a="dempty"${n ? '' : ' disabled'} title="Take everything off it">Empty</button>${dr ? '<button class="btn small" data-a="droll" title="Other things by the rules">🎲 Reroll</button>' : ''}` : '';
+    if (d) html = `<b>${ICON[e.t] || ''} ${esc(d.name)}</b>${host ? `<span class="dim" title="Pick a thing in Goods and point at its top or a shelf">${n ? `🧺 ${n} thing${n > 1 ? 's' : ''} on it${how}` : `🧺 things go on it${how}`}</span>${dress}` : ''}${INDOOR_SIGNS[e.t] ? `<span class="dim">${(F0 => sizeText(F0.w, F0.h))(signFace(e.it))}</span><button class="btn small primary" data-a="sign" title="Its size, style, design, ads">🪧 Sign settings</button>` : ''}${aboDefault(e.t) ? `<span class="dim">Look:</span><span class="chips"><span class="chip${e.it.m ? '' : ' on'}" data-a="look" data-v="" title="MVW's own">MVW</span><span class="chip${e.it.m ? ' on' : ''}" data-a="look" data-v="${aboDefault(e.t)}" title="Its Amazon counterpart">Amazon</span></span>` : ''}<button class="btn small" data-a="rot" title="Rotate (R)">⟳ Rotate</button><button class="btn small danger" data-a="del" title="Remove (Del)">🗑 Remove</button>${!d.tint ? '' : !INDOOR_SIGNS[e.t] ? swatches('tint', e.c) : signLit(e.t, e.it.v) ? `<span class="dim">Light:</span>${swatches('tint', e.c, SIGN_LIGHTS)}` : ''}`;
   }
   if (E.fsel._h !== html) { E.fsel.innerHTML = html; E.fsel._h = html; }
+  renderOnBar(html);
   setStatus();
+}
+/** The phone's bar for a thing on a piece (E.onbar): shown in Furnish on a narrow screen while one is picked or selected. */
+function renderOnBar(html) {
+  const want = S.mode === 'furnish' && matchMedia('(max-width: 760px)').matches && ((F.type && onType(F.type)) || (!F.type && !!selThing()));
+  const bar = html.replace(/ class="btn small( danger)?"/g, ' class="btn$1"') + '<button type="button" class="btn" data-a="done" title="Done: back to the Furnish panel">✕ Done</button>';
+  if (want && E.onbar._h !== bar) { E.onbar.innerHTML = bar; E.onbar._h = bar; }
+  if (want === !E.onbar.classList.contains('hidden')) return;
+  E.onbar.classList.toggle('hidden', !want);
+  if (want) app.docks?.open('left', false);   // (the world, not the drawer)
 }
 function setStatus() {
   let t;
   const nm = F.type ? CATALOG[F.type].name.toLowerCase() : '';
-  if (F.drag && F.drag.moved) t = F.drag.reason ? '⚠️ ' + F.drag.reason : 'Release to move it here';
+  if (F.drag && F.drag.moved) t = F.drag.reason ? '⚠️ ' + F.drag.reason : F.drag.thing || F.drag.to ? 'Release to put it here · [ ] shelf down / up' : 'Release to move it here';
+  else if (F.type && onType(F.type) && (F.on || !F.it)) t = F.it ? (F.ok ? `Click to put the ${nm} here · R turn (Shift: 15°) · [ ] shelf down / up · Alt: no snap · Esc stop` : '⚠️ ' + F.reason)
+    : `Point at a table, a desk, a counter or a shelf to put the ${nm} on it${CATALOG[F.type].goods && !CATALOG[F.type].floorOk ? '' : ' (or at the floor)'}`;
   else if (F.type) t = F.it ? (F.ok ? `Click to place the ${nm} · R rotate · Esc stop placing` : '⚠️ ' + F.reason) : `Point at the floor to place the ${nm}`;
   else if (F.resize) t = F.resize.reason ? `⚠️ ${F.resize.reason}` : `${sizeText(F.resize.w, F.resize.h)} · release to keep this size${F.resize.spot[0] && F.resize.spot[1] ? ' · Shift keeps its shape' : ''}`;
   else if (F.sel && INDOOR_SIGNS[selEntry()?.t]) t = 'Drag a handle to size the sign (corners: width and height; Shift keeps its shape) · drag the sign to move · R rotate · Del remove';
+  else if (selThing()) t = 'Drag to move it (to another shelf or piece too) · R turn · Del remove · Esc deselect';
   else if (F.sel) t = 'Drag to move · R rotate · Del remove · Esc deselect';
   else t = 'Pick an item to place it — or click something in the room to select it, then drag to move it.';
   if (E.fstat.textContent !== t) E.fstat.textContent = t;
@@ -375,7 +487,9 @@ function renderFloorBar(tg) {
       <button type="button" class="btn small" data-lop="clear"${m === 'empty' ? ' disabled' : ''} title="Take out all furniture and inner walls (the elevator stays)">${park ? 'Clear park' : 'Clear floor'}</button>
       <button type="button" class="btn small" data-lop="regen" title="A new arrangement of the same kind of ${park ? 'park' : 'floor'}">🎲 Regenerate</button>
       ${m !== 'auto' ? '<button type="button" class="btn small" data-lop="reset" title="Back to the layout made for this building">↺ Reset to auto</button>' : ''}</span>` : '';
-    const lib = `<span class="fm-acts"><button type="button" class="btn small" data-lop="save" title="Keep this layout in your layouts">💾 Save layout</button><button type="button" class="btn small" data-lop="lib" title="Your saved layouts and the ones shared with you">📂 Layouts</button></span>`;
+    // a shop floor: what it sells (its shelves' goods: shared/dress.js; its own choice, else what its name says)
+    const sells = L?.venue === 'shop' && !park && mayOn(tg.B, 'furnish') ? `<label class="fm-acts sells-l" title="What this shop's shelves hold by themselves">Sells: <select class="sells">${[['', `${STORE_KINDS[storeDefault(tg.B)] || 'General store'} (its name)`], ...Object.entries(STORE_KINDS)].map(([k, n]) => `<option value="${k}"${(L.goods || '') === k ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>` : '';
+    const lib = `${sells}<span class="fm-acts"><button type="button" class="btn small" data-lop="save" title="Keep this layout in your layouts">💾 Save layout</button><button type="button" class="btn small" data-lop="lib" title="Your saved layouts and the ones shared with you">📂 Layouts</button></span>`;
     const named = L?.name && !park ? `<span class="ft-name" title="This floor's name">${th ? `${th.icon} ` : ''}${esc(L.name)}</span>` : '';
     html = `<span class="fmode fm-${m}" title="${esc(tip)}">${ic} ${nm}</span>${named}<span class="fm-tip">${esc(th ? `${tip}. Theme: ${th.name} (🎲 Regenerate rolls it again)` : tip)}</span>${themes || naming ? `<span class="fm-acts">${themes}${naming}</span>` : ''}${acts}${lib}`;
   }
@@ -383,6 +497,13 @@ function renderFloorBar(tg) {
 }
 /** Clear / regenerate / reset the floor being furnished: one change, one undo. Losing changes made by hand takes a second
  *  tap (the button asks for 3 s). */
+/** What the shop floor being furnished sells (lvl.goods; '' back to what its name says): its shelves dressed again. */
+async function setSells(v) {
+  const tg = target(); if (!tg) return;
+  const r = await edit([{ op: 'lvl.goods', b: tg.b, f: tg.f, goods: v || null, ...scopeOp(tg) }]);
+  E.ffloor._h = ''; refreshFurnish();
+  if (r) app.toast(`🛍️ This shop sells ${(STORE_KINDS[v || storeDefault(tg.B)] || 'goods').toLowerCase()} — its shelves are stocked again`, 'good', 2400);
+}
 async function floorOp(btn) {
   const tg = target(); if (!tg) return;
   const op = btn.dataset.lop, L = levelOf(tg.b, tg.f), custom = levelMode(L) === 'custom';
@@ -408,16 +529,32 @@ function updateFurnishGhost() {
   const tg = target();
   if (F.drag) { if (F.drag.moved) dragGhost(); return; }
   if (F.resize) return;   // the ghost shows the sign at its new size (moveResize)
-  if (!tg || !F.type || !ptr.in) { ghost.hide(); F.it = null; F.ok = false; setStatus(); return; }
+  if (!tg || !F.type || !ptr.in) { ghost.hide(); F.it = null; F.on = null; F.ok = false; setStatus(); return; }
+  F.on = null;
+  if (onType(F.type)) {   // a thing: onto the surface under the pointer (shared/surfaces.js), else the floor if it may stand there
+    const T = onTarget(tg, F.type, { r: F.rot });
+    if (T) {
+      F.on = T; F.it = T.it; F.ok = !T.why; F.reason = T.why || '';
+      ghost.setType('on:' + F.type); ghost.showOn(T.e, T.it, F.ok);
+      setStatus(); return;
+    }
+  }
   const p = inter.floorPoint(cam.rayAt(ptr.x, ptr.y), tg.y);
   if (!p) { ghost.hide(); F.it = null; setStatus(); return; }
-  const l = toLocal(tg.B, p.x, p.z);
+  const l = toLocal(tg.B, p.x, p.z), goods = CATALOG[F.type].goods;
   let it = { t: F.type, x: snap(l.x), z: snap(l.z), r: F.rot };
   if (CATALOG[F.type].wall && tg.B.type !== 'park') it = wallSnap(tg.B, it, levelOf(tg.b, tg.f));
-  const reason = checkItem(tg.B, tg.f, levelOf(tg.b, tg.f), it);
+  const reason = goods && !CATALOG[F.type].floorOk ? `The ${CATALOG[F.type].name.toLowerCase()} goes on a table, a desk, a counter or a shelf` : checkItem(tg.B, tg.f, levelOf(tg.b, tg.f), it);
   F.it = it; F.ok = !reason; F.reason = reason || '';
-  ghost.setType(INDOOR_SIGNS[F.type] ? signGeoKey({ t: F.type, v: signStyle(F.type, F.sv[F.type]) }) : F.type); ghost.show(tg, it, F.ok);
+  ghost.setType(goods ? 'on:' + F.type : INDOOR_SIGNS[F.type] ? signGeoKey({ t: F.type, v: signStyle(F.type, F.sv[F.type]) }) : F.type); ghost.show(tg, it, F.ok);
   setStatus();
+}
+/** What a click or a press at the pointer finds on the floor being furnished: { thing: { e, k } } (a thing on a piece:
+ *  before its piece, which holds it inside its box) or { e } (a piece), or null. */
+function pickAt(tg, x, y) {
+  const ray = cam.rayAt(x, y), th = inter.pickOn(ray), hit = inter.pickItem(ray, true);
+  if (th && ownItem(tg, th.e) && (!hit || hit.e === th.e || th.d <= hit.d + 0.05)) return { thing: th };
+  return hit && ownItem(tg, hit.e) ? { e: hit.e } : null;
 }
 function furnishClick(e) {
   const tg = target();
@@ -427,29 +564,105 @@ function furnishClick(e) {
     return false;   // default handling selects parks, which makes them the target
   }
   if (F.type) {
-    if (F.it && F.ok) place(tg, F.it);
+    if (F.it && F.ok) place(tg, F.it, F.on);
     else if (F.reason) app.toast(F.reason, 'bad', 1800);
     return true;
   }
-  const hit = inter.pickItem(cam.rayAt(e.clientX, e.clientY), true);
-  if (hit && ownItem(tg, hit.e)) { selectItem(hit.e); return true; }
+  const hit = pickAt(tg, e.clientX, e.clientY);
+  if (hit?.thing) { selectThing(hit.thing.e, hit.thing.k); return true; }
+  if (hit) { selectItem(hit.e); return true; }
   if (F.sel) { selectItem(null); return true; }
   return false;
 }
-async function place(tg, it) {
+async function place(tg, it, on = null) {
+  if (on) {   // onto a piece: its whole list with the thing added (item.on, server/world/edit.js)
+    const r = await edit([{ op: 'item.on', b: on.e.b, f: on.e.f, id: on.e.id, on: [...on.list, it] }]);
+    if (r) app.toast(`🧺 Put the ${CATALOG[it.t].name.toLowerCase()} on the ${CATALOG[on.e.t].name.toLowerCase()}`, 'good', 1500);
+    return;
+  }
   const op = { op: 'item.add', b: tg.b, f: tg.f, t: it.t, x: it.x, z: it.z, r: it.r, ...scopeOp(tg) };
   if (INDOOR_SIGNS[it.t]) { const v = signStyle(it.t, F.sv[it.t]); if (v) op.v = v; op.c = F.sc; }   // a sign in its style, its light's colour
   else if (CATALOG[it.t].tint) op.c = F.tint;
   const r = await edit([op]);
   if (r) app.toast(`${ICON[it.t] || ''} Placed the ${CATALOG[it.t].name.toLowerCase()}`, 'good', 1500);
 }
+
+// ------------------------------------------------------------------ things on pieces (PLAN-SURFACES.md 7; phase P3)
+// A goods item (or small decor that may stand on a surface) is put on the surface under the pointer: a table's, a desk's
+// or a counter's top, any shelf of a bookcase, a shop shelf or a cabinet, on MVW's own pieces, the Amazon library's and
+// MVW's pieces drawn with an Amazon look alike. It snaps to 2 cm (Alt: free), turns by 45° (Shift: 15°), [ and ] step to
+// the shelf below / above; checked as the server checks it (shared/surfaces.js checkOn), with the reason when it does
+// not fit. Selected, it is dragged to another spot, shelf or piece (one edit), turned, removed; undo brings it back.
+const SNAP_ON = 0.02;
+const snapOn = (v, free) => (free ? Math.round(v * 1000) / 1000 : Math.round(v / SNAP_ON) * SNAP_ON);
+/** The things on piece entry e: its own list, else its dressing (shared/dress.js, as drawn: render/interiors.js), so the
+ *  first edit of a dressed piece makes its dressing its own list, nothing seen moving. */
+const onList = e => (Array.isArray(e?.it?.on) ? e.it.on : inter.dressNow(e)?.list || []);
+/** Whether piece entry e is dressed by the rules of its floor (Fill / Empty / Reroll in its bar). */
+function dressable(e) {
+  if (!e?.it || !surfacesOf(e.it).length) return false;
+  const B = bld(e.b), L = levelOf(e.b, e.f), ctx = dressContext(B, e.f, L), cls = hostClass(e.it);
+  return !!ctx && surfacesOf(e.it).some(S => ruleFor(ctx, cls, S.kind));
+}
+/** Fill (its own list let go: dressed by the rules again), Empty (nothing on it), Reroll (other things by the rules). */
+async function dressOp(a) {
+  const e = selEntry(), tg = target(); if (!e || !ownItem(tg, e)) return;
+  const op = { op: 'item.on', b: e.b, f: e.f, id: e.id, on: a === 'dempty' ? [] : null };
+  if (a === 'droll') op.ds = ((e.it.ds | 0) + 1) % 10000;
+  const r = await edit([op]);
+  if (r) app.toast(a === 'dempty' ? `🧺 Emptied the ${CATALOG[e.t].name.toLowerCase()}` : a === 'droll' ? `🎲 Other things on the ${CATALOG[e.t].name.toLowerCase()}` : `🧺 The ${CATALOG[e.t].name.toLowerCase()} filled by the rules`, 'good', 1500);
+}
+function levelOnCount(tg) { let n = 0; for (const it of levelOf(tg.b, tg.f)?.items || []) n += Array.isArray(it.on) ? it.on.length : 0; return n; }
+/** Where thing type t would stand on the piece under the pointer: { e (the piece's entry), it ({ t, s, x, z, r }), list
+ *  (the piece's other things), why (null: it fits) }, or null when no surface is under it. turn: { r } in the piece's frame
+ *  or { yaw } in the world (a thing moved from elsewhere keeps its facing). skip: { e, k } the thing being moved. */
+function onTarget(tg, t, turn, skip = null) {
+  const hit = inter.surfaceAt(cam.rayAt(ptr.x, ptr.y), e => ownItem(tg, e));
+  if (!hit) return null;
+  const e = hit.e, S = surfacesOf(e.it), at = `${e.b}:${e.id}:${hit.s}`;
+  if (at !== F.stepAt) { F.stepAt = at; F.step = 0; }
+  let s = hit.s, x = hit.x, z = hit.z;
+  if (F.step) {   // the shelf below / above (by height) at the same point
+    const order = S.map((q, i) => i).sort((a, b) => S[a].y - S[b].y), i = order.indexOf(s);
+    s = order[Math.max(0, Math.min(order.length - 1, i + F.step))];
+    const Q = S[s]; x = Math.max(Q.x0, Math.min(Q.x1, x)); z = Math.max(Q.z0, Math.min(Q.z1, z));
+  }
+  const r = turn.yaw !== undefined ? normA(Math.round((turn.yaw - e.yaw) / STEP15) * STEP15) : turn.r;
+  const it = nudgeIn(S[s], { t, s, x: snapOn(x, ptr.alt), z: snapOn(z, ptr.alt), r });
+  const list = onList(e).filter((o, k) => !(skip && skip.e === e && skip.k === k));
+  let why = checkOn(e.it, [...list, it]);
+  if (why && /does not fit/.test(why) && !checkOn(e.it, [...list, nudgeIn(S[s], { ...it, r: normA(r + HALF) })])) why += ' as it is turned: R twice turns it to fit';   // (a shoe on a shallow shelf: side-on)
+  if (!why && (!skip || skip.e.b !== e.b || skip.e.f !== e.f) && levelOnCount(tg) >= ON_LEVEL_MAX) why = `At most ${ON_LEVEL_MAX.toLocaleString()} things on one floor's pieces`;
+  return { e, it, list, why };
+}
+function unhide(d) { if (d.thing) inter.setHiddenOn(d.e, d.k, false); else inter.setHidden(d.e, false); }
+async function rotateThing(dr) {
+  const T = selThing(), tg = target(); if (!T || !ownItem(tg, T.e)) return;
+  const list = onList(T.e).slice();
+  list[T.k] = { ...T.o, r: normA(Math.round(((T.o.r || 0) + dr) / STEP15) * STEP15) };
+  const why = checkOn(T.e.it, list);
+  if (why) { app.toast(why, 'bad', 1800); return; }
+  await edit([{ op: 'item.on', b: T.e.b, f: T.e.f, id: T.e.id, on: list }]);
+}
+async function deleteThing() {
+  const T = selThing(), tg = target(); if (!T || !ownItem(tg, T.e)) return;
+  const r = await edit([{ op: 'item.on', b: T.e.b, f: T.e.f, id: T.e.id, on: onList(T.e).filter((o, k) => k !== T.k) }]);
+  if (r) { F.sel = null; inter.highlight(null); renderSel(); app.toast(`Removed the ${CATALOG[T.o.t].name.toLowerCase()}`, '', 1500); }
+}
+
 function onDown(e) {
   if (e.button !== 0 || S.mode !== 'furnish' || F.type || app.wallTool?.()) return;   // a wall tool owns the pointer (ui/walls-tool.js)
   const tg = target(); if (!tg) return;
   if (startResize(e, tg)) return;   // a sign's corner handle
-  const hit = inter.pickItem(cam.rayAt(e.clientX, e.clientY), true);
-  if (!hit || !ownItem(tg, hit.e)) return;
+  const hit = pickAt(tg, e.clientX, e.clientY);
+  if (!hit) return;
   if (cam.drag) cam.drag.kind = null;      // grab the item instead of panning the camera
+  F.step = 0;
+  if (hit.thing) {   // a thing on a piece
+    F.drag = { e: hit.thing.e, k: hit.thing.k, thing: true, tg, sx: e.clientX, sy: e.clientY, moved: false, it: null, ok: false, reason: '' };
+    selectThing(hit.thing.e, hit.thing.k);
+    return;
+  }
   const p = inter.floorPoint(cam.rayAt(e.clientX, e.clientY), tg.y), src = hit.e.it;
   const l = p ? toLocal(tg.B, p.x, p.z) : { x: src.x, z: src.z };
   F.drag = { e: hit.e, tg, sx: e.clientX, sy: e.clientY, moved: false, gx: src.x - l.x, gz: src.z - l.z, it: null, ok: false, reason: '' };
@@ -458,19 +671,38 @@ function onDown(e) {
 function onMove(e) {
   if (F.resize) { ptr.x = e.clientX; ptr.y = e.clientY; F.resize.keep = e.shiftKey; moveResize(); return; }
   const d = F.drag; if (!d) return;
-  ptr.x = e.clientX; ptr.y = e.clientY;
-  if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 5) { d.moved = true; inter.setHidden(d.e, true); inter.highlight(null); }
+  ptr.x = e.clientX; ptr.y = e.clientY; ptr.alt = e.altKey;
+  if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 5) { d.moved = true; if (d.thing) inter.setHiddenOn(d.e, d.k, true); else inter.setHidden(d.e, true); inter.highlight(null); }
   if (d.moved) dragGhost();
 }
 function dragGhost() {
   const d = F.drag, tg = d.tg;
+  d.to = null;
+  if (d.thing || CATALOG[d.e.t].goods) {   // a thing (or a goods item on the floor): onto a surface first
+    const o = d.thing ? onList(d.e)[d.k] : d.e.it; if (!o) return;
+    const yaw = d.thing ? d.e.yaw + (o.r || 0) : d.e.yaw;
+    const T = onTarget(tg, o.t, { yaw }, d.thing ? { e: d.e, k: d.k } : null);
+    if (T) {
+      d.to = T; d.it = T.it; d.ok = !T.why; d.reason = T.why || '';
+      ghost.setType('on:' + o.t); ghost.showOn(T.e, T.it, d.ok);
+      setStatus(); return;
+    }
+    if (d.thing) {   // off every surface: onto the floor if it may stand there
+      const p = inter.floorPoint(cam.rayAt(ptr.x, ptr.y), tg.y); if (!p) return;
+      const l = toLocal(tg.B, p.x, p.z), it = { t: o.t, x: snap(l.x), z: snap(l.z), r: normA(Math.round((yaw - bRot(tg.B)) / STEP15) * STEP15) };
+      const reason = CATALOG[o.t].floorOk ? checkItem(tg.B, tg.f, levelOf(tg.b, tg.f), it) : `Put the ${CATALOG[o.t].name.toLowerCase()} on a table, a desk, a counter or a shelf`;
+      d.it = it; d.ok = !reason; d.reason = reason || '';
+      ghost.setType('on:' + o.t); ghost.show(tg, it, d.ok);
+      setStatus(); return;
+    }
+  }
   const p = inter.floorPoint(cam.rayAt(ptr.x, ptr.y), tg.y); if (!p) return;
   const l = toLocal(tg.B, p.x, p.z), src = d.e.it;
   let it = { ...src, x: snap(l.x + d.gx), z: snap(l.z + d.gz), r: src.r || 0 };
   if (CATALOG[src.t].wall && tg.B.type !== 'park') it = wallSnap(tg.B, it, levelOf(tg.b, tg.f));
   const reason = checkItem(tg.B, tg.f, levelOf(tg.b, tg.f), it, src.id);
   d.it = it; d.ok = !reason; d.reason = reason || '';
-  ghost.setType(signGeoKey(src) || src.t); ghost.show(tg, it, d.ok);
+  ghost.setType(CATALOG[src.t].goods ? 'on:' + src.t : src.m && !INDOOR_SIGNS[src.t] ? `${src.t}~${src.m}` : signGeoKey(src) || src.t); ghost.show(tg, it, d.ok);   // (dragged looking as it is drawn)
   setStatus();
 }
 async function onUp() {
@@ -479,11 +711,37 @@ async function onUp() {
   F.drag = null;
   if (!d.moved) return;                      // plain click: the click hook keeps it selected
   ghost.hide(); F.dirty = true;
-  if (!d.ok || !d.it) { inter.setHidden(d.e, false); app.toast(d.reason || 'It does not fit there', 'bad', 1800); reselect(); return; }
+  if (!d.ok || !d.it) { unhide(d); app.toast(d.reason || 'It does not fit there', 'bad', 1800); reselect(); return; }
+  if (d.thing || d.to) return dropThing(d);
   const src = d.e.it;
   if (Math.abs(d.it.x - src.x) < 1e-3 && Math.abs(d.it.z - src.z) < 1e-3 && Math.abs((d.it.r || 0) - (src.r || 0)) < 1e-3) { inter.setHidden(d.e, false); reselect(); return; }
   const r = await edit([{ op: 'item.move', b: d.tg.b, f: d.tg.f, id: d.e.id, x: d.it.x, z: d.it.z, r: d.it.r, ...scopeOp(d.tg) }]);
   if (!r) { inter.setHidden(d.e, false); reselect(); }
+}
+/** A thing dropped: on the same piece, onto another piece, onto the floor; or a goods item from the floor onto a piece.
+ *  One edit each (one undo); what can be refused goes first (a refused op stops the batch). */
+async function dropThing(d) {
+  const T = d.to, it = d.it, b = d.e.b, f = d.e.f;
+  let ops, sel = null;
+  if (d.thing) {
+    const o = onList(d.e)[d.k], rest = onList(d.e).filter((x, k) => k !== d.k);
+    if (!o) { unhide(d); return; }
+    if (T && T.e === d.e) {
+      if (it.s === o.s && Math.abs(it.x - o.x) < 1e-3 && Math.abs(it.z - o.z) < 1e-3 && Math.abs((it.r || 0) - (o.r || 0)) < 1e-3) { unhide(d); reselect(); return; }
+      const list = onList(d.e).slice(); list[d.k] = it;
+      ops = [{ op: 'item.on', b, f, id: d.e.id, on: list }]; sel = { e: d.e, k: d.k };
+    } else if (T && T.e.b === b && T.e.f === f) {   // to another piece on the same floor: both in one op
+      ops = [{ op: 'item.on', b, f, id: d.e.id, on: rest, to: { id: T.e.id, on: [...T.list, it] } }]; sel = { e: T.e, k: T.list.length };
+    } else if (T) {
+      ops = [{ op: 'item.on', b: T.e.b, f: T.e.f, id: T.e.id, on: [...T.list, it] }, { op: 'item.on', b, f, id: d.e.id, on: rest }]; sel = { e: T.e, k: T.list.length };
+    } else ops = [{ op: 'item.add', b: d.tg.b, f: d.tg.f, t: it.t, x: it.x, z: it.z, r: it.r }, { op: 'item.on', b, f, id: d.e.id, on: rest }];   // (onto the floor)
+  } else {   // a goods item from the floor onto a piece
+    ops = [{ op: 'item.on', b: T.e.b, f: T.e.f, id: T.e.id, on: [...T.list, it] }, { op: 'item.del', b, f, id: d.e.id }]; sel = { e: T.e, k: T.list.length };
+  }
+  if (sel) F.sel = { b: sel.e.b, f: sel.e.f, id: sel.e.id, k: sel.k, t: it.t }; else F.sel = null;
+  const r = await edit(ops);
+  if (!r) { F.sel = d.thing ? { b, f, id: d.e.id, k: d.k, t: onList(d.e)[d.k]?.t } : null; unhide(d); }
+  reselect();
 }
 // ------------------------------------------------------------------ sizing a sign's face by hand (2026-10-05)
 // A selected sign inside shows handles round its face — the corners size its width and height (Shift keeps its
@@ -586,6 +844,10 @@ async function deleteSel() {
   const name = CATALOG[e.t].name.toLowerCase();
   const r = await edit([{ op: 'item.del', b: tg.b, f: tg.f, id: e.id, ...scopeOp(tg) }]);
   if (r) { F.sel = null; inter.highlight(null); renderSel(); app.toast(`Removed the ${name}`, '', 1500); }
+}
+async function lookSel(m) {   // MVW's own look or its Amazon counterpart's (shared/abo-replace.js)
+  const e = selEntry(), tg = target(); if (!e || !ownItem(tg, e) || !aboDefault(e.t)) return;
+  await edit([{ op: 'item.look', b: tg.b, f: tg.f, id: e.id, m, ...scopeOp(tg) }]);
 }
 async function tintSel(c) {
   const e = selEntry(), tg = target(); if (!e || !ownItem(tg, e) || !CATALOG[e.t].tint) return;

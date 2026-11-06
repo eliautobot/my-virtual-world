@@ -28,6 +28,14 @@ This asset license does not apply to:
   it may be played only inside My Virtual World;
 - the My Virtual World name, logos, wordmarks, or other brand identifiers
   covered by [TRADEMARKS.md](TRADEMARKS.md);
+- the Amazon furniture library in `client/assets/abo/` (its 3D models and pictures, and the list of them in
+  `shared/abo-catalog.js`): the Amazon Berkeley Objects by Amazon.com, which stay under their own license,
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (see [client/assets/abo/ATTRIBUTION.md](client/assets/abo/ATTRIBUTION.md)),
+  not under the CC BY-NC-SA terms above;
+- the goods in `client/assets/gso/` (their 3D models and pictures, and the list of them in `shared/goods-catalog.js`):
+  Google Scanned Objects by Google LLC, which stay under their own license,
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (see [client/assets/gso/ATTRIBUTION.md](client/assets/gso/ATTRIBUTION.md)),
+  not under the CC BY-NC-SA terms above;
 - third-party material, which remains under its original license; or
 - user-created content, saved worlds, runtime data, or other material not
   supplied as part of this repository.
