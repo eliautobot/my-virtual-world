@@ -2,6 +2,11 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.3.1 (2026-11-05)
+
+- **Goods load faster on a return visit**: the browser now keeps the goods' models and pictures for a day, like the
+  furniture's, instead of asking for them again on every visit.
+
 ## v2.3.0 (2026-11-05)
 
 - **A furniture library**: 7,580 pieces from the Amazon Berkeley Objects (lounge, decor, home, kitchen, office, outdoor,

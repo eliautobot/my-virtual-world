@@ -984,6 +984,7 @@ const STATIC = [
   ['/signs/', path.join(DATA, 'signs/'), 'public, max-age=86400'], // pictures on owners' signs and the Marketing tools' own content
   ['/assets/sfx/', path.join(ROOT, 'client/assets/sfx/'), 'public, max-age=86400'],   // the game's sound effects (audio/engine.js)
   ['/assets/abo/', path.join(ROOT, 'client/assets/abo/'), 'public, max-age=86400'],   // the Amazon furniture's models and pictures (tools/abo-build.mjs)
+  ['/assets/gso/', path.join(ROOT, 'client/assets/gso/'), 'public, max-age=86400'],   // the goods' models and pictures (tools/goods-build.mjs): kept a day, like the furniture's
   ['/', path.join(ROOT, 'client/'), 'no-cache'],
 ];
 // No framing by other sites (the sign-in dialog), no MIME sniffing, no full URLs in Referer headers to other sites.
