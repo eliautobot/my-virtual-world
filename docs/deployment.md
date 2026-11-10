@@ -6,8 +6,8 @@ matters once it runs for real.
 ## Running it for real
 
 - Put the server behind an HTTPS reverse proxy on the same machine; set `HOST=127.0.0.1`,
-  `MVW_TRUSTED_PROXIES=127.0.0.1,::1` and `MVW_PUBLIC_URL=https://your.domain`. Sign-in needs HTTPS except on the
-  machine itself.
+  `MVW_TRUSTED_PROXIES=127.0.0.1,::1`, `MVW_PUBLIC_URL=https://your.domain` and `MVW_REQUIRE_HTTPS=1` (sign-in then
+  needs HTTPS except on the machine itself; without it, plain HTTP signs in too, for a home network or a tailnet).
 - Keep the key (`MVW_KEY_FILE`) outside the data folder and back it up separately: the data without the key cannot
   open its stored secrets; the key without the data is useless.
 - Activate the License Key (Settings → License); until then the world runs in demo mode ([../README.md](../README.md)).

@@ -258,7 +258,7 @@ function dialog(kind, title, body, { closable = true, wide = false, settings = f
     error(err) {
       const e = el.querySelector('.err');
       if (!e) return;
-      e.textContent = err.code === 'https_required' ? 'Signing in needs a secure connection. Open this site over HTTPS.' : err.message;
+      e.textContent = err.code === 'https_required' ? 'This world allows signing in over HTTPS only. Open this site over HTTPS.' : err.message;
       e.classList.remove('hidden');
     },
     busy(on) { for (const b of el.querySelectorAll('button')) b.disabled = on; },
@@ -272,15 +272,23 @@ function dialog(kind, title, body, { closable = true, wide = false, settings = f
   return d;
 }
 
+/** What the sign-in and setup dialogs say about a connection without HTTPS: a refusal when this world allows signing in
+ *  over HTTPS only (MVW_REQUIRE_HTTPS), else a reminder that the password travels unencrypted. */
+function connectionNote(refused) {
+  const me = auth.me;
+  if (!me || me.secure !== false) return '';
+  if (me.signInAllowed === false) return `<p class="warn">This connection is not secure (no HTTPS), so ${refused}. Open this site over HTTPS or on this computer (localhost).</p>`;
+  return '<p class="hint">This connection is not encrypted (no HTTPS): fine on your own network; use HTTPS before opening this world to the internet.</p>';
+}
 function showSignIn(reason = '', { closable = true, reload = false } = {}) {
   if (open && open.kind === 'signin') return open.done;
-  const insecure = auth.me && auth.me.secure === false;
+  const note = connectionNote('signing in is turned off here');
   const d = dialog('signin', 'Sign in', `
     ${reason ? `<p class="why">${esc(reason)}</p>` : ''}
     <form class="aform" autocomplete="on">
       <label>Username<input class="input login" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
       <label>Password<input class="input pw" type="password" name="password" autocomplete="current-password" required></label>
-      ${insecure ? '<p class="warn">This connection is not secure (no HTTPS), so signing in is turned off here.</p>' : ''}
+      ${note}
       <div class="err hidden" role="alert"></div>
       <p class="hint">Forgot your password? Ask the world's owner or an administrator to reset it.</p>
       <div class="row end">${auth.me && auth.me.registrationOpen ? '<button type="button" class="btn link register">Create an account</button><span class="spacer"></span>' : ''}${closable ? '<button type="button" class="btn cancel">Cancel</button>' : ''}<button type="submit" class="btn primary go">Sign in</button></div>
@@ -354,13 +362,13 @@ function readNewAccount(d) {
  *  the server printed when it started (also in setup-code.txt in its data folder). */
 function showSetup({ reload = true } = {}) {
   if (open && open.kind === 'setup') return open.done;
-  const insecure = auth.me && auth.me.secure === false;
+  const note = connectionNote('accounts can\'t be made here');
   const d = dialog('setup', 'Welcome to My Virtual World', `<form class="aform">
     <p class="why">Create the administrator account for this world: you will manage it, its people and its agents.</p>
     <label>Setup code<input class="input scode" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="16" placeholder="XXXX-XXXX" required></label>
     <p class="hint">The server printed it when it started, and it is in <code>setup-code.txt</code> in its data folder. With Docker: <code>docker compose logs app | grep "Setup code"</code></p>
     ${newAccountFields()}
-    ${insecure ? '<p class="warn">This connection is not secure (no HTTPS), so accounts can\'t be made here. Open this site over HTTPS or on this computer (localhost).</p>' : ''}
+    ${note}
     <div class="err hidden" role="alert"></div>
     <div class="row end"><button type="submit" class="btn primary go">Create the administrator</button></div></form>`, { closable: false });
   focusLater(d.el, '.scode');

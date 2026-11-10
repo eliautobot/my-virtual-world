@@ -18,7 +18,7 @@ export const DEFAULT_POPULATION = 1000;
 export const SERVER_SETTINGS = Object.freeze([
   'PORT', 'HOST', 'MVW_DATA', 'MVW_POPULATION', 'MVW_SEED', 'MVW_HQ_NAME', 'MVW_PUBLIC_URL', 'MVW_TRUSTED_PROXIES',
   'MVW_COOKIE_NAME', 'MVW_KEY_FILE', 'MVW_SECRET_KEY', 'MVW_SECRET_KEY_PREVIOUS', 'MVW_KEY_POLL_MS',
-  'MVW_WS_PER_ADDRESS', 'MVW_WS_MAX', 'MVW_PROVIDER_MEDIA_CACHE_MB', 'MVW_GATEWAY_IS_LOCAL',
+  'MVW_WS_PER_ADDRESS', 'MVW_WS_MAX', 'MVW_PROVIDER_MEDIA_CACHE_MB', 'MVW_GATEWAY_IS_LOCAL', 'MVW_REQUIRE_HTTPS',
   'MVW_PROVIDER_TEST', 'MVW_PROVIDER_RUN_TIMEOUT_MS', 'MVW_TWILIO_TEST_URL', 'MVW_PROBLEM_SCAN_MS', 'MVW_CHROME', 'MVW_HOUSING', 'MVW_STARTER_MAP', 'MVW_SOUNDTRACK', 'MVW_RADIO',
   'MVW_ASSET_CACHE',
 ]);
@@ -29,6 +29,16 @@ const KEY_SETTINGS = ['MVW_KEY_FILE', 'MVW_SECRET_KEY', 'MVW_SECRET_KEY_PREVIOUS
 const HOST_RE = /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
 const COOKIE_RE = /^__Host-[A-Za-z0-9_.-]{1,64}$/;
 const shorten = v => { const s = String(v); return s.length > 60 ? `${s.slice(0, 57)}…` : s; };
+
+/** The address to open for a server listening on host:port, for the start message. 0.0.0.0 and :: mean "every
+ *  address of this machine", which a browser cannot open: localhost is shown, and how other devices reach it. */
+export function listenAddress(host, port) {
+  const h = String(host || '');
+  if (h === '' || h === '0.0.0.0' || h === '::') {
+    return `http://localhost:${port} (all addresses of this machine: from other devices, open http://<this machine's address>:${port})`;
+  }
+  return `http://${net.isIPv6(h) ? `[${h}]` : h}:${port}`;
+}
 
 /** The IPv4 default gateway in a Linux routing table (the text of /proc/net/route), or null. */
 export function defaultGateway(table) {
@@ -138,6 +148,9 @@ export function loadConfig({ env = process.env, root, release = null, routeTable
   try { new HttpPolicy({ trustedProxies: cfg.trustedProxies }); } catch (e) { errors.push(e.message); }
   // The Docker image (C105): connections from the container's default gateway count as coming from this machine for
   // plain-HTTP sign-in, and still only when the browser asked for localhost and no proxy header is present.
+  // Off by default: a self-hosted world signs in over plain HTTP too (a home network, a tailnet). 1: only over HTTPS or
+  // on this machine, for a world reachable from the internet.
+  cfg.requireHttps = bool('MVW_REQUIRE_HTTPS');
   cfg.gatewayIsLocal = bool('MVW_GATEWAY_IS_LOCAL');
   cfg.localPeers = [];
   if (cfg.gatewayIsLocal) {

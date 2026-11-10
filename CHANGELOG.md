@@ -2,6 +2,17 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.5.0 (2026-11-10)
+
+- **Sign in over plain HTTP on your own network**: other devices on a home network or a tailnet can now create
+  accounts and sign in at `http://<this machine's address>:8570`, with a notice that the connection is not encrypted.
+  Before, every address but `localhost` needed HTTPS. Set `MVW_REQUIRE_HTTPS=1` for a world reachable from the
+  internet to allow signing in only over HTTPS (or on the machine itself).
+- **Docker on your network**: `MVW_BIND=0.0.0.0` publishes the app to other devices (the default stays this machine
+  only).
+- **The start message shows an address you can open**: `listening on http://localhost:8570` instead of
+  `http://0.0.0.0:8570`, which is not an address for a browser.
+
 ## v2.4.0 (2026-11-06)
 
 - **Lighting on things**: rooms are lit from above with shaped light, the floor you look into gets its own room light,

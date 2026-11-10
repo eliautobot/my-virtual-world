@@ -211,8 +211,8 @@ async function dockerCheck(src, stamp, o) {
 
     const other = await request(`${origin}/api/auth/me`, { headers: { host: `world.example:${TEST_PORT}` } });
     const otherSignin = await request(`${origin}/api/auth/signin`, { method: 'POST', headers: { host: `world.example:${TEST_PORT}` }, body: { login: 'owner', password: chosen } });
-    check(other.json && other.json.secure === false && otherSignin.status !== 200,
-      'a request that names another host is not secure, and signing in there is refused', `${why(otherSignin)}`);
+    check(other.json && other.json.secure === false && other.json.signInAllowed === true && otherSignin.status === 200 && !/; Secure/.test([].concat((otherSignin.headers || {})['set-cookie'] || []).join('\n')),
+      'a request that names another host is plain HTTP: signing in there works, with a plain (not Secure) cookie (MVW_REQUIRE_HTTPS=1 refuses it)', `${why(otherSignin)}`);
     const lan = Object.values(os.networkInterfaces()).flat().find(a => a && a.family === 'IPv4' && !a.internal);
     if (lan) {
       const r = await tcpProbe(lan.address, TEST_PORT, 3000);

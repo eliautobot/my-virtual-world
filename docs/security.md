@@ -33,7 +33,9 @@ A member-level route also checks that the record is the caller's, or shared with
 
 Passwords are hashed with Argon2id and checked against a list of common passwords; sign-in is rate-limited and locks after
 repeated failures; two-factor sign-in (TOTP, recovery codes) can be required for the owner and administrators.
-Sessions are HTTP-only, `__Host-` cookies over HTTPS; every state-changing request carries a CSRF token and passes an
+Sessions are HTTP-only, SameSite=Strict cookies: `__Host-` and Secure over HTTPS (and on localhost), a plain one over
+plain HTTP from another machine, which only plain-HTTP pages read. `MVW_REQUIRE_HTTPS=1` allows signing in only over
+HTTPS or on the machine itself, for a world reachable from the internet; every state-changing request carries a CSRF token and passes an
 Origin check; destructive and sensitive actions need the password entered within the last 10 minutes. Roles change only
 below one's own role, to roles below one's own, never one's own account.
 

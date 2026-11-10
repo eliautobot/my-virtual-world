@@ -294,6 +294,14 @@ test('client addresses come only through trusted proxies; secure requests; Origi
   assert.equal(p.isSecure(req({ host: 'world.example.org', headers: { 'x-forwarded-proto': 'https', 'x-forwarded-for': '198.51.100.7' } })), true);
   assert.equal(p.isSecure(req({ peer: '192.0.2.10', host: 'world.example.org', headers: { 'x-forwarded-proto': 'https' } })), false, 'untrusted X-Forwarded-Proto');
   assert.equal(p.isSecure(req({ headers: { 'x-forwarded-for': '198.51.100.7' } })), false, 'proxied plain http');
+  // signing in over plain HTTP: allowed by default, with the plain cookie; MVW_REQUIRE_HTTPS refuses it
+  assert.equal(p.canSignIn(req({ host: 'world.example.org' })), true, 'plain http from another machine, by default');
+  assert.deepEqual(p.cookieFor(req({ host: 'world.example.org' }), '__Host-mvw-session'), { name: 'mvw-session', secure: false });
+  assert.deepEqual(p.cookieFor(req(), '__Host-mvw-session'), { name: '__Host-mvw-session', secure: true }, 'localhost keeps the __Host- cookie');
+  const strict = new HttpPolicy({ trustedProxies: '127.0.0.1,::1', requireHttps: true });
+  assert.equal(strict.canSignIn(req({ host: 'world.example.org' })), false, 'MVW_REQUIRE_HTTPS');
+  assert.equal(strict.canSignIn(req()), true, 'MVW_REQUIRE_HTTPS still allows localhost');
+  assert.equal(strict.canSignIn(req({ host: 'world.example.org', headers: { 'x-forwarded-proto': 'https', 'x-forwarded-for': '198.51.100.7' } })), true, 'and HTTPS');
   assert.equal(p.originAllowed(req()), true, 'no Origin (tools)');
   assert.equal(p.originAllowed(req({ headers: { origin: 'http://127.0.0.1:8570' } })), true);
   assert.equal(p.originAllowed(req({ headers: { origin: 'http://127.0.0.1:9999' } })), false);

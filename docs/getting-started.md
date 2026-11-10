@@ -18,7 +18,7 @@ MVW_KEY_FILE="$HOME/.config/my-virtual-world/secret.key" npm start
 data folder, created at the first start. Keep it: a backup can't open its secrets without it ([SECRETS.md](SECRETS.md)).
 The world lives in `./data` (`MVW_DATA` moves it).
 
-Open <http://localhost:8570>. Signing in needs HTTPS, except on the computer the server runs on.
+Open <http://localhost:8570>. Other devices on your network can use `http://<this computer's address>:8570`.
 
 ## 2. Create the administrator account
 
@@ -71,8 +71,9 @@ Already run an agent platform or an AI app? Bring those agents in instead:
 ## 7. Invite people
 
 **⚙️ Settings → ✉️ Invites** makes invite links; **👥 Users** creates accounts and resets passwords; **🔑 Permissions**
-decides what each role may do. People on other computers need HTTPS: put the world behind a reverse proxy with a
-certificate ([INSTALL.md](INSTALL.md#reaching-it-from-other-machines)).
+decides what each role may do. Other computers on your network sign in over plain HTTP; for the internet, put the
+world behind a reverse proxy with a certificate and set `MVW_REQUIRE_HTTPS=1`
+([INSTALL.md](INSTALL.md#reaching-it-from-other-machines)).
 
 ## 8. Keep it safe
 

@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  DEFAULT_COOKIE, DEFAULT_HQ_NAME, DEFAULT_PORT, DEFAULT_POPULATION, DEFAULT_SEED, SERVER_SETTINGS, defaultGateway, loadConfig,
+  DEFAULT_COOKIE, DEFAULT_HQ_NAME, DEFAULT_PORT, DEFAULT_POPULATION, DEFAULT_SEED, SERVER_SETTINGS, defaultGateway, listenAddress, loadConfig,
 } from '../server/config.js';
 import { HttpPolicy } from '../server/auth/http.js';
 import { createLogger, formatLine } from '../server/log.js';
@@ -22,7 +22,7 @@ const KEY_FILE = path.join(BASE, 'secret.key');
 const load = (env = {}, o = {}) => loadConfig({ env: { MVW_KEY_FILE: KEY_FILE, ...env }, root: CODE, ...o });
 const newKey = () => crypto.randomBytes(32).toString('base64');
 // Variables only compose.yaml uses (documented in .env.example next to the server's).
-const COMPOSE_SETTINGS = ['MVW_IMAGE', 'MVW_PORT', 'MVW_DOMAIN', 'MVW_HTTP_PORT', 'MVW_HTTPS_PORT', 'MVW_PROXY_SUBNET', 'MVW_PROXY_RANGE', 'MVW_PROXY_IP'];
+const COMPOSE_SETTINGS = ['MVW_IMAGE', 'MVW_PORT', 'MVW_BIND', 'MVW_DOMAIN', 'MVW_HTTP_PORT', 'MVW_HTTPS_PORT', 'MVW_PROXY_SUBNET', 'MVW_PROXY_RANGE', 'MVW_PROXY_IP'];
 
 test('with only the key set, every setting has its documented default', () => {
   const { cfg, errors, warnings } = load();
@@ -135,6 +135,21 @@ const ROUTES = [
   'eth0\t000200C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0',
 ];
 const TABLE = ROUTES.join('\n') + '\n', NO_DEFAULT = [ROUTES[0], ROUTES[2]].join('\n') + '\n';
+
+test('the start message shows an address a browser can open: localhost for 0.0.0.0 and ::', () => {
+  assert.match(listenAddress('0.0.0.0', 8570), /^http:\/\/localhost:8570 \(all addresses of this machine/);
+  assert.match(listenAddress('::', 8570), /^http:\/\/localhost:8570 /);
+  assert.equal(listenAddress('127.0.0.1', 8570), 'http://127.0.0.1:8570');
+  assert.equal(listenAddress('::1', 8570), 'http://[::1]:8570');
+  assert.equal(listenAddress('world.example.org', 80), 'http://world.example.org:80');
+});
+
+test('MVW_REQUIRE_HTTPS: off by default, 1 turns it on, anything else is refused', () => {
+  assert.equal(load({}).cfg.requireHttps, false);
+  assert.equal(load({ MVW_REQUIRE_HTTPS: '1' }).cfg.requireHttps, true);
+  assert.equal(load({ MVW_REQUIRE_HTTPS: 'off' }).cfg.requireHttps, false);
+  assert.match(load({ MVW_REQUIRE_HTTPS: 'sometimes' }).errors[0], /^MVW_REQUIRE_HTTPS must be 1 or 0/);
+});
 
 test('MVW_GATEWAY_IS_LOCAL: the default gateway counts as this machine for plain-HTTP sign-in on localhost only', () => {
   assert.equal(defaultGateway(TABLE), '192.0.2.1');

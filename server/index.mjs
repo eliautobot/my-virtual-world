@@ -135,7 +135,7 @@ import { registerSecretHolders } from './secret-holders.js';
 import { redact, scrub } from './redact.js';
 import { Settings } from './settings.js';
 import { placeMenu } from '../shared/kitchen-module.js';
-import { loadConfig } from './config.js';
+import { loadConfig, listenAddress } from './config.js';
 import { createLogger } from './log.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -180,7 +180,14 @@ const COOKIE = CFG.cookieName;
 // MVW_TRUSTED_PROXIES: reverse proxies whose X-Forwarded-For / X-Forwarded-Proto are believed (default: none, C71).
 // MVW_PUBLIC_URL: the address(es) people open; only these origins may change things. MVW_GATEWAY_IS_LOCAL (the Docker
 // image, C105): the container's default gateway counts as this machine for plain-HTTP sign-in on localhost.
-const policy = new HttpPolicy({ trustedProxies: CFG.trustedProxies, publicUrls: CFG.publicUrls, localPeers: CFG.localPeers });
+// MVW_REQUIRE_HTTPS: signing in only over HTTPS or on this machine (off: plain HTTP signs in too, with a plain cookie).
+const policy = new HttpPolicy({ trustedProxies: CFG.trustedProxies, publicUrls: CFG.publicUrls, localPeers: CFG.localPeers, requireHttps: CFG.requireHttps });
+/** This request's session token: from the cookie its connection uses (the __Host- one over a secure connection, the
+ *  plain one over plain HTTP; none where signing in is not allowed). */
+const sessionToken = req => {
+  if (!policy.canSignIn(req)) return undefined;
+  return parseCookies(req.headers.cookie)[policy.cookieFor(req, COOKIE).name];
+};
 let wss = null;
 let screenRelay = null;   // (agents' own screens, live: made with the WebSocket below)
 let worldCache = null, peopleCache = {};
@@ -1671,8 +1678,9 @@ async function handleApi(req, res, url) {
       return sendJSON(req, res, e.status, { error: e.message, code: e.code, ...(e.code === 'resign' ? { resign: true } : {}) }, null, e.retryAfter ? { ...nostore, 'retry-after': String(e.retryAfter) } : nostore);
     }
   }
-  const P = accounts.resolve(parseCookies(req.headers.cookie)[COOKIE], { ip });
-  const headers = P.stale ? { 'set-cookie': sessionCookie(COOKIE, '', 0) } : {};   // forget a cookie that no longer works
+  const P = accounts.resolve(sessionToken(req), { ip });
+  const ck = policy.cookieFor(req, COOKIE);
+  const headers = P.stale ? { 'set-cookie': sessionCookie(ck.name, '', 0, ck.secure) } : {};   // forget a cookie that no longer works
   const deny = (status, code, error) => sendJSON(req, res, status, { error, code }, null, headers);
   if (!perms.allowed(P, route.cap)) {
     if (P.restricted) {
@@ -1739,7 +1747,7 @@ wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDef
 const WS_PER_ADDRESS = CFG.wsPerAddress, WS_MAX = CFG.wsMax;
 // An agent's own screen, live (server/providers/screen-relay.js): for whoever manages its provider, while they may.
 screenRelay = new ScreenRelay({
-  principal: req => accounts.resolve(parseCookies(req.headers.cookie)[COOKIE], { ip: policy.clientIp(req) }),
+  principal: req => accounts.resolve(sessionToken(req), { ip: policy.clientIp(req) }),
   originAllowed: req => policy.originAllowed(req),
   ticketFor: async (P, agentId) => {
     if (!perms.allowed(P, 'chat.use')) throw Object.assign(new Error('forbidden'), { status: 403 });
@@ -1762,7 +1770,7 @@ server.on('upgrade', (req, sock, head) => {
     sock.end('HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
     return;
   }
-  const P = accounts.resolve(parseCookies(req.headers.cookie)[COOKIE], { ip });
+  const P = accounts.resolve(sessionToken(req), { ip });
   wss.handleUpgrade(req, sock, head, ws => {
     ws.ip = ip;
     ws.P = P.account ? P : GUEST;
@@ -1928,7 +1936,10 @@ const mainLoop = setInterval(() => {
 }, 100);
 
 server.listen(PORT, HOST, () => {
-  log(`[boot] My Virtual World ${VERSION} (${RELEASE.tag || RELEASE.channel}) listening on http://${HOST}:${server.address().port}`);
+  log(`[boot] My Virtual World ${VERSION} (${RELEASE.tag || RELEASE.channel}) listening on ${listenAddress(HOST, server.address().port)}`);
+  if (!CFG.requireHttps && !/^(127\.|::1$|localhost$)/.test(HOST)) {
+    log('[boot] Signing in over plain HTTP is allowed (passwords travel unencrypted on the network). Set MVW_REQUIRE_HTTPS=1 to allow it only over HTTPS or on this machine.');
+  }
   // the first start: how to create the administrator account (the code is also in <data>/setup-code.txt)
   if (accounts.needsSetup()) {
     const code = accounts.newSetupCode(), at = String(CFG.publicUrls || "").split(/[ ,]+/).filter(Boolean)[0] || `http://localhost:${server.address().port} (or the address you serve it at)`;

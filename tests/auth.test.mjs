@@ -164,7 +164,7 @@ test('admins manage members but never the owner or other admins', async () => {
   assert.equal(r.json.code, 'disabled');
 });
 
-test('writes need the CSRF token and a same-site Origin; sign-in needs a secure connection', async () => {
+test('writes need the CSRF token and a same-site Origin', async () => {
   const body = { i: 0 };
   assert.equal((await member.post('/api/talk', body, { 'x-csrf-token': '' })).json.code, 'csrf');
   assert.equal((await member.post('/api/talk', body, { 'x-csrf-token': 'wrong' })).json.code, 'csrf');
@@ -175,9 +175,48 @@ test('writes need the CSRF token and a same-site Origin; sign-in needs a secure 
   assert.equal(form.status, 415, 'only JSON bodies');
   assert.equal(form.json.code, 'unsupported_media_type');
   assert.equal((await httpClient(s.url).post('/api/auth/signin', { login: 'x', password: 'y' }, { origin: 'https://evil.example' })).json.code, 'bad_origin');
-  const plain = await httpClient(s.url).post('/api/auth/signin', { login: 'member1', password: member.password }, { 'x-forwarded-for': '198.51.100.3' });
-  assert.equal(plain.status, 400, 'proxied plain http');
-  assert.equal(plain.json.code, 'https_required');
+});
+
+// Plain HTTP from another machine (a home network, a tailnet): signing in works by default, with a plain session cookie
+// (browsers drop Secure and __Host- cookies over plain HTTP); MVW_REQUIRE_HTTPS=1 turns it off.
+test('plain HTTP from another machine signs in by default, with a plain cookie that only plain HTTP reads', async () => {
+  const lan = { 'x-forwarded-for': '198.51.100.3' };   // through the trusted loopback proxy, scheme http
+  const g = httpClient(s.url);
+  const me0 = await g.get('/api/auth/me', lan);
+  assert.equal(me0.json.secure, false);
+  assert.equal(me0.json.signInAllowed, true);
+  const r = await g.post('/api/auth/signin', { login: 'member1', password: member.password }, lan);
+  assert.equal(r.status, 200, r.text);
+  const sc = r.headers.get('set-cookie');
+  assert.match(sc, /^mvw-session=[^;]+; Path=\/; HttpOnly; SameSite=Strict; Max-Age=\d+$/, 'plain name, no Secure, still HttpOnly and SameSite=Strict');
+  const me = await g.get('/api/auth/me', lan);
+  assert.equal(me.json.account && me.json.account.login, 'member1', 'the plain cookie signs the plain-HTTP visitor in');
+  const w = await g.post('/api/talk', { i: 0 }, lan);
+  assert.equal(w.status, 200, `and writes work with its CSRF token: ${w.text}`);
+  const https = await g.get('/api/auth/me', fwd('198.51.100.3'));
+  assert.equal(https.json.account, null, 'an HTTPS page never reads the plain cookie');
+  assert.equal((await g.get('/api/auth/me', lan)).json.account.login, 'member1', 'still signed in over plain HTTP (and its CSRF token back)');
+  const out = await g.post('/api/auth/signout', {}, lan);
+  assert.equal(out.status, 200);
+  const cleared = out.headers.get('set-cookie');
+  assert.match(cleared, /__Host-mvw-session=;/);
+  assert.match(cleared, /(^|, )mvw-session=;/, 'signing out forgets both cookies');
+});
+
+test('MVW_REQUIRE_HTTPS=1: plain HTTP from another machine cannot sign in, and a plain cookie counts for nothing', async () => {
+  const s2 = await startServer({ population: 60, env: { MVW_REQUIRE_HTTPS: '1', MVW_TRUSTED_PROXIES: '127.0.0.1,::1' } });
+  try {
+    const lan = { 'x-forwarded-for': '198.51.100.3' };
+    const g = httpClient(s2.url);
+    const me = await g.get('/api/auth/me', lan);
+    assert.equal(me.json.secure, false);
+    assert.equal(me.json.signInAllowed, false);
+    const r = await g.post('/api/auth/signin', { login: 'owner', password: 'wrong-password-1' }, lan);
+    assert.equal(r.status, 400, 'proxied plain http');
+    assert.equal(r.json.code, 'https_required');
+    assert.equal((await g.post('/api/auth/signin', { login: 'owner', password: 'wrong-password-1' })).status, 401, 'localhost still signs in');
+    assert.equal((await g.post('/api/auth/signin', { login: 'owner', password: 'wrong-password-1' }, fwd('198.51.100.3'))).status, 401, 'and HTTPS through the proxy');
+  } finally { await s2.stop(); }
 });
 
 // A request forwarded by the (trusted, loopback) TLS proxy for a client at `ip`.
@@ -240,7 +279,7 @@ test('live-stream connections are limited per client address', async () => {
 
 // How the client address is derived is covered in permissions.test.mjs; here: the server believes no forwarded header.
 test('without trusted proxies, forwarded headers are not believed', async () => {
-  const s2 = await startServer({ population: 60, env: { MVW_TRUSTED_PROXIES: 'none' } });
+  const s2 = await startServer({ population: 60, env: { MVW_TRUSTED_PROXIES: 'none', MVW_REQUIRE_HTTPS: '1' } });
   try {
     const g = httpClient(s2.url);
     assert.equal((await g.get('/api/auth/me', fwd('203.0.113.7'))).json.secure, false, 'a forwarded https scheme is not believed');

@@ -54,7 +54,7 @@ test('.dockerignore keeps private and runtime files out of the build context', (
 
 test('compose.yaml: the app on the loopback address only, its data and key on volumes, the proxy as a profile', () => {
   const y = read('compose.yaml');
-  assert.match(y, /^      - "127\.0\.0\.1:\$\{MVW_PORT:-8570\}:8570"$/m);
+  assert.match(y, /^      - "\$\{MVW_BIND:-127\.0\.0\.1\}:\$\{MVW_PORT:-8570\}:8570"$/m, 'the loopback address unless MVW_BIND says otherwise');
   assert.match(y, /^      - data:\/data$/m);
   assert.match(y, /^      - keys:\/keys$/m);
   assert.match(y, /^    profiles: \[proxy\]$/m);

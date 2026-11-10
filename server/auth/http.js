@@ -29,9 +29,16 @@ export function parseCookies(header) {
   return out;
 }
 
-/** A __Host- session cookie: host-only, whole site, HTTPS only, invisible to scripts, never sent cross-site. */
-export function sessionCookie(name, value, maxAgeSec) {
-  return `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${Math.max(0, Math.floor(maxAgeSec))}`;
+/** A session cookie: host-only, whole site, invisible to scripts, never sent cross-site. The __Host- one is HTTPS only
+ *  (Secure); the plain one (secure false) is for a connection without HTTPS, where browsers drop Secure cookies. */
+export function sessionCookie(name, value, maxAgeSec, secure = true) {
+  return `${name}=${value}; Path=/;${secure ? ' Secure;' : ''} HttpOnly; SameSite=Strict; Max-Age=${Math.max(0, Math.floor(maxAgeSec))}`;
+}
+
+/** The session cookie's name over plain HTTP: the __Host- name without its prefix (browsers refuse __Host- cookies
+ *  that are not Secure). */
+export function plainCookieName(name) {
+  return String(name).replace(/^__Host-/, '') || 'mvw-session';
 }
 
 export class HttpPolicy {
@@ -42,10 +49,13 @@ export class HttpPolicy {
    * @param {string} [o.publicUrls]      comma-separated public addresses (MVW_PUBLIC_URL); when set, only their origins
    *                                      (and the loopback address) may send state-changing requests
    */
-  constructor({ trustedProxies = 'none', publicUrls = '', localPeers = [] } = {}) {
+  constructor({ trustedProxies = 'none', publicUrls = '', localPeers = [], requireHttps = false } = {}) {
     // localPeers: peer addresses that count as this machine for plain-HTTP sign-in on localhost, like the loopback
     // address (the Docker image's default gateway, MVW_GATEWAY_IS_LOCAL; DECISIONS C105).
     this.localPeers = new Set(localPeers.map(normIp));
+    // requireHttps (MVW_REQUIRE_HTTPS): signing in only over HTTPS or on this machine. Off by default: a self-hosted
+    // world on a home network or a tailnet signs in over plain HTTP too, with a plain (not Secure) session cookie.
+    this.requireHttps = !!requireHttps;
     this.trusted = new net.BlockList();
     for (const t of String(trustedProxies).split(',').map(s => s.trim()).filter(s => s && s !== 'none')) {
       const [addr, bits] = t.split('/');
@@ -88,6 +98,16 @@ export class HttpPolicy {
     if (this.scheme(req) === 'https') return true;
     const peer = this.peer(req);
     return (isLoopbackIp(peer) || this.localPeers.has(peer)) && LOOPBACK_HOSTS.has(hostName(req.headers.host)) && !req.headers['x-forwarded-for'];
+  }
+  /** Whether signing in (and the AI-app connector) is allowed on this request: a secure one, or any when HTTPS is not
+   *  required. */
+  canSignIn(req) {
+    return !this.requireHttps || this.isSecure(req);
+  }
+  /** The session cookie for this request: the __Host- one (Secure) on a secure connection, else the plain one. Each
+   *  connection reads only its own, so a cookie set over plain HTTP never counts on an HTTPS page. */
+  cookieFor(req, name) {
+    return this.isSecure(req) ? { name, secure: true } : { name: plainCookieName(name), secure: false };
   }
   /** Same-origin check for state-changing requests and WebSocket upgrades. Requests without an Origin header (tools)
    *  pass; for them the session's CSRF token is the protection. */

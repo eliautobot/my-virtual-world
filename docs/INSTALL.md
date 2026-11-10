@@ -11,8 +11,9 @@ A new world opens with the starting map: a city of about 110 buildings and 1,000
 airport, a marina and lake docks. It needs about 300 MB of memory and a fraction of one CPU core; larger cities need more.
 Windows and macOS: use Docker Desktop.
 
-**Signing in needs HTTPS**, except on the machine that runs the server. A fresh install can only be reached from that
-machine. [Reaching it from other machines](#reaching-it-from-other-machines) takes a reverse proxy with a certificate.
+A fresh Docker install can only be reached from the machine that runs it. [Reaching it from other
+machines](#reaching-it-from-other-machines) works over plain HTTP on your own network, or over HTTPS through a reverse
+proxy for the internet.
 
 ## Docker
 
@@ -207,8 +208,17 @@ sudo userdel my-virtual-world
 
 ## Reaching it from other machines
 
-People on other machines need HTTPS to sign in, so the server needs a reverse proxy with a certificate. Until then,
-nobody on another machine can reach the server.
+### On your own network: plain HTTP
+
+On a home network or a tailnet, other devices can sign in over plain HTTP. With Docker, set `MVW_BIND=0.0.0.0` in
+`.env` and run `docker compose up -d`; with systemd, `HOST=0.0.0.0` (the default). Then open
+`http://<this machine's address>:8570` on the other device. Passwords and the session cookie travel unencrypted on that
+network, so do not do this on a network you do not trust, and never open the port to the internet.
+
+### From the internet: HTTPS
+
+A world reachable from the internet needs a reverse proxy with a certificate. Set `MVW_REQUIRE_HTTPS=1` too: signing in
+then works only over HTTPS (or on the server itself, at `http://localhost`).
 
 ### Docker: the included proxy
 
@@ -271,9 +281,9 @@ An invalid setting stops the start, with a message that lists every setting to f
 
 - **The server does not start.** Read its log: `docker compose logs app`, or `journalctl -u my-virtual-world`. A
   configuration problem stops the start with a message that lists every setting to fix.
-- **Signing in says it needs HTTPS.** On another machine, set up a
-  [reverse proxy](#reaching-it-from-other-machines). On the server itself, open `http://localhost:8570`, not the
-  machine's name or address.
+- **Signing in says it needs HTTPS.** `MVW_REQUIRE_HTTPS=1` is set: on another machine, use the
+  [reverse proxy](#reaching-it-from-other-machines)'s HTTPS address; on the server itself, open `http://localhost:8570`.
+  The server log's `http://0.0.0.0:…` meant "every address of this machine", not an address to open.
 - **The setup code is lost, or the owner's password forgotten.** `node tools/admin.mjs reset-owner` writes a new setup
   code (before the administrator account exists) or a temporary owner password (after), see Administration.
 - **Stored secrets cannot be opened** after a restore or a move to a new machine. The server needs the key that the

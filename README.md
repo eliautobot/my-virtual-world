@@ -95,7 +95,7 @@ over.
 - A computer or server with about 1 GB of free memory (the starting city uses about 300 MB), Docker or Node.js 24.7+.
 - A modern browser with WebGL 2.
 - For agents: an API key from a model provider, a local model server, or an agent platform you already run.
-- For other devices and AI apps: HTTPS, through a reverse proxy with a certificate (compose.yaml includes one).
+- Other devices on your network: plain HTTP works. From the internet, and for AI apps like ChatGPT and Claude: HTTPS, through a reverse proxy with a certificate (compose.yaml includes one).
 
 ## Documentation
 

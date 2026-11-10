@@ -53,7 +53,7 @@ export function connectorHandler(d) {
   return async function handle(req, res, url) {
     const p = url.pathname, origin = originOf(req), issuer = origin, resource = `${origin}/mcp`;
     if (!d.enabled()) { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('Not found'); return; }
-    if (!d.policy.isSecure(req)) return json(req, res, 403, { error: 'https_required', error_description: 'Use https' });
+    if (!d.policy.canSignIn(req)) return json(req, res, 403, { error: 'https_required', error_description: 'Use https' });   // MVW_REQUIRE_HTTPS
     const own = AGENT_MCP.exec(p), ownMeta = AGENT_PRM.exec(p);   // one agent's own address (or its metadata)
     if (req.method === 'OPTIONS' && p !== '/mcp' && !own) {   // a web client's CORS preflight for the open endpoints
       res.writeHead(204, { ...OPEN, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type, authorization, mcp-protocol-version', 'access-control-max-age': '600' }); res.end(); return;

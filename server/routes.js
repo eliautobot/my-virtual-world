@@ -17,7 +17,7 @@ import { HostError } from './providers/host.js';
 import { ChatError } from './chat/chat.js';
 import { INLINE as INLINE_MEDIA } from './chat/provider-media.js';
 import { AttachmentError } from './chat/attachments.js';
-import { sessionCookie } from './auth/http.js';
+import { sessionCookie, plainCookieName } from './auth/http.js';
 
 export class Router {
   constructor() { this.routes = []; }
@@ -87,13 +87,19 @@ export function createApi(d) {
   /** The address people open (MVW_PUBLIC_URL, else this request's own), for invite links. */
   const siteBase = req => [...policy.publicOrigins][0] || `${policy.scheme(req)}://${String(req.headers.host || 'localhost')}`;
   const requireSecure = req => {
-    if (!policy.isSecure(req)) throw new AuthError(400, 'https_required', 'Signing in needs a secure connection: open this site over HTTPS');
+    if (!policy.canSignIn(req)) throw new AuthError(400, 'https_required', 'Signing in needs a secure connection here: open this site over HTTPS');
   };
   const router = new Router();
   const ok = (json, status = 200, headers = null) => ({ status, json, headers });
   const notFound = what => ok({ error: `No such ${what}`, code: 'not_found' }, 404);
   const tasks = P => perms.allowed(P, 'agents.view_tasks');
-  const setCookie = (value, maxAgeSec) => ({ 'set-cookie': sessionCookie(cookieName, value, maxAgeSec) });
+  // the cookie this connection uses (the __Host- one over a secure connection, the plain one over plain HTTP); signing
+  // out forgets both, so none is left behind
+  const setCookie = (value, maxAgeSec, req) => {
+    const c = policy.cookieFor(req, cookieName);
+    return { 'set-cookie': sessionCookie(c.name, value, maxAgeSec, c.secure) };
+  };
+  const clearCookies = () => ({ 'set-cookie': [sessionCookie(cookieName, '', 0), sessionCookie(plainCookieName(cookieName), '', 0, false)] });
 
   /** What the page needs to know about its visitor. The CSRF token is only readable by same-origin scripts. */
   function me(req, P) {
@@ -109,6 +115,7 @@ export function createApi(d) {
       reauthLeftMs: P.session ? Math.max(0, P.session.authAt + LIMITS.reauthMs - Date.now()) : 0,
       requireSignIn: perms.requireSignIn(),
       secure: policy.isSecure(req),
+      signInAllowed: policy.canSignIn(req),   // false only with MVW_REQUIRE_HTTPS on a plain-HTTP connection
       licence: d.licence ? d.licence.status() : null,   // demo mode or licensed (WP1.11)
     };
   }
@@ -264,7 +271,7 @@ export function createApi(d) {
       const r = await accounts.signIn({ login: body.login, password: body.password, ip, userAgent: text(req.headers['user-agent'], 200) });
       if (r.twofa) return ok({ twofa: 'required', ticket: r.ticket });   // the code comes in /api/auth/signin/2fa
       if (P.session) accounts.signOut(P, {}, ip);   // the session this browser had before
-      return ok(me(req, r.principal), 200, setCookie(r.token, LIMITS.sessionMaxMs / 1000));
+      return ok(me(req, r.principal), 200, setCookie(r.token, LIMITS.sessionMaxMs / 1000, req));
     },
   });
   router.add({
@@ -272,7 +279,7 @@ export function createApi(d) {
       requireSecure(req);
       const r = await accounts.signInTwofa({ ticket: body.ticket, code: body.code, ip, userAgent: text(req.headers['user-agent'], 200) });
       if (P.session) accounts.signOut(P, {}, ip);
-      return ok(me(req, r.principal), 200, setCookie(r.token, LIMITS.sessionMaxMs / 1000));
+      return ok(me(req, r.principal), 200, setCookie(r.token, LIMITS.sessionMaxMs / 1000, req));
     },
   });
   // the first start: whoever holds the setup code creates the administrator account and is signed in (server/auth/accounts.js)
@@ -281,7 +288,7 @@ export function createApi(d) {
       requireSecure(req);
       const r = await accounts.setupOwner({ code: body.code, login: body.login, displayName: body.displayName, password: body.password, ip, userAgent: text(req.headers['user-agent'], 200) });
       if (P.session) accounts.signOut(P, {}, ip);
-      return ok(me(req, r.principal), 201, setCookie(r.token, LIMITS.sessionMaxMs / 1000));
+      return ok(me(req, r.principal), 201, setCookie(r.token, LIMITS.sessionMaxMs / 1000, req));
     },
   });
   router.add({
@@ -289,7 +296,7 @@ export function createApi(d) {
       requireSecure(req);
       if (!perms.flag('registration.open')) throw new AuthError(403, 'registration_closed', 'New accounts need an invite here');
       const r = await accounts.register({ login: body.login, displayName: body.displayName, password: body.password, ip, userAgent: text(req.headers['user-agent'], 200) });
-      return ok(me(req, r.principal), 201, setCookie(r.token, LIMITS.sessionMaxMs / 1000));
+      return ok(me(req, r.principal), 201, setCookie(r.token, LIMITS.sessionMaxMs / 1000, req));
     },
   });
   router.add({
@@ -300,7 +307,7 @@ export function createApi(d) {
     method: 'POST', path: '/api/invites/accept', cap: 'auth.register', csrf: false, handler: async ({ req, ip, body }) => {
       requireSecure(req);
       const r = await accounts.acceptInvite({ token: body.token, login: body.login, displayName: body.displayName, password: body.password, ip, userAgent: text(req.headers['user-agent'], 200) });
-      return ok(me(req, r.principal), 201, setCookie(r.token, LIMITS.sessionMaxMs / 1000));
+      return ok(me(req, r.principal), 201, setCookie(r.token, LIMITS.sessionMaxMs / 1000, req));
     },
   });
   router.add({
@@ -312,7 +319,7 @@ export function createApi(d) {
         else if (typeof body.endpoint === 'string' && body.endpoint) d.notifications.unsubscribe(P.account.id, body.endpoint.slice(0, 1000));
       }
       accounts.signOut(P, { everywhere: body.everywhere === true }, ip);
-      return ok(me(req, GUEST), 200, setCookie('', 0));
+      return ok(me(req, GUEST), 200, clearCookies());
     },
   });
   router.add({
@@ -342,7 +349,7 @@ export function createApi(d) {
       if (!Number.isInteger(id)) throw new AuthError(400, 'bad_request', 'Which device?');
       if (id === P.session.id) {
         accounts.signOut(P, {}, ip);
-        return ok({ ...me(req, GUEST), devices: [], signedOut: true }, 200, setCookie('', 0));
+        return ok({ ...me(req, GUEST), devices: [], signedOut: true }, 200, clearCookies());
       }
       accounts.revokeDevice(P, id, ip);
       return ok({ devices: accounts.devices(P) });
@@ -490,7 +497,7 @@ export function createApi(d) {
   router.add({
     method: 'POST', path: '/api/account/delete', cap: 'account.data', reauth: true, handler: async ({ req, P, ip, body }) => {
       await accounts.deleteSelf(P, body.password, ip);
-      return ok({ ...me(req, GUEST), deleted: true }, 200, setCookie('', 0));
+      return ok({ ...me(req, GUEST), deleted: true }, 200, clearCookies());
     },
   });
 

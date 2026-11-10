@@ -30,7 +30,8 @@ wrong passwords (5 within 15 minutes). Lost it? `node tools/admin.mjs reset-owne
 Account settings (the account chip in the top bar) change the display name, the username (asks for the password)
 and the password, list the signed-in devices, and sign out one device or all.
 
-Signing in needs HTTPS, except on `http://localhost` and `http://127.0.0.1`.
+Signing in works over HTTPS, and over plain HTTP on your own network (a notice says the connection is not encrypted).
+`MVW_REQUIRE_HTTPS=1` allows it only over HTTPS or on `http://localhost` and `http://127.0.0.1`.
 
 ## A forgotten password
 
