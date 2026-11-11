@@ -1173,8 +1173,11 @@ export function create(a, mgr, o = {}) {
     if (W && !W.messages.length) paintThread();
   }
   async function setPref(k, v) {
-    if (W.session) { try { await prefs(W.session, { [k]: v }); } catch (e) { return app.toast?.(e.message, 'bad'); } }
-    else W.pending[k] = v;
+    if (W.session) {
+      try { await prefs(W.session, { [k]: v }); } catch (e) { return app.toast?.(e.message, 'bad'); }
+      // (the provider's session took it at once: what it was read to have is that now — null, the default again)
+      if (W.prov && (k === 'model' || k === 'effort')) W.prov = { ...W.prov, [k]: v || null };
+    } else W.pending[k] = v;
     paintComposer();
   }
   /** The / menu: while the message is a slash command being typed, the agent's commands that start so (a provider's —
@@ -1226,7 +1229,7 @@ export function create(a, mgr, o = {}) {
   function modelMenu(anchor) {
     const m = W.models;
     if (!m || !m.models?.length) return popup(anchor, [{ label: m ? 'No other models here' : 'Loading the models…', disabled: true }]);
-    const cur = curModel() || m.default, price = x => (x.priceIn !== undefined ? `$${x.priceIn} / $${x.priceOut} per M tokens` : '');
+    const cur = curModel() || W.prov?.model || m.default, price = x => (x.priceIn !== undefined ? `$${x.priceIn} / $${x.priceOut} per M tokens` : '');
     const row = x => `<button type="button" class="cw-pi${x.id === cur ? ' on' : ''}" data-model="${esc(x.id)}" role="option">
       <span class="cw-pi-l">${esc(x.label || x.id)}${x.id === m.default ? ' <em>default</em>' : ''}</span>
       <span class="cw-pi-s">${[x.images ? '👁 images' : '', x.files ? '📄 files' : '', price(x), x.context ? `${kTok(x.context)} context` : ''].filter(Boolean).join(' · ')}</span>${x.id === cur ? '<span class="cw-pi-ok">✓</span>' : ''}</button>`;
@@ -1252,7 +1255,7 @@ export function create(a, mgr, o = {}) {
     return [['', 'Default', mm.effortDefault ? `The model's own: ${mm.effortDefault}` : 'The model\'s own'], ...mm.effort.map(x => [x.id, cap1(x.label || x.id), x.id === 'off' ? 'Answers at once' : ''])];
   }
   function effortMenu(anchor) {
-    const cur = curEffort() || '';
+    const cur = curEffort() || W.prov?.effort || '';
     popup(anchor, efforts().map(([v, l, s]) => ({ label: l, sub: s, on: v === cur, run: () => setPref('effort', v || null) })), { cls: 'cw-pop-effort' });
   }
   function paintCtx(caps) {

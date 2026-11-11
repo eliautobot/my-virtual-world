@@ -125,6 +125,33 @@ test('models with their thinking levels; a choice goes into the gateway\'s sessi
   assert.equal(gw.sessions.get(key).label, 'Planning');
 });
 
+test('the default model and thinking level chosen again clear the gateway session\'s own, and the next message keeps them', async () => {
+  const chat = await newChat();
+  await run(owner, chat.id, 'hello');
+  const key = (await owner.get(`/api/chat/recent?agent=${agent}`)).json.sessions.find(x => x.id === chat.id).key;
+  assert.equal((await owner.post('/api/chat-sessions/prefs', { agent, session: chat.id, model: 'stub/stub-2', effort: 'high' })).status, 200);
+  assert.equal(gw.sessions.get(key).model, 'stub/stub-2');
+  // (the picker sends null for the default)
+  const back = await owner.post('/api/chat-sessions/prefs', { agent, session: chat.id, model: null });
+  assert.equal(back.status, 200, back.text);
+  assert.equal(back.json.session.model, null);
+  assert.deepEqual(gw.patches.at(-1), { key, model: null, thinkingLevel: undefined, label: undefined }, 'the session\'s own model cleared');
+  assert.equal(gw.sessions.get(key).model, 'stub/stub-1', 'the gateway is on the default again');
+  const eff = await owner.post('/api/chat-sessions/prefs', { agent, session: chat.id, effort: null });
+  assert.equal(eff.status, 200, eff.text);
+  assert.deepEqual(gw.patches.at(-1), { key, model: undefined, thinkingLevel: null, label: undefined }, 'the session\'s own thinking level cleared');
+  assert.equal(gw.sessions.get(key).thinkingLevel, null);
+  const h = (await owner.get(`/api/providers/history?agent=${agent}&session=${chat.id}`)).json;
+  assert.deepEqual(h.session, { model: 'stub/stub-1', effort: null }, 'the history says so (the picker\'s label)');
+  const n = gw.patches.length;
+  await run(owner, chat.id, 'next');
+  assert.equal(gw.patches.length, n, 'the next message sets nothing again');
+  assert.equal(gw.sessions.get(key).model, 'stub/stub-1');
+  // a model chosen again after that still goes in
+  await owner.post('/api/chat-sessions/prefs', { agent, session: chat.id, model: 'stub/stub-2' });
+  assert.equal(gw.sessions.get(key).model, 'stub/stub-2');
+});
+
 test('whoever manages the provider sees its sessions made elsewhere; someone it is shared with sees only their own', async () => {
   // a session started outside this world (OpenClaw's Control UI, a channel)
   const key = gw.methods['sessions.create']({ agentId: 'tester' }).key;

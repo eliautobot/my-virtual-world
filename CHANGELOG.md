@@ -2,6 +2,14 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.5.1 (2026-11-11)
+
+- **Going back to the default model now works with OpenClaw agents**: in an OpenClaw agent's chat, choosing another
+  model and then the default model again left the chat on the other model. The picker went back to showing that model
+  and the next answers still came from it. Choosing the default now clears the chat's own model on the OpenClaw
+  gateway, so the default is used again and the picker shows it. The same fix applies to the thinking level's
+  **Default**.
+
 ## v2.5.0 (2026-11-10)
 
 - **Sign in over plain HTTP on your own network**: other devices on a home network or a tailnet can now create

@@ -858,9 +858,10 @@ export class Chat {
       p.effort = body.effort;
     }
     // (a provider that keeps its own sessions takes the model and thinking level into the session at once — as its own
-    // pickers do — and refuses one the model hasn't; a chat not started there yet takes them with its first message)
-    if ((p.model || p.effort) && s.key !== LAZY_KEY && this.patches(a)) {
-      await this.call(this.linkOf(a), 'patchSession', { agentKey: a.nativeId || a.key, sessionKey: s.key, ...(p.model ? { model: p.model } : {}), ...(p.effort ? { effort: p.effort } : {}) });
+    // pickers do — and refuses one the model hasn't; a chat not started there yet takes them with its first message.
+    // null is the default chosen again: the session's own choice is cleared there too, or it stays on the one before)
+    if (('model' in p || 'effort' in p) && s.key !== LAZY_KEY && this.patches(a)) {
+      await this.call(this.linkOf(a), 'patchSession', { agentKey: a.nativeId || a.key, sessionKey: s.key, ...('model' in p ? { model: p.model } : {}), ...('effort' in p ? { effort: p.effort } : {}) });
     }
     if (body.pinned !== undefined) p.pinned = !!body.pinned;
     // Work or Life (CHAT.md §13; null: the agent's default): a change of what a chat with messages is in is marked in it

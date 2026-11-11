@@ -482,7 +482,8 @@ export class LinkChat {
     if (!sessionKey || sessionKey === LAZY) return { ok: false };
     const profile = String(agentKey || '');
     if (label !== undefined) await this.link.rest('PATCH', `/api/sessions/${encodeURIComponent(this.renamed.get(sessionKey) || sessionKey)}`, { query: { profile }, body: { title: label || '' } });
-    if (model !== undefined || effort !== undefined) {
+    // (a default chosen again, null, is not set here: Hermes' session keeps what it has)
+    if (model || effort) {
       const sid = await this.liveFor(sessionKey, profile);
       await this.prefsFor(sessionKey, sid, profile, model || null, effort || null);
     }

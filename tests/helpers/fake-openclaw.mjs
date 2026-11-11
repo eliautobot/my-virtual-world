@@ -164,8 +164,10 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
       'sessions.patch': ({ key, model, thinkingLevel, label }) => {
         const x = f.sessions.get(key); if (!x) throw Object.assign(new Error('unknown session'), { code: 'INVALID_REQUEST' });
         f.patches.push({ key, model, thinkingLevel, label });
-        if (model !== undefined && model !== null) x.model = model;
-        if (thinkingLevel) {
+        // (null clears the session's own choice, as on a gateway: back to the agent's model, the model's own thinking)
+        if (model !== undefined) x.model = model === null ? 'stub/stub-1' : model;
+        if (thinkingLevel === null) x.thinkingLevel = null;
+        else if (thinkingLevel) {
           const m = MODELS.find(y => `stub/${y.id}` === x.model);
           if (!m.thinkingLevels.some(l => l.id === thinkingLevel)) throw Object.assign(new Error(`invalid thinkingLevel (use ${m.thinkingLevels.map(l => l.id).join('|')})`), { code: 'INVALID_REQUEST' });
           x.thinkingLevel = thinkingLevel;
