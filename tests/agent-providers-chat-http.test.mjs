@@ -152,6 +152,25 @@ test('the default model and thinking level chosen again clear the gateway sessio
   assert.equal(gw.sessions.get(key).model, 'stub/stub-2');
 });
 
+test('a default model the gateway cannot run now is still in the picker\'s list, marked; choosing it clears the session\'s own', async () => {
+  const was = gw.methods['models.list'];
+  gw.methods['models.list'] = () => ({ models: was().models.map(x => (x.id === 'stub-1' ? { ...x, available: false, unavailableReason: 'missing-auth' } : x)) });
+  try {
+    const m = (await owner.get(`/api/providers/models?agent=${agent}`)).json;
+    assert.equal(m.default, 'stub/stub-1', 'the default is still the default');
+    assert.deepEqual(m.models.map(x => [x.id, x.unavailable]), [['stub/stub-1', 'missing-auth'], ['stub/stub-2', undefined]]);
+    assert.deepEqual(m.models[0].effort.map(x => x.id), ['off'], 'with its own thinking levels');
+    const chat = await newChat();
+    await run(owner, chat.id, 'hello');
+    const key = (await owner.get(`/api/chat/recent?agent=${agent}`)).json.sessions.find(x => x.id === chat.id).key;
+    await owner.post('/api/chat-sessions/prefs', { agent, session: chat.id, model: 'stub/stub-2' });
+    assert.equal(gw.sessions.get(key).model, 'stub/stub-2');
+    const back = await owner.post('/api/chat-sessions/prefs', { agent, session: chat.id, model: null });
+    assert.equal(back.status, 200, back.text);
+    assert.equal(gw.sessions.get(key).model, 'stub/stub-1', 'the gateway is on the default again');
+  } finally { gw.methods['models.list'] = was; }
+});
+
 test('whoever manages the provider sees its sessions made elsewhere; someone it is shared with sees only their own', async () => {
   // a session started outside this world (OpenClaw's Control UI, a channel)
   const key = gw.methods['sessions.create']({ agentId: 'tester' }).key;

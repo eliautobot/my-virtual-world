@@ -363,18 +363,23 @@ function tidy(turn) {
   return { role: 'assistant', text: turn.text, ts: turn.ts, meta };
 }
 
-/** A model list (models.list) as the model picker's: ids as OpenClaw names them in a session (provider/model). */
+/** A model list (models.list) as the model picker's: ids as OpenClaw names them in a session (provider/model). The models
+ *  the gateway cannot run now are left out, but for the agent's default: it stays, marked (`unavailable`: the gateway's
+ *  reason), so the picker still shows what the agent is on and still has the way back to it. */
 export function modelsOf(r, current = null) {
-  const list = (r && Array.isArray(r.models) ? r.models : []).filter(m => m && m.id && m.available !== false);
+  const all = (r && Array.isArray(r.models) ? r.models : []).filter(m => m && m.id);
   const ref = m => (m.provider ? `${m.provider}/${m.id}` : m.id);
-  const def = list.find(m => Array.isArray(m.tags) && m.tags.includes('default'));
+  const def = all.find(m => Array.isArray(m.tags) && m.tags.includes('default'));
+  const list = all.filter(m => m.available !== false || m === def).slice(0, 300);
+  if (def && !list.includes(def)) list[list.length - 1] = def;
   return {
     default: current || (def ? ref(def) : null),
-    models: list.slice(0, 300).map(m => ({
+    models: list.map(m => ({
       id: ref(m), label: String(m.name || m.id), context: Number.isFinite(m.contextWindow) ? m.contextWindow : undefined,
       images: Array.isArray(m.input) ? m.input.includes('image') : undefined, reasoning: !!m.reasoning,
       effort: Array.isArray(m.thinkingLevels) ? m.thinkingLevels.filter(x => x && x.id).map(x => ({ id: String(x.id), label: String(x.label || x.id) })) : undefined,
       effortDefault: m.thinkingDefault || undefined,
+      ...(m.available === false ? { unavailable: String(m.unavailableReason || 'unavailable').slice(0, 40) } : {}),
     })),
   };
 }

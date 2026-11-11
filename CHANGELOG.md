@@ -2,6 +2,14 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.5.2 (2026-11-11)
+
+- **The default model stays in the model picker when OpenClaw cannot run it**: when an OpenClaw gateway reported an
+  agent's default model as unavailable (for example, the sign-in for that model's provider had expired), the model
+  picker left it out. The picker then had no default, the model button read "Model", and the default could not be
+  chosen again. The default now stays in the list, tagged **default**, with a short note saying why it may not answer
+  (such as "Not signed in at the provider"). Other models the gateway cannot run are still left out.
+
 ## v2.5.1 (2026-11-11)
 
 - **Going back to the default model now works with OpenClaw agents**: in an OpenClaw agent's chat, choosing another

@@ -103,6 +103,21 @@ test('models, sessions and the context meter', () => {
   assert.equal(phaseText('starting_model'), 'Starting the model'); assert.equal(phaseText('new_phase_x'), 'New phase x');
 });
 
+test('the agent\'s default model stays in the model list when the gateway cannot run it now, marked; others it cannot run are left out', () => {
+  const m = modelsOf({ models: [
+    { id: 'big', name: 'Big', provider: 'p', contextWindow: 1000000, reasoning: true, tags: ['default', 'configured'], thinkingLevels: [{ id: 'low', label: 'low' }, { id: 'high', label: 'high' }], thinkingDefault: 'low', available: false, unavailableReason: 'missing-auth' },
+    { id: 'small', name: 'Small', provider: 'p', tags: ['configured'], available: true },
+    { id: 'gone', name: 'Gone', provider: 'p', tags: ['configured'], available: false, unavailableReason: 'missing-auth' }] });
+  assert.equal(m.default, 'p/big', 'still the default');
+  assert.deepEqual(m.models.map(x => x.id), ['p/big', 'p/small']);
+  assert.equal(m.models[0].unavailable, 'missing-auth'); assert.equal(m.models[1].unavailable, undefined);
+  assert.deepEqual(m.models[0].effort.map(x => x.id), ['low', 'high']); assert.equal(m.models[0].effortDefault, 'low');
+  // (a list longer than the picker takes: the default is among those kept)
+  const many = modelsOf({ models: [...Array.from({ length: 320 }, (_, i) => ({ id: `m${i}`, provider: 'p', available: true })), { id: 'last', provider: 'p', tags: ['default'], available: false }] });
+  assert.equal(many.models.length, 300); assert.equal(many.default, 'p/last');
+  assert.equal(many.models.find(x => x.id === 'p/last')?.unavailable, 'unavailable');
+});
+
 test('the agent asks: its question with its options and a free answer; the answer comes back', () => {
   const { out } = replay('run-question');
   const q = out.find(e => e.type === 'question.requested');

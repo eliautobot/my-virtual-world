@@ -1226,13 +1226,15 @@ export function create(a, mgr, o = {}) {
     const p = popup($w('.cw-box'), null, { cls: 'cw-pop-cmds pv-pop', html, wire: el => { el.onclick = e => { const b = e.target.closest('[data-k]'); if (b) choose(flat[Number(b.dataset.k)]); }; } });
     p.querySelector('[data-k]')?.classList.add('hl');
   }
+  /** Why the provider cannot run a model now, in a few words (the agent's default stays in the list, said so). */
+  function notNow(u) { return /auth/.test(String(u)) ? 'Not signed in at the provider' : 'Not available at the provider right now'; }
   function modelMenu(anchor) {
     const m = W.models;
     if (!m || !m.models?.length) return popup(anchor, [{ label: m ? 'No other models here' : 'Loading the models…', disabled: true }]);
     const cur = curModel() || W.prov?.model || m.default, price = x => (x.priceIn !== undefined ? `$${x.priceIn} / $${x.priceOut} per M tokens` : '');
-    const row = x => `<button type="button" class="cw-pi${x.id === cur ? ' on' : ''}" data-model="${esc(x.id)}" role="option">
+    const row = x => `<button type="button" class="cw-pi${x.id === cur ? ' on' : ''}${x.unavailable ? ' off' : ''}" data-model="${esc(x.id)}" role="option">
       <span class="cw-pi-l">${esc(x.label || x.id)}${x.id === m.default ? ' <em>default</em>' : ''}</span>
-      <span class="cw-pi-s">${[x.images ? '👁 images' : '', x.files ? '📄 files' : '', price(x), x.context ? `${kTok(x.context)} context` : ''].filter(Boolean).join(' · ')}</span>${x.id === cur ? '<span class="cw-pi-ok">✓</span>' : ''}</button>`;
+      <span class="cw-pi-s">${[x.unavailable ? `<span class="cw-pi-warn">${esc(notNow(x.unavailable))}</span>` : '', x.images ? '👁 images' : '', x.files ? '📄 files' : '', price(x), x.context ? `${kTok(x.context)} context` : ''].filter(Boolean).join(' · ')}</span>${x.id === cur ? '<span class="cw-pi-ok">✓</span>' : ''}</button>`;
     const paint = (p, q) => {
       const t = q.toLowerCase(), list = m.models.filter(x => !t || x.id.toLowerCase().includes(t) || String(x.label || '').toLowerCase().includes(t));
       list.sort((a, b) => (b.id === m.default) - (a.id === m.default) || (b.id === cur) - (a.id === cur));
@@ -1848,6 +1850,9 @@ export function create(a, mgr, o = {}) {
     const mb = $w('.cw-model');
     mb.classList.toggle('hidden', !caps.models);
     const mid = curModel() || W.prov?.model || W.models?.default || '';
+    // (the agent's default while the provider cannot run it: the button says so)
+    const mun = W.models?.models?.find(x => x.id === mid)?.unavailable;
+    mb.title = mun ? `Model · ${notNow(mun)}` : 'Model';
     mb.querySelector('.cw-tool-lb').textContent = mid ? (W.models?.models?.find(x => x.id === mid)?.label || mid).replace(/^[\w-]+\//, '').slice(0, 28) : 'Model';
     const eb = $w('.cw-effort');
     eb.classList.toggle('hidden', !caps.effort);

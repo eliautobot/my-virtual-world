@@ -304,6 +304,8 @@
 .cw-pi-l em { font-style: normal; font-size: 11px; color: var(--dim); margin-left: 4px; }
 .cw-pi-s { grid-column: 1; font-size: 11.5px; color: var(--dim); margin-top: 1px; }
 .cw-pi-ok { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--cw-acc); }
+.cw-pi.off .cw-pi-l { color: var(--dim); }
+.cw-pi-warn { color: var(--warn, #d9a441); }
 /* the agent picker: a row per agent, its ⧉ beside it — in a window of its own */
 .cw-pi-row { display: flex; align-items: stretch; gap: 2px; }
 .cw-pi-row .cw-pi { flex: 1; min-width: 0; }
