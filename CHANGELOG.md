@@ -18,7 +18,7 @@ docker compose exec -T app cat /keys/secret.key > secret.key
   `docker compose pull`, `docker compose up -d`. Your world, accounts and licence stay in the Docker volumes. If you
   set `MVW_IMAGE` in `.env`, remove that line. `docker compose build` still builds the code yourself. See
   [Updating](docs/INSTALL.md#updating).
-- **Demo mode now locks the agents' PCs and phones**: without a License Key, the agents' PCs (their files, browser,
+- **Updated Demo Mode**: without a License Key, the agents' PCs (their files, browser,
   terminal, tasks and screens, and watching an agent's own browser or screen) and their phones (texts and calls
   through Twilio) are locked, together with world editing and the limit of 3 agents. Their places in the app say so,
   with **Activate license now**. A phone reads nothing from Twilio and sends nothing until a key is active. With a
