@@ -7,6 +7,7 @@
 import { getJSON, post } from '../core/net.js';
 import { esc } from '../core/util.js';
 import { icon } from '../core/icons.js';
+import { isDemo, lockedPanel, LOCKED_TEXT } from './licence.js';
 
 const BROWSER_POLL_MS = 5000;   // the tabs (titles, addresses) read again this often while the browser shows
 const FRAME_GAP_MS = 80;        // the live picture at most ~12 frames a second
@@ -28,7 +29,8 @@ export function providerBrowser(o) {
   // until their next one)
   const B = { agent: null, body: null, state: null, loading: false, error: null, notice: null, tab: null, seq: 0, view: null, img: null, loop: 0, live: -1, poll: null, typed: '', typeTimer: null, wheel: null, editing: false };
   const bq = () => `agent=${B.agent}`;
-  const showing = () => !!B.agent && o.showing();
+  // (demo mode: an agent's browser is part of its PC, locked — nothing is asked, its place says so: paintBrowser)
+  const showing = () => !!B.agent && o.showing() && !isDemo();
   const repaint = () => o.repaint();
   /** Another agent's browser (or none): everything of the last one is dropped. */
   function reset(agent = null) {
@@ -38,7 +40,7 @@ export function providerBrowser(o) {
   }
   /** The browser's tabs, read again (the shown one kept while it is still there). */
   function loadBrowser() {
-    if (!B.agent) return Promise.resolve();
+    if (!B.agent || isDemo()) return Promise.resolve();
     if (!B.loadP) B.loadP = readBrowser().finally(() => { B.loadP = null; });
     return B.loadP;   // (one reading at a time: a second ask waits for it)
   }
@@ -176,6 +178,7 @@ export function providerBrowser(o) {
     <div class="cw-bw-note">A browser shared with the agent: what you do here, it sees.</div>`;
   function paintBrowser(body) {
     B.body = body;
+    if (isDemo()) { if (body._view !== 'locked') { lockedPanel(body, LOCKED_TEXT.browser); body._view = 'locked'; body._h = ''; } return; }
     if (body._view !== 'browser') {
       body.innerHTML = BROWSER; body._view = 'browser'; body._h = '';
       body.querySelector('.cw-bw-img').addEventListener('click', onPageClick);

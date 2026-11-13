@@ -71,8 +71,9 @@ export class Phone {
    *   principalFor: (ownerId: number|null) => object|null, setting: (path: string) => any, installId?: string,
    *   audit?: object, log?: object, now?: () => number, timers?: boolean }} o
    */
-  constructor({ dbs, agents, connections, host, chat, notifications = null, send, principalFor, setting, installId = 'mvw', audit = null, log = null, now = () => Date.now(), timers = true }) {
-    Object.assign(this, { dbs, agents, connections, host, chat, notifications, sendFn: send, principalFor, setting, installId, audit, log, now, timers });
+  constructor({ dbs, agents, connections, host, chat, notifications = null, send, principalFor, setting, installId = 'mvw', audit = null, log = null, now = () => Date.now(), timers = true, locked = () => false }) {
+    // locked(): demo mode's 'phone' lock stands (server/licence.js) — no Twilio call, no sync, nothing reaches the agent
+    Object.assign(this, { dbs, agents, connections, host, chat, notifications, sendFn: send, principalFor, setting, installId, audit, log, now, timers, locked });
     const db = dbs.db, w = dbs.worldId;
     this.db = db; this.w = w;
     this.q = {
@@ -216,6 +217,8 @@ export class Phone {
 
   // ---------------------------------------------------------------- Twilio
   async tw(c, method, params = {}) {
+    // every Twilio call goes through here: none in demo mode (licence enforcement, server/licence.js: never remove this)
+    if (this.locked()) throw new PhoneError(403, 'licence_required', 'Each agent\'s phone is locked in demo mode. A licence key unlocks it.');
     try {
       return await this.host.call('twilio', method, { connectionId: String(c.id), config: c.config, secrets: this.connections.secretsFor(c.id), ...params });
     } catch (e) {
@@ -696,6 +699,7 @@ export class Phone {
   }
   async tick() {
     if (this.ticking || this.timers === false) return;   // (stopped: the server is going, its database with it)
+    if (this.locked()) return;   // (demo mode: the phones rest until a licence key is active — server/licence.js)
     this.ticking = true;
     this.ticks += 1;
     try {
@@ -866,6 +870,7 @@ export class Phone {
   // ---------------------------------------------------------------- the agent
   /** What is waiting for the agent goes to it — one turn at a time per phone, in its phone chat. */
   async deliver(line) {
+    if (this.locked()) return;   // (demo mode: nothing reaches the agent — server/licence.js)
     const busy = this.delivering.get(line.id);
     if (busy) {
       const run = this.runs.get(busy);

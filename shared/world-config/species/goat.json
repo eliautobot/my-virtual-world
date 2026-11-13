@@ -1,0 +1,47 @@
+{
+ "id": "goat",
+ "name": "Wild goats",
+ "tier": "shared",
+ "model": "goat",
+ "asset": "/assets/fauna/goat/goat.json",
+ "behaviour": "graze",
+ "habitats": [
+  "rock",
+  "meadow"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  2,
+  6
+ ],
+ "perKm2": 6,
+ "habitatWeight": {
+  "rock": 1,
+  "meadow": 0.15
+ },
+ "size": 1.0,
+ "colors": [
+  "#e9e4d8"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#e9e4d8",
+   "hair": "#e9e4d8",
+   "legs": "#e9e4d8"
+  }
+ ],
+ "speed": 0.8,
+ "run": 8,
+ "flee": 30
+}

@@ -1,0 +1,34 @@
+{
+ "id": "chicken",
+ "name": "Chickens",
+ "tier": "shared",
+ "model": "bird",
+ "asset": "/assets/fauna/chicken/chicken.json",
+ "behaviour": "graze",
+ "habitats": [
+  "field"
+ ],
+ "hours": [
+  5.5,
+  20.5
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  4,
+  9
+ ],
+ "perKm2": 6,
+ "size": 1.0,
+ "colors": [
+  "#b07a45"
+ ],
+ "speed": 0.25,
+ "run": 0.9,
+ "flee": 6
+}

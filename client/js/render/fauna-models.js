@@ -320,6 +320,13 @@ export const MODELS = {
   ]),
 };
 
+// stand-ins for the modelled-only animals (2026-11-11: goat, wolf, tiger, shark come as Tripo models; if one can't
+// load, a near relative's built shape stands in)
+MODELS.goat = MODELS.sheep; MODELS.wolf = MODELS.deer; MODELS.tiger = MODELS.deer; MODELS.shark = MODELS.dolphin;
+// (2026-11-12: the second set, Tripo models too)
+MODELS.whale = MODELS.dolphin; MODELS.marlin = MODELS.dolphin; MODELS.manta = MODELS.turtle; MODELS.jellyfish = MODELS.reeffish;
+MODELS.boar = MODELS.sheep; MODELS.bull = MODELS.cow; MODELS.bear = MODELS.sheep; MODELS.moose = MODELS.deer;
+
 const ANIM = /* glsl */`
 attribute float aPart;
 attribute vec4 aTone, aAnim;

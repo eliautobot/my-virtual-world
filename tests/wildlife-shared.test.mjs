@@ -7,7 +7,7 @@ import { generateWorld } from '../server/world/generate.js';
 import { defaultIsland, Island } from '../shared/terrain.js';
 import { generateIslandRoads } from '../shared/island-roads.js';
 import { makeGrid } from '../shared/city.js';
-import { Wildlife, sharedSpecies, REGION } from '../server/world/wildlife.js';
+import { Wildlife, sharedSpecies, REGION, dry } from '../server/world/wildlife.js';
 import { biome } from '../shared/biome.js';
 
 function world() {
@@ -89,4 +89,81 @@ test('a grid laid out over a herd\'s land sends it away; taken away, the herds c
   w.roads = keep;
   for (let i = 0; i < 40; i++) A.tick(0.1, [spot], [], 10);
   assert.ok(all().some(inTown), 'the grid gone, they graze there again');
+});
+
+/** Every region of the island woken once with these species: its herds. */
+function census(w, species) {
+  const A = new Wildlife(w, { seed: 'test', clock, species }), I = A.island(), c = w.terrain.center, R = w.terrain.radius, all = [];
+  for (let i = Math.floor((c.x - R) / REGION); i <= Math.floor((c.x + R) / REGION); i++)
+    for (let j = Math.floor((c.z - R) / REGION); j <= Math.floor((c.z + R) / REGION); j++) all.push(...A.wake(I, i, j, 0).herds);
+  return { A, I, all };
+}
+const kindAt = (I, x, z) => { const k = biome(I, x, z, I.height(x, z), 1).kind; return k === 'lawn' ? 'meadow' : k === 'conifer' ? 'forest' : k; };
+
+test('a liking for each habitat: sheep mostly on the farms\' pastures, few out on the meadows (2026-11-12)', () => {
+  const w = world(), sheep = sharedSpecies().find(s => s.id === 'sheep');
+  const even = census(w, [{ ...sheep, habitatWeight: undefined }]).all, liked = census(w, [sheep]).all, I = census(w, []).I;
+  const on = (hs, k) => hs.filter(H => kindAt(I, H.ax, H.az) === k).length;
+  assert.ok(on(even, 'meadow') > 0 && on(liked, 'meadow') < on(even, 'meadow') * 0.35, `on the meadows: ${on(liked, 'meadow')} flocks, ${on(even, 'meadow')} without the liking`);
+  assert.ok(Math.abs(on(liked, 'field') - on(even, 'field')) <= Math.max(3, on(even, 'field') * 0.4), `on the pastures as many: ${on(liked, 'field')} vs ${on(even, 'field')}`);
+  const none = census(w, [{ ...sheep, habitatWeight: { meadow: 0 } }]).all;
+  assert.equal(on(none, 'meadow'), 0, 'none where it has no liking at all');
+});
+
+test('bears fish where the rivers fall: haunts found from the island\'s own waterfalls, not fixed places (2026-11-12)', () => {
+  const w = world(), bear = sharedSpecies().find(s => s.id === 'black-bear');
+  assert.ok(bear.haunts?.some(h => h.near === 'falls'), 'the bears\' catalogue entry has the waterfalls as a haunt');
+  // (only the haunt: no bears elsewhere, so every one placed is by a fall)
+  const only = { ...bear, perKm2: 0, haunts: bear.haunts.filter(h => h.near === 'falls') }, { A, I, all } = census(w, [only]);
+  const falls = I.lakes.filter(L => L.pool), lips = I.rivers.flatMap(R => R.drops || []);
+  assert.ok(falls.length > 0, 'the island has waterfalls');
+  assert.ok(all.length > 0, 'bears at the falls');
+  const within = only.haunts[0].within;
+  for (const H of all) {
+    const d = Math.min(...falls.map(L => Math.hypot(L.x - H.ax, L.z - H.az) - L.r), ...lips.map(f => Math.hypot(f.x - H.ax, f.z - H.az) - f.w / 2));
+    assert.ok(d <= within + 0.01, `a bear ${d.toFixed(0)} m from a fall`);
+    assert.ok(H.spot?.kind === 'falls' && dry(I, H.ax, H.az), 'keeping to the fall, on dry ground');
+  }
+  // the haunts follow the land: with no rivers (a flat, dry island), no falls and no bears there
+  const bare = census(w, [only]); bare.I.rivers = []; bare.I.lakes = bare.I.lakes.filter(L => !L.pool); bare.A._haunts = null;
+  assert.equal(bare.A.haunts(bare.I).count.falls, 0);
+  // and over a while by the falls, they keep near the water and out of it
+  const H0 = all[0], B = new Wildlife(w, { seed: 'test', clock, species: [only] });
+  for (let t = 0; t < 400; t++) B.tick(0.5, [{ x: H0.ax, z: H0.az }], [], 12);
+  const hs = [...B.regions.values()].flatMap(R => R.herds);
+  assert.ok(hs.length > 0);
+  for (const H of hs) for (const m of H.members) {
+    const p = B.at(m, B.t);
+    assert.ok(dry(I, p.x, p.z), 'not in the water (nor on a bank under the river\'s level)');
+    assert.ok(Math.hypot(p.x - H.spot.x, p.z - H.spot.z) - H.spot.r < within + 40, 'still by its fall');
+  }
+});
+
+test('the elder stag leads some of the deer herds in the hills, and a few roam alone (2026-11-12)', () => {
+  const w = world(), sps = sharedSpecies().filter(s => s.id === 'deer' || s.id === 'elder-deer'), { I, all } = census(w, sps);
+  const elder = all.filter(H => H.sp.id === 'elder-deer'), deer = all.filter(H => H.sp.id === 'deer'), alt = sps.find(s => s.id === 'elder-deer').altitude;
+  assert.ok(elder.length > 0, 'elder deer on the island');
+  for (const E of elder) {
+    assert.equal(E.members.length, 1, 'one stag');
+    if (E.with) {
+      const H = deer.find(d => d.id === E.with); assert.ok(H, 'with a herd of deer');
+      const h = I.height(H.ax, H.az); assert.ok(h >= alt[0] && h <= alt[1], `its herd in the hills (${h.toFixed(0)} m)`);
+    }
+  }
+  assert.ok(elder.some(E => E.with), 'some leading a herd');
+});
+
+test('roosters keep company with the hens: one beside some of the chickens\' groups, nowhere else (2026-11-12)', () => {
+  const w = world(), A = new Wildlife(w, { seed: 'test', clock }), I = A.island();
+  const c = w.terrain.center, R = w.terrain.radius, all = [];
+  for (let i = Math.floor((c.x - R) / REGION); i <= Math.floor((c.x + R) / REGION); i++)
+    for (let j = Math.floor((c.z - R) / REGION); j <= Math.floor((c.z + R) / REGION); j++) all.push(...(A.wake(I, i, j, 0)?.herds || []));
+  const hens = all.filter(h => h.sp.id === 'chicken'), cocks = all.filter(h => h.sp.id === 'rooster');
+  assert.ok(hens.length > 0, 'chickens on the farmland');
+  assert.ok(cocks.length > 0 && cocks.length <= hens.length, `roosters: ${cocks.length} with ${hens.length} flocks`);
+  for (const r of cocks) {
+    const h = hens.find(x => x.id === r.with);
+    assert.ok(h, 'each rooster with a flock');
+    assert.ok(Math.hypot(r.ax - h.ax, r.az - h.az) < 1e-6 && r.members.length === 1, 'at its place, alone');
+  }
 });

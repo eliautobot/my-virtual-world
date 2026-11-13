@@ -1,0 +1,157 @@
+{
+ "v": 1,
+ "model": "parrot",
+ "rig": "mvw-bird-v1",
+ "source": "Tripo Studio (2a3f2099-badd-44db-ab8a-5c0a6636b8f2); bird rig along its body, neck, wings and legs; folded, flapping, gliding, walking and swimming poses (tools/animals/bird_animal.py)",
+ "height": 0.457,
+ "span": 1.0,
+ "bones": [
+  "root",
+  "chest",
+  "neck1",
+  "head",
+  "tail1",
+  "tail2",
+  "shoulder.L",
+  "elbow.L",
+  "wrist.L",
+  "thigh.L",
+  "shin.L",
+  "tarsus.L",
+  "toes.L",
+  "shoulder.R",
+  "elbow.R",
+  "wrist.R",
+  "thigh.R",
+  "shin.R",
+  "tarsus.R",
+  "toes.R"
+ ],
+ "lods": [
+  {
+   "verts": 10198,
+   "tris": 13998,
+   "pos": 0,
+   "nrm": 122376,
+   "uv": 244752,
+   "skin": 326336,
+   "weight": 367128,
+   "index": 407920,
+   "indexType": "u16",
+   "min": [
+    -0.3028999865055084,
+    0.0003000000142492354,
+    -0.5001000165939331
+   ],
+   "max": [
+    0.3018999993801117,
+    0.45649999380111694,
+    0.4999000132083893
+   ]
+  },
+  {
+   "verts": 4346,
+   "tris": 5000,
+   "pos": 491908,
+   "nrm": 544060,
+   "uv": 596212,
+   "skin": 630980,
+   "weight": 648364,
+   "index": 665748,
+   "indexType": "u16",
+   "min": [
+    -0.3028999865055084,
+    0.0007999999797903001,
+    -0.49889999628067017
+   ],
+   "max": [
+    0.3018999993801117,
+    0.45649999380111694,
+    0.49779999256134033
+   ]
+  },
+  {
+   "verts": 1837,
+   "tris": 1500,
+   "pos": 695748,
+   "nrm": 717792,
+   "uv": 739836,
+   "skin": 754532,
+   "weight": 761880,
+   "index": 769228,
+   "indexType": "u16",
+   "min": [
+    -0.3028999865055084,
+    0.0008999999845400453,
+    -0.49889999628067017
+   ],
+   "max": [
+    0.296099990606308,
+    0.45350000262260437,
+    0.49779999256134033
+   ]
+  }
+ ],
+ "lodDist": [
+  25,
+  70
+ ],
+ "anim": {
+  "offset": 778228,
+  "frames": 244,
+  "bones": 20
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 180,
+   "fps": 15.0
+  },
+  "fly": {
+   "start": 180,
+   "frames": 24,
+   "fps": 108.0,
+   "hz": 4.5
+  },
+  "glide": {
+   "start": 204,
+   "frames": 40,
+   "fps": 14.0,
+   "hz": 0.35
+  }
+ },
+ "textures": {
+  "color": "parrot-color.jpg",
+  "mask": "parrot-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

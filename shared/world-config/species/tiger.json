@@ -1,0 +1,64 @@
+{
+ "id": "tiger",
+ "name": "Tigers",
+ "tier": "shared",
+ "model": "tiger",
+ "asset": "/assets/fauna/tiger/tiger.json",
+ "behaviour": "graze",
+ "habitats": [
+  "forest",
+  "meadow"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  1,
+  1
+ ],
+ "perKm2": 1.3,
+ "habitatWeight": {
+  "meadow": 0.2
+ },
+ "haunts": [
+  {
+   "near": "river",
+   "within": 100,
+   "perKm2": 2,
+   "on": [
+    "shore"
+   ]
+  },
+  {
+   "near": "lake",
+   "within": 100,
+   "perKm2": 1.5,
+   "on": [
+    "shore"
+   ]
+  }
+ ],
+ "size": 1.0,
+ "colors": [
+  "#d9822b"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#d9822b",
+   "hair": "#d9822b",
+   "legs": "#d9822b"
+  }
+ ],
+ "speed": 1.0,
+ "run": 12,
+ "flee": 50
+}

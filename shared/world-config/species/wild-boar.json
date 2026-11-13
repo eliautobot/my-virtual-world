@@ -1,0 +1,47 @@
+{
+ "id": "wild-boar",
+ "name": "Wild boar",
+ "tier": "shared",
+ "model": "boar",
+ "asset": "/assets/fauna/boar/boar.json",
+ "behaviour": "graze",
+ "habitats": [
+  "forest",
+  "meadow"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  2,
+  6
+ ],
+ "perKm2": 3,
+ "habitatWeight": {
+  "forest": 1,
+  "meadow": 0.3
+ },
+ "size": 1.0,
+ "colors": [
+  "#4a3f33"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#4a3f33",
+   "hair": "#4a3f33",
+   "legs": "#4a3f33"
+  }
+ ],
+ "speed": 0.9,
+ "run": 9,
+ "flee": 35
+}

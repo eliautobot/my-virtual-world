@@ -490,7 +490,9 @@ test('which chats are working: an answer being written here, or the provider run
   await new Promise(res => ws.once('open', res));
   await sleep(200);
   // a turn on another channel (nobody here following it): the gateway's session feed says the session runs one
-  gw.external(key, 'thinking', 'From the phone', 250);   // (slow enough to be seen on a busy machine)
+  // (the recorded turn has one pause: well over the activity feed's 250 ms settle window — a turn that ends within it
+  // is never reported, which is what a busy machine made of a 250 ms one)
+  gw.external(key, 'thinking', 'From the phone', 1500);
   let w = null;
   for (let i = 0; i < 100 && !(w = await listed()).working; i++) await sleep(50);
   assert.equal(w.working, true, 'listed as working');
@@ -498,6 +500,121 @@ test('which chats are working: an answer being written here, or the provider run
   assert.equal((await listed()).working, undefined, 'and not, once the turn is over');
   ws.close();
   assert.deepEqual([marks[0], marks.at(-1)], [true, false], 'the page was told as it happened');
+});
+
+test('Stop for a chat the provider works in with no answer of ours: the session is stopped as OpenClaw\'s own page does it (the run in flight by its id, else the session)', async () => {
+  const chat = await newChat();
+  await run(owner, chat.id, 'hello');
+  const key = (await owner.get(`/api/chat/recent?agent=${agent}`)).json.sessions.find(x => x.id === chat.id).key;
+  const working = async () => !!(await owner.get(`/api/chat/recent?agent=${agent}`)).json.sessions.find(x => x.id === chat.id).working;
+  const until = async want => { for (let i = 0; i < 200 && (await working()) !== want; i++) await sleep(50); return working(); };
+  assert.equal((await owner.get(`/api/chat/can?agent=${agent}`)).json.stopSession, true, 'whoever manages the provider is told they may');
+  // nothing running there: said so
+  const idle = await owner.post('/api/providers/interrupt', { agent, session: chat.id });
+  assert.deepEqual([idle.status, idle.json.scope, idle.json.stopped], [200, 'session', false], idle.text);
+  // a turn from another channel, in flight on the gateway (it names it: chat.history's inFlightRun): stopped by its
+  // run id, as OpenClaw's Control UI stops a run it learned of on opening the chat
+  const sess0 = gw.sessionAborts.length;
+  const ext = gw.external(key, 'thinking', 'From the phone', 400);
+  assert.equal(await until(true), true, 'marked working');
+  const r = await owner.post('/api/providers/interrupt', { agent, session: chat.id });
+  assert.deepEqual([r.status, r.json.scope, r.json.stopped], [200, 'session', true], r.text);
+  assert.deepEqual(gw.aborts.at(-1), { sessionKey: key, runId: ext }, 'chat.abort with the run in flight');
+  assert.equal(gw.sessionAborts.length, sess0, 'no session stop for it');
+  assert.equal(gw.runs.get(ext).aborted, true);
+  assert.equal(await until(false), false, 'and no longer working');
+  // a session the gateway reports working with no run anyone can name (what a restart here leaves behind)
+  gw.hold(key);
+  assert.equal(await until(true), true, 'marked working again');
+  const h = await owner.post('/api/providers/interrupt', { agent, session: chat.id });
+  assert.deepEqual([h.status, h.json.scope, h.json.stopped], [200, 'session', true], h.text);
+  assert.equal(await until(false), false, 'cleared');
+  assert.deepEqual(gw.sessionAborts.at(-1), { key, agentId: 'tester', clearQueued: true }, 'no run to name: the session, its queued follow-ups discarded');
+  // … one it names a run for, of the kind stopped through its session (sessionAbortable): sessions.abort with the run
+  gw.hold(key, { runId: 'held-1', sessionAbortable: true });
+  assert.equal(await until(true), true, 'marked working (held-1)');
+  const h1 = await owner.post('/api/providers/interrupt', { agent, session: chat.id });
+  assert.equal(h1.json.stopped, true, h1.text);
+  assert.deepEqual(gw.sessionAborts.at(-1), { key, agentId: 'tester', runId: 'held-1' });
+  assert.equal(await until(false), false, 'cleared (held-1)');
+  // … and one it names a plain run for: that run, by its id
+  gw.hold(key, { runId: 'held-2' });
+  assert.equal(await until(true), true, 'marked working (held-2)');
+  const h2 = await owner.post('/api/providers/interrupt', { agent, session: chat.id });
+  assert.equal(h2.json.stopped, true, h2.text);
+  assert.deepEqual(gw.aborts.at(-1), { sessionKey: key, runId: 'held-2' });
+  assert.equal(await until(false), false, 'cleared (held-2)');
+  // an answer of ours being written: stopped by its run as before (chat.abort with the run), asked for by the chat
+  const n = gw.sessionAborts.length;
+  let asked = false;
+  const own = await run(owner, chat.id, 'Slowly [[slow]] [[think]]', { onEvent: async e => { if (e.type === 'run.status' && !asked) { asked = true; const x = await owner.post('/api/providers/interrupt', { agent, session: chat.id }); assert.equal(x.json.scope, 'run', x.text); } } });
+  assert.ok(gw.aborts.some(a => a.runId === own.id), 'chat.abort with the run');
+  assert.equal(gw.sessionAborts.length, n, 'no session stop for it');
+  assert.equal(own.events.at(-1).status, 'stopped');
+  // not for someone the agent is only shared with (to chat), nor on someone else's chat
+  const annId = (await ann.get('/api/auth/me')).json.account.id;
+  assert.equal((await owner.post('/api/agents/share', { id: agent, kind: 'account', who: String(annId), level: 'use' })).status, 200);
+  const annCan = (await ann.get(`/api/chat/can?agent=${agent}`)).json;
+  assert.deepEqual([annCan.ok, annCan.stopSession], [true, undefined], 'she may chat, and is not told she may stop it');
+  const annChat = await newChat(ann);
+  assert.equal((await ann.post('/api/providers/interrupt', { agent, session: annChat.id })).status, 403);
+  assert.equal((await ann.post('/api/providers/interrupt', { agent, session: chat.id })).status, 404);
+  assert.equal(gw.sessionAborts.length, n);
+});
+
+test('a typed /stop stops the session as OpenClaw\'s own page does and ends at once; Stop on a run the gateway does not know ends it and stops what runs there', async () => {
+  const chat = await newChat();
+  await run(owner, chat.id, 'hello');
+  const key = (await owner.get(`/api/chat/recent?agent=${agent}`)).json.sessions.find(x => x.id === chat.id).key;
+  const working = async () => !!(await owner.get(`/api/chat/recent?agent=${agent}`)).json.sessions.find(x => x.id === chat.id).working;
+  const until = async want => { for (let i = 0; i < 200 && (await working()) !== want; i++) await sleep(50); return working(); };
+  // a turn from another channel running there: /stop typed in the chat
+  const ext = gw.external(key, 'thinking', 'From the phone', 400);
+  assert.equal(await until(true), true, 'marked working');
+  const s0 = gw.sessionAborts.length, n0 = gw.sends.length;
+  const t0 = Date.now();
+  const st = await run(owner, chat.id, '/stop');
+  assert.ok(Date.now() - t0 < 5000, 'it ends at once (no turn for it)');
+  assert.equal(st.events.at(-1).type, 'run.end');
+  assert.equal(st.events.at(-1).status, 'stopped');
+  assert.equal(gw.runs.get(ext).aborted, true, 'the turn running there stopped');
+  assert.deepEqual(gw.sessionAborts.slice(s0), [{ key, agentId: 'tester', clearQueued: true }], 'the session, its queued follow-ups discarded, so they cannot start it again');
+  assert.equal(gw.sends.length, n0, 'not sent as a message (as OpenClaw\'s own page)');
+  assert.equal(await until(false), false, 'and the chat is not left working');
+  // other words the gateway takes as a stop go as a message: its answer has no turn, so the run ends at once too, and
+  // the queued follow-ups are discarded as well
+  const ext2 = gw.external(key, 'thinking', 'From the phone', 400);
+  assert.equal(await until(true), true, 'marked working (again)');
+  const s2 = gw.sessionAborts.length;
+  const ps = await run(owner, chat.id, 'please stop');
+  assert.equal(ps.events.at(-1).status, 'stopped');
+  assert.equal(gw.sends.at(-1).message, 'please stop');
+  assert.equal(gw.runs.get(ext2).aborted, true);
+  assert.deepEqual(gw.sessionAborts.slice(s2), [{ key, agentId: 'tester', clearQueued: true }]);
+  assert.equal(await until(false), false);
+  const h = (await owner.get(`/api/providers/history?agent=${agent}&session=${chat.id}`)).json;
+  assert.equal(h.live || null, null, 'no answer of ours left to follow');
+  // /stop with nothing running: ends at once too
+  const st2 = await run(owner, chat.id, '/stop');
+  assert.equal(st2.events.at(-1).status, 'stopped');
+  assert.equal(await working(), false);
+  // a run of ours the gateway took and lost (no events; chat.abort does not know it), while the gateway works in the
+  // session on its own: Stop on it ends it here and stops what runs there
+  const g = await owner.post('/api/providers/runs', { agent, session: chat.id, input: 'Hello [[ghost]]' });
+  assert.equal(g.status, 200, g.text);
+  assert.equal(await until(true), true, 'working while it waits');
+  gw.hold(key);
+  const s1 = gw.sessionAborts.length;
+  const x = await owner.post('/api/providers/interrupt', { run: g.json.runId });
+  assert.equal(x.status, 200, x.text);
+  assert.deepEqual([x.json.scope, x.json.stopped], ['session', true], 'what the gateway ran there was stopped instead');
+  assert.ok(gw.aborts.some(a => a.runId === g.json.runId), 'asked by its id first');
+  assert.deepEqual(gw.sessionAborts.slice(s1), [{ key, agentId: 'tester', clearQueued: true }]);
+  let done = null;
+  for (let i = 0; i < 100 && !(done = (await owner.get(`/api/providers/runs/events?run=${g.json.runId}&since=0`)).json).done; i++) await sleep(50);
+  assert.equal(done.done, true, 'the run ended');
+  assert.equal(done.events.at(-1).event.status, 'stopped');
+  assert.equal(await until(false), false, 'and the chat is not left working');
 });
 
 test('slash commands for the / menu (the ones a person can type)', async () => {

@@ -1,0 +1,50 @@
+{
+ "id": "white-tiger",
+ "name": "White tigers",
+ "tier": "shared",
+ "model": "tiger",
+ "asset": "/assets/fauna/whitetiger/whitetiger.json",
+ "behaviour": "graze",
+ "habitats": [
+  "snow",
+  "rock",
+  "forest",
+  "meadow"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "storm",
+  "fog"
+ ],
+ "group": [
+  1,
+  2
+ ],
+ "perKm2": 4,
+ "size": 1.0,
+ "colors": [
+  "#eeebe4"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#eeebe4",
+   "hair": "#eeebe4",
+   "legs": "#eeebe4"
+  }
+ ],
+ "speed": 1.0,
+ "run": 12,
+ "flee": 50,
+ "altitude": [
+  400,
+  5000
+ ]
+}

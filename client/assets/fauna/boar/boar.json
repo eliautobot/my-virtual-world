@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "boar",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (808cd132-108e-441f-9461-f1e6468d81b3); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.274,
+    0.0,
+    -0.1018
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.274,
+    0.0,
+    0.1073
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.2033,
+    0.0,
+    -0.0945
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.2033,
+    0.0,
+    0.1034
+   ]
+  ]
+ },
+ "height": 0.938,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 17227,
+   "tris": 13981,
+   "pos": 0,
+   "nrm": 206724,
+   "uv": 413448,
+   "skin": 551264,
+   "weight": 620172,
+   "index": 689080,
+   "indexType": "u16",
+   "min": [
+    -0.7062000036239624,
+    0.0,
+    -0.29600000381469727
+   ],
+   "max": [
+    0.8486999869346619,
+    0.9366000294685364,
+    0.298799991607666
+   ]
+  },
+  {
+   "verts": 13215,
+   "tris": 9287,
+   "pos": 772968,
+   "nrm": 931548,
+   "uv": 1090128,
+   "skin": 1195848,
+   "weight": 1248708,
+   "index": 1301568,
+   "indexType": "u16",
+   "min": [
+    -0.6967999935150146,
+    0.0,
+    -0.29600000381469727
+   ],
+   "max": [
+    0.8460000157356262,
+    0.9366000294685364,
+    0.2888000011444092
+   ]
+  },
+  {
+   "verts": 13175,
+   "tris": 9241,
+   "pos": 1357292,
+   "nrm": 1515392,
+   "uv": 1673492,
+   "skin": 1778892,
+   "weight": 1831592,
+   "index": 1884292,
+   "indexType": "u16",
+   "min": [
+    -0.6967999935150146,
+    0.00039999998989515007,
+    -0.29600000381469727
+   ],
+   "max": [
+    0.8460000157356262,
+    0.9366000294685364,
+    0.2743000090122223
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 1939740,
+  "frames": 328,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 240,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 240,
+   "frames": 48,
+   "fps": 59.727,
+   "stride": 0.7233
+  },
+  "run": {
+   "start": 288,
+   "frames": 40,
+   "fps": 120.0,
+   "stride": 3.0
+  }
+ },
+ "textures": {
+  "color": "boar-color.jpg",
+  "mask": "boar-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

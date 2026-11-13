@@ -964,6 +964,21 @@ input[type=checkbox], input[type=radio], input[type=range] { accent-color: var(-
 #demo-mark .dm-go { font-style: normal; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: #ffcc4d; color: #1d1600; }
 #demo-mark:hover .dm-go { background: #ffd970; }
 body.play #demo-mark { bottom: auto; top: 10px; }
+/* "New version available" in Settings → About (ui/updates.js) */
+.upd-box { margin: 10px 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--gold-line); background: var(--gold-soft); }
+.upd-box h5 { margin: 0 0 4px; }
+.upd-box details { margin-top: 6px; }
+.upd-box summary { cursor: pointer; font-weight: 600; }
+.upd-box .upd-text { white-space: pre-wrap; max-height: 260px; overflow: auto; font-size: 12.5px; margin-top: 6px; }
+.upd-box .upd-cmd { white-space: pre-wrap; word-break: break-all; font-size: 12px; padding: 8px; border-radius: 8px; background: var(--bg2); margin: 6px 0; }
+/* a locked feature's place (ui/licence.js lockedPanel): the agents' PC, phone, browser and screen */
+.demo-locked-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center;
+  min-height: 220px; height: 100%; box-sizing: border-box; padding: 24px 18px; }
+.demo-locked-panel .dlp-ic { font-size: 40px; line-height: 1; }
+.demo-locked-panel h4 { margin: 4px 0 0; }
+.demo-locked-panel .hint { max-width: 420px; margin: 0; }
+.demo-locked-panel .dlp-acts { justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.pc-window > .demo-locked-panel, .pc-window > div > .demo-locked-panel { background: var(--bg2); border: 1px solid var(--gold-line); border-radius: 14px; box-shadow: var(--shadow); }
 body.demo-locked #dockL .dsec-b > *, body.demo-locked #buildp > :not(h4), body.demo-locked #furnp > :not(h4),
 body.demo-locked [data-cap="world.edit"], body.demo-locked #buildp h4 .addp, body.demo-locked .undo, body.demo-locked .redo,
 body.demo-locked .act-revert, body.demo-locked .revert {

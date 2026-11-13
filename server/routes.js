@@ -117,6 +117,8 @@ export function createApi(d) {
       secure: policy.isSecure(req),
       signInAllowed: policy.canSignIn(req),   // false only with MVW_REQUIRE_HTTPS on a plain-HTTP connection
       licence: d.licence ? d.licence.status() : null,   // demo mode or licensed (WP1.11)
+      // "New version available" (server/updates.js): for those who see the installation's settings
+      update: d.updates && perms.allowed(P, 'settings.view') ? d.updates.status() : null,
     };
   }
   /** Public health for monitors and the smoke test; diagnostics only for callers with server.diagnostics. */
@@ -757,7 +759,7 @@ export function createApi(d) {
   router.add({ method: 'POST', path: '/api/chat-sessions/delete', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.deleteSession(P, body.agent, body.session)) });
   router.add({ method: 'POST', path: '/api/providers/runs', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.startRun(P, body)) });
   router.add({ method: 'GET', path: '/api/providers/runs/events', cap: 'chat.use', handler: ({ P, url }) => chatCall(() => d.chat.events(P, url.searchParams.get('run') || '', qnum(url, 'since') || 0)) });
-  router.add({ method: 'POST', path: '/api/providers/interrupt', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.stop(P, body.run)) });
+  router.add({ method: 'POST', path: '/api/providers/interrupt', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => (body.run !== undefined && body.run !== null ? d.chat.stop(P, body.run) : d.chat.stopSession(P, body.agent, body.session))) });
   router.add({ method: 'POST', path: '/api/providers/approvals', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.approve(P, body.run, body.approval, body.approved, body.decision ?? null)) });
   // live activity in an open provider session (Agent Providers): watched while the chat is open
   // the media of a provider's answers (Agent Providers: an agent's images, video, audio): only at an address this server
@@ -788,10 +790,12 @@ export function createApi(d) {
   router.add({ method: 'POST', path: '/api/providers/branch', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.branchSession(P, need(body && body.agent, 'agent'), need(body.session, 'session'), body.upto)) });
   router.add({ method: 'POST', path: '/api/providers/tasks/steer', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.steerTask(P, need(body && body.agent, 'agent'), body.session ?? null, need(body.task, 'task'), body.text, taskScope(body.scope))) });
   router.add({ method: 'POST', path: '/api/providers/tasks/cancel', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.cancelTask(P, need(body && body.agent, 'agent'), body.session ?? null, need(body.task, 'task'), taskScope(body.scope))) });
-  router.add({ method: 'GET', path: '/api/providers/browser', cap: 'chat.use', handler: ({ P, url }) => chatCall(() => d.chat.browser(P, need(qnum(url, 'agent'), 'agent'), url.searchParams.get('tab'))) });
-  router.add({ method: 'POST', path: '/api/providers/browser', cap: 'chat.use', handler: ({ P, body }) => chatCall(() => d.chat.browserAct(P, need(body && body.agent, 'agent'), body)) });
+  // an agent's browser and own screen, watched and taken over: part of the agents' PC, locked in demo mode (lock 'pc',
+  // licence enforcement: server/licence.js)
+  router.add({ method: 'GET', path: '/api/providers/browser', cap: 'chat.use', lock: 'pc', handler: ({ P, url }) => chatCall(() => d.chat.browser(P, need(qnum(url, 'agent'), 'agent'), url.searchParams.get('tab'))) });
+  router.add({ method: 'POST', path: '/api/providers/browser', cap: 'chat.use', lock: 'pc', handler: ({ P, body }) => chatCall(() => d.chat.browserAct(P, need(body && body.agent, 'agent'), body)) });
   // the live picture: the tab's next frame after `after` (a JPEG, with the page's address and size), or 204 — none yet
-  router.add({ method: 'GET', path: '/api/providers/browser/frame', cap: 'chat.use', handler: async ({ P, url }) => {
+  router.add({ method: 'GET', path: '/api/providers/browser/frame', cap: 'chat.use', lock: 'pc', handler: async ({ P, url }) => {
     let f;
     try { f = await d.chat.browserFrame(P, need(qnum(url, 'agent'), 'agent'), need(url.searchParams.get('tab'), 'tab'), qnum(url, 'after') || 0); }
     catch (e) { if (e instanceof ChatError) throw new AuthError(e.status, e.code, e.message); throw e; }
@@ -802,13 +806,13 @@ export function createApi(d) {
   } });
   // the agent's own screen (Hermes' Bot Desktop): its state and controls, and one picture of it now (a JPEG, or 204 — not
   // running, or a person has control); the live screen itself is a WebSocket, /api/providers/screen/ws (server/providers/screen-relay.js)
-  router.add({ method: 'GET', path: '/api/providers/screen', cap: 'chat.use', handler: ({ P, url }) => chatCall(() => d.chat.screen(P, need(qnum(url, 'agent'), 'agent'))) });
-  router.add({ method: 'POST', path: '/api/providers/screen', cap: 'chat.use', handler: ({ P, body }) => {
+  router.add({ method: 'GET', path: '/api/providers/screen', cap: 'chat.use', lock: 'pc', handler: ({ P, url }) => chatCall(() => d.chat.screen(P, need(qnum(url, 'agent'), 'agent'))) });
+  router.add({ method: 'POST', path: '/api/providers/screen', cap: 'chat.use', lock: 'pc', handler: ({ P, body }) => {
     // (its browser put on its screen or taken off: the provider's own settings changed — a recent password, as its sub-menu's changes)
     if (body && body.action === 'browser' && !(P.session && Date.now() - P.session.authAt <= LIMITS.reauthMs)) throw new AuthError(403, 'reauth_required', 'Changing the agent platform needs your password: confirm it to continue');
     return chatCall(() => d.chat.screenAct(P, need(body && body.agent, 'agent'), body));
   } });
-  router.add({ method: 'GET', path: '/api/providers/screen/thumb', cap: 'chat.use', handler: async ({ P, url }) => {
+  router.add({ method: 'GET', path: '/api/providers/screen/thumb', cap: 'chat.use', lock: 'pc', handler: async ({ P, url }) => {
     let f;
     try { f = await d.chat.screenThumb(P, need(qnum(url, 'agent'), 'agent')); }
     catch (e) { if (e instanceof ChatError) throw new AuthError(e.status, e.code, e.message); throw e; }

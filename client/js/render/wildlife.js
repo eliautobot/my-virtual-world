@@ -11,11 +11,14 @@
 import * as THREE from 'three';
 import { S, bus } from '../core/state.js';
 import { validateSpecies, activeAt } from '/shared/species.js';
+import { CHUNK_M } from '/shared/terrain.js';
 import { MODELS, faunaMaterial } from './fauna-models.js';
+import { loadSkinned, skinnedPack, coatsOf, motion } from './fauna-skinned.js';
+import { GU } from './scene.js';
 
 const RANGE = { low: 260, medium: 420, high: 600 };   // m around the camera's target
 const CAP = { firefly: 420, butterfly: 200, songbird: 220, 'reef-fish': 360 };
-const HIPS = { deer: 0.8, rabbit: 0.3, cow: 0.68, sheep: 0.42, horse: 0.98, crab: 0.3, dolphin: -1 };   // (dolphin −1: its flukes beat up and down, render/fauna-models.js)
+const HIPS = { deer: 0.8, rabbit: 0.3, cow: 0.68, sheep: 0.42, horse: 0.98, crab: 0.3, dolphin: -1, goat: 0.42, wolf: 0.8, tiger: 0.8, shark: -1 };   // (dolphin −1: its flukes beat up and down, render/fauna-models.js)
 const STAND = { seagull: 0.31, bird: 0.19 };   // a landed bird's feet (a gull's legs) or belly below its middle, in its own size
 const MODE = { rest: 0, walk: 1, run: 2, fly: 3, glide: 4, swim: 5, hop: 6, glow: 7 };
 let app = null, species = [], packs = new Map(), groups = new Map(), lastPlan = 0, seed = 'world';
@@ -23,7 +26,29 @@ const shared = { herds: new Map(), off: null, seen: 0 };   // herds from the ser
 let level = localStorage.getItem('mvw.wildlife') || 'normal';   // Display → Wildlife: off, fewer, normal
 bus.on('display', k => { if (k === 'wildlife') { level = localStorage.getItem('mvw.wildlife') || 'normal'; groups.clear(); } });
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+const _qp = new THREE.Quaternion(), _side = new THREE.Vector3(0, 0, 1);
+const SWIMMERS = ['reeffish', 'turtle', 'fish', 'otter', 'alligator', 'beaver', 'dolphin', 'shark', 'whale', 'marlin', 'manta', 'jellyfish'];
+/** The clip slot of a modelled animal (render/fauna-skinned.js: 0 rest, 1 walk, 2 run) for a pose's mode: a swimmer's
+ *  swim is its walk slot (its swimming clip), a glide too. */
+const SKIN_MODE = { 0: 0, 1: 1, 2: 2, 4: 1, 5: 1, 6: 1 };
+/** A pose's clip slot for a modelled animal: a bird's own fly, glide and swim clips (render/fauna-skinned.js slots 4,
+ *  5, 6; tools/animals/bird_animal.py) where it has them, else SKIN_MODE. */
+function slotOf(pk, mode) {
+  const c = pk.clips;
+  if (mode === MODE.fly && c.fly) return 4;
+  if (mode === MODE.glide && (c.glide || c.fly)) return c.glide ? 5 : 4;
+  if (mode === MODE.swim && c.swim) return 6;
+  return SKIN_MODE[mode ?? 0] ?? 0;
+}
+const SLOT_CLIP = ['rest', 'walk', 'run', 'trot', 'fly', 'glide', 'swim'];
+/** A modelled animal's fore and hind feet along its length ([front x, hind x], model metres at size 1), from its
+ *  manifest's feet; null without them. */
+function feetSpan(man) {
+  const f = man.feet; if (!f?.LF || !f?.LH) return null;
+  return [(f.LF[1][0] + f.RF[1][0]) / 2, (f.LH[1][0] + f.RH[1][0]) / 2];
+}
 
+const sstep = (a, b, v) => { const u = Math.min(1, Math.max(0, (v - a) / (b - a))); return u * u * (3 - 2 * u); };
 function hash(str, n = 0) {
   let h = 2166136261 ^ n;
   for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
@@ -44,11 +69,22 @@ export async function init(a) {
       if (sp.tier === 'ambient') species.push(sp);
     }
   } catch (e) { console.warn('[wildlife] the species catalogue could not load:', e.message); return; }
+  // modelled animals (render/fauna-skinned.js): a species naming an asset is drawn from it; if it can't load, from its built model
+  const assets = await Promise.all(all.map(sp => (sp.asset ? loadSkinned(sp.asset) : null)));
+  all.forEach((sp, k) => {
+    const A = assets[k]; if (!A) return;
+    const cap = CAP[sp.id] || 160;
+    const pk = { sp, cap, n: 0, skinned: skinnedPack(A, cap, app.stage.scene, `wildlife-${sp.id}`, coatsOf(sp, A)), clips: A.man.clips, span: feetSpan(A.man) };
+    // (a modelled swimmer is seen through the water, as the built ones are: render/water.js underwater)
+    if (SWIMMERS.includes(sp.model) && app.terrain?.uw) new Set(pk.skinned.meshes.map(m => m.material)).forEach(m => app.terrain.uw(m));
+    packs.set(sp.id, pk);
+  });
   for (const sp of all) {
+    if (packs.has(sp.id)) continue;
     const cap = CAP[sp.id] || 160, geo = MODELS[sp.model]().clone();
     geo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4));
     // (what swims below the sea is seen through its water, with the full sea: render/water.js underwater)
-    const swims = ['reeffish', 'turtle', 'fish', 'otter', 'alligator', 'beaver', 'dolphin'].includes(sp.model), T = app.terrain;
+    const swims = SWIMMERS.includes(sp.model), T = app.terrain;
     const mesh = new THREE.InstancedMesh(geo, swims && T?.uw ? T.uw(faunaMaterial(sp.model)) : faunaMaterial(sp.model), cap);
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
     mesh.count = 0; mesh.frustumCulled = false; mesh.castShadow = sp.model === 'deer'; mesh.userData.smallCaster = true; mesh.name = `wildlife-${sp.id}`;
@@ -57,9 +93,9 @@ export async function init(a) {
   }
   // every species' shader compiled now (in the background where the browser can), not in the frame it first appears
   app.stage.renderer.compileAsync?.(app.stage.scene, app.stage.camera).catch(() => {});
-  app.wildlife = { get count() { let n = 0; for (const P of packs.values()) n += P.mesh.count; return n; }, groups, species, shared, plan: () => plan(performance.now()) };
+  app.wildlife = { get count() { let n = 0; for (const P of packs.values()) n += P.skinned ? P.skinned.count : P.mesh.count; return n; }, groups, species, shared, plan: () => plan(performance.now()) };
   bus.on('frame', update);
-  for (const ev of ['terrain', 'roads', 'world']) bus.on(ev, () => GQ.clear());   // (the ground changed: reshaped, roads, building pads)
+  for (const ev of ['terrain', 'roads', 'world']) bus.on(ev, () => { GQ.clear(); seaCells.clear(); });   // (the ground changed: reshaped, roads, building pads)
   bus.on('msg:fauna', m => {
     const now = performance.now() / 1000;
     shared.off = m.wt - now; shared.seen = now;
@@ -68,7 +104,7 @@ export async function init(a) {
       const pk = packs.get(h.s); if (!pk) continue;
       keep.add(h.id);
       const was = shared.herds.get(h.id);
-      shared.herds.set(h.id, { id: h.id, sp: pk.sp, m: h.m, born: was ? was.born : performance.now(), r: h.m.map((_, i) => hash(h.id, i)) });
+      shared.herds.set(h.id, { id: h.id, sp: pk.sp, m: h.m, born: was ? was.born : performance.now(), r: h.m.map((_, i) => hash(h.id, i)), st: was?.st || [] });
     }
     for (const id of [...shared.herds.keys()]) if (!keep.has(id)) shared.herds.delete(id);
   });
@@ -81,6 +117,11 @@ function plan(now) {
   const ct = app.cam.target, R = RANGE[app.stage.q.name] || 420, hour = S.hour, kind = app.weather?.now?.kind || 'clear';
   const want = new Map();
   const consider = (key, sp, anchors, areaKm2) => {
+    // (a species of deep water keeps to anchors with that much sea over them: whales, marlin)
+    if (sp.depth) { const sea = T.params?.seaLevel ?? 0; anchors = anchors.filter(a => sea - a.y >= sp.depth[0] && sea - a.y <= sp.depth[1]); }
+    // (a species of the heights keeps to anchors that high above the sea: eagles over the mountains; one of the
+    // lowlands below its top: parrots in the warm forests near the coast)
+    if (sp.altitude) { const sea = T.params?.seaLevel ?? 0; anchors = anchors.filter(a => a.y - sea >= sp.altitude[0] && a.y - sea <= sp.altitude[1]); }
     if (!anchors.length) return;
     const exp = sp.perKm2 * areaKm2, n = Math.floor(exp) + (hash(key, 1) < exp % 1 ? 1 : 0);
     for (let k = 0; k < Math.min(n, level === 'fewer' ? 1 : 3); k++) {
@@ -97,6 +138,21 @@ function plan(now) {
       const pts = []; let frac = 0;
       for (const h of sp.habitats) { const L = t.hab[h]; if (!L) continue; frac += L.length / 3; for (let i = 0; i < L.length; i += 3) pts.push({ x: L[i], y: L[i + 1], z: L[i + 2] }); }
       consider(`${seed}:${t.key}:${sp.id}`, sp, pts, (t.S * t.S / 1e6) * Math.min(1, frac / 24));
+    }
+  }
+  // the open sea (2026-11-12, the owner: "I can't spot the sharks"): the terrain hides its tiles of deep water (the sea
+  // is drawn over them), so they had no habitats and the sea's animals lived only along the coast; here the sea round
+  // the camera cell by cell (the level-0 tiles' grid, so a group keeps its key once its tile has habitats), its anchors
+  // where the water is 7-60 m deep, as the tiles' own 'sea' (render/terrain.worker.js)
+  const seaSp = species.filter(sp => sp.habitats.includes('sea') && activeAt(sp, hour) && sp.weather.includes(kind));
+  if (seaSp.length) {
+    const C = CHUNK_M, n = Math.ceil(R / C), ci = Math.floor(ct.x / C), cj = Math.floor(ct.z / C);
+    for (let i = ci - n; i <= ci + n; i++) for (let j = cj - n; j <= cj + n; j++) {
+      if (Math.hypot((i + 0.5) * C - ct.x, (j + 0.5) * C - ct.z) > R) continue;
+      const tk = `0:${i}:${j}`, t = T.tiles.get(tk);
+      if (t?.hab && T.shown.has(tk)) continue;   // (its tile has its habitats: above)
+      const pts = seaCell(i, j); if (!pts.length) continue;
+      for (const sp of seaSp) consider(`${seed}:${tk}:${sp.id}`, sp, pts, (C * C / 1e6) * pts.length / 25);
     }
   }
   for (const L of T.lakes || []) {
@@ -122,8 +178,23 @@ function plan(now) {
     const g = groups.get(k);
     if (g) { g.leaving = null; continue; }
     const sp = w.sp, n = sp.group[0] + Math.floor(hash(k, 3) * (sp.group[1] - sp.group[0] + 1));
-    groups.set(k, { sp, a: w.a, key: k, born: now, leaving: null, flee: null, members: Array.from({ length: n }, (_, i) => ({ r: [hash(k, 100 + i), hash(k, 200 + i), hash(k, 300 + i), hash(k, 400 + i)], col: Math.floor(hash(k, 500 + i) * sp.colors.length), x: w.a.x, y: w.a.y, z: w.a.z, yaw: 0 })) });
+    groups.set(k, { sp, a: w.a, key: k, born: now, leaving: null, flee: null, sk: !!packs.get(sp.id)?.skinned, members: Array.from({ length: n }, (_, i) => ({ r: [hash(k, 100 + i), hash(k, 200 + i), hash(k, 300 + i), hash(k, 400 + i)], col: Math.floor(hash(k, 500 + i) * sp.colors.length), x: w.a.x, y: w.a.y, z: w.a.z, yaw: 0 })) });
   }
+}
+
+/** A cell of the open sea (CHUNK_M square at i, j): its points (of a jittered 5 x 5 grid) with 7-60 m of water over them,
+ *  { x, y (the floor), z } — worked out once (until the ground changes). */
+const seaCells = new Map();
+function seaCell(i, j) {
+  const k = `${i}:${j}`; let out = seaCells.get(k); if (out) return out;
+  const C = CHUNK_M, sea = app.terrain?.params.seaLevel ?? 0; out = [];
+  for (let a = 0; a < 5; a++) for (let b = 0; b < 5; b++) {
+    const x = (i + (a + 0.2 + 0.6 * hash(k, a * 5 + b)) / 5) * C, z = (j + (b + 0.2 + 0.6 * hash(k, 50 + a * 5 + b)) / 5) * C, y = ground(x, z), dep = sea - y;
+    if (dep > 7 && dep < 60) out.push({ x, y, z });
+  }
+  if (seaCells.size > 6000) seaCells.delete(seaCells.keys().next().value);
+  seaCells.set(k, out);
+  return out;
 }
 
 const RIVER_STRETCH = 120;   // m of a river's course: one place for a group of its swimmers
@@ -149,6 +220,24 @@ function alongRiver(st, s) {
   const P = st.pts; let k = 1; while (k < P.length - 1 && P[k].s < s) k++;
   const a = P[k - 1], b = P[k], l = Math.max(1e-3, b.s - a.s), u = Math.min(1, Math.max(0, (s - a.s) / l)), dx = (b.x - a.x) / l, dz = (b.z - a.z) / l, n = Math.hypot(dx, dz) || 1;
   return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, z: a.z + (b.z - a.z) * u, dx: dx / n, dz: dz / n };
+}
+
+// ------------------------------------------------------------------ the shallows (wading birds)
+/** Water 10-45 cm deep at (x, z) (the sea over its floor). */
+function wadeable(x, z) {
+  const sea = app.terrain?.params.seaLevel ?? 0, d = sea - ground(x, z);
+  return d > 0.1 && d < 0.45 && !(app.terrain?.ground?.island?.inTown?.(x, z));
+}
+/** The middle of the shallows nearest a point on a beach: rings out from it to 120 m, the first wadeable spot with
+ *  wadeable water round it (so the flock has room); null if none. */
+function shallowsNear(x, z, key) {
+  for (let r = 4; r <= 120; r += 4) for (let k = 0; k < 16; k++) {
+    const a = (k + hash(key, 3)) / 16 * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+    if (!wadeable(px, pz)) continue;
+    let ok = 0; for (let j = 0; j < 6; j++) if (wadeable(px + Math.cos(j * 1.047) * 5, pz + Math.sin(j * 1.047) * 5)) ok++;
+    if (ok >= 3) return { x: px, z: pz };
+  }
+  return null;
 }
 
 // ------------------------------------------------------------------ how they move
@@ -179,7 +268,8 @@ function pose(g, m, i, t, player) {
       const cx = a.x + Math.sin(t * w + 1.3) * R, cz = a.z + Math.sin(t * w * 1.7) * R * 0.7;
       const ox = Math.sin(t * 0.9 + r[0] * 6.28) * 3 + (r[1] - 0.5) * 6, oz = Math.cos(t * 0.8 + r[2] * 6.28) * 3 + (r[3] - 0.5) * 6;
       const gx = cx + ox, gz = cz + oz, gy = ground(gx, gz);
-      if (landed) { m.x = a.x + (r[1] - 0.5) * 10; m.z = a.z + (r[3] - 0.5) * 10; m.y = ground(m.x, m.z) + (STAND[sp.model] ?? 0.02) * sp.size * (0.85 + 0.3 * r[3]); m.mode = MODE.rest; m.rate = 1; m.yaw = r[0] * 6.28 + Math.sin(t * 0.5 + r[2] * 9) * 0.6; return; }
+      // (a modelled bird stands on its feet at its origin; a built one's belly or legs are below its middle)
+      if (landed) { m.x = a.x + (r[1] - 0.5) * 10; m.z = a.z + (r[3] - 0.5) * 10; m.y = ground(m.x, m.z) + (g.sk ? 0 : (STAND[sp.model] ?? 0.02) * sp.size * (0.85 + 0.3 * r[3])); m.mode = MODE.rest; m.rate = 1; m.yaw = r[0] * 6.28 + (g.sk ? 0 : Math.sin(t * 0.5 + r[2] * 9) * 0.6); return; }
       m.x = gx; m.z = gz; m.y = gy + H[0] + (H[1] - H[0]) * (0.5 + 0.5 * Math.sin(t * 0.3 + r[0] * 6)) ;
       m.yaw = Math.atan2(-(Math.cos(t * w * 1.7) * w * 1.7 * R * 0.7), Math.cos(t * w + 1.3) * w * R);
       m.mode = Math.sin(t * 0.7 + r[1] * 6.28) > 0.55 ? MODE.glide : MODE.fly; m.rate = 2.6 + r[2]; return;
@@ -189,7 +279,9 @@ function pose(g, m, i, t, player) {
       m.x = a.x + Math.cos(ang) * R; m.z = a.z + Math.sin(ang) * R;
       m.y = Math.max(ground(m.x, m.z), app.terrain?.params.seaLevel ?? 0) + H[0] + (H[1] - H[0]) * (0.5 + 0.5 * Math.sin(t * 0.13 + r[3] * 6));
       m.yaw = Math.atan2(-(Math.cos(ang) * w), -Math.sin(ang) * w);
-      m.mode = Math.sin(t * 0.4 + r[0] * 9) > (sp.behaviour === 'soar' ? 0.85 : 0.5) ? MODE.fly : MODE.glide; m.rate = sp.behaviour === 'soar' ? 1.4 : 2.2; return;
+      m.mode = Math.sin(t * 0.4 + r[0] * 9) > (sp.behaviour === 'soar' ? 0.85 : 0.5) ? MODE.fly : MODE.glide; m.rate = sp.behaviour === 'soar' ? 1.4 : 2.2;
+      m.roll = (w > 0 ? 1 : -1) * Math.min(0.45, Math.atan(sp.speed * Math.abs(w) / 9.8) + 0.12);   // (banked into the turn)
+      return;
     }
     case 'swim': {
       if (a.river) {
@@ -260,8 +352,14 @@ function pose(g, m, i, t, player) {
       m.x = a.x + Math.cos(ang) * R; m.z = a.z + Math.sin(ang) * R * 0.8;
       const floor = ground(m.x, m.z), top = sea - 0.4;
       if (top - floor < 0.6) { m.hide = true; return; }
-      m.y = floor + 0.35 + (top - floor - 0.35) * (0.2 + 0.25 * (0.5 + 0.5 * Math.sin(t * 0.05 + r[3] * 6)));
-      m.yaw = Math.atan2(-(Math.cos(ang) * 0.8 * w), -Math.sin(ang) * w); m.mode = MODE.glide; m.rate = 1.6; return;   // (glide: the flippers stroke gently)
+      const low = floor + 0.35 + (top - floor - 0.35) * (0.2 + 0.25 * (0.5 + 0.5 * Math.sin(t * 0.05 + r[3] * 6)));
+      // (a turtle comes up to breathe every minute or so: rising, a few breaths with its shell awash, then down again —
+      // 2026-11-12, the owner: sea turtles were hard to see, gliding near the floor)
+      const per = sp.breathe ? 45 + r[3] * 30 : 0, u = per ? ((t + r[0] * per) % per) / per : 1;
+      const up = u < 0.06 ? sstep(0, 0.06, u) : u < 0.16 ? 1 : u < 0.24 ? 1 - sstep(0.16, 0.24, u) : 0;
+      m.y = low + (sea - 0.12 * sp.size - low) * up;
+      m.pitch = u < 0.06 ? 0.35 * Math.sin(u / 0.06 * Math.PI) : u >= 0.16 && u < 0.24 ? -0.3 * Math.sin((u - 0.16) / 0.08 * Math.PI) : 0;
+      m.yaw = Math.atan2(-(Math.cos(ang) * 0.8 * w), -Math.sin(ang) * w); m.mode = MODE.glide; m.rate = up > 0.9 ? 0.8 : 1.6; return;   // (glide: the flippers stroke gently)
     }
     case 'pod': {
       // dolphins (2026-10-04): a pod on a long loop offshore, one behind and beside another, each breaking the
@@ -276,6 +374,66 @@ function pose(g, m, i, t, player) {
       else { const v = (u - 0.3) / 0.7; y = sea - 0.35 - Math.sin(v * Math.PI) * 1.6; pitch = -Math.cos(v * Math.PI) * 0.25; }
       m.x = cx; m.z = cz; m.y = y; m.pitch = pitch;
       m.yaw = Math.atan2(-(Math.cos(a2) * w * (R + off) * 0.75), -Math.sin(a2) * w * (R + off)); m.mode = MODE.swim; m.rate = 1.2 + r[0] * 0.4; return;
+    }
+    case 'patrol': {
+      // sharks (2026-11-12, the product owner: "sharks in open sea"): one alone on a wide, slow loop offshore, a few metres down,
+      // now and then rising till its fin cuts the surface; never over water shallower than its depth and 2 m
+      // (its loop drawn in to stay over water deep enough all the way round — a reef shark's near the shore — instead of
+      // vanishing wherever it crossed the shallows: 2026-11-12, the owner: "I can't spot the sharks")
+      const sea = app.terrain?.params.seaLevel ?? 0, [d0, d1] = sp.swimDepth || [0.45, 3.25];
+      const R = g.loopR ??= (() => {
+        const R0 = 45 + hash(g.key, 9) * 50, deepAll = R => { for (let k = 0; k < 12; k++) { const q = k / 12 * 6.283; if (sea - ground(a.x + Math.cos(q) * R, a.z + Math.sin(q) * R * 0.7) < d1 + 2) return false; } return true; };
+        for (const f of [1, 0.7, 0.5, 0.35, 0.25]) if (deepAll(R0 * f)) return R0 * f;
+        return R0 * 0.25;
+      })();
+      const w = sp.speed / R * (hash(g.key, 8) > 0.5 ? 1 : -1);
+      const ang = t * w + hash(g.key, 5) * 6.28, cx = a.x + Math.cos(ang) * R, cz = a.z + Math.sin(ang) * R * 0.7;
+      const depth = d0 + (d1 - d0) * (0.5 + 0.5 * Math.sin(t * 0.045 + r[2] * 6.28)) ** 2;   // (a shark at 0.45 m: its fin is out)
+      if (sea - ground(cx, cz) < depth + 2) { m.hide = true; return; }
+      m.x = cx; m.z = cz; m.y = sea - depth;
+      m.yaw = Math.atan2(-(Math.cos(ang) * w * R * 0.7), -Math.sin(ang) * w * R); m.mode = MODE.swim; m.rate = 0.6;
+      if (sp.leaps) {
+        // now and then (a few seconds in a minute or so) it rises and leaps clear in an arc, nose up then down
+        const per = 50 + r[3] * 40, u = ((t + r[1] * per) % per) / per, L = 0.07;
+        if (u < L) { const v = u / L; m.y = sea - d0 + Math.sin(v * Math.PI) * (1.6 + r[0]); m.pitch = Math.cos(v * Math.PI) * 0.9; }
+      }
+      return;
+    }
+    case 'roam': {
+      // whales (2026-11-12): a long slow loop over deep water; up at the surface for a few breaths (its back awash), then
+      // down again for most of a minute, nose down going and up coming back
+      const sea = app.terrain?.params.seaLevel ?? 0, R = 120 + hash(g.key, 9) * 120, w = sp.speed / R * (hash(g.key, 8) > 0.5 ? 1 : -1);
+      const ang = t * w + hash(g.key, 5) * 6.28 - i * 0.04, cx = a.x + Math.cos(ang) * R + (r[0] - 0.5) * 12, cz = a.z + Math.sin(ang) * R * 0.75 + (r[1] - 0.5) * 12;
+      const deep = Math.min(9, sea - ground(cx, cz) - 0.1 * sp.size - 4); if (deep < 2) { m.hide = true; return; }
+      const per = 45 + r[2] * 20, u = ((t + r[3] * per) % per) / per;
+      const sink = u < 0.18 ? 0 : u < 0.3 ? (1 - Math.cos((u - 0.18) / 0.12 * Math.PI)) / 2 : u < 0.85 ? 1 : (1 + Math.cos((u - 0.85) / 0.15 * Math.PI)) / 2;
+      const dsink = u < 0.18 || (u >= 0.3 && u < 0.85) ? 0 : u < 0.3 ? 1 : -1;
+      // (at the surface its back just awash: its middle a tenth of its length down)
+      m.x = cx; m.z = cz; m.y = sea - 0.1 * sp.size - sink * deep + (u < 0.18 ? 0.08 * Math.sin(t * 1.3) : 0);
+      m.pitch = -0.28 * dsink * Math.sin(Math.PI * (u < 0.3 ? (u - 0.18) / 0.12 : (u - 0.85) / 0.15));
+      m.yaw = Math.atan2(-(Math.cos(ang) * w * R * 0.75), -Math.sin(ang) * w * R); m.mode = MODE.swim; m.rate = 0.3; return;
+    }
+    case 'drift': {
+      // jellyfish (2026-11-12): a bloom drifting slowly about its patch of sea near the surface, each one bobbing as it
+      // pulses
+      const sea = app.terrain?.params.seaLevel ?? 0;
+      m.x = a.x + (r[0] - 0.5) * 18 + Math.sin(t * 0.03 + r[1] * 6.28) * 6; m.z = a.z + (r[1] - 0.5) * 18 + Math.cos(t * 0.027 + r[2] * 6.28) * 6;
+      if (sea - ground(m.x, m.z) < 2) { m.hide = true; return; }
+      m.y = sea - 0.5 - r[2] * 2.5 + 0.18 * Math.sin(t * 0.9 + r[3] * 6.28);
+      m.yaw = r[3] * 6.28 + t * 0.02; m.mode = MODE.swim; m.rate = 0.5; return;
+    }
+    case 'wade': {
+      // flamingos (2026-11-12): a flock wading in the shallows off a beach — the strip of sea 10-45 cm deep — each one
+      // walking slowly from spot to spot and feeding, head down, in between; never out of its depth or up on the sand
+      if (!g.wade) g.wade = shallowsNear(a.x, a.z, g.key) || { none: true };
+      if (g.wade.none) { m.hide = true; return; }
+      // (its own patch of the shallows, a few metres from the flock's middle; a stroll of a few metres every 20 s)
+      const c = g.wade, seg = Math.floor(t / 20 + r[0] * 5), f = (t / 20 + r[0] * 5) - seg, walking = f < 0.4;
+      const hx = c.x + (r[1] - 0.5) * 14, hz = c.z + (r[2] - 0.5) * 14;
+      const spot = k => { for (let tr = 0; tr < 6; tr++) { const x = hx + (hash(g.key, 900 + i * 31 + k * 7 + tr) - 0.5) * 7, z = hz + (hash(g.key, 1700 + i * 31 + k * 7 + tr) - 0.5) * 7; if (wadeable(x, z)) return { x, z }; } return { x: c.x + (r[1] - 0.5) * 3, z: c.z + (r[2] - 0.5) * 3 }; };
+      const p0 = spot(seg), p1 = spot(seg + 1), u = walking ? f / 0.4 : 1;
+      m.x = p0.x + (p1.x - p0.x) * u; m.z = p0.z + (p1.z - p0.z) * u; m.y = ground(m.x, m.z);
+      m.yaw = Math.atan2(-(p1.z - p0.z), p1.x - p0.x); m.mode = walking ? MODE.walk : MODE.rest; m.rate = 1; return;
     }
     case 'scuttle': {
       // crabs (2026-10-04): short sideways dashes between spots on their patch of sand, pausing between; never into
@@ -303,26 +461,37 @@ function pose(g, m, i, t, player) {
 
 function update(dt, now) {
   if (!species.length || !app.terrain) return;
-  if (level === 'off') { for (const pk of packs.values()) pk.mesh.count = 0; return; }
+  if (level === 'off') { for (const pk of packs.values()) if (pk.skinned) { pk.skinned.begin(); pk.skinned.end(); } else pk.mesh.count = 0; return; }
   if (now - lastPlan > 500) { lastPlan = now; plan(now); }
   if (now - gqAt > 5000) { gqAt = now; GQ.clear(); }   // (and now and then anyway: a regrade lands a moment after its event)
   const t = app.net?.realNow ? app.net.realNow() % 100000 : now / 1000, cam = app.stage.camera.position;
   const P = app.player && app.player.active && app.player.ctx === -1 ? { x: app.player.x, z: app.player.z } : null;
-  for (const pk of packs.values()) pk.n = 0;
+  for (const pk of packs.values()) { pk.n = 0; pk.skinned?.begin(); }
   for (const [k, g] of groups) {
     const fade = g.leaving != null ? 1 - (now - g.leaving) / 1500 : Math.min(1, (now - g.born) / 1500);
     if (g.leaving != null && fade <= 0) { groups.delete(k); continue; }
     const pk = packs.get(g.sp.id);
     // life under the sea is seen only close by: far-off schools and turtles aren't moved or drawn
-    if ((g.sp.behaviour === 'school' || g.sp.behaviour === 'cruise') && Math.hypot(g.a.x - cam.x, g.a.z - cam.z) > 170 + cam.y * 0.3) continue;
+    // (turtles that come up to breathe are seen further: at the surface)
+    if ((g.sp.behaviour === 'school' || g.sp.behaviour === 'cruise') && Math.hypot(g.a.x - cam.x, g.a.z - cam.z) > (g.sp.breathe ? 320 : 170) + cam.y * 0.3) continue;
     g.members.forEach((m, i) => {
-      m.hide = false; m.pitch = 0;
+      m.hide = false; m.pitch = 0; m.roll = 0;
       pose(g, m, i, t, P);
       if (m.hide || pk.n >= pk.cap) return;
       const d = Math.hypot(m.x - cam.x, m.y - cam.y, m.z - cam.z); if (d > 700) return;
       const sc = g.sp.size * fade * (0.85 + 0.3 * m.r[3]);
       _q.setFromAxisAngle(_up, m.yaw); if (m.pitch) _q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), m.pitch));
+      if (m.roll) _q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), m.roll));
       _m.compose(_p.set(m.x, m.y, m.z), _q, _s.set(sc, sc, sc));
+      if (pk.skinned) {
+        // its clip at the pace it really moves (speed / the clip's stride: a tail beat carries it one stride), else
+        // the behaviour's own rate
+        const sm = slotOf(pk, m.mode), clip = sm ? pk.clips[SLOT_CLIP[sm]] || pk.clips[sm === 2 ? 'run' : 'walk'] : null;
+        // (a bird's wingbeat at its own pace, a little different for each: the clip's hz)
+        const rate = clip?.hz ? clip.hz * (0.9 + 0.2 * m.r[2]) : clip?.stride ? Math.min(3.5, Math.max(0.15, g.sp.speed / (clip.stride * sc))) : (m.rate || 1);
+        if (pk.skinned.put(_m, m.col, m.r[0] * 6.28, rate, sm, d)) pk.n++;
+        return;
+      }
       pk.mesh.setMatrixAt(pk.n, _m);
       pk.mesh.instanceColor.setXYZ(pk.n, pk.colors[m.col].r, pk.colors[m.col].g, pk.colors[m.col].b);
       pk.anim.setXYZW(pk.n, m.r[0] * 6.28, m.rate || 1, m.mode ?? 0, HIPS[g.sp.model] || 0);
@@ -341,7 +510,27 @@ function update(dt, now) {
         if (Math.hypot(x - cam.x, z - cam.z) > 700) return;
         const sc = h.sp.size * fade * (0.85 + 0.3 * h.r[i]);
         _q.setFromAxisAngle(_up, a[7]);
-        _m.compose(_p.set(x, ground(x, z), z), _q, _s.set(sc, sc, sc));
+        let gy = ground(x, z);
+        if (pk.span && Math.hypot(x - cam.x, z - cam.z) < 200) {
+          // on a slope a modelled animal leans with the ground along its length (its fore and hind feet on the ground,
+          // not one pair in the hill and the other in the air)
+          const [xf, xh] = pk.span, cy = Math.cos(a[7]), sy = Math.sin(a[7]);
+          const gf = ground(x + cy * xf * sc, z - sy * xf * sc), gh = ground(x + cy * xh * sc, z - sy * xh * sc);
+          const pitch = Math.atan2(gf - gh, (xf - xh) * sc);
+          if (Math.abs(pitch) < 0.5) { gy = gh + (gf - gh) * (-xh / (xf - xh)); _q.multiply(_qp.setFromAxisAngle(_side, pitch)); }
+        }
+        _m.compose(_p.set(x, gy, z), _q, _s.set(sc, sc, sc));
+        if (pk.skinned) {
+          // the gait's rate from the animal's own speed along its plan, so the hooves keep pace with the ground (the
+          // clips' strides are made for the species' speeds: the rate stays near the gait's own beat, and the bounds
+          // only catch odd plans); kept continuous, and a change of gait cross-faded (render/fauna-skinned.js motion)
+          const mode = !moving ? 0 : a[6] === 2 ? 2 : 1, clip = pk.clips[mode === 2 ? 'run' : 'walk'];
+          const speed = a[5] > a[4] ? Math.hypot(a[2] - a[0], a[3] - a[1]) / (a[5] - a[4]) : 0;
+          const rate = mode === 2 ? Math.min(4.2, Math.max(1.4, speed / (clip.stride * sc))) : Math.min(2.0, Math.max(0.4, speed / (clip.stride * sc)));
+          const st = motion(h.st[i] ||= {}, mode, rate, GU.uTime.value, h.r[i]);
+          if (pk.skinned.put(_m, a[8], st.off, st.rate, st.mode, Math.hypot(x - cam.x, z - cam.z), st.prev, true)) pk.n++;
+          return;
+        }
         pk.mesh.setMatrixAt(pk.n, _m);
         const c = pk.colors[a[8] % pk.colors.length]; pk.mesh.instanceColor.setXYZ(pk.n, c.r, c.g, c.b);
         const mode = !moving ? MODE.rest : a[6] === 2 ? (h.sp.model === 'rabbit' ? MODE.hop : MODE.run) : (h.sp.model === 'rabbit' ? MODE.hop : MODE.walk);
@@ -351,6 +540,7 @@ function update(dt, now) {
     }
   }
   for (const pk of packs.values()) {
+    if (pk.skinned) { pk.skinned.end(); continue; }
     pk.mesh.count = pk.n;
     if (pk.n) { pk.mesh.instanceMatrix.needsUpdate = true; pk.mesh.instanceColor.needsUpdate = true; pk.anim.needsUpdate = true; }
   }

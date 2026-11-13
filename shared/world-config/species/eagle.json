@@ -1,0 +1,39 @@
+{
+ "id": "eagle",
+ "name": "Eagles",
+ "tier": "ambient",
+ "model": "bird",
+ "asset": "/assets/fauna/eagle/eagle.json",
+ "behaviour": "soar",
+ "habitats": [
+  "rock",
+  "forest"
+ ],
+ "hours": [
+  7,
+  19
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast"
+ ],
+ "group": [
+  1,
+  1
+ ],
+ "perKm2": 3,
+ "size": 1.0,
+ "colors": [
+  "#4a3524"
+ ],
+ "height": [
+  70,
+  160
+ ],
+ "speed": 13,
+ "altitude": [
+  150,
+  5000
+ ]
+}

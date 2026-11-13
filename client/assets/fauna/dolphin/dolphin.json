@@ -1,0 +1,145 @@
+{
+ "v": 1,
+ "model": "dolphin",
+ "rig": "mvw-swimmer-v1",
+ "source": "Tripo Studio (110a1553-24c5-4c9a-a913-1f194beaa241); swimmer rig along its centre line, a wave down the body (tools/animals/swim_animal.py)",
+ "height": 1.0,
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "neck",
+  "head",
+  "fin.L",
+  "fin.R"
+ ],
+ "lods": [
+  {
+   "verts": 10553,
+   "tris": 14000,
+   "pos": 0,
+   "nrm": 126636,
+   "uv": 253272,
+   "skin": 337696,
+   "weight": 379908,
+   "index": 422120,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.1703999936580658,
+    -0.2076999992132187
+   ],
+   "max": [
+    0.49970000982284546,
+    0.19030000269412994,
+    0.2076999992132187
+   ]
+  },
+  {
+   "verts": 4044,
+   "tris": 5000,
+   "pos": 506120,
+   "nrm": 554648,
+   "uv": 603176,
+   "skin": 635528,
+   "weight": 651704,
+   "index": 667880,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.1703999936580658,
+    -0.2076999992132187
+   ],
+   "max": [
+    0.49950000643730164,
+    0.19030000269412994,
+    0.2076999992132187
+   ]
+  },
+  {
+   "verts": 1357,
+   "tris": 1500,
+   "pos": 697880,
+   "nrm": 714164,
+   "uv": 730448,
+   "skin": 741304,
+   "weight": 746732,
+   "index": 752160,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.1696999967098236,
+    -0.2070000022649765
+   ],
+   "max": [
+    0.49639999866485596,
+    0.19030000269412994,
+    0.20640000700950623
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 761160,
+  "frames": 111,
+  "bones": 9
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 45,
+   "fps": 15
+  },
+  "walk": {
+   "start": 45,
+   "frames": 36,
+   "fps": 74.118,
+   "stride": 0.85
+  },
+  "run": {
+   "start": 81,
+   "frames": 30,
+   "fps": 49.412,
+   "stride": 1.0625
+  }
+ },
+ "textures": {
+  "color": "dolphin-color.jpg",
+  "mask": "dolphin-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

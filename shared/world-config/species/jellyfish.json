@@ -1,0 +1,41 @@
+{
+ "id": "jellyfish",
+ "name": "Jellyfish",
+ "tier": "ambient",
+ "model": "jellyfish",
+ "asset": "/assets/fauna/jellyfish/jellyfish.json",
+ "behaviour": "drift",
+ "habitats": [
+  "sea"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "storm",
+  "fog"
+ ],
+ "group": [
+  4,
+  10
+ ],
+ "perKm2": 2,
+ "size": 0.6,
+ "colors": [
+  "#7f8ff0"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#7f8ff0",
+   "hair": "#7f8ff0",
+   "legs": "#7f8ff0"
+  }
+ ],
+ "speed": 0.15
+}

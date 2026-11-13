@@ -706,8 +706,42 @@ export class Chat {
   async stop(P, runId) {
     const run = this.ownRun(P, runId);
     const { a } = this.need(P, run.agentId);
-    await this.call(this.linkOf(a), 'stop', { runId });
+    const r = await this.call(this.linkOf(a), 'stop', { runId });
+    // (the provider does not know the run — its helper started again, or it never had a turn for it: it ends here, as
+    // stopped, never left waiting for an end that cannot come)
+    if (r && r.ok === false && !run.done) this.onEvent({ type: 'run.end', runId: String(runId), status: 'stopped' });
+    // (nothing of that run was running there: what the provider does run in the chat — a turn the gateway started again
+    // on its own, one from elsewhere — is stopped instead, for whoever may stop it, as the chat's Stop does)
+    if (r && (r.ok === false || r.aborted === false)) {
+      const s = this.sessions.get(P.account.id, run.sessionId);
+      const x = s ? await this.stopOnProvider(P, a, s, { quiet: true }) : null;
+      if (x) return { ok: true, scope: 'session', stopped: x.stopped };
+    }
     return { ok: true };
+  }
+  /**
+   * Stop for a chat, as the provider's own app has it (OpenClaw's Control UI): an answer of this account's being written
+   * there is stopped by its run, as stop() does; otherwise whatever the provider runs in that session — a turn from
+   * another channel, a job, one this installation no longer knows of since it restarted — is stopped on the provider,
+   * for whoever manages its connection (those turns are theirs, as watching them is). Resolves { ok, scope: 'run' |
+   * 'session', stopped } — stopped false: the provider had nothing running there.
+   */
+  async stopSession(P, agentId, sessionId) {
+    const { a, s } = this.need(P, agentId, sessionId ?? undefined);
+    if (!s) throw new ChatError(400, 'bad_request', 'Which chat?');
+    const own = [...this.runs].find(([, r]) => r.sessionId === s.id && r.accountId === P.account.id && !r.done && !r.uncertain);
+    if (own) { const x = await this.stop(P, own[0]); return x.scope === 'session' ? { ...x, run: own[0] } : { ok: true, scope: 'run', stopped: true, run: own[0] }; }
+    return this.stopOnProvider(P, a, s);
+  }
+  /** What the provider runs in a chat's session, stopped there (Stop for a chat with no answer of ours running). quiet:
+   *  null instead of an error where it may not (a provider without it, an account that does not manage it). */
+  async stopOnProvider(P, a, s, { quiet = false } = {}) {
+    const c = this.linkOf(a), m = this.registry.manifest(c.kind);
+    if (!m?.capabilities?.stopSession || !this.patches(a)) { if (quiet) return null; throw new ChatError(400, 'not_supported', 'This agent\'s provider stops an answer only while it is being written here'); }
+    if (this.connections.level(P, c) !== 'manage') { if (quiet) return null; throw new ChatError(403, 'forbidden', 'Only whoever manages this agent\'s provider stops what it runs in a chat from elsewhere'); }
+    if (!s.key || s.key === LAZY_KEY) return { ok: true, scope: 'session', stopped: false };
+    const r = await this.call(c, 'stopSession', { agentKey: a.nativeId || a.key, sessionKey: s.key });
+    return { ok: true, scope: 'session', stopped: !!(r && r.stopped) };
   }
   /** Answers what a run asks: approved (true or false), or a decision where the provider offers more (allow-once,
    *  allow-session — for this chat, Hermes —, allow-always, deny — Agent Providers). */
@@ -836,7 +870,9 @@ export class Chat {
     }
     const block = this.chatBlock ? this.chatBlock(P, a, c) : null;   // (the Mind: switched off, the owner's plan, a limit)
     if (block) return { ok: false, ...block, ...(manage && block.fix ? {} : { fix: undefined }) };
-    return { ok: true, kind: c.kind, caps: { ...m.capabilities }, manage, ...(this.hasModes(P, a, c) ? { modes: { default: this.work.brief(a.id).defaultMode } } : {}) };
+    // (stopSession: this account may stop what the provider runs in a chat from elsewhere — it manages the connection)
+    const stopSession = !!m.capabilities.stopSession && this.patches(a) && this.connections.level(P, c) === 'manage';
+    return { ok: true, kind: c.kind, caps: { ...m.capabilities }, manage, ...(stopSession ? { stopSession: true } : {}), ...(this.hasModes(P, a, c) ? { modes: { default: this.work.brief(a.id).defaultMode } } : {}) };
   }
   /** Whether this account's chats with the agent have Work and Life (CHAT.md §13): its owner's, when its brain is the Mind. */
   hasModes(P, a, c = null) {

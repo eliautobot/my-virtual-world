@@ -1,0 +1,169 @@
+{
+ "v": 1,
+ "model": "flamingo",
+ "rig": "mvw-bird-v1",
+ "source": "Tripo Studio (bc4e1d4d-8c37-4edd-8e32-974d1117f854); bird rig along its body, neck, wings and legs; folded, flapping, gliding, walking and swimming poses (tools/animals/bird_animal.py)",
+ "height": 1.03,
+ "span": 1.5,
+ "bones": [
+  "root",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "neck4",
+  "neck5",
+  "neck6",
+  "neck7",
+  "neck8",
+  "head",
+  "tail1",
+  "shoulder.L",
+  "elbow.L",
+  "wrist.L",
+  "thigh.L",
+  "shin.L",
+  "tarsus.L",
+  "toes.L",
+  "shoulder.R",
+  "elbow.R",
+  "wrist.R",
+  "thigh.R",
+  "shin.R",
+  "tarsus.R",
+  "toes.R"
+ ],
+ "lods": [
+  {
+   "verts": 10172,
+   "tris": 13998,
+   "pos": 0,
+   "nrm": 122064,
+   "uv": 244128,
+   "skin": 325504,
+   "weight": 366192,
+   "index": 406880,
+   "indexType": "u16",
+   "min": [
+    -0.3635999858379364,
+    0.0,
+    -0.7493000030517578
+   ],
+   "max": [
+    0.3644999861717224,
+    1.0297000408172607,
+    0.7483999729156494
+   ]
+  },
+  {
+   "verts": 4393,
+   "tris": 4998,
+   "pos": 490868,
+   "nrm": 543584,
+   "uv": 596300,
+   "skin": 631444,
+   "weight": 649016,
+   "index": 666588,
+   "indexType": "u16",
+   "min": [
+    -0.3625999987125397,
+    0.0,
+    -0.7475000023841858
+   ],
+   "max": [
+    0.3630000054836273,
+    1.0297000408172607,
+    0.7483999729156494
+   ]
+  },
+  {
+   "verts": 1909,
+   "tris": 1500,
+   "pos": 696576,
+   "nrm": 719484,
+   "uv": 742392,
+   "skin": 757664,
+   "weight": 765300,
+   "index": 772936,
+   "indexType": "u16",
+   "min": [
+    -0.3538999855518341,
+    0.0008999999845400453,
+    -0.7475000023841858
+   ],
+   "max": [
+    0.35199999809265137,
+    1.023800015449524,
+    0.7473999857902527
+   ]
+  }
+ ],
+ "lodDist": [
+  25,
+  70
+ ],
+ "anim": {
+  "offset": 781936,
+  "frames": 306,
+  "bones": 26
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 210,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 210,
+   "frames": 32,
+   "fps": 25.565,
+   "stride": 0.4381
+  },
+  "fly": {
+   "start": 242,
+   "frames": 24,
+   "fps": 72.0,
+   "hz": 3.0
+  },
+  "glide": {
+   "start": 266,
+   "frames": 40,
+   "fps": 12.0,
+   "hz": 0.3
+  }
+ },
+ "textures": {
+  "color": "flamingo-color.jpg",
+  "mask": "flamingo-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

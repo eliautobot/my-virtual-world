@@ -1,0 +1,157 @@
+{
+ "v": 1,
+ "model": "hawk",
+ "rig": "mvw-bird-v1",
+ "source": "Tripo Studio (e301e321-7838-4dbc-b628-c70783eefaf1); bird rig along its body, neck, wings and legs; folded, flapping, gliding, walking and swimming poses (tools/animals/bird_animal.py)",
+ "height": 0.488,
+ "span": 1.2,
+ "bones": [
+  "root",
+  "chest",
+  "neck1",
+  "head",
+  "tail1",
+  "tail2",
+  "shoulder.L",
+  "elbow.L",
+  "wrist.L",
+  "thigh.L",
+  "shin.L",
+  "tarsus.L",
+  "toes.L",
+  "shoulder.R",
+  "elbow.R",
+  "wrist.R",
+  "thigh.R",
+  "shin.R",
+  "tarsus.R",
+  "toes.R"
+ ],
+ "lods": [
+  {
+   "verts": 9824,
+   "tris": 13998,
+   "pos": 0,
+   "nrm": 117888,
+   "uv": 235776,
+   "skin": 314368,
+   "weight": 353664,
+   "index": 392960,
+   "indexType": "u16",
+   "min": [
+    -0.3215000033378601,
+    0.00019999999494757503,
+    -0.599399983882904
+   ],
+   "max": [
+    0.3215000033378601,
+    0.48820000886917114,
+    0.5995000004768372
+   ]
+  },
+  {
+   "verts": 3955,
+   "tris": 5000,
+   "pos": 476948,
+   "nrm": 524408,
+   "uv": 571868,
+   "skin": 603508,
+   "weight": 619328,
+   "index": 635148,
+   "indexType": "u16",
+   "min": [
+    -0.32109999656677246,
+    0.0010000000474974513,
+    -0.599399983882904
+   ],
+   "max": [
+    0.32120001316070557,
+    0.48820000886917114,
+    0.5993000268936157
+   ]
+  },
+  {
+   "verts": 1558,
+   "tris": 1500,
+   "pos": 665148,
+   "nrm": 683844,
+   "uv": 702540,
+   "skin": 715004,
+   "weight": 721236,
+   "index": 727468,
+   "indexType": "u16",
+   "min": [
+    -0.3208000063896179,
+    0.002199999988079071,
+    -0.5975000262260437
+   ],
+   "max": [
+    0.32120001316070557,
+    0.48669999837875366,
+    0.5993000268936157
+   ]
+  }
+ ],
+ "lodDist": [
+  25,
+  70
+ ],
+ "anim": {
+  "offset": 736468,
+  "frames": 244,
+  "bones": 20
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 180,
+   "fps": 15.0
+  },
+  "fly": {
+   "start": 180,
+   "frames": 24,
+   "fps": 72.0,
+   "hz": 3.0
+  },
+  "glide": {
+   "start": 204,
+   "frames": 40,
+   "fps": 12.0,
+   "hz": 0.3
+  }
+ },
+ "textures": {
+  "color": "hawk-color.jpg",
+  "mask": "hawk-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

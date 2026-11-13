@@ -11,7 +11,7 @@ import { auth } from '../core/auth.js';
 import { h, esc } from '../core/util.js';
 
 let app, btn, badge, panel = null, list = [], unread = 0, loaded = false, statuses = new Map(), swReg = null;
-const ICON = { approval: '✋', note: '💬', chat: '💬', problem: '🧭', system: '🔔', phone: '📱' };
+const ICON = { approval: '✋', note: '💬', chat: '💬', problem: '🧭', system: '🔔', phone: '📱', update: '⬆️' };
 const vc = c => `${(c / 100).toFixed(c % 100 ? 2 : 0)} VC`;
 const ago = ms => { const s = Math.max(0, (Date.now() - ms) / 1000); return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : new Date(ms).toLocaleDateString(); };
 const pushable = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && window.isSecureContext;
@@ -75,14 +75,18 @@ function urlOf(link) {
   if (link.approval) return `/?approval=${encodeURIComponent(link.approval)}${link.agent ? `&agent=${link.agent}` : ''}`;
   if (link.agent && link.phone) return `/?phone=${link.agent}${link.phone.peer ? `&peer=${encodeURIComponent(link.phone.peer)}` : ''}${link.phone.call ? '&calls=1' : ''}`;
   if (link.agent) return `/?chat=${link.agent}${link.session ? `:${link.session}` : ''}`;
+  if (link.update) return '/?update=1';
   return '/';
 }
-/** Opens what a notification is about: a chat, or the bell on an approval. */
+/** Settings → About: what a newer version brings and how to update (a "New version available" notification). */
+const openAbout = () => import('./settings.js').then(m => m.open(app, 'about'));
+/** Opens what a notification is about: a chat, Settings → About for a new version, or the bell on an approval. */
 function follow(u, fromLoad = false) {
-  const chat = u.searchParams.get('chat'), appr = u.searchParams.get('approval'), phone = Number(u.searchParams.get('phone'));
-  if (!chat && !appr && !(phone > 0)) return;
+  const chat = u.searchParams.get('chat'), appr = u.searchParams.get('approval'), phone = Number(u.searchParams.get('phone')), upd = u.searchParams.get('update');
+  if (!chat && !appr && !(phone > 0) && !upd) return;
   if (fromLoad) history.replaceState(null, '', location.pathname);   // (a reload doesn't open it again)
   if (!auth.account) return;
+  if (upd) { openAbout(); return; }
   if (phone > 0) { app.chat?.openPhone?.(phone, { peer: u.searchParams.get('peer') || null, calls: u.searchParams.get('calls') === '1' }); return; }
   if (chat) { const [agent, session] = chat.split(':').map(Number); if (agent > 0) app.chat?.open(agent, session > 0 ? { session } : {}); return; }
   openPanel();
@@ -121,7 +125,7 @@ export function itemsHtml(items, { inChat = false } = {}) {
     const st = n.kind === 'approval' ? statuses.get(n.link?.approval) || 'pending' : null;
     const acts = st === 'pending' ? `<div class="bell-acts"><button type="button" class="btn small primary" data-appr="${esc(n.link.approval)}" data-yes="1">Approve</button><button type="button" class="btn small" data-appr="${esc(n.link.approval)}" data-yes="0">Decline</button>${n.link.agent && !inChat ? `<button type="button" class="btn small" data-chat="${n.link.agent}">Open chat</button>` : ''}</div>`
       : st ? `<div class="bell-st ${st}">${{ approved: 'Approved', declined: 'Declined', expired: 'Expired', failed: 'Approved, but it failed' }[st] || st}</div>` : '';
-    return `<div class="bell-item${n.read ? '' : ' unread'}" role="listitem" data-id="${n.id}"${n.link?.agent && n.link.phone ? ` data-phone="${n.link.agent}" data-peer="${esc(n.link.phone.peer || '')}" data-calls="${n.link.phone.call ? '1' : ''}"` : n.link?.agent && n.kind !== 'approval' ? ` data-chat="${n.link.agent}" data-session="${n.link.session || ''}"` : ''}${n.link?.homestead ? ' data-fl="open"' : ''}>
+    return `<div class="bell-item${n.read ? '' : ' unread'}" role="listitem" data-id="${n.id}"${n.link?.agent && n.link.phone ? ` data-phone="${n.link.agent}" data-peer="${esc(n.link.phone.peer || '')}" data-calls="${n.link.phone.call ? '1' : ''}"` : n.link?.update ? ` data-update="${esc(String(n.link.update))}"` : n.link?.agent && n.kind !== 'approval' ? ` data-chat="${n.link.agent}" data-session="${n.link.session || ''}"` : ''}${n.link?.homestead ? ' data-fl="open"' : ''}>
       <span class="bell-ic" aria-hidden="true">${ICON[n.kind] || '🔔'}</span><div class="bell-txt"><div class="bell-t" data-noicon>${esc(n.title)}</div>${n.body ? `<div class="bell-b" data-noicon>${esc(n.body)}</div>` : ''}${acts}<div class="bell-when">${ago(n.created)}</div></div></div>`;
   }).join('');
 }
@@ -170,6 +174,13 @@ export async function clickItem(e, { beforeOpen = null } = {}) {
     beforeOpen?.();
     app.chat?.openPhone?.(Number(ph.dataset.phone), { peer: ph.dataset.peer || null, calls: ph.dataset.calls === '1' });
     return 'phone';
+  }
+  const up = e.target.closest('[data-update]');
+  if (up) {
+    if (up.classList.contains('unread')) post('/api/notifications/read', { id: Number(up.dataset.id) }).then(r => setUnread(r.unread)).catch(() => {});
+    beforeOpen?.();
+    openAbout();
+    return 'update';
   }
   const c = e.target.closest('[data-chat]');
   if (c) {

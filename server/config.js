@@ -20,7 +20,7 @@ export const SERVER_SETTINGS = Object.freeze([
   'MVW_COOKIE_NAME', 'MVW_KEY_FILE', 'MVW_SECRET_KEY', 'MVW_SECRET_KEY_PREVIOUS', 'MVW_KEY_POLL_MS',
   'MVW_WS_PER_ADDRESS', 'MVW_WS_MAX', 'MVW_PROVIDER_MEDIA_CACHE_MB', 'MVW_GATEWAY_IS_LOCAL', 'MVW_REQUIRE_HTTPS',
   'MVW_PROVIDER_TEST', 'MVW_PROVIDER_RUN_TIMEOUT_MS', 'MVW_TWILIO_TEST_URL', 'MVW_PROBLEM_SCAN_MS', 'MVW_CHROME', 'MVW_HOUSING', 'MVW_STARTER_MAP', 'MVW_SOUNDTRACK', 'MVW_RADIO',
-  'MVW_ASSET_CACHE',
+  'MVW_ASSET_CACHE', 'MVW_UPDATE_CHECK', 'MVW_UPDATE_TEST_URL',
 ]);
 /** Older names that still work, with a warning (C102): none at present. */
 export const LEGACY_SETTINGS = Object.freeze({});
@@ -133,11 +133,16 @@ export function loadConfig({ env = process.env, root, release = null, routeTable
   cfg.soundtrack = !/^(0|off|false|no)$/i.test(String(raw('MVW_SOUNDTRACK') ?? '').trim());
   // MVW Radio's hosts writing breaks (server/radio/): off stops them (the tests' servers)
   cfg.radio = !/^(0|off|false|no)$/i.test(String(raw('MVW_RADIO') ?? '').trim());
+  // "New version available" (server/updates.js): the server asks GitHub's latest release now and then; off: never (the
+  // tests' servers). Settings → General turns it off too.
+  cfg.updateCheck = !/^(0|off|false|no)$/i.test(String(raw('MVW_UPDATE_CHECK') ?? '').trim());
   // Tests only (WP2.2): load the mock agent provider into the provider helper, and shorten how long a run submission may go unanswered.
   cfg.providerTest = bool('MVW_PROVIDER_TEST');
   cfg.providerRunTimeoutMs = int('MVW_PROVIDER_RUN_TIMEOUT_MS', 0, 0, 600000);
   // (tests only, with MVW_PROVIDER_TEST: the Twilio adapter talks to a fake Twilio on this machine — tests/helpers/fake-twilio.mjs)
   cfg.twilioTestUrl = cfg.providerTest && /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(raw('MVW_TWILIO_TEST_URL') || '') ? raw('MVW_TWILIO_TEST_URL') : null;
+  // (tests only, with MVW_PROVIDER_TEST: the update check asks a fake release feed on this machine instead of GitHub)
+  cfg.updateTestUrl = cfg.providerTest && /^http:\/\/127\.0\.0\.1:\d{2,5}(\/[\w./-]*)?$/.test(raw('MVW_UPDATE_TEST_URL') || '') ? raw('MVW_UPDATE_TEST_URL') : null;
   cfg.seed = text('MVW_SEED', DEFAULT_SEED, 100);
   cfg.hqName = text('MVW_HQ_NAME', DEFAULT_HQ_NAME, 28);   // the rooftop sign holds 28 characters
 

@@ -1,0 +1,158 @@
+{
+ "v": 1,
+ "model": "eagle",
+ "rig": "mvw-bird-v1",
+ "source": "Tripo Studio (dec16a4e-d7e1-42ef-a684-d487f359dc3f); bird rig along its body, neck, wings and legs; folded, flapping, gliding, walking and swimming poses (tools/animals/bird_animal.py)",
+ "height": 0.814,
+ "span": 2.0,
+ "bones": [
+  "root",
+  "chest",
+  "neck1",
+  "neck2",
+  "head",
+  "tail1",
+  "tail2",
+  "shoulder.L",
+  "elbow.L",
+  "wrist.L",
+  "thigh.L",
+  "shin.L",
+  "tarsus.L",
+  "toes.L",
+  "shoulder.R",
+  "elbow.R",
+  "wrist.R",
+  "thigh.R",
+  "shin.R",
+  "tarsus.R",
+  "toes.R"
+ ],
+ "lods": [
+  {
+   "verts": 9567,
+   "tris": 14000,
+   "pos": 0,
+   "nrm": 114804,
+   "uv": 229608,
+   "skin": 306144,
+   "weight": 344412,
+   "index": 382680,
+   "indexType": "u16",
+   "min": [
+    -0.31869998574256897,
+    0.0,
+    -1.0
+   ],
+   "max": [
+    0.31859999895095825,
+    0.8134999871253967,
+    0.9998000264167786
+   ]
+  },
+  {
+   "verts": 3994,
+   "tris": 5000,
+   "pos": 466680,
+   "nrm": 514608,
+   "uv": 562536,
+   "skin": 594488,
+   "weight": 610464,
+   "index": 626440,
+   "indexType": "u16",
+   "min": [
+    -0.31869998574256897,
+    0.0017999999690800905,
+    -0.9957000017166138
+   ],
+   "max": [
+    0.31859999895095825,
+    0.8134999871253967,
+    0.9958000183105469
+   ]
+  },
+  {
+   "verts": 1636,
+   "tris": 1496,
+   "pos": 656440,
+   "nrm": 676072,
+   "uv": 695704,
+   "skin": 708792,
+   "weight": 715336,
+   "index": 721880,
+   "indexType": "u16",
+   "min": [
+    -0.31869998574256897,
+    0.003100000089034438,
+    -0.9957000017166138
+   ],
+   "max": [
+    0.31859999895095825,
+    0.8134999871253967,
+    0.982699990272522
+   ]
+  }
+ ],
+ "lodDist": [
+  25,
+  70
+ ],
+ "anim": {
+  "offset": 730856,
+  "frames": 244,
+  "bones": 21
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 180,
+   "fps": 15.0
+  },
+  "fly": {
+   "start": 180,
+   "frames": 24,
+   "fps": 48.0,
+   "hz": 2.0
+  },
+  "glide": {
+   "start": 204,
+   "frames": 40,
+   "fps": 10.0,
+   "hz": 0.25
+  }
+ },
+ "textures": {
+  "color": "eagle-color.jpg",
+  "mask": "eagle-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

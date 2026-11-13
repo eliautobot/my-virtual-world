@@ -1,0 +1,78 @@
+{
+ "id": "black-bear",
+ "name": "Black bears",
+ "tier": "shared",
+ "model": "bear",
+ "asset": "/assets/fauna/bear/bear.json",
+ "behaviour": "graze",
+ "habitats": [
+  "forest",
+  "meadow",
+  "rock"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  1,
+  1
+ ],
+ "perKm2": 1.6,
+ "habitatWeight": {
+  "meadow": 0.12,
+  "rock": 0.3
+ },
+ "haunts": [
+  {
+   "near": "falls",
+   "within": 60,
+   "perKm2": 120,
+   "on": [
+    "shore"
+   ]
+  },
+  {
+   "near": "river",
+   "within": 50,
+   "perKm2": 4,
+   "on": [
+    "shore"
+   ]
+  },
+  {
+   "near": "lake",
+   "within": 60,
+   "perKm2": 1,
+   "on": [
+    "shore"
+   ]
+  }
+ ],
+ "size": 1.0,
+ "colors": [
+  "#1e1d1f"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#1e1d1f",
+   "hair": "#1e1d1f",
+   "legs": "#1e1d1f"
+  }
+ ],
+ "speed": 0.9,
+ "run": 10,
+ "flee": 45,
+ "altitude": [
+  0,
+  350
+ ]
+}

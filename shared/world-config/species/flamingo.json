@@ -1,0 +1,30 @@
+{
+ "id": "flamingo",
+ "name": "Flamingos",
+ "tier": "ambient",
+ "model": "bird",
+ "asset": "/assets/fauna/flamingo/flamingo.json",
+ "behaviour": "wade",
+ "habitats": [
+  "beach"
+ ],
+ "hours": [
+  6,
+  19.5
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast"
+ ],
+ "group": [
+  6,
+  14
+ ],
+ "perKm2": 12,
+ "size": 1.0,
+ "colors": [
+  "#f08a9a"
+ ],
+ "speed": 0.35
+}

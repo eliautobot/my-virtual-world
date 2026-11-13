@@ -1,8 +1,8 @@
 // Demo mode over HTTP (server/licence.js; the self-hosted release's licence, as release 1's): until a licence key is
 // active the world stays the one generated at the first start — building, interiors, signs, layouts, promotional
 // aircraft and restoring a world backup are refused on the server — and the installation has at most 3 agents in all,
-// built in or connected (a Grok Bot counts like any other; tests/agents-api.test.mjs). Watching, chat and the routes
-// that only read stay open.
+// built in or connected (a Grok Bot counts like any other; tests/agents-api.test.mjs); the agents' PCs and phones are
+// locked too (tests/licence-pc-phone.test.mjs). Watching, chat and the routes that only read stay open.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { startServer, ownerSession } from './helpers/server.mjs';
@@ -35,5 +35,6 @@ test('demo mode: watching and reading stay open', async () => {
   for (const p of ['/api/world', '/api/people', '/api/layouts', '/api/promo-aircraft', '/api/property/lots']) assert.equal((await owner.get(p)).status, 200, p);
   const lic = (await owner.get('/api/licence')).json;
   assert.equal(lic.agentLimit, 3);
-  assert.deepEqual(lic.locks, ['World editing', 'More than 3 agents (built in or connected)']);
+  assert.deepEqual(lic.locks, ['World editing', 'More than 3 agents (built in or connected)', 'Each agent\'s PC (its computer, browser, terminal and screens)',
+    'Each agent\'s phone (texts and calls through Twilio)']);   // (the PCs' and phones' locks: tests/licence-pc-phone.test.mjs)
 });

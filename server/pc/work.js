@@ -21,8 +21,9 @@ export class PcWork {
    * (server/agent-work/work.js). names(tag, me). bus: the providers' event bus (presence: the agent goes to a screen).
    * notify(accountId, { title, body, link }). zoneOf(agent): its work time zone.
    */
-  constructor({ pc, mind, agents, work = null, names = t => t, bus = null, notify = null, zoneOf = () => 'UTC', browser = () => null, workers = WORKERS, log = null, now = () => Date.now() }) {
-    Object.assign(this, { pc, mind, agents, work, names, bus, notifyFn: notify, zoneOf, browserFn: browser, workers, log, now });
+  constructor({ pc, mind, agents, work = null, names = t => t, bus = null, notify = null, zoneOf = () => 'UTC', browser = () => null, workers = WORKERS, log = null, now = () => Date.now(), locked = () => false }) {
+    // locked(): demo mode's 'pc' lock stands (server/licence.js) — queued work waits, none starts, until a key is active
+    Object.assign(this, { pc, mind, agents, work, names, bus, notifyFn: notify, zoneOf, browserFn: browser, workers, log, now, locked });
     this.queue = [];             // { agent, card, why, by, at }
     this.running = new Map();    // agent id → { card, started, steps, stop }
     this.q = {
@@ -94,6 +95,7 @@ export class PcWork {
     return { stopped: true };
   }
   pump() {
+    if (this.locked()) return;   // (demo mode: the PC rests — licence enforcement, server/licence.js; the server pumps again once licensed)
     while (this.running.size < this.workers && this.queue.length) {
       const k = this.queue.findIndex(j => !this.running.has(j.agent));
       if (k < 0) break;

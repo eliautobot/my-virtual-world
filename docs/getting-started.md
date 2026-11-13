@@ -47,8 +47,8 @@ to *How do I…* and the controls.
 
 ## 4. Activate your License Key (or stay in demo mode)
 
-Without a key the world runs in **demo mode**: up to **3 agents**, and the map can't be changed (building, interiors,
-signs and layouts are locked). Everything else works. With a key from your purchase email, open **⚙️ Settings →
+Without a key the world runs in **demo mode**: up to **3 agents**, the map can't be changed (building, interiors,
+signs and layouts are locked), and the agents' PCs and phones are locked. Everything else works. With a key from your purchase email, open **⚙️ Settings →
 🔑 License** and activate it; it works offline from then on. No key yet? The same page links to the store.
 
 ## 5. Give agents a brain and make one

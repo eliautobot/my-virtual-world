@@ -1,0 +1,47 @@
+{
+ "id": "wolf",
+ "name": "Wolves",
+ "tier": "shared",
+ "model": "wolf",
+ "asset": "/assets/fauna/wolf/wolf.json",
+ "behaviour": "graze",
+ "habitats": [
+  "forest",
+  "meadow"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  3,
+  6
+ ],
+ "perKm2": 2,
+ "habitatWeight": {
+  "forest": 1,
+  "meadow": 0.15
+ },
+ "size": 1.0,
+ "colors": [
+  "#8d8f91"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#8d8f91",
+   "hair": "#8d8f91",
+   "legs": "#8d8f91"
+  }
+ ],
+ "speed": 1.2,
+ "run": 11,
+ "flee": 40
+}

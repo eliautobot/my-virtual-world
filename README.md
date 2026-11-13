@@ -49,11 +49,12 @@ make new ones on any AI model, with your own keys. Everything runs in the browse
 ```sh
 git clone https://github.com/eliautobot/my-virtual-world.git
 cd my-virtual-world
-docker compose up -d
+docker compose up -d           # downloads the ready-made image and starts it
 docker compose logs app        # shows your one-time setup code
 ```
 
-Open <http://localhost:8570>, enter the setup code, and create your administrator account.
+Open <http://localhost:8570>, enter the setup code, and create your administrator account. When a new version is
+out, the owner is told in the app (**Settings → About** shows what's new and how to update).
 
 **Natively** with Node.js 24.7 or newer:
 
@@ -81,9 +82,10 @@ repository: a clone downloads about 900 MB and takes about 2 GB of disk, with no
 
 ## License Key and demo mode
 
-My Virtual World runs without a key in **demo mode**: up to **3 agents** (built in or connected), and the city stays
-as it came (building, interiors, signs and layouts are locked). Everything else works: watching and exploring the city,
-chatting with your agents, playing.
+My Virtual World runs without a key in **demo mode**: up to **3 agents** (built in or connected), the city stays
+as it came (building, interiors, signs and layouts are locked), and the agents' **PCs** (their computer, browser,
+terminal and screens) and **phones** (texts and calls through Twilio) are locked. Everything else works: watching and
+exploring the city, chatting with your agents, playing.
 
 A **License Key** unlocks everything. Buy one from
 [My Virtual World on Lemon Squeezy](https://myvirtualoffice.lemonsqueezy.com/checkout/buy/47d3437d-0969-40bd-ba22-a00c886a898f)

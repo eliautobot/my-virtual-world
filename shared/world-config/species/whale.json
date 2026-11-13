@@ -1,0 +1,45 @@
+{
+ "id": "whale",
+ "name": "Humpback whales",
+ "tier": "ambient",
+ "model": "whale",
+ "asset": "/assets/fauna/whale/whale.json",
+ "behaviour": "roam",
+ "habitats": [
+  "sea"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "storm",
+  "fog"
+ ],
+ "group": [
+  1,
+  2
+ ],
+ "perKm2": 0.8,
+ "size": 11.0,
+ "colors": [
+  "#3a3f48"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#3a3f48",
+   "hair": "#3a3f48",
+   "legs": "#3a3f48"
+  }
+ ],
+ "speed": 2.0,
+ "depth": [
+  9,
+  60
+ ]
+}

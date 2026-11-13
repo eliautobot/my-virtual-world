@@ -4,12 +4,36 @@
  "tier": "ambient",
  "model": "alligator",
  "behaviour": "swim",
- "habitats": ["lake"],
- "hours": [7, 20],
- "weather": ["clear", "partly"],
- "group": [1, 1],
+ "habitats": [
+  "lake"
+ ],
+ "hours": [
+  7,
+  20
+ ],
+ "weather": [
+  "clear",
+  "partly"
+ ],
+ "group": [
+  1,
+  1
+ ],
  "perKm2": 14,
  "size": 2.9,
- "colors": ["#56604a", "#4c5a42", "#5f644a"],
- "speed": 0.35
+ "colors": [
+  "#56604a",
+  "#4c5a42",
+  "#5f644a"
+ ],
+ "speed": 0.35,
+ "asset": "/assets/fauna/alligator/alligator.json",
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#5f6a4a",
+   "hair": "#5f6a4a",
+   "legs": "#5f6a4a"
+  }
+ ]
 }

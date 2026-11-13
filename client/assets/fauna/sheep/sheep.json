@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "sheep",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (3d414791-d849-4421-96fc-a81aeccad8fe); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.1378,
+    0.0,
+    -0.1906
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.1407,
+    0.0,
+    0.1907
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.6262,
+    0.0,
+    -0.1941
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.6233,
+    0.0,
+    0.188
+   ]
+  ]
+ },
+ "height": 1.35,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 8706,
+   "tris": 13999,
+   "pos": 0,
+   "nrm": 104472,
+   "uv": 208944,
+   "skin": 278592,
+   "weight": 313416,
+   "index": 348240,
+   "indexType": "u16",
+   "min": [
+    -0.9896000027656555,
+    0.0,
+    -0.376800000667572
+   ],
+   "max": [
+    0.8371999859809875,
+    1.3494000434875488,
+    0.3741999864578247
+   ]
+  },
+  {
+   "verts": 3377,
+   "tris": 4999,
+   "pos": 432236,
+   "nrm": 472760,
+   "uv": 513284,
+   "skin": 540300,
+   "weight": 553808,
+   "index": 567316,
+   "indexType": "u16",
+   "min": [
+    -0.9896000027656555,
+    0.0,
+    -0.3711000084877014
+   ],
+   "max": [
+    0.8360000252723694,
+    1.3493000268936157,
+    0.3711000084877014
+   ]
+  },
+  {
+   "verts": 1258,
+   "tris": 1499,
+   "pos": 597312,
+   "nrm": 612408,
+   "uv": 627504,
+   "skin": 637568,
+   "weight": 642600,
+   "index": 647632,
+   "indexType": "u16",
+   "min": [
+    -0.9725000262260437,
+    0.0006000000284984708,
+    -0.3695000112056732
+   ],
+   "max": [
+    0.8276000022888184,
+    1.3361999988555908,
+    0.3684000074863434
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 656628,
+  "frames": 328,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 240,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 240,
+   "frames": 48,
+   "fps": 56.161,
+   "stride": 0.6837
+  },
+  "run": {
+   "start": 288,
+   "frames": 40,
+   "fps": 112.0,
+   "stride": 1.9048
+  }
+ },
+ "textures": {
+  "color": "sheep-color.jpg",
+  "mask": "sheep-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

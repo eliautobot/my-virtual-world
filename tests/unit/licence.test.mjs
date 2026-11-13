@@ -78,7 +78,7 @@ test('the defaults are the product\'s own: Lemon Squeezy, store 321733, product 
   assert.equal(STORE_ID, '321733');
   assert.deepEqual([...PRODUCT_IDS], [1140366]);
   assert.equal(DEMO_AGENTS, 3);
-  assert.deepEqual(Object.keys(LOCKS).sort(), ['agents.more', 'edit']);
+  assert.deepEqual(Object.keys(LOCKS).sort(), ['agents.more', 'edit', 'pc', 'phone']);
   assert.ok(Object.isFrozen(PRODUCT_IDS) && Object.isFrozen(LOCKS), 'nothing can change them at run time');
 });
 

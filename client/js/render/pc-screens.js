@@ -21,6 +21,7 @@ import { floorAt } from '/shared/constants.js';
 import { PROP } from '/shared/anims.js';
 import { usePc, pcInUse } from '../ui/pc-onscreen.js';
 import { watchScreens } from '../ui/pc-watch.js';
+import { isDemo } from '../ui/licence.js';
 import { drawPcScreen, drawPlainScreen, isTyping, TYPE_MS } from './pc-draw.js';
 
 const LIVE = 16, TVS = 2, NEAR = 24, TW = 768, TH = 388;
@@ -94,7 +95,8 @@ export class PcScreens {
 
   // ---------------------------------------------------------------- what is mine
   async load() {
-    if (!auth.can?.('agents.pc') || !auth.me?.account) { this.mine.clear(); this.teams = []; return; }
+    // (demo mode: the agents' PCs are locked — lock 'pc' — so their screens in the world show nothing of them)
+    if (!auth.can?.('agents.pc') || !auth.me?.account || isDemo()) { this.mine.clear(); this.teams = []; return; }
     try {
       const o = await getJSON('/api/pc');
       const was = this.mine;

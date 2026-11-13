@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "cow",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (63a2528f-ab9e-40b4-9481-7c40b88d1a64); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.4069,
+    0.0,
+    -0.1525
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.364,
+    0.0,
+    0.3447
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.7737,
+    0.0,
+    -0.3808
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.7601,
+    0.0,
+    0.3916
+   ]
+  ]
+ },
+ "height": 1.75,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 9375,
+   "tris": 13977,
+   "pos": 0,
+   "nrm": 112500,
+   "uv": 225000,
+   "skin": 300000,
+   "weight": 337500,
+   "index": 375000,
+   "indexType": "u16",
+   "min": [
+    -1.2484999895095825,
+    0.0,
+    -0.45179998874664307
+   ],
+   "max": [
+    1.3459999561309814,
+    1.7484999895095825,
+    0.49059998989105225
+   ]
+  },
+  {
+   "verts": 3637,
+   "tris": 4987,
+   "pos": 458864,
+   "nrm": 502508,
+   "uv": 546152,
+   "skin": 575248,
+   "weight": 589796,
+   "index": 604344,
+   "indexType": "u16",
+   "min": [
+    -1.247499942779541,
+    0.00039999998989515007,
+    -0.45179998874664307
+   ],
+   "max": [
+    1.344599962234497,
+    1.7482000589370728,
+    0.4844000041484833
+   ]
+  },
+  {
+   "verts": 1369,
+   "tris": 1492,
+   "pos": 634268,
+   "nrm": 650696,
+   "uv": 667124,
+   "skin": 678076,
+   "weight": 683552,
+   "index": 689028,
+   "indexType": "u16",
+   "min": [
+    -1.2355999946594238,
+    0.00039999998989515007,
+    -0.44519999623298645
+   ],
+   "max": [
+    1.344099998474121,
+    1.7482000589370728,
+    0.4837999939918518
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 697980,
+  "frames": 388,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 300,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 300,
+   "frames": 48,
+   "fps": 36.554,
+   "stride": 0.9192
+  },
+  "run": {
+   "start": 348,
+   "frames": 40,
+   "fps": 88.0,
+   "stride": 2.7273
+  }
+ },
+ "textures": {
+  "color": "cow-color.jpg",
+  "mask": "cow-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

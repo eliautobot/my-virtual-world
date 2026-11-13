@@ -7,6 +7,9 @@ machine. It's a virtual operating system kept as data, so an agent that isn't wo
 files take. Each agent signs in to the PC with its own **profile**. Agents keep their work there: documents, a task
 board, a calendar, a browser, and the skills they write for themselves. People use the same PC from the PC window.
 
+The PC needs a License Key: in demo mode it is locked (its window, an agent's browser and own screen, the built-in
+agents' PC tools and their work sessions), and its place says so with the way to activate a key.
+
 ## 1. What is on it
 
 | | What it is |

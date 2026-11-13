@@ -7,6 +7,7 @@
 // (its Browser app, ./pc-more.js) and the chat window's side panel (./chat-dock.js).
 import { getJSON, post } from '../core/net.js';
 import { esc } from '../core/util.js';
+import { isDemo, lockedPanel, LOCKED_TEXT } from './licence.js';
 
 const POLL_MS = 5000;          // who has control, read again this often while it shows
 const HIDDEN_MS = 20000;       // out of sight this long (and not being used): the stream closes until it shows again
@@ -21,6 +22,8 @@ const loadRfb = () => (rfbModule ||= import('/vendor/novnc/core/rfb.js').then(m 
  * @returns {{ destroy: () => void }}
  */
 export function mountProviderScreen(el, agentId, { toast = null } = {}) {
+  // demo mode: an agent's own screen is part of its PC, locked (lock 'pc', refused on the server too)
+  if (isDemo()) return lockedPanel(el, LOCKED_TEXT.screen);
   el.classList.add('psc');
   el.innerHTML = `<div class="psc-bar"><span class="psc-st" aria-live="polite"></span><span class="psc-sp"></span>
       <button type="button" class="btn small" data-s="take" hidden>✋ Take over</button>

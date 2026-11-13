@@ -5,7 +5,8 @@
  "model": "duck",
  "behaviour": "swim",
  "habitats": [
-  "lake"
+  "lake",
+  "river"
  ],
  "hours": [
   5,
@@ -21,9 +22,10 @@
   3
  ],
  "perKm2": 15,
- "size": 0.75,
+ "size": 1.0,
  "colors": [
   "#f4f4f2"
  ],
- "speed": 0.35
+ "speed": 0.35,
+ "asset": "/assets/fauna/swan/swan.json"
 }

@@ -1,0 +1,170 @@
+{
+ "v": 1,
+ "model": "chicken",
+ "rig": "mvw-bird-v1",
+ "source": "Tripo Studio (2ffb1b40-e2cb-43d3-be38-2a87c3b9b1ec); bird rig along its body, neck, wings and legs; folded, flapping, gliding, walking and swimming poses (tools/animals/bird_animal.py)",
+ "height": 0.45,
+ "span": 0.773,
+ "bones": [
+  "root",
+  "chest",
+  "neck1",
+  "neck2",
+  "head",
+  "tail1",
+  "tail2",
+  "shoulder.L",
+  "elbow.L",
+  "wrist.L",
+  "thigh.L",
+  "shin.L",
+  "tarsus.L",
+  "toes.L",
+  "shoulder.R",
+  "elbow.R",
+  "wrist.R",
+  "thigh.R",
+  "shin.R",
+  "tarsus.R",
+  "toes.R"
+ ],
+ "lods": [
+  {
+   "verts": 9799,
+   "tris": 14000,
+   "pos": 0,
+   "nrm": 117588,
+   "uv": 235176,
+   "skin": 313568,
+   "weight": 352764,
+   "index": 391960,
+   "indexType": "u16",
+   "min": [
+    -0.27250000834465027,
+    0.00039999998989515007,
+    -0.38589999079704285
+   ],
+   "max": [
+    0.27309998869895935,
+    0.4496999979019165,
+    0.38580000400543213
+   ]
+  },
+  {
+   "verts": 4164,
+   "tris": 5000,
+   "pos": 475960,
+   "nrm": 525928,
+   "uv": 575896,
+   "skin": 609208,
+   "weight": 625864,
+   "index": 642520,
+   "indexType": "u16",
+   "min": [
+    -0.27239999175071716,
+    0.00039999998989515007,
+    -0.38589999079704285
+   ],
+   "max": [
+    0.27309998869895935,
+    0.44760000705718994,
+    0.38580000400543213
+   ]
+  },
+  {
+   "verts": 1740,
+   "tris": 1500,
+   "pos": 672520,
+   "nrm": 693400,
+   "uv": 714280,
+   "skin": 728200,
+   "weight": 735160,
+   "index": 742120,
+   "indexType": "u16",
+   "min": [
+    -0.27140000462532043,
+    0.005900000222027302,
+    -0.38589999079704285
+   ],
+   "max": [
+    0.2712000012397766,
+    0.447299987077713,
+    0.38580000400543213
+   ]
+  }
+ ],
+ "lodDist": [
+  25,
+  70
+ ],
+ "anim": {
+  "offset": 751120,
+  "frames": 464,
+  "bones": 21
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 336,
+   "fps": 24.0
+  },
+  "walk": {
+   "start": 336,
+   "frames": 32,
+   "fps": 52.608,
+   "stride": 0.1521
+  },
+  "run": {
+   "start": 368,
+   "frames": 32,
+   "fps": 132.571,
+   "stride": 0.2172
+  },
+  "fly": {
+   "start": 400,
+   "frames": 24,
+   "fps": 120.0,
+   "hz": 5.0
+  },
+  "glide": {
+   "start": 424,
+   "frames": 40,
+   "fps": 16.0,
+   "hz": 0.4
+  }
+ },
+ "textures": {
+  "color": "chicken-color.jpg",
+  "mask": "chicken-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

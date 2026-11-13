@@ -1,0 +1,62 @@
+{
+ "id": "moose",
+ "name": "Moose",
+ "tier": "shared",
+ "model": "moose",
+ "asset": "/assets/fauna/moose/moose.json",
+ "behaviour": "graze",
+ "habitats": [
+  "forest",
+  "meadow"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  1,
+  2
+ ],
+ "perKm2": 3.5,
+ "haunts": [
+  {
+   "near": "lake",
+   "within": 120,
+   "perKm2": 4,
+   "on": [
+    "shore"
+   ]
+  },
+  {
+   "near": "river",
+   "within": 60,
+   "perKm2": 2,
+   "on": [
+    "shore"
+   ]
+  }
+ ],
+ "size": 1.0,
+ "colors": [
+  "#4a3c30"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#4a3c30",
+   "hair": "#4a3c30",
+   "legs": "#4a3c30"
+  }
+ ],
+ "speed": 1.0,
+ "run": 9,
+ "flee": 50,
+ "nearWater": 250
+}

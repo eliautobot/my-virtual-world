@@ -7,7 +7,9 @@
 // agent's chat brain (a connection without 'chat' cannot be linked to an agent).
 // (Agent Providers, docs/features/agent-providers.md §4: agents — the provider lists its own agents; tools — each step
 // as it runs; context — the context meter; questions — the agent asks the person; plan — the plan card; commands — slash
-// commands; observe — live activity in a session from the provider's other channels; settings — its own sub-menu;
+// commands; observe — live activity in a session from the provider's other channels; stopSession — Stop for a chat the
+// provider works in with no answer of ours being written there (another channel, a job, a turn from before a restart
+// here), as the provider's own app has it, for whoever manages the provider; settings — its own sub-menu;
 // rewrite — editing a message and writing an answer again; false where the provider keeps the history itself; media —
 // the images, video and audio an answer carries, shown in the chat window; queue — messages sent while the agent works:
 // the provider takes them in (into the running turn, or after it, as it is set up); tasks — the chat's background tasks
@@ -22,7 +24,7 @@
 // service for the agents' PC (docs/features/agent-pc.md §5)
 export const CAPABILITIES = Object.freeze(['chat', 'sessions', 'models', 'effort', 'attachments', 'approvals', 'stop', 'taskProgress', 'presence', 'decisions', 'speak', 'listen',
   'agents', 'tools', 'context', 'questions', 'plan', 'commands', 'observe', 'settings', 'rewrite', 'media', 'queue', 'tasks', 'browser', 'phone', 'files',
-  'rewind', 'branch', 'titles', 'archive', 'native', 'search', 'computer', 'screen']);
+  'rewind', 'branch', 'titles', 'archive', 'native', 'search', 'computer', 'screen', 'stopSession']);
 export const CONNECTION_KINDS = Object.freeze(['remote', 'host-process']);
 export const TRANSPORTS = Object.freeze(['network', 'process']);
 export const FIELD_TYPES = Object.freeze(['text', 'url', 'secret', 'select', 'number', 'path', 'boolean']);
@@ -157,7 +159,7 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     ],
     capabilities: { chat: true, sessions: true, models: true, effort: true, attachments: true, approvals: true, stop: true, presence: true,
       agents: true, tools: true, context: true, questions: true, plan: true, commands: true, observe: true, settings: true, rewrite: false, media: true, queue: true, tasks: true, browser: true, files: true,
-      computer: true },
+      computer: true, stopSession: true },
     // computer: its agents' own computer, in their owner's PC (docs/features/agent-pc.md §4.1; ./openclaw/files.js) —
     // where its files are (each agent's workspace), the calls the adapter takes and which of them change something
     computer: { where: 'workspace', docs: true, ops: ['list', 'read', 'docs', 'doc', 'docSet'], writes: ['docSet'] },

@@ -5,7 +5,8 @@
  "model": "duck",
  "behaviour": "swim",
  "habitats": [
-  "lake"
+  "lake",
+  "river"
  ],
  "hours": [
   5,
@@ -22,12 +23,13 @@
   8
  ],
  "perKm2": 60,
- "size": 0.36,
+ "size": 1.0,
  "colors": [
   "#6e5a3c",
   "#3d5c3a",
   "#7a6548"
  ],
  "speed": 0.5,
- "sound": "quack"
+ "sound": "quack",
+ "asset": "/assets/fauna/duck/duck.json"
 }

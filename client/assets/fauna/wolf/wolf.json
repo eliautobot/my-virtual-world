@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "wolf",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (ba528559-5904-49be-ae05-202e20954835); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.1974,
+    0.0,
+    -0.1338
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.1974,
+    0.0,
+    0.1338
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.4506,
+    0.0,
+    -0.143
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.4515,
+    0.0,
+    0.1517
+   ]
+  ]
+ },
+ "height": 1.12,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 9308,
+   "tris": 13925,
+   "pos": 0,
+   "nrm": 111696,
+   "uv": 223392,
+   "skin": 297856,
+   "weight": 335088,
+   "index": 372320,
+   "indexType": "u16",
+   "min": [
+    -0.9200000166893005,
+    -0.00039999998989515007,
+    -0.23090000450611115
+   ],
+   "max": [
+    0.7166000008583069,
+    1.118299961090088,
+    0.22709999978542328
+   ]
+  },
+  {
+   "verts": 3863,
+   "tris": 4947,
+   "pos": 455872,
+   "nrm": 502228,
+   "uv": 548584,
+   "skin": 579488,
+   "weight": 594940,
+   "index": 610392,
+   "indexType": "u16",
+   "min": [
+    -0.9200000166893005,
+    0.00139999995008111,
+    -0.2280000001192093
+   ],
+   "max": [
+    0.7150999903678894,
+    1.118299961090088,
+    0.2222999930381775
+   ]
+  },
+  {
+   "verts": 1573,
+   "tris": 1470,
+   "pos": 640076,
+   "nrm": 658952,
+   "uv": 677828,
+   "skin": 690412,
+   "weight": 696704,
+   "index": 702996,
+   "indexType": "u16",
+   "min": [
+    -0.9200000166893005,
+    0.00139999995008111,
+    -0.2231999933719635
+   ],
+   "max": [
+    0.7150999903678894,
+    1.118299961090088,
+    0.22020000219345093
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 711816,
+  "frames": 324,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 240,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 240,
+   "frames": 48,
+   "fps": 58.04,
+   "stride": 0.9924
+  },
+  "run": {
+   "start": 288,
+   "frames": 36,
+   "fps": 108.0,
+   "stride": 3.6667
+  }
+ },
+ "textures": {
+  "color": "wolf-color.jpg",
+  "mask": "wolf-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

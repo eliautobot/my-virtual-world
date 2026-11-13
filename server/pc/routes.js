@@ -40,7 +40,8 @@ export function addPcRoutes(router, pc, d) {
       throw e;
     }
   };
-  const R = (method, path, fn, o = {}) => router.add({ method, path, cap: 'agents.pc', ...o, handler: run(fn) });
+  // every PC route carries the demo-mode lock 'pc' (licence enforcement: server/licence.js; the server refuses it unlicensed)
+  const R = (method, path, fn, o = {}) => router.add({ method, path, cap: 'agents.pc', ...o, lock: 'pc', handler: run(fn) });
   const me = P => { if (!P.account) throw new PcError(401, 'signed_out', 'Sign in'); return { human: P.account.id }; };
   const num = v => (typeof v === 'number' && Number.isInteger(v) ? v : typeof v === 'string' && /^\d{1,12}$/.test(v) ? Number(v) : null);
   const str = (v, n = 2000) => (typeof v === 'string' ? v.slice(0, n) : '');

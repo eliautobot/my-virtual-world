@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "deer",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (673d5ad7-3b13-4ddb-9178-e61b7c5b305a); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    -0.1516,
+    0.0,
+    -0.1148
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    -0.1041,
+    0.0,
+    0.0541
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.7479,
+    0.0,
+    -0.1764
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.8486,
+    0.0,
+    0.1628
+   ]
+  ]
+ },
+ "height": 1.654,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 9736,
+   "tris": 13999,
+   "pos": 0,
+   "nrm": 116832,
+   "uv": 233664,
+   "skin": 311552,
+   "weight": 350496,
+   "index": 389440,
+   "indexType": "u16",
+   "min": [
+    -1.0260000228881836,
+    9.999999747378752e-05,
+    -0.2484000027179718
+   ],
+   "max": [
+    0.3882000148296356,
+    1.6532000303268433,
+    0.3091999888420105
+   ]
+  },
+  {
+   "verts": 3813,
+   "tris": 4999,
+   "pos": 473436,
+   "nrm": 519192,
+   "uv": 564948,
+   "skin": 595452,
+   "weight": 610704,
+   "index": 625956,
+   "indexType": "u16",
+   "min": [
+    -1.0250999927520752,
+    0.00039999998989515007,
+    -0.2484000027179718
+   ],
+   "max": [
+    0.38609999418258667,
+    1.6514999866485596,
+    0.3091999888420105
+   ]
+  },
+  {
+   "verts": 1464,
+   "tris": 1499,
+   "pos": 655952,
+   "nrm": 673520,
+   "uv": 691088,
+   "skin": 702800,
+   "weight": 708656,
+   "index": 714512,
+   "indexType": "u16",
+   "min": [
+    -1.0211000442504883,
+    0.00039999998989515007,
+    -0.2354000061750412
+   ],
+   "max": [
+    0.38339999318122864,
+    1.6514999866485596,
+    0.3091999888420105
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 723508,
+  "frames": 358,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 270,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 270,
+   "frames": 48,
+   "fps": 49.921,
+   "stride": 1.0577
+  },
+  "run": {
+   "start": 318,
+   "frames": 40,
+   "fps": 120.0,
+   "stride": 3.3333
+  }
+ },
+ "textures": {
+  "color": "deer-color.jpg",
+  "mask": "deer-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -3,6 +3,7 @@
  "name": "Wild horses",
  "tier": "shared",
  "model": "horse",
+ "asset": "/assets/fauna/horse/horse.json",
  "behaviour": "graze",
  "habitats": [
   "meadow"
@@ -22,15 +23,34 @@
   3,
   7
  ],
- "perKm2": 3,
+ "perKm2": 1.6,
  "size": 1.05,
  "colors": [
-  "#6b4a30",
-  "#3c2b20",
-  "#a07850",
-  "#d9cbb3"
+  "#5c3424",
+  "#c79a5c",
+  "#a8a8a8"
  ],
- "speed": 1.3,
+ "coats": [
+  {
+   "name": "bay",
+   "body": "#5c3424",
+   "hair": "#3a2a22",
+   "legs": "#3d2b23"
+  },
+  {
+   "name": "palomino",
+   "body": "#c79a5c",
+   "hair": "#ede0bd",
+   "legs": "#b8895a"
+  },
+  {
+   "name": "grey",
+   "body": "#a8a8a8",
+   "hair": "#434346",
+   "legs": "#57575a"
+  }
+ ],
+ "speed": 0.8,
  "run": 13,
  "flee": 45,
  "sound": "whinny"

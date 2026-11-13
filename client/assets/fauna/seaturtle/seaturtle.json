@@ -1,0 +1,145 @@
+{
+ "v": 1,
+ "model": "seaturtle",
+ "rig": "mvw-swimmer-v1",
+ "source": "Tripo Studio (08cd06c9-a16c-4794-972b-2f43c36d01f6); swimmer rig along its centre line, a wave down the body (tools/animals/swim_animal.py)",
+ "height": 1.0,
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "neck",
+  "head",
+  "arm.L",
+  "arm.R",
+  "leg.L",
+  "leg.R"
+ ],
+ "lods": [
+  {
+   "verts": 9304,
+   "tris": 14000,
+   "pos": 0,
+   "nrm": 111648,
+   "uv": 223296,
+   "skin": 297728,
+   "weight": 334944,
+   "index": 372160,
+   "indexType": "u16",
+   "min": [
+    -0.4999000132083893,
+    -0.21940000355243683,
+    -0.29170000553131104
+   ],
+   "max": [
+    0.4999000132083893,
+    0.2190999984741211,
+    0.2913999855518341
+   ]
+  },
+  {
+   "verts": 3693,
+   "tris": 5000,
+   "pos": 456160,
+   "nrm": 500476,
+   "uv": 544792,
+   "skin": 574336,
+   "weight": 589108,
+   "index": 603880,
+   "indexType": "u16",
+   "min": [
+    -0.4999000132083893,
+    -0.21940000355243683,
+    -0.29170000553131104
+   ],
+   "max": [
+    0.49799999594688416,
+    0.2190999984741211,
+    0.2913999855518341
+   ]
+  },
+  {
+   "verts": 1408,
+   "tris": 1500,
+   "pos": 633880,
+   "nrm": 650776,
+   "uv": 667672,
+   "skin": 678936,
+   "weight": 684568,
+   "index": 690200,
+   "indexType": "u16",
+   "min": [
+    -0.4973999857902527,
+    -0.21629999577999115,
+    -0.29170000553131104
+   ],
+   "max": [
+    0.4977000057697296,
+    0.2190999984741211,
+    0.2872999906539917
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 699200,
+  "frames": 111,
+  "bones": 9
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 45,
+   "fps": 15
+  },
+  "walk": {
+   "start": 45,
+   "frames": 36,
+   "fps": 36.0,
+   "stride": 0.5
+  },
+  "run": {
+   "start": 81,
+   "frames": 30,
+   "fps": 24.0,
+   "stride": 0.625
+  }
+ },
+ "textures": {
+  "color": "seaturtle-color.jpg",
+  "mask": "seaturtle-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

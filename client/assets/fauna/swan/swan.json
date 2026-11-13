@@ -1,0 +1,170 @@
+{
+ "v": 1,
+ "model": "swan",
+ "rig": "mvw-bird-v1",
+ "source": "Tripo Studio (2f148842-0e47-468c-81f2-a2ec276a56bd); bird rig along its body, neck, wings and legs; folded, flapping, gliding, walking and swimming poses (tools/animals/bird_animal.py)",
+ "height": 1.201,
+ "span": 2.2,
+ "bones": [
+  "root",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "tail1",
+  "shoulder.L",
+  "elbow.L",
+  "wrist.L",
+  "thigh.L",
+  "shin.L",
+  "tarsus.L",
+  "toes.L",
+  "shoulder.R",
+  "elbow.R",
+  "wrist.R",
+  "thigh.R",
+  "shin.R",
+  "tarsus.R",
+  "toes.R"
+ ],
+ "lods": [
+  {
+   "verts": 9128,
+   "tris": 14000,
+   "pos": 0,
+   "nrm": 109536,
+   "uv": 219072,
+   "skin": 292096,
+   "weight": 328608,
+   "index": 365120,
+   "indexType": "u16",
+   "min": [
+    -0.477400004863739,
+    0.0013000000035390258,
+    -1.0999000072479248
+   ],
+   "max": [
+    0.4772999882698059,
+    1.2003999948501587,
+    1.100000023841858
+   ]
+  },
+  {
+   "verts": 3669,
+   "tris": 5000,
+   "pos": 449120,
+   "nrm": 493148,
+   "uv": 537176,
+   "skin": 566528,
+   "weight": 581204,
+   "index": 595880,
+   "indexType": "u16",
+   "min": [
+    -0.4745999872684479,
+    0.0013000000035390258,
+    -1.0999000072479248
+   ],
+   "max": [
+    0.4772999882698059,
+    1.2003999948501587,
+    1.100000023841858
+   ]
+  },
+  {
+   "verts": 1441,
+   "tris": 1500,
+   "pos": 625880,
+   "nrm": 643172,
+   "uv": 660464,
+   "skin": 671992,
+   "weight": 677756,
+   "index": 683520,
+   "indexType": "u16",
+   "min": [
+    -0.4745999872684479,
+    0.002099999925121665,
+    -1.0999000072479248
+   ],
+   "max": [
+    0.4657999873161316,
+    1.2003999948501587,
+    1.100000023841858
+   ]
+  }
+ ],
+ "lodDist": [
+  25,
+  70
+ ],
+ "anim": {
+  "offset": 692520,
+  "frames": 306,
+  "bones": 21
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 180,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 180,
+   "frames": 32,
+   "fps": 31.859,
+   "stride": 0.3516
+  },
+  "fly": {
+   "start": 212,
+   "frames": 24,
+   "fps": 62.4,
+   "hz": 2.6
+  },
+  "glide": {
+   "start": 236,
+   "frames": 40,
+   "fps": 12.0,
+   "hz": 0.3
+  },
+  "swim": {
+   "start": 276,
+   "frames": 30,
+   "fps": 27.0,
+   "stride": 0.3889
+  }
+ },
+ "textures": {
+  "color": "swan-color.jpg",
+  "mask": "swan-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

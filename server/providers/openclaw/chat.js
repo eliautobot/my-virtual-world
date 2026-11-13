@@ -266,16 +266,33 @@ export class LinkChat {
     const r = { key, agentId, base, approvals: new Map(), questions: new Set(), tr: null, followup };
     r.tr = new RunTranslator({ emit: e => this.out(base, e, () => this.finish(runId), () => [runId, ...[...this.alias].filter(([, o]) => o === runId).map(([t]) => t)], r) });
     this.runs.set(runId, r);
+    // (a typed /stop, as OpenClaw's own page takes it: the whole session stopped through sessions.abort — its run and its
+    // queued follow-ups — never sent as a message; other words the gateway takes as a stop go as messages, below)
+    const typedStop = /^\s*\/stop\s*$/i.test(String(p.input || '')) && !attachments.length && l.offers('sessions.abort') && key.trim().toLowerCase() !== 'global';
     try {
-      await this.prefsFor(key, agentId, p.model, p.effort);
-      // (how a message sent while the agent works is taken: the gateway's own setting — messages.queue, steer by default —
-      // as OpenClaw's Control UI sends it; queue 'later': after the running turn, whatever that setting)
-      const sent = await l.request('chat.send', { sessionKey: key, agentId, message: String(p.input || ''), idempotencyKey: runId, ...(p.queue === 'later' ? { queueMode: 'followup' } : {}),
-        ...(attachments.length ? { attachments } : {}) }, { timeoutMs: SEND_TIMEOUT_MS });
-      const theirs = sent && sent.runId ? normalizeSessionProjectionRunId(sent.runId) : null;
-      if (theirs && theirs !== runId) this.alias.set(theirs, runId);
+      if (typedStop) {
+        await l.request('sessions.abort', { key, agentId, clearQueued: true });
+        r.stopCommand = 'typed';
+      } else {
+        await this.prefsFor(key, agentId, p.model, p.effort);
+        // (how a message sent while the agent works is taken: the gateway's own setting — messages.queue, steer by default —
+        // as OpenClaw's Control UI sends it; queue 'later': after the running turn, whatever that setting)
+        const sent = await l.request('chat.send', { sessionKey: key, agentId, message: String(p.input || ''), idempotencyKey: runId, ...(p.queue === 'later' ? { queueMode: 'followup' } : {}),
+          ...(attachments.length ? { attachments } : {}) }, { timeoutMs: SEND_TIMEOUT_MS });
+        const theirs = sent && sent.runId ? normalizeSessionProjectionRunId(sent.runId) : null;
+        if (theirs && theirs !== runId) this.alias.set(theirs, runId);
+        // (words the gateway takes as a stop — "stop", "please stop": it stopped the session's work and started no turn
+        // of its own, answering { aborted, runIds }; nothing will come for this run)
+        r.stopCommand = !!sent && !sent.runId && typeof sent.aborted === 'boolean' ? 'sent' : null;
+      }
     } catch (e) { this.finish(runId); throw e; }
     this.emit({ ...base, type: 'run.start' });
+    if (r.stopCommand) {
+      // (a stop the gateway took as a message: the session's queued follow-ups — background results, a subagent's —
+      // discarded too, as a typed /stop does, so they cannot start the agent again right after)
+      if (r.stopCommand === 'sent' && l.offers('sessions.abort') && key.trim().toLowerCase() !== 'global') { try { await l.request('sessions.abort', { key, agentId, clearQueued: true }); } catch { /* stopped all the same */ } }
+      r.tr.chat({ state: 'aborted' });
+    }
     return { runId, sessionKey: key };
   }
   /** A run's event on its way out. Its end waits a moment for the run's media: OpenClaw attaches them in its history (an
@@ -338,10 +355,49 @@ export class LinkChat {
     return out;
   }
   async stop({ runId }) {
-    const r = this.runs.get(String(runId));
+    const id = String(runId), r = this.runs.get(id);
     if (!r) return { ok: false };
-    await this.link.request('chat.abort', { sessionKey: r.key, agentId: r.agentId, runId: String(runId) });
-    return { ok: true };
+    // (by its id, and by the gateway's own for it where that differs)
+    let aborted = false;
+    for (const x of [id, ...[...this.alias].filter(([, o]) => o === id).map(([t]) => t)]) {
+      const res = await this.link.request('chat.abort', { sessionKey: r.key, agentId: r.agentId, runId: x });
+      if (!(res && res.aborted === false)) { aborted = true; break; }
+    }
+    // (the gateway has no such run — one it never started, or one whose end never came: it ends here, as stopped, so the
+    // chat is not left waiting on it; what the gateway does run in the session is for the chat's Stop to stop)
+    if (!aborted && this.runs.get(id) === r && !r.tr.ended) r.tr.chat({ state: 'aborted' });
+    return { ok: true, aborted };
+  }
+  /**
+   * Stops what the gateway runs in a session with no run of ours to name, with the call its own Control UI makes for
+   * the chat it has open (docs web/control-ui/chat.md, Stop and abort; its rC / oC):
+   *  - the gateway names a run in flight there (chat.history's inFlightRun, as that page learns of it on opening the
+   *    chat): that run, by its id — chat.abort { sessionKey, agentId, runId }; one it marks sessionAbortable (a run
+   *    with no chat controller): sessions.abort { key, agentId, runId };
+   *  - it names none, yet reports the session working: sessions.abort { key, agentId, clearQueued } — the queued
+   *    follow-ups discarded so they cannot start it again (not for the literal global session, as there).
+   * A gateway without sessions.abort: chat.abort for the session. Resolves { ok, stopped, how } — stopped false:
+   * the gateway had nothing running there (aborted false, no-active-run).
+   */
+  async stopSession({ sessionKey, agentKey }) {
+    const key = String(sessionKey || '');
+    if (!key) return { ok: false, stopped: false };
+    const agent = agentKey ? { agentId: String(agentKey) } : {};
+    let run = null;
+    try {
+      const h = await this.link.request('chat.history', { sessionKey: key, ...agent, limit: 1 });
+      const f = h && h.inFlightRun, ids = h && h.sessionInfo && h.sessionInfo.activeRunIds;
+      // (taken as that page takes it: not one the session's exact active set, when given, no longer has)
+      if (f && f.runId && (!Array.isArray(ids) || ids.includes(f.runId))) run = { id: String(f.runId), bySession: f.sessionAbortable === true };
+    } catch { /* not known: stopped as a session */ }
+    let how, r;
+    if (run && !run.bySession) { how = 'chat.abort'; r = await this.link.request('chat.abort', { sessionKey: key, ...agent, runId: run.id }); }
+    else if (this.link.offers('sessions.abort')) {
+      how = 'sessions.abort';
+      r = await this.link.request('sessions.abort', { key, ...agent, ...(run ? { runId: run.id } : key.trim().toLowerCase() === 'global' ? {} : { clearQueued: true }) });
+    } else { how = 'chat.abort'; r = await this.link.request('chat.abort', { sessionKey: key, ...agent, ...(run ? { runId: run.id } : {}) }); }
+    const none = !!r && (r.aborted === false || r.status === 'no-active-run');
+    return { ok: true, stopped: !none, how, ...(run ? { runId: run.id } : {}) };
   }
   /** Answers an approval: decision allow-once, allow-always or deny (approved: true/false is once or deny). */
   async approve({ runId, approvalId, approved, decision }) {

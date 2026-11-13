@@ -24,6 +24,7 @@ listed in [reference/settings.md](reference/settings.md)). `.env.example` has ev
 | `MVW_STARTER_MAP` | `on` | `on`: a new world opens with the starting map built for new installations (a hand-built city with metro, parks, an airport, a marina and lake docks). `off`: a city generated from `MVW_SEED`, sized by `MVW_POPULATION` |
 | `MVW_SOUNDTRACK` | `on` | `on`: the game's soundtrack (`server/music/soundtrack/`) goes into the music library when the server starts, each song once (one an administrator deletes stays deleted). `off`: the library is left alone |
 | `MVW_RADIO` | `on` | `on`: MVW Radio's hosts (agents posted at a Radio Station's broadcast desk) write and read their breaks between songs, each with its own AI brain (Settings → Radio). `off`: no breaks are written; the music and the station idents still play |
+| `MVW_UPDATE_CHECK` | `on` | `on`: the server asks GitHub for the latest release a minute after it starts and then every 12 hours (a plain request; nothing about this world is sent) and tells the owner when a newer version is out (Settings → About and the notifications). `off`: never. Settings → General turns it off too |
 | `MVW_SEED` | `next-city` | The seed a new world is generated from |
 | `MVW_HQ_NAME` | `Headquarters` | The headquarters' rooftop sign (at most 28 characters) |
 | `MVW_PROBLEM_SCAN_MS` | `15000` | How often agents' problems (rent, money, home, job) are looked for |

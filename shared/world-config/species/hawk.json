@@ -6,7 +6,8 @@
  "behaviour": "soar",
  "habitats": [
   "rock",
-  "forest"
+  "forest",
+  "meadow"
  ],
  "hours": [
   8,
@@ -21,7 +22,7 @@
   1
  ],
  "perKm2": 1.5,
- "size": 0.62,
+ "size": 1.0,
  "colors": [
   "#6b4a2d",
   "#7d5a38"
@@ -30,5 +31,6 @@
   60,
   130
  ],
- "speed": 12
+ "speed": 12,
+ "asset": "/assets/fauna/hawk/hawk.json"
 }

@@ -455,6 +455,12 @@ export const SETTINGS = Object.freeze([
     path: 'pc.realBrowser', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'agents.manage',
     label: 'Agents\' PC: a real browser for the built-in agents (Chrome on this server; off: the text reader)', saved: 'PC browser saved',
   },
+  // "New version available" (server/updates.js): the server asks GitHub for the latest release now and then and tells
+  // the owner when a newer one is out. Nothing about this world is sent. (MVW_UPDATE_CHECK=off turns it off for good.)
+  {
+    path: 'updates.check', scope: 'install', tier: 2, type: 'boolean', default: true,
+    label: 'Check for new versions of My Virtual World (asks GitHub twice a day; nothing about this world is sent)', saved: 'Update check saved',
+  },
   // Display preferences of an account (tier 0); they follow the account to every device (C91). Graphics quality stays
   // with each device and is not here.
   // The theme (WP1.9, C39): one of the three token sets in client/css/theme.css. A preference, so it follows the

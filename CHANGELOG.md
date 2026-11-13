@@ -2,6 +2,38 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.6.0 (2026-11-13)
+
+**A breaking update: back up before you update.** This release changes how a Docker install gets the program and
+what demo mode includes. Save your world and your key first, in the folder that holds `compose.yaml`:
+
+```sh
+docker compose exec -T app node tools/admin.mjs backup > world-backup.tar.gz
+docker compose exec -T app cat /keys/secret.key > secret.key
+```
+
+- **A ready-made Docker image**: `docker compose up -d` now downloads the official image
+  (`ghcr.io/eliautobot/my-virtual-world:2`, for 64-bit PCs and ARM machines such as Apple Silicon and Raspberry Pi)
+  instead of building it on your machine. To update from 2.5 or earlier, after the backup: `git pull`,
+  `docker compose pull`, `docker compose up -d`. Your world, accounts and licence stay in the Docker volumes. If you
+  set `MVW_IMAGE` in `.env`, remove that line. `docker compose build` still builds the code yourself. See
+  [Updating](docs/INSTALL.md#updating).
+- **Demo mode now locks the agents' PCs and phones**: without a License Key, the agents' PCs (their files, browser,
+  terminal, tasks and screens, and watching an agent's own browser or screen) and their phones (texts and calls
+  through Twilio) are locked, together with world editing and the limit of 3 agents. Their places in the app say so,
+  with **Activate license now**. A phone reads nothing from Twilio and sends nothing until a key is active. With a
+  License Key nothing changes.
+- **New version available**: the owner is told when a newer release is out, in the notifications and in
+  **Settings → About**, with the release notes and how to update. The server asks GitHub for the latest release twice
+  a day and sends nothing about your world. Turn it off in **Settings → General**, or with `MVW_UPDATE_CHECK=off`.
+- **Modelled wildlife**: thirty species are now rigged, animated models (horses, deer, sheep, cows, wolves, tigers,
+  bears, alligators, otters, dolphins, sharks, whales, sea turtles, swans, flamingos, eagles and more). They move on
+  their own footfalls, birds fly, glide, swim and peck, and each lives where it belongs (its habitat, height, water
+  depth, rivers or snow), out to the open sea.
+- **Stop works on more OpenClaw answers**: Stop now stops a chat an OpenClaw agent is working in even when the answer
+  started elsewhere (another channel, a scheduled job, or before a restart), as OpenClaw's own page does. A typed
+  `/stop` stops the OpenClaw session at once, and Stop on an answer the gateway no longer has ends it.
+
 ## v2.5.2 (2026-11-11)
 
 - **The default model stays in the model picker when OpenClaw cannot run it**: when an OpenClaw gateway reported an

@@ -66,10 +66,12 @@ function run(cmd, args, { cwd, env, input, timeout = 600000, binary = false } = 
 }
 
 /** The environment for docker compose, without any of the product's settings, so this shell's cannot leak in. */
+// (the proxy network's addresses, when this machine has the default subnet taken already: "Pool overlaps" — INSTALL.md)
+const KEPT = ['MVW_PROXY_SUBNET', 'MVW_PROXY_RANGE', 'MVW_PROXY_IP'];
 function composeEnv(extra) {
   const e = {};
   for (const [k, v] of Object.entries(process.env)) {
-    if (!/^(MVW_|COMPOSE_)/.test(k) && !['PORT', 'HOST'].includes(k)) e[k] = v;
+    if ((!/^(MVW_|COMPOSE_)/.test(k) || KEPT.includes(k)) && !['PORT', 'HOST'].includes(k)) e[k] = v;
   }
   return { ...e, ...extra };
 }
@@ -180,7 +182,8 @@ async function dockerCheck(src, stamp, o) {
   }
   const proxyImageBefore = run('docker', ['image', 'inspect', PROXY_IMAGE]).status === 0;
   const env = composeEnv({ MVW_IMAGE: image, MVW_PORT: String(TEST_PORT) });
-  const proxyEnv = { MVW_DOMAIN: 'localhost', MVW_HTTP_PORT: String(PROXY_HTTP), MVW_HTTPS_PORT: String(PROXY_HTTPS) };
+  // (the test proxy is published on the loopback address only, as the app is: nothing of the check is reachable from outside)
+  const proxyEnv = { MVW_DOMAIN: 'localhost', MVW_HTTP_PORT: `127.0.0.1:${PROXY_HTTP}`, MVW_HTTPS_PORT: `127.0.0.1:${PROXY_HTTPS}` };
   const compose = (args, x = {}) => run('docker', ['compose', '-p', project, ...args], { cwd: src, env: { ...env, ...(x.env || {}) }, binary: x.binary, timeout: x.timeout });
   const inApp = (args, x) => compose(['exec', '-T', 'app', ...args], x);
   try {

@@ -1,0 +1,170 @@
+{
+ "v": 1,
+ "model": "rooster",
+ "rig": "mvw-bird-v1",
+ "source": "Tripo Studio (f2ec98c4-0e4a-4f24-9614-8bc7e8b8406a); bird rig along its body, neck, wings and legs; folded, flapping, gliding, walking and swimming poses (tools/animals/bird_animal.py)",
+ "height": 0.62,
+ "span": 0.985,
+ "bones": [
+  "root",
+  "chest",
+  "neck1",
+  "neck2",
+  "head",
+  "tail1",
+  "tail2",
+  "shoulder.L",
+  "elbow.L",
+  "wrist.L",
+  "thigh.L",
+  "shin.L",
+  "tarsus.L",
+  "toes.L",
+  "shoulder.R",
+  "elbow.R",
+  "wrist.R",
+  "thigh.R",
+  "shin.R",
+  "tarsus.R",
+  "toes.R"
+ ],
+ "lods": [
+  {
+   "verts": 10025,
+   "tris": 13999,
+   "pos": 0,
+   "nrm": 120300,
+   "uv": 240600,
+   "skin": 320800,
+   "weight": 360900,
+   "index": 401000,
+   "indexType": "u16",
+   "min": [
+    -0.32739999890327454,
+    0.0,
+    -0.4909000098705292
+   ],
+   "max": [
+    0.3276999890804291,
+    0.6200000047683716,
+    0.4918999969959259
+   ]
+  },
+  {
+   "verts": 4363,
+   "tris": 4999,
+   "pos": 484996,
+   "nrm": 537352,
+   "uv": 589708,
+   "skin": 624612,
+   "weight": 642064,
+   "index": 659516,
+   "indexType": "u16",
+   "min": [
+    -0.3257000148296356,
+    0.002899999963119626,
+    -0.49050000309944153
+   ],
+   "max": [
+    0.3276999890804291,
+    0.6176000237464905,
+    0.4918999969959259
+   ]
+  },
+  {
+   "verts": 1900,
+   "tris": 1499,
+   "pos": 689512,
+   "nrm": 712312,
+   "uv": 735112,
+   "skin": 750312,
+   "weight": 757912,
+   "index": 765512,
+   "indexType": "u16",
+   "min": [
+    -0.3257000148296356,
+    0.005100000184029341,
+    -0.49050000309944153
+   ],
+   "max": [
+    0.3190999925136566,
+    0.59579998254776,
+    0.4918999969959259
+   ]
+  }
+ ],
+ "lodDist": [
+  25,
+  70
+ ],
+ "anim": {
+  "offset": 774508,
+  "frames": 536,
+  "bones": 21
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 408,
+   "fps": 24.0
+  },
+  "walk": {
+   "start": 408,
+   "frames": 32,
+   "fps": 49.382,
+   "stride": 0.1944
+  },
+  "run": {
+   "start": 440,
+   "frames": 32,
+   "fps": 115.225,
+   "stride": 0.2777
+  },
+  "fly": {
+   "start": 472,
+   "frames": 24,
+   "fps": 120.0,
+   "hz": 5.0
+  },
+  "glide": {
+   "start": 496,
+   "frames": 40,
+   "fps": 16.0,
+   "hz": 0.4
+  }
+ },
+ "textures": {
+  "color": "rooster-color.jpg",
+  "mask": "rooster-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

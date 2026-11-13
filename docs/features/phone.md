@@ -6,6 +6,9 @@ Any agent can have a phone: a real phone number from a Twilio account. The agent
 Provider's (OpenClaw, Hermes…). Its owner, and anyone it is shared with to manage, uses the phone like a real one:
 contacts, texts, calls and voicemail. The agent reads the texts and calls its owner lets through, and answers them.
 
+The phone needs a License Key: in demo mode it is locked. Nothing is read from or sent through Twilio, and nothing
+reaches the agent, until a key is active.
+
 The phone is in two places. The **Agent Studio → Phone** tab, and the **chat window's side panel → Phone**, beside the
 agent's chat. Both show the same phone.
 

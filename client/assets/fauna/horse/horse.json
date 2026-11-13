@@ -1,0 +1,244 @@
+{
+ "v": 1,
+ "model": "horse",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio project c6d48689; rig v2 fitted to the mesh (tools/animals/horse_rig2.py); motion v2: gaits from the horse's footfalls with the hooves pinned and the stride matched to its speed, a standing/grazing loop with the hooves pinned (tools/animals/gait2.py, rest2.py)",
+ "height": 2.1,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "mane1",
+  "mane2",
+  "mane3",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 10547,
+   "tris": 13905,
+   "pos": 0,
+   "nrm": 126564,
+   "uv": 253128,
+   "skin": 337504,
+   "weight": 379692,
+   "index": 421880,
+   "indexType": "u16",
+   "min": [
+    -0.9476000070571899,
+    0.0013000000035390258,
+    -0.420199990272522
+   ],
+   "max": [
+    1.5289000272750854,
+    2.099600076675415,
+    0.41519999504089355
+   ]
+  },
+  {
+   "verts": 4664,
+   "tris": 4981,
+   "pos": 505312,
+   "nrm": 561280,
+   "uv": 617248,
+   "skin": 654560,
+   "weight": 673216,
+   "index": 691872,
+   "indexType": "u16",
+   "min": [
+    -0.9476000070571899,
+    0.0013000000035390258,
+    -0.420199990272522
+   ],
+   "max": [
+    1.5289000272750854,
+    2.099600076675415,
+    0.41519999504089355
+   ]
+  },
+  {
+   "verts": 2177,
+   "tris": 1618,
+   "pos": 721760,
+   "nrm": 747884,
+   "uv": 774008,
+   "skin": 791424,
+   "weight": 800132,
+   "index": 808840,
+   "indexType": "u16",
+   "min": [
+    -0.9476000070571899,
+    0.0013000000035390258,
+    -0.420199990272522
+   ],
+   "max": [
+    1.5240000486373901,
+    2.0820999145507812,
+    0.41519999504089355
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 818548,
+  "frames": 388,
+  "bones": 38
+ },
+ "feet": {
+  "LF": [
+   16,
+   [
+    1.0036,
+    0.0,
+    -0.3094
+   ]
+  ],
+  "RF": [
+   27,
+   [
+    0.8704,
+    0.0,
+    0.2996
+   ]
+  ],
+  "LH": [
+   21,
+   [
+    -0.1159,
+    0.0,
+    -0.3242
+   ]
+  ],
+  "RH": [
+   32,
+   [
+    -0.2765,
+    0.0,
+    0.3063
+   ]
+  ]
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 300,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 300,
+   "frames": 48,
+   "fps": 34.009,
+   "stride": 1.0753
+  },
+  "run": {
+   "start": 348,
+   "frames": 40,
+   "fps": 92.0,
+   "stride": 5.383
+  }
+ },
+ "textures": {
+  "color": "horse-color.jpg",
+  "mask": "horse-mask.png"
+ },
+ "refLum": {
+  "body": 0.21412910521030426,
+  "hair": 0.16960656642913818,
+  "points": 0.18975619971752167
+ },
+ "refLumLinear": {
+  "body": 0.04504169523715973,
+  "hair": 0.030000824481248856,
+  "points": 0.032393358647823334
+ },
+ "coats": [
+  {
+   "name": "bay",
+   "body": [
+    0.321,
+    0.186,
+    0.119
+   ],
+   "hair": [
+    0.217,
+    0.162,
+    0.134
+   ],
+   "legs": [
+    0.221,
+    0.167,
+    0.135
+   ]
+  },
+  {
+   "name": "palomino",
+   "body": [
+    0.78,
+    0.56,
+    0.27
+   ],
+   "hair": [
+    0.93,
+    0.88,
+    0.74
+   ],
+   "legs": [
+    0.72,
+    0.52,
+    0.27
+   ]
+  },
+  {
+   "name": "grey",
+   "body": [
+    0.6,
+    0.6,
+    0.6
+   ],
+   "hair": [
+    0.26,
+    0.26,
+    0.27
+   ],
+   "legs": [
+    0.34,
+    0.34,
+    0.35
+   ]
+  }
+ ]
+}

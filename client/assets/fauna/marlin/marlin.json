@@ -1,0 +1,145 @@
+{
+ "v": 1,
+ "model": "marlin",
+ "rig": "mvw-swimmer-v1",
+ "source": "Tripo Studio (9d1c9f3f-b6dd-4604-abe6-6be953a601b7); swimmer rig along its centre line, a wave down the body (tools/animals/swim_animal.py)",
+ "height": 1.0,
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "neck",
+  "head",
+  "fin.L",
+  "fin.R"
+ ],
+ "lods": [
+  {
+   "verts": 9589,
+   "tris": 14000,
+   "pos": 0,
+   "nrm": 115068,
+   "uv": 230136,
+   "skin": 306848,
+   "weight": 345204,
+   "index": 383560,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.24549999833106995,
+    -0.2305999994277954
+   ],
+   "max": [
+    0.5,
+    0.24570000171661377,
+    0.2305999994277954
+   ]
+  },
+  {
+   "verts": 3701,
+   "tris": 5000,
+   "pos": 467560,
+   "nrm": 511972,
+   "uv": 556384,
+   "skin": 585992,
+   "weight": 600796,
+   "index": 615600,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.24539999663829803,
+    -0.2305999994277954
+   ],
+   "max": [
+    0.5,
+    0.2451999932527542,
+    0.2305999994277954
+   ]
+  },
+  {
+   "verts": 1369,
+   "tris": 1500,
+   "pos": 645600,
+   "nrm": 662028,
+   "uv": 678456,
+   "skin": 689408,
+   "weight": 694884,
+   "index": 700360,
+   "indexType": "u16",
+   "min": [
+    -0.499099999666214,
+    -0.2379000037908554,
+    -0.2305999994277954
+   ],
+   "max": [
+    0.5,
+    0.24150000512599945,
+    0.22939999401569366
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 709360,
+  "frames": 111,
+  "bones": 9
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 45,
+   "fps": 15
+  },
+  "walk": {
+   "start": 45,
+   "frames": 36,
+   "fps": 40.0,
+   "stride": 0.75
+  },
+  "run": {
+   "start": 81,
+   "frames": 30,
+   "fps": 26.667,
+   "stride": 0.9375
+  }
+ },
+ "textures": {
+  "color": "marlin-color.jpg",
+  "mask": "marlin-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,46 @@
+{
+ "id": "manta",
+ "name": "Manta rays",
+ "tier": "ambient",
+ "model": "manta",
+ "asset": "/assets/fauna/manta/manta.json",
+ "behaviour": "patrol",
+ "habitats": [
+  "sea",
+  "reef"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "storm",
+  "fog"
+ ],
+ "group": [
+  1,
+  2
+ ],
+ "perKm2": 1,
+ "size": 4.0,
+ "colors": [
+  "#3b3f4a"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#3b3f4a",
+   "hair": "#3b3f4a",
+   "legs": "#3b3f4a"
+  }
+ ],
+ "speed": 1.0,
+ "swimDepth": [
+  0.8,
+  4.0
+ ]
+}

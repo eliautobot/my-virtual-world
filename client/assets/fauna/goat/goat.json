@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "goat",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (0f338faf-9978-4c0a-8448-bfddad0ee327); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.0775,
+    0.0,
+    -0.1575
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.0819,
+    0.0,
+    0.1667
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.4895,
+    0.0,
+    -0.1582
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.4989,
+    0.0,
+    0.1321
+   ]
+  ]
+ },
+ "height": 1.031,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 8879,
+   "tris": 13999,
+   "pos": 0,
+   "nrm": 106548,
+   "uv": 213096,
+   "skin": 284128,
+   "weight": 319644,
+   "index": 355160,
+   "indexType": "u16",
+   "min": [
+    -0.8058000206947327,
+    0.0,
+    -0.2224999964237213
+   ],
+   "max": [
+    0.5968000292778015,
+    1.0312000513076782,
+    0.2337999939918518
+   ]
+  },
+  {
+   "verts": 3616,
+   "tris": 4990,
+   "pos": 439156,
+   "nrm": 482548,
+   "uv": 525940,
+   "skin": 554868,
+   "weight": 569332,
+   "index": 583796,
+   "indexType": "u16",
+   "min": [
+    -0.8058000206947327,
+    0.00039999998989515007,
+    -0.2224999964237213
+   ],
+   "max": [
+    0.5939000248908997,
+    1.030900001525879,
+    0.2337999939918518
+   ]
+  },
+  {
+   "verts": 1421,
+   "tris": 1492,
+   "pos": 613736,
+   "nrm": 630788,
+   "uv": 647840,
+   "skin": 659208,
+   "weight": 664892,
+   "index": 670576,
+   "indexType": "u16",
+   "min": [
+    -0.7954000234603882,
+    0.00139999995008111,
+    -0.22059999406337738
+   ],
+   "max": [
+    0.5939000248908997,
+    1.030900001525879,
+    0.2337999939918518
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 679528,
+  "frames": 358,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 270,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 270,
+   "frames": 48,
+   "fps": 60.012,
+   "stride": 0.6399
+  },
+  "run": {
+   "start": 318,
+   "frames": 40,
+   "fps": 120.0,
+   "stride": 2.6667
+  }
+ },
+ "textures": {
+  "color": "goat-color.jpg",
+  "mask": "goat-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

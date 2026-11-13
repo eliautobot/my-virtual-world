@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "bull",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (88e9abaf-5371-45ad-bbb0-6697281caef7); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.4252,
+    0.0,
+    -0.4646
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.4252,
+    0.0,
+    0.4646
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.6104,
+    0.0,
+    -0.4788
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.6104,
+    0.0,
+    0.4788
+   ]
+  ]
+ },
+ "height": 1.603,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 9307,
+   "tris": 13997,
+   "pos": 0,
+   "nrm": 111684,
+   "uv": 223368,
+   "skin": 297824,
+   "weight": 335052,
+   "index": 372280,
+   "indexType": "u16",
+   "min": [
+    -1.2418999671936035,
+    -0.017000000923871994,
+    -0.6083999872207642
+   ],
+   "max": [
+    1.4013999700546265,
+    1.601099967956543,
+    0.6075000166893005
+   ]
+  },
+  {
+   "verts": 3623,
+   "tris": 4997,
+   "pos": 456264,
+   "nrm": 499740,
+   "uv": 543216,
+   "skin": 572200,
+   "weight": 586692,
+   "index": 601184,
+   "indexType": "u16",
+   "min": [
+    -1.2411999702453613,
+    -0.014800000004470348,
+    -0.6047000288963318
+   ],
+   "max": [
+    1.4013999700546265,
+    1.5993000268936157,
+    0.6065999865531921
+   ]
+  },
+  {
+   "verts": 1367,
+   "tris": 1498,
+   "pos": 631168,
+   "nrm": 647572,
+   "uv": 663976,
+   "skin": 674912,
+   "weight": 680380,
+   "index": 685848,
+   "indexType": "u16",
+   "min": [
+    -1.229099988937378,
+    -0.014800000004470348,
+    -0.6047000288963318
+   ],
+   "max": [
+    1.3970999717712402,
+    1.5893000364303589,
+    0.6065999865531921
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 694836,
+  "frames": 388,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 300,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 300,
+   "frames": 48,
+   "fps": 34.412,
+   "stride": 0.8369
+  },
+  "run": {
+   "start": 348,
+   "frames": 40,
+   "fps": 88.0,
+   "stride": 3.1818
+  }
+ },
+ "textures": {
+  "color": "bull-color.jpg",
+  "mask": "bull-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

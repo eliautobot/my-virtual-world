@@ -14,6 +14,7 @@ import { boardApp, calendarApp } from './pc-plan.js';
 import { teamsApp, browserApp, activityApp, terminalApp, settingsApp } from './pc-more.js';
 import { computerApp } from './pc-own.js';
 import { watchScreens } from './pc-watch.js';
+import { isDemo, lockedPanel, LOCKED_TEXT } from './licence.js';
 
 export const APPS = [
   { id: 'files', label: 'Files', icon: '📂', run: filesApp },
@@ -45,6 +46,8 @@ export { size, when, popMenu };
  *   lock: the PC is this agent's own screen (no switching to another agent's); start: an app to open at once
  */
 export function mountPc(el, { agent, lock = false, start = null, args = null, toast = () => {}, onClose = null } = {}) {
+  // demo mode: the PC is locked (lock 'pc', refused on the server too): its place says so, with the way out
+  if (isDemo()) return lockedPanel(el, LOCKED_TEXT.pc);
   const P = {
     agent: Number(agent), lock, toast, agents: [], teams: [], usage: null, limits: null, profile: null, screen: null, alive: true,
     follow: true,   // (it shows what the agent does, as it does it — until the person takes over: setFollow)

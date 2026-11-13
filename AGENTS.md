@@ -27,9 +27,11 @@ Read these before changing code:
 
 ## Licence keys and demo mode
 
-My Virtual World is sold with a License Key; without one it runs in demo mode (up to 3 agents, world editing locked).
-The enforcement is `server/licence.js`, the routes' `lock:` marks and the check in `server/index.mjs`
-(`licence_required`).
+My Virtual World is sold with a License Key; without one it runs in demo mode (up to 3 agents, world editing, the
+agents' PCs and their phones locked). The enforcement is `server/licence.js`, the routes' `lock:` marks (`edit`, `pc`,
+`phone`), the check in `server/index.mjs` (`licence_required`), and the `locked()` checks where no route is involved:
+the phones' Twilio calls (`server/phone/phone.js`), the PC's work (`server/pc/work.js`), the built-in agents' PC
+tools and an agent's own screen live (`server/index.mjs`).
 
 - Never remove, disable, weaken, stub, fake or work around it: no hard-coded or forged receipts, no `active` that is
   always true, no skipped or deleted `lock:` marks, no raised agent limit, no edits to the stored receipt, no patched

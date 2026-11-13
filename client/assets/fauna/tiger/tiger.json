@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "tiger",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (9460aa2c-5732-4d66-b483-15d7d70aada1); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.4308,
+    0.0,
+    -0.194
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.4308,
+    0.0,
+    0.2466
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.8026,
+    0.0,
+    -0.1939
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.8026,
+    0.0,
+    0.2694
+   ]
+  ]
+ },
+ "height": 1.202,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 9931,
+   "tris": 13975,
+   "pos": 0,
+   "nrm": 119172,
+   "uv": 238344,
+   "skin": 317792,
+   "weight": 357516,
+   "index": 397240,
+   "indexType": "u16",
+   "min": [
+    -1.5585999488830566,
+    0.0005000000237487257,
+    -0.3142000138759613
+   ],
+   "max": [
+    0.7789999842643738,
+    1.2015999555587769,
+    0.3743000030517578
+   ]
+  },
+  {
+   "verts": 4085,
+   "tris": 4975,
+   "pos": 481092,
+   "nrm": 530112,
+   "uv": 579132,
+   "skin": 611812,
+   "weight": 628152,
+   "index": 644492,
+   "indexType": "u16",
+   "min": [
+    -1.555899977684021,
+    0.0013000000035390258,
+    -0.3142000138759613
+   ],
+   "max": [
+    0.7768999934196472,
+    1.200700044631958,
+    0.3743000030517578
+   ]
+  },
+  {
+   "verts": 1724,
+   "tris": 1498,
+   "pos": 674344,
+   "nrm": 695032,
+   "uv": 715720,
+   "skin": 729512,
+   "weight": 736408,
+   "index": 743304,
+   "indexType": "u16",
+   "min": [
+    -1.551200032234192,
+    0.004900000058114529,
+    -0.30880001187324524
+   ],
+   "max": [
+    0.776199996471405,
+    1.200700044631958,
+    0.3643999993801117
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 752292,
+  "frames": 354,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 270,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 270,
+   "frames": 48,
+   "fps": 50.963,
+   "stride": 0.9419
+  },
+  "run": {
+   "start": 318,
+   "frames": 36,
+   "fps": 93.6,
+   "stride": 4.6154
+  }
+ },
+ "textures": {
+  "color": "tiger-color.jpg",
+  "mask": "tiger-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

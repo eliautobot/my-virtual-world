@@ -11,7 +11,7 @@ const KEEP = 200;                       // notifications kept per account (the o
 const KEEP_READ_MS = 30 * 86400000;     // read ones, this long
 const MAX_FAILS = 5;                    // a subscription that fails this often in a row is dropped
 const MAX_DEVICES = 10;                 // browsers and phones per account
-const KINDS = new Set(['approval', 'note', 'chat', 'problem', 'system', 'phone', 'pc']);   // (phone: an agent's phone — a text, a missed call, a draft: server/phone/; pc: work an agent did on its PC, server/pc/work.js)
+const KINDS = new Set(['approval', 'note', 'chat', 'problem', 'system', 'phone', 'pc', 'update']);   // (update: a newer version of My Virtual World, server/updates.js; phone: an agent's phone — a text, a missed call, a draft: server/phone/; pc: work an agent did on its PC, server/pc/work.js)
 const VAPID = 'push.vapid';
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 
@@ -117,6 +117,7 @@ export class Notifications {
     // (an agent's phone: the conversation or the call it is about)
     if (link.agent && link.phone) return `/?phone=${link.agent}${link.phone.peer ? `&peer=${encodeURIComponent(link.phone.peer)}` : ''}${link.phone.call ? '&calls=1' : ''}`;
     if (link.agent) return `/?chat=${link.agent}${link.session ? `:${link.session}` : ''}`;
+    if (link.update) return '/?update=1';   // (a newer version: Settings → About)
     return '/';
   }
 

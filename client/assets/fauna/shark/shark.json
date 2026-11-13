@@ -1,0 +1,145 @@
+{
+ "v": 1,
+ "model": "shark",
+ "rig": "mvw-swimmer-v1",
+ "source": "Tripo Studio (be6e65e5-8588-43bd-9c1d-30ab590ea97c); swimmer rig along its centre line, a wave down the body (tools/animals/swim_animal.py)",
+ "height": 1.0,
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "neck",
+  "head",
+  "fin.L",
+  "fin.R"
+ ],
+ "lods": [
+  {
+   "verts": 10256,
+   "tris": 14000,
+   "pos": 0,
+   "nrm": 123072,
+   "uv": 246144,
+   "skin": 328192,
+   "weight": 369216,
+   "index": 410240,
+   "indexType": "u16",
+   "min": [
+    -0.4999000132083893,
+    -0.164900004863739,
+    -0.2671999931335449
+   ],
+   "max": [
+    0.4997999966144562,
+    0.23520000278949738,
+    0.267300009727478
+   ]
+  },
+  {
+   "verts": 3935,
+   "tris": 5000,
+   "pos": 494240,
+   "nrm": 541460,
+   "uv": 588680,
+   "skin": 620160,
+   "weight": 635900,
+   "index": 651640,
+   "indexType": "u16",
+   "min": [
+    -0.4997999966144562,
+    -0.1648000031709671,
+    -0.2671000063419342
+   ],
+   "max": [
+    0.4997999966144562,
+    0.23520000278949738,
+    0.267300009727478
+   ]
+  },
+  {
+   "verts": 1387,
+   "tris": 1500,
+   "pos": 681640,
+   "nrm": 698284,
+   "uv": 714928,
+   "skin": 726024,
+   "weight": 731572,
+   "index": 737120,
+   "indexType": "u16",
+   "min": [
+    -0.49729999899864197,
+    -0.16439999639987946,
+    -0.2671000063419342
+   ],
+   "max": [
+    0.49939998984336853,
+    0.23520000278949738,
+    0.267300009727478
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 746120,
+  "frames": 111,
+  "bones": 9
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 45,
+   "fps": 15
+  },
+  "walk": {
+   "start": 45,
+   "frames": 36,
+   "fps": 22.4,
+   "stride": 0.75
+  },
+  "run": {
+   "start": 81,
+   "frames": 30,
+   "fps": 14.933,
+   "stride": 0.9375
+  }
+ },
+ "textures": {
+  "color": "shark-color.jpg",
+  "mask": "shark-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

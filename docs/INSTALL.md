@@ -25,8 +25,9 @@ You need Docker Engine with Docker Compose v2, or Docker Desktop.
    cd my-virtual-world
    docker compose up -d
    ```
-   The first start builds the image (a few minutes) and opens the world with the starting map. `docker compose ps`
-   shows the app as `healthy` once it is ready, usually within half a minute of the build.
+   The first start downloads the ready-made image (`ghcr.io/eliautobot/my-virtual-world:2`, for 64-bit PCs and ARM
+   machines such as Apple Silicon and Raspberry Pi) and opens the world with the starting map. `docker compose ps`
+   shows the app as `healthy` once it is ready, usually within half a minute.
 2. Find the one-time **setup code**. The server prints it when it starts:
    ```sh
    docker compose logs app
@@ -51,14 +52,37 @@ How many people live in the city is set in the world itself: **Settings → Resi
 
 ### Updating
 
-Read the release notes first, then:
+When a new version is out, the owner sees **New version available** in the notifications and in
+**Settings → About**, with its release notes. (The server asks GitHub for the latest release twice a day and sends
+nothing about your world; turn it off in **Settings → General** or with `MVW_UPDATE_CHECK=off`.)
+
+Read the release notes first. Back up the world and the key (see [Backups](#backups)), then update in the folder that
+holds `compose.yaml`:
 
 ```sh
+docker compose exec -T app node tools/admin.mjs backup > world-backup.tar.gz
+docker compose exec -T app cat /keys/secret.key > secret.key
 git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-The world, the accounts and the key stay in their Docker volumes.
+The world, the accounts, the licence and the key stay in their Docker volumes: updating replaces only the program.
+
+To stay on one version, pin it in `.env` (for example `MVW_IMAGE=ghcr.io/eliautobot/my-virtual-world:2.6.0`).
+
+#### Building the image yourself
+
+`docker compose build` builds the code in this folder instead of downloading it (a few minutes), under the same name;
+`docker compose up -d` then runs your build. Compose also builds it by itself when it can't download the ready-made
+image. To go back to the ready-made image, run `docker compose pull` and `docker compose up -d`.
+
+#### From 2.5 or earlier
+
+Up to 2.5, `docker compose up -d` built the image on your machine. From 2.6 it downloads the ready-made one. Back up
+first, then run the five update commands above: `git pull` brings the new compose.yaml and `docker compose pull`
+downloads the image. Your data stays where it is. If you set `MVW_IMAGE` in `.env` before, remove that line (or set it
+to `ghcr.io/eliautobot/my-virtual-world:2`).
 
 ### Backups
 

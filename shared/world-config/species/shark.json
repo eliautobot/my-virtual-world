@@ -1,0 +1,46 @@
+{
+ "id": "shark",
+ "name": "Sharks",
+ "tier": "ambient",
+ "model": "shark",
+ "asset": "/assets/fauna/shark/shark.json",
+ "behaviour": "patrol",
+ "habitats": [
+  "sea",
+  "reef"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "storm",
+  "fog"
+ ],
+ "group": [
+  1,
+  1
+ ],
+ "perKm2": 4,
+ "size": 3.0,
+ "colors": [
+  "#7d8ca3"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#7d8ca3",
+   "hair": "#7d8ca3",
+   "legs": "#7d8ca3"
+  }
+ ],
+ "speed": 1.4,
+ "swimDepth": [
+  0.3,
+  1.8
+ ]
+}

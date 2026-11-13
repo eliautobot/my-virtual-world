@@ -25,7 +25,8 @@ export function addPhoneRoutes(router, phone) {
   };
   const q = (url, k) => url.searchParams.get(k);
   const agent = (url, b) => Number(b?.agent ?? q(url, 'agent'));
-  const R = (method, path, fn) => router.add({ method, path, cap: 'agents.phone', handler: run(fn) });
+  // every phone route carries the demo-mode lock 'phone' (licence enforcement: server/licence.js; the server refuses it unlicensed)
+  const R = (method, path, fn) => router.add({ method, path, cap: 'agents.phone', lock: 'phone', handler: run(fn) });
 
   R('GET', '/api/phone', ({ P, url }) => phone.state(P, agent(url)));
   R('GET', '/api/phone/summary', ({ P }) => ({ phones: phone.summary(P) }));
@@ -53,10 +54,10 @@ export function addPhoneRoutes(router, phone) {
   R('POST', '/api/phone/send', ({ P, url, body }) => phone.send(P, agent(url, body), { to: body?.to, body: body?.body, via: body?.via === 'agent' ? 'agent' : 'person' }));
   R('POST', '/api/phone/drafts/send', ({ P, url, body }) => phone.approve(P, agent(url, body), body?.id, { body: body?.body }));
   R('POST', '/api/phone/drafts/discard', ({ P, url, body }) => phone.discard(P, agent(url, body), body?.id));
-  router.add({ method: 'GET', path: '/api/phone/media', cap: 'agents.phone', handler: file(({ P, url }) => phone.mediaOf(P, agent(url), q(url, 'message'), Number(q(url, 'i')) || 0)) });
+  router.add({ method: 'GET', path: '/api/phone/media', cap: 'agents.phone', lock: 'phone', handler: file(({ P, url }) => phone.mediaOf(P, agent(url), q(url, 'message'), Number(q(url, 'i')) || 0)) });
   // calls: the history, voicemail, calling someone (the person's own phone rings first)
   R('GET', '/api/phone/calls', ({ P, url }) => phone.calls(P, agent(url), { before: q(url, 'before') }));
   R('POST', '/api/phone/calls/read', ({ P, url, body }) => phone.readCalls(P, agent(url, body)));
   R('POST', '/api/phone/dial', ({ P, url, body }) => phone.dial(P, agent(url, body), { to: body?.to }));
-  router.add({ method: 'GET', path: '/api/phone/voicemail', cap: 'agents.phone', handler: file(({ P, url }) => phone.recording(P, agent(url), q(url, 'call'))) });
+  router.add({ method: 'GET', path: '/api/phone/voicemail', cap: 'agents.phone', lock: 'phone', handler: file(({ P, url }) => phone.recording(P, agent(url), q(url, 'call'))) });
 }

@@ -1,0 +1,50 @@
+{
+ "id": "marlin",
+ "name": "Blue marlin",
+ "tier": "ambient",
+ "model": "marlin",
+ "asset": "/assets/fauna/marlin/marlin.json",
+ "behaviour": "patrol",
+ "habitats": [
+  "sea"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "storm",
+  "fog"
+ ],
+ "group": [
+  1,
+  1
+ ],
+ "perKm2": 1,
+ "size": 3.0,
+ "colors": [
+  "#2a52b0"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#2a52b0",
+   "hair": "#2a52b0",
+   "legs": "#2a52b0"
+  }
+ ],
+ "speed": 2.5,
+ "depth": [
+  9,
+  60
+ ],
+ "swimDepth": [
+  0.6,
+  3.0
+ ],
+ "leaps": true
+}

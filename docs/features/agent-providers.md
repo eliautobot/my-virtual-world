@@ -116,6 +116,7 @@ provider offers. The chat window reads it (`canChat → caps`) and shows only th
 | `plan` | the task progress card in the composer: notes, steps and their status; Refresh and Dismiss where offered | `progressCard.get`, `progressCard.changed`, `progressCard.refresh`, `progressCard.put` |
 | `commands` | slash commands (`/`) with their descriptions | `commands.list` |
 | `observe` | live activity in a session from the provider's other channels | `sessions.messages.subscribe` |
+| `stopSession` | Stop for a chat the provider works in with no answer of ours being written there (another channel, a job, a turn from before this server restarted), as OpenClaw's Control UI stops the selected session; for whoever manages the provider | as that page: the run the gateway has in flight there (`chat.history`: `inFlightRun`) by its id, `chat.abort` (`sessions.abort` with it when it is `sessionAbortable`); none named: `sessions.abort` (`key`, `agentId`, `clearQueued`). An answer of ours is stopped by its run (`chat.abort`) |
 | `settings` | the provider's sub-menu | `config.get`, `config.schema.lookup`, … |
 | `media` | the images, video and audio an answer carries: pictures (open large), players, files | `artifacts.download`, the gateway's `assistant-media` route |
 | `files` | any file a person attaches - video and audio too (OpenClaw keeps it for the agent); without it, video and recordings are refused before sending | `chat.send` attachments (non-image: saved by the gateway, `[media attached: …]`) |

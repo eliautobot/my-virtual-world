@@ -4,12 +4,39 @@
  "tier": "ambient",
  "model": "otter",
  "behaviour": "swim",
- "habitats": ["river"],
- "hours": [5.5, 20],
- "weather": ["clear", "partly", "overcast", "rain"],
- "group": [1, 3],
+ "habitats": [
+  "river",
+  "lake"
+ ],
+ "hours": [
+  5.5,
+  20
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain"
+ ],
+ "group": [
+  1,
+  3
+ ],
  "perKm2": 300,
- "size": 0.95,
- "colors": ["#5b4129", "#6a4b2f", "#4e3824"],
- "speed": 0.9
+ "size": 1.1,
+ "colors": [
+  "#5b4129",
+  "#6a4b2f",
+  "#4e3824"
+ ],
+ "speed": 0.9,
+ "asset": "/assets/fauna/otter/otter.json",
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#6b4e36",
+   "hair": "#6b4e36",
+   "legs": "#6b4e36"
+  }
+ ]
 }

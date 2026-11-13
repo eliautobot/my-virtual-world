@@ -4,12 +4,38 @@
  "tier": "ambient",
  "model": "dolphin",
  "behaviour": "pod",
- "habitats": ["sea"],
- "hours": [5.5, 20.5],
- "weather": ["clear", "partly", "overcast", "rain"],
- "group": [3, 7],
- "perKm2": 30,
- "size": 1.25,
- "colors": ["#6f7a86", "#5f6a76", "#7d8794"],
- "speed": 4.2
+ "habitats": [
+  "sea"
+ ],
+ "hours": [
+  5.5,
+  20.5
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain"
+ ],
+ "group": [
+  3,
+  7
+ ],
+ "perKm2": 3,
+ "size": 2.4,
+ "colors": [
+  "#6f7a86",
+  "#5f6a76",
+  "#7d8794"
+ ],
+ "speed": 4.2,
+ "asset": "/assets/fauna/dolphin/dolphin.json",
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#8e9aae",
+   "hair": "#8e9aae",
+   "legs": "#8e9aae"
+  }
+ ]
 }

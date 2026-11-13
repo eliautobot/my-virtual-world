@@ -33,5 +33,14 @@
  ],
  "speed": 0.7,
  "run": 0,
- "flee": 0
+ "flee": 0,
+ "asset": "/assets/fauna/cow/cow.json",
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#f1ece2",
+   "hair": "#f1ece2",
+   "legs": "#f1ece2"
+  }
+ ]
 }

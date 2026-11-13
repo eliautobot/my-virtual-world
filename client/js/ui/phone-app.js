@@ -8,6 +8,7 @@
 import { bus } from '../core/state.js';
 import { getJSON, post } from '../core/net.js';
 import { esc } from '../core/util.js';
+import { isDemo, lockedPanel, LOCKED_TEXT } from './licence.js';
 
 const NAV = [
   { id: 'messages', label: 'Messages', icon: '💬' },
@@ -49,6 +50,8 @@ const initials = s => String(s || '').split(/\s+/).filter(Boolean).slice(0, 2).m
  * @param {{ compact?: boolean, toast?: (m: string, kind?: string) => void, onCounts?: (c: object) => void }} [o]
  */
 export function mountPhone(el, agentId, { compact = false, toast = () => {}, onCounts = null } = {}) {
+  // demo mode: the phone is locked (lock 'phone', refused on the server too): its place says so, with the way out
+  if (isDemo()) return lockedPanel(el, LOCKED_TEXT.phone);
   const P = { st: null, view: 'messages', peer: null, threads: null, thread: null, calls: null, contacts: null, editing: null, keypad: '', compose: { to: '', body: '' },
     setup: { connection: null, numbers: null, buy: null, err: null, form: {} }, busy: false, err: null, open: new Set(), timer: null, seq: 0, alive: true, filter: '' };
   el.classList.add('ph-app'); el.classList.toggle('ph-compact', compact);

@@ -21,10 +21,14 @@
   "fog"
  ],
  "group": [
-  4,
-  12
+  3,
+  9
  ],
  "perKm2": 12,
+ "habitatWeight": {
+  "field": 1,
+  "meadow": 0.15
+ },
  "size": 0.75,
  "colors": [
   "#ece8de",
@@ -33,5 +37,14 @@
  ],
  "speed": 0.6,
  "run": 4,
- "flee": 10
+ "flee": 10,
+ "asset": "/assets/fauna/sheep/sheep.json",
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#ece8de",
+   "hair": "#ece8de",
+   "legs": "#ece8de"
+  }
+ ]
 }

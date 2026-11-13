@@ -1,0 +1,36 @@
+{
+ "id": "rooster",
+ "name": "Roosters",
+ "tier": "shared",
+ "model": "bird",
+ "asset": "/assets/fauna/rooster/rooster.json",
+ "behaviour": "graze",
+ "habitats": [
+  "field"
+ ],
+ "hours": [
+  5.5,
+  20.5
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  1,
+  1
+ ],
+ "perKm2": 0,
+ "size": 1.0,
+ "colors": [
+  "#7a3b16"
+ ],
+ "speed": 0.3,
+ "run": 1.0,
+ "flee": 7,
+ "joins": "chicken",
+ "joinChance": 0.8
+}

@@ -23,7 +23,11 @@
   2,
   5
  ],
- "perKm2": 10,
+ "perKm2": 9,
+ "habitatWeight": {
+  "forest": 1,
+  "meadow": 0.45
+ },
  "size": 1.0,
  "colors": [
   "#8a5f3a",
@@ -33,5 +37,14 @@
  "speed": 1.1,
  "run": 10,
  "flee": 38,
- "sound": "snort"
+ "sound": "snort",
+ "asset": "/assets/fauna/deer/deer.json",
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#8a5f3a",
+   "hair": "#8a5f3a",
+   "legs": "#8a5f3a"
+  }
+ ]
 }

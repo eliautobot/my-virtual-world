@@ -175,6 +175,7 @@ const adapter = {
   // ---------------------------------------------------------------- the chat (./chat.js)
   async run(p) { return (await linkFor(p)).chat.run(p); },
   async stop(p) { return (await linkFor(p)).chat.stop(p); },
+  async stopSession(p) { return (await linkFor(p)).chat.stopSession(p); },
   async approve(p) { return (await linkFor(p)).chat.approve(p); },
   async history(p) { return (await linkFor(p)).chat.history(p); },
   async models(p) { return (await linkFor(p)).chat.models(p); },

@@ -935,7 +935,7 @@ export function create(a, mgr, o = {}) {
     if (!W || tok !== W.token) return;
     if (W.session) W.session = sessionOf(W.session.id) || W.session;
     if (W.view === 'project') loadProject(W.projectId); else paintSide();
-    head();
+    head(); paintSend();   // (the send button too: Stop while the open chat works from elsewhere)
   }
   /** A new chat with this agent (in `project`, when started from it). */
   function newChat({ project = null } = {}) {
@@ -1817,6 +1817,10 @@ export function create(a, mgr, o = {}) {
     const i = $w('.cw-in');
     if (i.placeholder !== p) i.placeholder = p;
   }
+  /** The open chat works on its provider with no answer of ours being written here (another channel, a job, a turn from
+   *  before this server restarted) and this person may stop it there, as the provider's own app does (OpenClaw's Control
+   *  UI: Stop for the selected session). */
+  function elsewhere() { return !!(W && !W.run && W.session && W.can?.ok && W.can.stopSession && (W.obs || sessionOf(W.session.id)?.working)); }
   function paintSend() {
     const b = $w('.cw-send'), busy = !!W.run;
     paintPlaceholder();
@@ -1834,12 +1838,13 @@ export function create(a, mgr, o = {}) {
     $w('.cw-queue').classList.add('hidden');
     // (while it works: with words written, the button sends them — into this answer for a provider that takes them, else
     // queued until it ends; with nothing written, it stops the answer)
-    const stopping = busy && !ready;
+    // (… or, working there from elsewhere, stops what the agent does in this chat)
+    const away = !busy && elsewhere(), stopping = (busy || away) && !ready;
     b.classList.toggle('stop', stopping);
     b.textContent = stopping ? '⏹' : '↑';
-    b.title = stopping ? 'Stop' : busy ? (W.can?.caps?.queue ? 'Send now (Enter) — or after this answer (Ctrl+Enter)' : 'Queue it: sent when this answer ends (Enter)') : 'Send (Enter)';
+    b.title = stopping ? (away ? 'Stop what the agent is doing in this chat' : 'Stop') : busy ? (W.can?.caps?.queue ? 'Send now (Enter) — or after this answer (Ctrl+Enter)' : 'Queue it: sent when this answer ends (Enter)') : 'Send (Enter)';
     b.setAttribute('aria-label', stopping ? 'Stop' : busy && !W.can?.caps?.queue ? 'Queue message' : 'Send');
-    b.disabled = !stopping && (!ready || W.files.some(f => f.status === 'up') || !W.can?.ok);
+    b.disabled = stopping ? !!W.stopBusy : (!ready || W.files.some(f => f.status === 'up') || !W.can?.ok);
   }
   function paintComposer() {
     if (!W) return;
@@ -2002,7 +2007,7 @@ export function create(a, mgr, o = {}) {
     const v = view();
     if (v?.submit) { v.submit(cctx(), button ? { button: true } : { ctrl }); return; }
     const ready = !!$w('.cw-in').value.trim() || W.files.some(f => f.status === 'ok' && f.id);
-    if (!ready) { if (button && W.run) stop(); return; }
+    if (!ready) { if (button && (W.run || elsewhere())) stop(); return; }
     if (W.files.some(f => f.status === 'up') || !W.can?.ok) return;
     if (!W.run) { send(); return; }
     if (W.can.caps?.queue) { send({ later: ctrl }); return; }
@@ -2362,7 +2367,24 @@ export function create(a, mgr, o = {}) {
     el.lastChild.textContent = ` ${R.phase || 'Thinking'}${ms > 3000 ? ` · ${secs(ms)}` : ''}`;
   }
   function abandonRun(w = W) { if (w?.run) { clearInterval(w.run.timer); w.run.gone = true; w.run = null; } w?.el?.querySelector('.chatwin > .hv-ovl:not(.confirm)')?.remove(); }
+  /** Stop with no answer of ours here: what the provider runs in this chat is stopped there (the server makes the call
+   *  the provider's own app makes: OpenClaw, the run in flight by its id, else the session). Nothing was running there
+   *  any more: said so. */
+  async function stopElsewhere() {
+    const w = W, sid = W.session.id;
+    if (w.stopBusy) return;
+    w.stopBusy = true; paintSend();
+    try {
+      const r = await post('/api/providers/interrupt', { agent: w.agentId, session: sid });
+      if (W === w && W.session?.id === sid && r && r.stopped === false) app.toast?.('Nothing was running in this chat any more.', '', 3800);
+    } catch (e) { if (W === w && W.session?.id === sid) note(e.message); }
+    w.stopBusy = false;
+    if (W !== w) return;
+    await refreshList();
+    if (W === w) paintSend();
+  }
   async function stop() {
+    if (W && !W.run && elsewhere()) return stopElsewhere();
     if (!W?.run) return;
     const id = W.run.id;
     W.run.stopAsked = true;   // (the person stopped it: what they queued waits — the end may come as 'stopped' or not)
@@ -2372,7 +2394,7 @@ export function create(a, mgr, o = {}) {
   /** The socket's frames for the answer being written. */
   function onFrame(m) {
     if (m.working !== undefined && m.session) {   // (one of the agent's chats began or stopped working: its mark in the Sidebar)
-      if (W && m.agent === W.agentId) for (const s of [sessionOf(m.session)].filter(Boolean)) { s.working = m.working || false; if (W.view === 'chats' || W.view === 'project') paintSide(); }
+      if (W && m.agent === W.agentId) for (const s of [sessionOf(m.session)].filter(Boolean)) { s.working = m.working || false; if (W.view === 'chats' || W.view === 'project') paintSide(); if (W.session && W.session.id === m.session) paintSend(); }
       return;
     }
     if (m.card) { if (W && W.session && m.session === W.session.id && m.agent === W.agentId) { W.plan = { ...(W.plan || {}), ...m.card }; paintCard(); } return; }

@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "elderdeer",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (f39d4247-e426-472f-849e-6652691e3f75); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.3181,
+    0.0,
+    -0.17
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.3312,
+    0.0,
+    0.167
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.7732,
+    0.0,
+    -0.3197
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.7732,
+    0.0,
+    0.3197
+   ]
+  ]
+ },
+ "height": 2.593,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 10605,
+   "tris": 13990,
+   "pos": 0,
+   "nrm": 127260,
+   "uv": 254520,
+   "skin": 339360,
+   "weight": 381780,
+   "index": 424200,
+   "indexType": "u16",
+   "min": [
+    -1.3622000217437744,
+    -0.0010000000474974513,
+    -0.7713000178337097
+   ],
+   "max": [
+    0.9926000237464905,
+    2.5922999382019043,
+    0.7120000123977661
+   ]
+  },
+  {
+   "verts": 4632,
+   "tris": 4995,
+   "pos": 508140,
+   "nrm": 563724,
+   "uv": 619308,
+   "skin": 656364,
+   "weight": 674892,
+   "index": 693420,
+   "indexType": "u16",
+   "min": [
+    -1.3561999797821045,
+    -0.0010000000474974513,
+    -0.7681999802589417
+   ],
+   "max": [
+    0.9832000136375427,
+    2.589600086212158,
+    0.7120000123977661
+   ]
+  },
+  {
+   "verts": 2140,
+   "tris": 1609,
+   "pos": 723392,
+   "nrm": 749072,
+   "uv": 774752,
+   "skin": 791872,
+   "weight": 800432,
+   "index": 808992,
+   "indexType": "u16",
+   "min": [
+    -1.3425999879837036,
+    0.00019999999494757503,
+    -0.7681999802589417
+   ],
+   "max": [
+    0.9473999738693237,
+    2.579900026321411,
+    0.6746000051498413
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 818648,
+  "frames": 418,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 330,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 330,
+   "frames": 48,
+   "fps": 36.573,
+   "stride": 1.1812
+  },
+  "run": {
+   "start": 378,
+   "frames": 40,
+   "fps": 104.0,
+   "stride": 3.8462
+  }
+ },
+ "textures": {
+  "color": "elderdeer-color.jpg",
+  "mask": "elderdeer-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -11,7 +11,9 @@
 // product's own store and product; every account shares the activation. Until then the installation runs in demo mode:
 // the world stays as it came at the first start (the starting map) — building, interiors, signs, layouts, promotional aircraft and
 // restoring a world backup are locked — and it has at most 3 agents in all, built in or connected (a Grok Bot counts
-// like any other); a watermark shows, and chat, weather, day and night and watching the city stay available.
+// like any other); the agents' PCs (their computer, browser, terminal and screens: 'pc') and their phones (texts and
+// calls through Twilio: 'phone') are locked too; a watermark shows, and chat, weather, day and night and watching the
+// city stay available.
 // - The activation receipt is kept sealed in the secret store (the settings row secret:licence.receipt, so a key
 //   rotation re-seals it) and trusted from then on: once activated, the installation works offline forever (E19).
 // - While it is online, the server asks Lemon Squeezy now and then (10 minutes after it starts, then daily) whether the
@@ -38,12 +40,17 @@ export const RECEIPT = 'licence.receipt';
 const TIERS = { EARLY: 'Early Bird', FULL: 'Full License' };
 export const RECHECK_FIRST_MS = 10 * 60000, RECHECK_MS = 24 * 3600000, RECHECK_CONFIRM_MS = 3600000;
 const STRIKES = 'licence.recheck';   // settings row: { n, at } — clear refusals in a row, the last one's time
-export const DEMO_MESSAGE = 'Demo mode: up to 3 agents (built in or connected) and the world as it came: editing is locked. A licence key unlocks everything.';
-/** The features demo mode locks (E17, E19); each later package that builds one adds its lock and a test. 'edit' is a
- *  route lock (server/index.mjs refuses it); 'agents.more' is counted where agents are made (server/routes.js). */
+export const DEMO_MESSAGE = 'Demo mode: up to 3 agents (built in or connected), the world as it came (editing is locked), and no agent PCs or phones. A licence key unlocks everything.';
+/** The features demo mode locks (E17, E19); each later package that builds one adds its lock and a test. 'edit', 'pc'
+ *  and 'phone' are route locks (server/index.mjs refuses them); 'agents.more' is counted where agents are made
+ *  (server/routes.js). 'pc' and 'phone' are also checked where no route is involved: the built-in agents' PC tools and
+ *  PC work (server/pc/work.js), an agent's own screen live (server/providers/screen-relay.js) and the phones' Twilio
+ *  sync and sending (server/phone/phone.js). Licence enforcement: see the notice at the top of this file. */
 export const LOCKS = Object.freeze({
   edit: 'World editing',
   'agents.more': 'More than 3 agents (built in or connected)',
+  pc: 'Each agent\'s PC (its computer, browser, terminal and screens)',
+  phone: 'Each agent\'s phone (texts and calls through Twilio)',
 });
 
 export class LicenceError extends Error {

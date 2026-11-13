@@ -79,6 +79,7 @@ import { Players } from './world/players.js';
 import { createVehicles } from './world/vehicles.js';
 import { Friends } from './world/friends.js';
 import { Licence, LOCKS, DEMO_AGENTS } from './licence.js';
+import { UpdateCheck, RELEASES_URL } from './updates.js';
 import { Agents, peopleResolver } from './agents.js';
 import { Connections } from './connections.js';
 import { Attachments } from './chat/attachments.js';
@@ -385,6 +386,16 @@ const chat = new Chat({ media: providerMedia, agents, connections, registry, hos
 const accountOnline = id => { if (!wss) return false; for (const ws of wss.clients) if (ws.readyState === 1 && ws.P?.account?.id === id) return true; return false; };
 const notifications = new Notifications(dbs, { box, send: sendToAccount, online: accountOnline, allowLocal: providerTest, log,
   subject: () => { const c = String(settings.get('push.contact') || '').trim(); if (c) return /^https:\/\//.test(c) ? c : `mailto:${c.replace(/^mailto:/, '')}`; const u = (String(CFG.publicUrls || '').split(',')[0] || '').trim(); return /^https:\/\//.test(u) ? u.replace(/\/+$/, '') : 'mailto:push@localhost'; } }).attach();
+// "New version available" (server/updates.js): GitHub's latest release, asked a minute after the start and every 12 hours;
+// a newer version is told once to the accounts that run the server (settings.infrastructure), and the pages are told.
+const updateRecipientsQ = dbs.db.prepare("SELECT id, login, role FROM accounts WHERE world_id = ? AND status = 'active'");
+const updates = new UpdateCheck({
+  db: dbs.db, worldId: dbs.worldId, current: VERSION, url: CFG.updateTestUrl || RELEASES_URL, log,
+  enabled: () => CFG.updateCheck && settings.get('updates.check') !== false,
+  recipients: () => updateRecipientsQ.all(dbs.worldId).filter(r => perms.allowed({ account: { id: r.id, login: r.login, role: r.role }, role: r.role }, 'settings.infrastructure')).map(r => r.id),
+  notify: (id, n) => notifications.create(id, n),
+});
+if (CFG.updateCheck) updates.start(CFG.updateTestUrl ? { first: 1000, every: 1500 } : {});   // (a test's fake feed: asked at once and often)
 const vcText = c => `${(c / 100).toFixed(c % 100 ? 2 : 0)} VC`;
 const notifyAccount = (id, m) => {
   sendToAccount(id, m);
@@ -1162,6 +1173,7 @@ const api = createApi({
   onAccessChange: () => recheckSockets(), send, realNow, readiness,
   onTalk: (P, i) => mind?.heard(P, i),   // (an agent with a brain of its own answers in its own words: server/mind/)
   demoAgentRoom,   // (demo mode: an installation has at most 3 agents, built in or connected)
+  updates,   // ("New version available": server/updates.js)
   agentPublic: a => (agentTalk ? agentTalk.isPublic(a) : false),   // (the info dock's Public agents: anyone may talk with it)
 });
 const router = api.router, WS = api.ws;
@@ -1331,16 +1343,18 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   ownerPrincipal = principalFor;   // (MVW Radio's hosts speak as their owners: server/radio/)
   // agents' phones (server/phone/, docs/features/phone.md): a Twilio number per agent — texts, calls, voicemail, contacts;
   // read from Twilio every few seconds (no webhook), what reaches the agent goes into its phone chat, its answer is a reply
+  // (demo mode locks the phones: no Twilio call, sync or delivery while licence.locked('phone') — server/licence.js)
   phone = new Phone({ dbs, agents, connections, host, chat, notifications, send: sendToAccount, principalFor, setting: k => settings.get(k),
-    installId: dbs.worldId, audit, log }).watch();
+    installId: dbs.worldId, audit, log, locked: () => licence.locked('phone') }).watch();
   addPhoneRoutes(router, phone);
   { const before = chat.onAnswer; chat.onAnswer = (run, e) => { if (phone.onAnswer(run, e)) return; before?.(run, e); }; }
   phone.start();
   // the agents' PC (server/pc/, docs/features/agent-pc.md): one per account, a profile for each of its agents, teams;
   // its own database and file store under <data>/pc; live updates to the owning account only
   const displayQ = dbs.db.prepare('SELECT display_name FROM accounts WHERE world_id = ? AND id = ?');
+  // (demo mode locks the PC: its live updates stop too while licence.locked('pc') — server/licence.js)
   pc = new PcOS({ dir: path.join(DATA, 'pc'), worldId: dbs.worldId, agents, ownerAccount: () => ownerQ.get(dbs.worldId)?.id ?? null,
-    emit: sendToAccount, log,
+    emit: (accountId, frame) => { if (!licence.locked('pc')) sendToAccount(accountId, frame); }, log,
     limits: () => ({ agentMB: Number(settings.get('pc.agentMB')), teamMB: Number(settings.get('pc.teamMB')), fileMB: Number(settings.get('pc.fileMB')), keepDays: Number(settings.get('pc.keepDays')) }) });
   pcNames = (tag, me = null) => {
     if (me && tag === me) return 'you';
@@ -1469,8 +1483,9 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   agentLife.onMet = (id, o) => mind.onMet(id, o);
   mind.work = work;     // (its owner's chats in Work mode answer from its job)
   // its PC as a tool of its brain (owner's chats, visitors' — Public only), and work sessions on the tasks given to it
-  mind.pcTools = (agent, kind, o = {}) => pcToolbox({ pc, agent, kind, tz: o.tz && validZone(o.tz) ? o.tz : pcZone(agent), names: pcNames, browser: pcBrowser });
-  pcWork = new PcWork({ pc, mind, agents, work, names: pcNames, bus: providerBus, zoneOf: pcZone, log, browser: () => pcBrowser,
+  // the built-in agents' PC tools and PC work: none in demo mode (lock 'pc' — licence enforcement, server/licence.js)
+  mind.pcTools = (agent, kind, o = {}) => (licence.locked('pc') ? null : pcToolbox({ pc, agent, kind, tz: o.tz && validZone(o.tz) ? o.tz : pcZone(agent), names: pcNames, browser: pcBrowser }));
+  pcWork = new PcWork({ pc, mind, agents, work, names: pcNames, bus: providerBus, zoneOf: pcZone, log, browser: () => pcBrowser, locked: () => licence.locked('pc'),
     notify: (accountId, n) => notifications.create(accountId, { kind: 'pc', ...n }) }).start();
   mind.talk = talk;     // (agents an owner blocked are not spoken to when they meet)
   mind.modelsFn = c => host.call('models', 'models', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: connections.mayReachLocal(c) });
@@ -1751,11 +1766,15 @@ screenRelay = new ScreenRelay({
   originAllowed: req => policy.originAllowed(req),
   ticketFor: async (P, agentId) => {
     if (!perms.allowed(P, 'chat.use')) throw Object.assign(new Error('forbidden'), { status: 403 });
+    // (an agent's own screen is part of its PC: locked in demo mode — licence enforcement, server/licence.js)
+    if (licence.locked('pc')) throw Object.assign(new Error('licence_required'), { status: 403 });
     return chat.screenTicket(P, agentId);
   },
-  allowed: (P, agentId) => { if (!perms.allowed(P, 'chat.use')) return false; chat.screenOf(P, agentId); return true; },
+  allowed: (P, agentId) => { if (!perms.allowed(P, 'chat.use') || licence.locked('pc')) return false; chat.screenOf(P, agentId); return true; },
   refresh: sid => accounts.refresh(sid), log,
 });
+// The licence changed: live screens close in demo mode, and the PC's waiting work starts once a key is active.
+licence.listeners.add(() => { screenRelay?.recheck(); if (!licence.locked('pc')) pcWork?.pump(); });
 server.on('upgrade', (req, sock, head) => {
   if (shuttingDown) return sock.destroy();
   let pathname = '';
@@ -1962,6 +1981,7 @@ function shutdown(sig) {
   log(`[shutdown] ${sig}: saving and closing`);
   clearInterval(mainLoop);
   clearInterval(vehicleLoop); clearInterval(fleetLoop);
+  try { updates.stop(); } catch { /* stopping anyway */ }
   try { phone?.stop(); } catch (e) { log.error('[phone] shutdown', e.message); }   // (before the database closes: a sync starting then wrote to a closed one)
   try { economy?.stop(); } catch (e) { log.error('[economy] shutdown', e.message); }
   try { music.stop(); music.flush(); } catch (e) { log.error('[music] shutdown', e.message); }

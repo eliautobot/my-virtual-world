@@ -1,0 +1,39 @@
+{
+ "id": "parrot",
+ "name": "Parrots",
+ "tier": "ambient",
+ "model": "bird",
+ "asset": "/assets/fauna/parrot/parrot.json",
+ "behaviour": "flock",
+ "habitats": [
+  "forest"
+ ],
+ "hours": [
+  6,
+  18.5
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain"
+ ],
+ "group": [
+  3,
+  7
+ ],
+ "perKm2": 6,
+ "size": 1.0,
+ "colors": [
+  "#d8261c"
+ ],
+ "height": [
+  6,
+  22
+ ],
+ "speed": 9,
+ "altitude": [
+  0,
+  140
+ ]
+}

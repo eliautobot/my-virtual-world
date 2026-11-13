@@ -1,0 +1,169 @@
+{
+ "v": 1,
+ "model": "duck",
+ "rig": "mvw-bird-v1",
+ "source": "Tripo Studio (1ea72061-6bb3-4196-94af-5f0cd8e11146); bird rig along its body, neck, wings and legs; folded, flapping, gliding, walking and swimming poses (tools/animals/bird_animal.py)",
+ "height": 0.53,
+ "span": 0.9,
+ "bones": [
+  "root",
+  "chest",
+  "neck1",
+  "neck2",
+  "head",
+  "tail1",
+  "shoulder.L",
+  "elbow.L",
+  "wrist.L",
+  "thigh.L",
+  "shin.L",
+  "tarsus.L",
+  "toes.L",
+  "shoulder.R",
+  "elbow.R",
+  "wrist.R",
+  "thigh.R",
+  "shin.R",
+  "tarsus.R",
+  "toes.R"
+ ],
+ "lods": [
+  {
+   "verts": 9908,
+   "tris": 13999,
+   "pos": 0,
+   "nrm": 118896,
+   "uv": 237792,
+   "skin": 317056,
+   "weight": 356688,
+   "index": 396320,
+   "indexType": "u16",
+   "min": [
+    -0.22599999606609344,
+    0.00019999999494757503,
+    -0.4498000144958496
+   ],
+   "max": [
+    0.22609999775886536,
+    0.5303999781608582,
+    0.44999998807907104
+   ]
+  },
+  {
+   "verts": 3878,
+   "tris": 4999,
+   "pos": 480316,
+   "nrm": 526852,
+   "uv": 573388,
+   "skin": 604412,
+   "weight": 619924,
+   "index": 635436,
+   "indexType": "u16",
+   "min": [
+    -0.2240000069141388,
+    0.00019999999494757503,
+    -0.4498000144958496
+   ],
+   "max": [
+    0.22579999268054962,
+    0.5303999781608582,
+    0.4487999975681305
+   ]
+  },
+  {
+   "verts": 1489,
+   "tris": 1499,
+   "pos": 665432,
+   "nrm": 683300,
+   "uv": 701168,
+   "skin": 713080,
+   "weight": 719036,
+   "index": 724992,
+   "indexType": "u16",
+   "min": [
+    -0.2240000069141388,
+    0.00019999999494757503,
+    -0.4498000144958496
+   ],
+   "max": [
+    0.22579999268054962,
+    0.5257999897003174,
+    0.4487999975681305
+   ]
+  }
+ ],
+ "lodDist": [
+  25,
+  70
+ ],
+ "anim": {
+  "offset": 733988,
+  "frames": 306,
+  "bones": 20
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 180,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 180,
+   "frames": 32,
+   "fps": 59.79,
+   "stride": 0.1606
+  },
+  "fly": {
+   "start": 212,
+   "frames": 24,
+   "fps": 120.0,
+   "hz": 5.0
+  },
+  "glide": {
+   "start": 236,
+   "frames": 40,
+   "fps": 16.0,
+   "hz": 0.4
+  },
+  "swim": {
+   "start": 276,
+   "frames": 30,
+   "fps": 48.0,
+   "stride": 0.3125
+  }
+ },
+ "textures": {
+  "color": "duck-color.jpg",
+  "mask": "duck-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

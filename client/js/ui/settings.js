@@ -18,6 +18,7 @@ import { authDialog } from './account.js';
 import { accountPanel } from './account.js';
 import { usersTab, invitesTab, auditTab, generalTab, permissionsTab, useApp } from './admin.js';
 import { licenceTab, aboutLine } from './licence.js';
+import { aboutBlock } from './updates.js';
 import { connectionsTab } from './connections.js';
 import { agentSlotsTab } from './agent-slots.js';
 import { DRIVE_PHYSICS_KEY, drivePhysicsMode } from '../player/drive-physics.js';
@@ -287,6 +288,7 @@ async function aboutTab(d, body) {
     <h4>My Virtual World</h4>
     <div class="kv2"><span>Version</span><b>${esc((h1 && h1.version) || '—')}</b></div>
     <div class="kv2"><span>Release</span><b>${esc(rel)}</b></div>
+    ${aboutBlock()}
     <div class="kv2"><span>World</span><b>${esc((h1 && h1.worldVersion) || '—')}</b></div>
     ${aboutLine()}
     <div class="kv2"><span>Residents</span><b>${(S.people.length || 0).toLocaleString()}</b></div>

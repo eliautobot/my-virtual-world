@@ -20,6 +20,7 @@ import { mountPhone } from './phone-app.js';
 import { providerBrowser } from './provider-browser.js';
 import { mountProviderScreen } from './provider-screen.js';
 import { mountPc } from './pc-app.js';
+import { isDemo } from './licence.js';
 
 const SIDE_W = 268;     // the Sidebar's width beside the conversation (css: .chatwin.wide)
 const DOCK_W = 360;     // the panel's width beside it (css: --cw-dock-w)
@@ -29,7 +30,8 @@ const RECENT_MAX = 100;
 // the agents whose PC is this account's (GET /api/pc): read once, again after a minute — the PC tab is theirs alone
 let pcIds = null, pcAt = 0, pcLoading = null;
 function readPcIds() {
-  if (!auth.can('agents.pc')) { pcIds = new Set(); return Promise.resolve(pcIds); }
+  // (demo mode: the PCs are locked — not asked; the tab shows for this account's own agents, with the way out)
+  if (!auth.can('agents.pc') || isDemo()) { pcIds = new Set(); return Promise.resolve(pcIds); }
   if (pcIds && Date.now() - pcAt < 60000) return Promise.resolve(pcIds);
   pcLoading ||= getJSON('/api/pc').then(o => { pcIds = new Set(o.agents.map(a => a.id)); pcAt = Date.now(); return pcIds; }, () => pcIds || new Set()).finally(() => { pcLoading = null; });
   return pcLoading;
@@ -67,7 +69,7 @@ export function attach(host) {
   const has = () => {
     const c = host.can(), ok = !!(c && c.ok && c.manage), a = host.agent;
     return { tasks: ok && !!c.caps?.tasks, browser: ok && !!c.caps?.browser, screen: ok && !!c.caps?.screen, phone: !!(a && (a.mine || a.level === 'manage') && auth.can('agents.phone')),
-      pc: !!(host.agentId && pcIds?.has(host.agentId)) };
+      pc: !!(host.agentId && (pcIds?.has(host.agentId) || (isDemo() && a?.mine && auth.can('agents.pc')))) };
   };
   const enabled = () => { const h = has(); return h.tasks || h.browser || h.screen || h.phone || h.pc; };
   // the Screen tab: the agent's own screen (Hermes' Bot Desktop — ./provider-screen.js), mounted while the tab shows
@@ -82,7 +84,7 @@ export function attach(host) {
   function dropPhone() { M.app?.destroy(); M.app = null; M.agent = null; }
   async function readPhoneCounts() {
     const id = host.agentId;
-    if (!has().phone) { M.counts = null; return; }
+    if (!has().phone || isDemo()) { M.counts = null; return; }   // (demo mode: the phones are locked)
     try { const r = await getJSON('/api/phone/summary'); if (host.agentId === id) { const x = r.phones.find(p => p.agent === id); M.counts = x ? { unread: x.unread, missed: x.missed, drafts: x.drafts } : null; paint(); } }
     catch { /* the badge waits for the next change */ }
   }

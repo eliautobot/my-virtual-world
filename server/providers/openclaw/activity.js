@@ -34,7 +34,9 @@ export class LinkActivity {
     if (!evt || evt.event !== 'sessions.changed') return;
     const p = evt.payload || {}, s = p.session || null, key = (s && s.key) || p.sessionKey || p.key;
     if (!key) return;
-    const active = s && typeof s.hasActiveRun === 'boolean' ? s.hasActiveRun : p.hasActiveRun;
+    let active = s && typeof s.hasActiveRun === 'boolean' ? s.hasActiveRun : p.hasActiveRun;
+    // (no aggregate in it: an exact active set that is empty says the session is idle — rpc-session-control's activeRunIds)
+    if (typeof active !== 'boolean' && s && Array.isArray(s.activeRunIds) && !s.activeRunIds.length) active = false;
     if (typeof active !== 'boolean') return;
     this.take({ ...(s || {}), key, agentId: (s && s.agentId) || p.agentId, hasActiveRun: active });
     if (!this.timer) this.timer = setTimeout(() => { this.timer = null; this.flush(); }, SETTLE_MS);

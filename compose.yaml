@@ -3,12 +3,15 @@
 #   docker compose up -d                    the app at http://localhost:8570, reachable from this machine only
 #                                           (MVW_BIND=0.0.0.0: from other devices too, at http://<this machine's address>:8570)
 #   docker compose --profile proxy up -d    plus a reverse proxy with HTTPS for MVW_DOMAIN, reachable from anywhere
+#   docker compose pull && docker compose up -d    update to the newest release of version 2 (back up first: docs/INSTALL.md)
+# It runs the ready-made image each release publishes (ghcr.io/eliautobot/my-virtual-world). `docker compose build`
+# builds this folder's code instead, under the same name (and Compose builds it by itself when it can't download one).
 # Settings: environment variables, or a .env file next to this file (.env.example describes every setting).
 
 services:
   app:
+    image: ${MVW_IMAGE:-ghcr.io/eliautobot/my-virtual-world:2}
     build: .
-    image: ${MVW_IMAGE:-my-virtual-world:2}
     init: true
     restart: unless-stopped
     stop_grace_period: 30s

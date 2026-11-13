@@ -5,6 +5,7 @@
 // otherwise. Each place says its own agents; the server hears all of them together, at once for one newly watched, then
 // once a minute while any is.
 import { post } from '../core/net.js';
+import { isDemo } from './licence.js';
 
 const EVERY_MS = 60000;
 const by = new Map();   // the place watching → its agents' ids
@@ -14,7 +15,7 @@ function all() { const s = new Set(); for (const ids of by.values()) for (const 
 function send() {
   const ids = all();
   clearTimeout(timer); timer = null;
-  if (!ids.size || document.hidden) { sent = new Set(); return; }
+  if (!ids.size || document.hidden || isDemo()) { sent = new Set(); return; }   // (demo mode: the PCs are locked)
   sent = ids; at = Date.now();
   post('/api/pc/watch', { agents: [...ids] }).catch(() => {});
   timer = setTimeout(send, EVERY_MS);

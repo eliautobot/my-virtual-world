@@ -8,6 +8,8 @@
 // - Settings → License: the status for everyone; for the owner also Activate a key, Import a release 1 licence
 //   (its license.json; validated with Lemon Squeezy, no new activation) and Deactivate.
 // - The owner is told once, on this browser, that the installation runs in demo mode.
+// - The agents' PCs and phones (and an agent's browser and screen) show lockedPanel() in their place in demo mode: what
+//   is locked and the way out. The server refuses them whatever the page shows (locks 'pc' and 'phone').
 import { bus } from '../core/state.js';
 import { auth } from '../core/auth.js';
 import { getJSON, post } from '../core/net.js';
@@ -23,7 +25,7 @@ export function init(a) {
   app = a;
   app.licence = { status, isDemo, open: openTab };
   mark = document.body.appendChild(h(`<button type="button" id="demo-mark" class="hidden" title="Open Settings → License">
-    <b>DEMO MODE</b><span>Up to 3 agents; editing is locked.</span><em class="dm-go">Activate license now ›</em></button>`));
+    <b>DEMO MODE</b><span>Up to 3 agents; editing, PCs and phones are locked.</span><em class="dm-go">Activate license now ›</em></button>`));
   mark.onclick = openTab;
   bus.on('auth', paint);
   bus.on('msg:licence', () => auth.refresh());
@@ -39,6 +41,31 @@ export function init(a) {
   paint();
 }
 function openTab() { import('./settings.js').then(m => m.open(app, 'licence')); }
+/** Settings → License, from anywhere on the page. */
+export const openLicence = () => openTab();
+/**
+ * A locked feature's place in demo mode (the agents' PC, phone, browser or screen): what it is, that a licence key
+ * unlocks it, "Activate license now" and the buy link. Returns a handle with the methods the feature's own handle has
+ * (destroy, and the others doing nothing), so whoever mounts the feature needs no other change.
+ */
+export function lockedPanel(el, { icon = '🔒', title = 'Locked in demo mode', text = 'A licence key unlocks it.' } = {}) {
+  const s = status();
+  el.innerHTML = `<div class="demo-locked-panel" role="note"><div class="dlp-ic" aria-hidden="true">${icon}</div>
+    <h4>${esc(title)}</h4><p class="hint">${esc(text)}</p>
+    <div class="row dlp-acts"><button type="button" class="btn primary dlp-go">Activate license now</button>${s && s.buyUrl
+      ? `<a class="btn dlp-buy" href="${esc(s.buyUrl)}" target="_blank" rel="noopener noreferrer">🛒 Buy License here</a>` : ''}</div></div>`;
+  el.querySelector('.dlp-go').onclick = () => openTab();
+  const nop = () => {};
+  return { el, P: { alive: false }, locked: true, open: nop, setAgent: nop, show: nop, refresh: nop, reset: nop, live: nop, load: () => Promise.resolve(),
+    destroy() { el.innerHTML = ''; } };
+}
+/** The demo-mode text for each locked part of an agent (lockedPanel's title and text). */
+export const LOCKED_TEXT = Object.freeze({
+  pc: { icon: '💻', title: 'The agents\u2019 PCs are locked in demo mode', text: 'An agent\u2019s PC (its files, browser, terminal, tasks and screens) needs a licence key. Chatting with your agents stays free.' },
+  phone: { icon: '📱', title: 'The agents\u2019 phones are locked in demo mode', text: 'An agent\u2019s phone (its own number for texts and calls through Twilio) needs a licence key.' },
+  browser: { icon: '🌐', title: 'The agent\u2019s browser is locked in demo mode', text: 'Watching and taking over an agent\u2019s browser is part of its PC, which needs a licence key.' },
+  screen: { icon: '🖥️', title: 'The agent\u2019s screen is locked in demo mode', text: 'Watching and taking over an agent\u2019s own screen is part of its PC, which needs a licence key.' },
+});
 /** The note's button: Settings → License. */
 const ACTIVATE = { label: 'Activate license now', run: () => openTab() };
 let lastRefusal = 0;
@@ -60,7 +87,7 @@ function paint() {
     try { seen = localStorage.getItem(PROMPTED); } catch { /* private mode */ }
     if (!seen) {
       try { localStorage.setItem(PROMPTED, '1'); } catch { /* private mode */ }
-      setTimeout(() => app.toast('🔑 This installation runs in demo mode: up to 3 agents, and editing is locked.', '', 12000, '', '', ACTIVATE), 1500);
+      setTimeout(() => app.toast('🔑 This installation runs in demo mode: up to 3 agents, and editing, the agents\u2019 PCs and their phones are locked.', '', 12000, '', '', ACTIVATE), 1500);
     }
   }
 }

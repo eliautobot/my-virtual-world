@@ -1,0 +1,50 @@
+{
+ "id": "elder-deer",
+ "name": "Elder deer",
+ "tier": "shared",
+ "model": "deer",
+ "asset": "/assets/fauna/elderdeer/elderdeer.json",
+ "behaviour": "graze",
+ "habitats": [
+  "forest",
+  "meadow"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "storm",
+  "fog"
+ ],
+ "group": [
+  1,
+  1
+ ],
+ "perKm2": 0.5,
+ "size": 1.0,
+ "colors": [
+  "#6e4f33"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#6e4f33",
+   "hair": "#5a3f28",
+   "legs": "#c9b89a"
+  }
+ ],
+ "speed": 0.9,
+ "run": 10,
+ "flee": 60,
+ "altitude": [
+  80,
+  5000
+ ],
+ "joins": "deer",
+ "joinChance": 0.2
+}

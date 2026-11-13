@@ -1,0 +1,42 @@
+{
+ "id": "bull",
+ "name": "Bulls",
+ "tier": "shared",
+ "model": "bull",
+ "asset": "/assets/fauna/bull/bull.json",
+ "behaviour": "graze",
+ "habitats": [
+  "field"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  1,
+  1
+ ],
+ "perKm2": 3,
+ "size": 1.0,
+ "colors": [
+  "#2e2a28"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#2e2a28",
+   "hair": "#2e2a28",
+   "legs": "#2e2a28"
+  }
+ ],
+ "speed": 0.6,
+ "run": 0,
+ "flee": 0
+}

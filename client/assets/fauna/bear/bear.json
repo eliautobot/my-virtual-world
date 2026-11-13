@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "bear",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (8cf8f6fb-7333-4729-bcea-dc7d17c08989); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.6812,
+    0.0,
+    -0.2119
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.6812,
+    0.0,
+    0.2337
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.086,
+    0.0,
+    -0.2627
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.086,
+    0.0,
+    0.2631
+   ]
+  ]
+ },
+ "height": 1.073,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 9293,
+   "tris": 14000,
+   "pos": 0,
+   "nrm": 111516,
+   "uv": 223032,
+   "skin": 297376,
+   "weight": 334548,
+   "index": 371720,
+   "indexType": "u16",
+   "min": [
+    -0.6420000195503235,
+    0.0,
+    -0.4027999937534332
+   ],
+   "max": [
+    1.0405999422073364,
+    1.0721999406814575,
+    0.4185999929904938
+   ]
+  },
+  {
+   "verts": 3781,
+   "tris": 4998,
+   "pos": 455720,
+   "nrm": 501092,
+   "uv": 546464,
+   "skin": 576712,
+   "weight": 591836,
+   "index": 606960,
+   "indexType": "u16",
+   "min": [
+    -0.6420000195503235,
+    0.0010999999940395355,
+    -0.39730000495910645
+   ],
+   "max": [
+    1.0393999814987183,
+    1.069200038909912,
+    0.41350001096725464
+   ]
+  },
+  {
+   "verts": 1484,
+   "tris": 1500,
+   "pos": 636948,
+   "nrm": 654756,
+   "uv": 672564,
+   "skin": 684436,
+   "weight": 690372,
+   "index": 696308,
+   "indexType": "u16",
+   "min": [
+    -0.6367999911308289,
+    0.001500000013038516,
+    -0.3959999978542328
+   ],
+   "max": [
+    1.0302000045776367,
+    1.069200038909912,
+    0.4059999883174896
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 705308,
+  "frames": 354,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 270,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 270,
+   "frames": 48,
+   "fps": 55.849,
+   "stride": 0.7735
+  },
+  "run": {
+   "start": 318,
+   "frames": 36,
+   "fps": 122.4,
+   "stride": 2.9412
+  }
+ },
+ "textures": {
+  "color": "bear-color.jpg",
+  "mask": "bear-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

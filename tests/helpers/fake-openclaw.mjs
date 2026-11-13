@@ -83,6 +83,21 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
       return id;
     },
     sessionFeed: new Set(),   // sockets that called sessions.subscribe: told of every session's turns starting and ending
+    /** A session the gateway reports as working, as a client that was restarted meanwhile finds it: with no run it can
+     *  name (hasActiveRun, no activeRunIds: only sessions.abort ends it), or with a run in flight (chat.history's
+     *  inFlightRun), sessionAbortable or not. */
+    hold(key, { runId = null, sessionAbortable = false } = {}) {
+      f.stuck.set(key, { runId, sessionAbortable });
+      const agentId = f.sessions.get(key)?.agentId || (/^agent:([^:]+):/.exec(key) || [])[1];
+      const ids = runId ? { activeRunIds: [runId] } : {};
+      for (const ws of f.sessionFeed) send(ws, { type: 'event', event: 'sessions.changed', payload: { reason: 'agent.run.started', sessionKey: key, hasActiveRun: true, ...ids, session: { key, agentId, hasActiveRun: true, ...ids } } });
+    },
+    /** The run the gateway has in flight in a session, as chat.history names it (inFlightRun), or null. */
+    inFlight(key) {
+      const live = [...f.runs.entries()].find(([, r]) => r.key === key && !r.finished && !r.aborted), h = f.stuck.get(key);
+      if (live) return { runId: live[0], text: '', startedAt: Date.now() };
+      return h && h.runId ? { runId: h.runId, text: '', startedAt: Date.now(), ...(h.sessionAbortable ? { sessionAbortable: true } : {}) } : null;
+    },
     /** A session's turn starting or ending, as OpenClaw's session feed tells it (sessions.changed). */
     activity(key, active, runId) {
       const agentId = f.sessions.get(key)?.agentId || (/^agent:([^:]+):/.exec(key) || [])[1];
@@ -95,7 +110,7 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
     sessions: new Map(),     // key → { agentId, model, thinkingLevel, history: [], label }
     runs: new Map(),         // runId → { key, frames, at, timer, waiting, aborted }
     subs: new Map(),         // socket → Set(session key)
-    patches: [], sends: [], aborts: [], resolutions: [],
+    patches: [], sends: [], aborts: [], sessionAborts: [], stuck: new Map(), resolutions: [],
     // its settings (the sub-menu): a config with secrets in it, its description, and the base-hash guard on changes
     config: { gateway: { port: 18789, auth: { mode: 'token', token: 'GW-CONFIG-SECRET' } }, models: { providers: { stub: { baseUrl: 'http://x', apiKey: 'sk-PROVIDER-SECRET' } } }, agents: { defaults: { model: { primary: 'stub/stub-1' } } } },
     configRev: 1, changes: [],
@@ -177,11 +192,28 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
       },
       'sessions.delete': ({ key }) => ({ ok: f.sessions.delete(key) }),
       'models.list': () => ({ models: MODELS }),
-      'chat.history': ({ sessionKey }) => { const x = f.sessions.get(sessionKey); return { sessionKey, messages: x ? x.history : [],
+      'chat.history': ({ sessionKey }) => { const x = f.sessions.get(sessionKey), fl = f.inFlight(sessionKey); return { sessionKey, ...(fl ? { inFlightRun: fl } : {}), messages: x ? x.history : [],
         sessionInfo: x ? { key: sessionKey, model: x.model.split('/')[1], modelProvider: 'stub', thinkingLevel: x.thinkingLevel, totalTokens: 15000, contextTokens: x.model === 'stub/stub-2' ? 32000 : 128000 } : null } },
       'chat.send': ({ sessionKey, message, idempotencyKey, attachments, queueMode }) => {
         const x = f.sessions.get(sessionKey); if (!x) throw Object.assign(new Error('unknown session'), { code: 'INVALID_REQUEST' });
         f.sends.push({ sessionKey, message, idempotencyKey, attachments, queueMode });
+        // a stop command, as OpenClaw takes it (/stop, or words like "stop", "please stop"): the session's work stopped,
+        // whatever started it, and no turn of its own — the answer is { aborted, runIds }, no run id
+        if (/^\s*(\/stop|stop|stop run|stop action|please stop)\s*[.!]?\s*$/i.test(String(message))) {
+          const live = [...f.runs.entries()].filter(([, r]) => r.key === sessionKey && !r.finished && !r.aborted);
+          const h = f.stuck.get(sessionKey); if (h) f.stuck.delete(sessionKey);
+          for (const [id, r] of live) {
+            r.aborted = true; clearTimeout(r.timer);
+            f.toSession(r.key, 'chat', { runId: id, sessionKey: r.key, seq: 999, state: 'aborted', stopReason: 'stop' });
+            if (r.announced) f.activity(r.key, false, id);
+          }
+          if (h) f.activity(sessionKey, false);
+          const ids = [...live.map(([id]) => id), ...(h && h.runId ? [h.runId] : [])];
+          return { ok: true, aborted: ids.length > 0, runIds: ids };
+        }
+        // (a send the gateway took and then lost — no turn, no events, unknown to chat.abort: what a client may be left
+        // waiting on)
+        if (/\[\[ghost\]\]/.test(String(message))) return { runId: idempotencyKey, status: 'started' };
         // a message while a turn runs, as OpenClaw takes it: steered into that turn by default (its answer comes there;
         // its own run ends empty), or with queueMode followup run after it
         const active = [...f.runs.values()].find(r => r.key === sessionKey && !r.finished && !r.aborted);
@@ -210,11 +242,28 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
       },
       'chat.abort': ({ sessionKey, runId }) => {
         f.aborts.push({ sessionKey, runId });
+        const held = f.stuck.get(sessionKey);
+        if (held && held.runId && held.runId === runId) { f.stuck.delete(sessionKey); f.activity(sessionKey, false, runId); return { ok: true, aborted: true, runIds: [runId] }; }
         const r = f.runs.get(runId); if (!r || r.aborted) return { ok: true, aborted: false };
         r.aborted = true; clearTimeout(r.timer);
         f.toSession(r.key, 'chat', { runId, sessionKey: r.key, seq: 999, state: 'aborted', stopReason: 'user' });
         if (r.announced) f.activity(r.key, false, runId);
         return { ok: true, aborted: true, runIds: [runId] };
+      },
+      // (as OpenClaw: the session's active work stopped, whatever started it; with a run id, that run only; nothing
+      // running there: said so)
+      'sessions.abort': ({ key, agentId, runId, clearQueued }) => {
+        f.sessionAborts.push({ key, agentId, ...(runId !== undefined ? { runId } : {}), ...(clearQueued !== undefined ? { clearQueued } : {}) });
+        const live = [...f.runs.entries()].filter(([id, r]) => r.key === key && !r.finished && !r.aborted && (runId === undefined || id === runId));
+        const h = f.stuck.get(key), held = !!h && (runId === undefined || h.runId === runId) && f.stuck.delete(key);
+        if (!live.length && !held) return { ok: true, status: 'no-active-run', abortedRunId: null };
+        for (const [id, r] of live) {
+          r.aborted = true; clearTimeout(r.timer);
+          f.toSession(r.key, 'chat', { runId: id, sessionKey: r.key, seq: 999, state: 'aborted', stopReason: 'user' });
+          if (r.announced) f.activity(r.key, false, id);
+        }
+        if (held) f.activity(key, false);
+        return { ok: true, status: 'aborted', abortedRunId: live[0] ? live[0][0] : null };
       },
       // (the questions waiting for an answer, as OpenClaw lists them for a client that opens later)
       'question.list': () => ({ questions: [...f.runs.values()].filter(r => r.waiting && r.asked && r.asked.id === r.waiting).map(r => ({ ...r.asked, status: 'pending' })) }),
@@ -292,7 +341,7 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
       'sessions.subscribe': (params, conn, ws) => {
         f.sessionFeed.add(ws); ws.once('close', () => f.sessionFeed.delete(ws));
         const active = [...f.runs.entries()].filter(([, r]) => r.announced && !r.finished && !r.aborted).map(([id, r]) => ({ key: r.key, agentId: f.sessions.get(r.key)?.agentId || (/^agent:([^:]+):/.exec(r.key) || [])[1], hasActiveRun: true, activeRunIds: [id] }));
-        return Object.keys(params || {}).length ? { subscribed: true, list: { sessions: active } } : { subscribed: true };
+        return Object.keys(params || {}).length ? { subscribed: true, list: { sessions: [...active, ...[...f.stuck].map(([key, h]) => ({ key, agentId: f.sessions.get(key)?.agentId || (/^agent:([^:]+):/.exec(key) || [])[1], hasActiveRun: true, ...(h.runId ? { activeRunIds: [h.runId] } : {}) }))] } } : { subscribed: true };
       },
       'tasks.list': ({ status, agentId, sessionKey, limit = 100, sortBy }) => {
         const want = status ? (Array.isArray(status) ? status : [status]) : null;

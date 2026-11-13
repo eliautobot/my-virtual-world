@@ -1,0 +1,205 @@
+{
+ "v": 1,
+ "model": "moose",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (f2582259-531b-4a4f-81b1-e63772b30c8e); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.4805,
+    0.0,
+    -0.2368
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.4805,
+    0.0,
+    0.251
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.9404,
+    0.0046,
+    -0.3605
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.9404,
+    0.0046,
+    0.3805
+   ]
+  ]
+ },
+ "height": 2.883,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 9835,
+   "tris": 14000,
+   "pos": 0,
+   "nrm": 118020,
+   "uv": 236040,
+   "skin": 314720,
+   "weight": 354060,
+   "index": 393400,
+   "indexType": "u16",
+   "min": [
+    -1.5583000183105469,
+    0.0017000000225380063,
+    -0.9733999967575073
+   ],
+   "max": [
+    1.6367000341415405,
+    2.8828001022338867,
+    0.9534000158309937
+   ]
+  },
+  {
+   "verts": 4052,
+   "tris": 5000,
+   "pos": 477400,
+   "nrm": 526024,
+   "uv": 574648,
+   "skin": 607064,
+   "weight": 623272,
+   "index": 639480,
+   "indexType": "u16",
+   "min": [
+    -1.5550999641418457,
+    0.0017000000225380063,
+    -0.9732000231742859
+   ],
+   "max": [
+    1.635699987411499,
+    2.8738999366760254,
+    0.9488999843597412
+   ]
+  },
+  {
+   "verts": 1647,
+   "tris": 1500,
+   "pos": 669480,
+   "nrm": 689244,
+   "uv": 709008,
+   "skin": 722184,
+   "weight": 728772,
+   "index": 735360,
+   "indexType": "u16",
+   "min": [
+    -1.552899956703186,
+    0.0035000001080334187,
+    -0.9668999910354614
+   ],
+   "max": [
+    1.635699987411499,
+    2.867000102996826,
+    0.9301999807357788
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 744360,
+  "frames": 384,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 300,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 300,
+   "frames": 48,
+   "fps": 31.071,
+   "stride": 1.5449
+  },
+  "run": {
+   "start": 348,
+   "frames": 36,
+   "fps": 72.0,
+   "stride": 4.5
+  }
+ },
+ "textures": {
+  "color": "moose-color.jpg",
+  "mask": "moose-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}
