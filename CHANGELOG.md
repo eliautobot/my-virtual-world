@@ -2,6 +2,17 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.7.1 (2026-11-14)
+
+- **The world opens sooner**: it no longer waits for every animal model to download first. Each animal species now
+  loads in the background when you come near where it lives, a little ahead of you, and fades in once it is ready.
+  Animal and fish models are sent about half as big and are kept by your browser, so a return visit loads them again
+  only when they change.
+- **Smoother travel across the island**: the animals take less work every frame, so moving over the map stutters less,
+  most noticeably on phones and slower computers.
+
+To update a Docker install: `docker compose pull`, then `docker compose up -d`.
+
 ## v2.7.0 (2026-11-14)
 
 - **A new fishing game**: every fish and find is now a detailed, animated model (87 species including the six legends,

@@ -1024,9 +1024,20 @@ function staticHeaders(pathname) {
 const gzCache = new Map();
 // The characters' files compressed in the background (in the system's temporary folder, or MVW_ASSET_CACHE) and kept a
 // year at their version (server/asset-compress.js)
-const CHAR_DIR = path.join(ROOT, 'client/assets/chars');
-const charPack = new AssetCompressor({ dir: CHAR_DIR, cache: CFG.assetCache || path.join(os.tmpdir(), `mvw-asset-cache-${crypto.createHash('sha1').update(CHAR_DIR).digest('hex').slice(0, 10)}`), log });
-setTimeout(() => charPack.warm(), 2000).unref();
+// — and the wildlife's and the fishing game's models the same way (2026-11-14), each folder its own copies and version
+// (beside MVW_ASSET_CACHE, never inside it: a folder's cache holds only its own copies and removes anything else)
+const assetCacheFor = dir => (CFG.assetCache ? `${CFG.assetCache}-${path.basename(dir)}` : path.join(os.tmpdir(), `mvw-asset-cache-${crypto.createHash('sha1').update(dir).digest('hex').slice(0, 10)}`));
+const ASSET_PACKS = [['chars', 'characters\''], ['fauna', 'animals\''], ['fish', 'fish models\'']].map(([name, label]) => {
+  const dir = path.join(ROOT, 'client/assets', name);
+  if (!fs.existsSync(dir)) return null;
+  // (the characters' copies stay where they always were: CFG.assetCache itself, or their own folder under the system's)
+  const cache = name === 'chars' ? (CFG.assetCache || assetCacheFor(dir)) : assetCacheFor(dir);
+  return { name, dir, pack: new AssetCompressor({ dir, cache, log, label }) };
+}).filter(Boolean);
+// one folder after another, the characters first (a phone's people), never on a request
+setTimeout(async () => { for (const p of ASSET_PACKS) await p.pack.warm(); }, 2000).unref();
+/** The compressed, versioned folder a served file belongs to, or null. */
+const assetPackOf = file => ASSET_PACKS.find(p => file.startsWith(p.dir + path.sep)) || null;
 function sendJSON(req, res, code, obj, pre = null, extra = null) {
   const body = pre ? pre.body : JSON.stringify(obj);
   const acceptGz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
@@ -1074,10 +1085,13 @@ function contentEtag(file, st, done) {
   pending.then(done);
 }
 function serveStatic(req, res, pathname) {
-  if (pathname === '/assets/chars/version.json') {   // the characters' folder version, for ?v= (server/asset-compress.js)
-    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache', ...SECURITY_HEADERS });
-    res.end(JSON.stringify({ v: charPack.version }));
-    return true;
+  { // a compressed folder's version, for ?v= (server/asset-compress.js): /assets/chars, /assets/fauna, /assets/fish
+    const m = /^\/assets\/([a-z]+)\/version\.json$/.exec(pathname), P = m && ASSET_PACKS.find(p => p.name === m[1]);
+    if (P) {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache', ...SECURITY_HEADERS });
+      res.end(JSON.stringify({ v: P.pack.version }));
+      return true;
+    }
   }
   for (let [prefix, dir, cache] of STATIC) {
     if (!pathname.startsWith(prefix)) continue;
@@ -1095,10 +1109,11 @@ function serveStatic(req, res, pathname) {
     const ext = path.extname(file).toLowerCase();
     const type = MIME[ext] || 'application/octet-stream';
     const sec = staticHeaders(pathname);
-    // the characters' files: kept a year when asked for at the folder's version, sent compressed (server/asset-compress.js)
-    const chars = file.startsWith(CHAR_DIR + path.sep);
-    if (chars && charPack.version && new URL(req.url, 'http://x').searchParams.get('v') === charPack.version) cache = 'public, max-age=31536000, immutable';
-    const packed = chars ? charPack.pick(file, req.headers['accept-encoding'] || '') : null;
+    // the characters', animals' and fish models' files: kept a year when asked for at their folder's version, sent
+    // compressed (server/asset-compress.js)
+    const AP = assetPackOf(file), chars = !!AP;
+    if (AP && AP.pack.version && new URL(req.url, 'http://x').searchParams.get('v') === AP.pack.version) cache = 'public, max-age=31536000, immutable';
+    const packed = AP ? AP.pack.pick(file, req.headers['accept-encoding'] || '') : null;
     contentEtag(file, st, etag0 => {
       const etag = packed ? etag0.replace(/"$/, `-${packed.encoding}"`) : etag0;
       if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag, 'cache-control': cache, ...(chars ? { vary: 'Accept-Encoding' } : {}), ...sec }); return res.end(); }

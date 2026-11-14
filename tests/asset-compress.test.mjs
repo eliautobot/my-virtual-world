@@ -45,3 +45,26 @@ test('nothing is compressed when the disk that would keep the copies is short of
     assert.match(said.join(' '), /under 1 GB free/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a folder of model folders (the wildlife, the fish): walked through, each model\'s files compressed, one version for all', async () => {
+  const root = tempDir('mvw-faunapack-'), dir = path.join(root, 'fauna'), cache = path.join(root, 'cache');
+  for (const id of ['horse', 'deer']) {
+    fs.mkdirSync(path.join(dir, id), { recursive: true });
+    fs.writeFileSync(path.join(dir, id, `${id}.bin`), Buffer.alloc(120000, id.length)); fs.writeFileSync(path.join(dir, id, `${id}-color.jpg`), 'jpeg');
+  }
+  try {
+    const said = [], A = new AssetCompressor({ dir, cache, log: { info: s => said.push(s) }, label: 'animals\'' });
+    await A.warm();
+    for (const id of ['horse', 'deer']) {
+      const file = path.join(dir, id, `${id}.bin`), b = A.pick(file, 'br');
+      assert.equal(b?.encoding, 'br', `${id}: compressed`);
+      assert.ok(zlib.brotliDecompressSync(fs.readFileSync(b.path)).equals(fs.readFileSync(file)));
+    }
+    assert.equal(A.pick(path.join(dir, 'horse', 'horse-color.jpg'), 'br'), null);
+    assert.match(said.join(' '), /2 animals' files compressed/);
+    // a change in one model's folder: a new version for the whole folder
+    const v1 = A.version, f = path.join(dir, 'deer', 'deer.bin');
+    fs.writeFileSync(f, Buffer.alloc(120001, 4)); fs.utimesSync(f, new Date(), new Date(Date.now() + 5000));
+    assert.notEqual(new AssetCompressor({ dir, cache, log: {} }).version, v1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

@@ -22,6 +22,14 @@ const HIPS = { deer: 0.8, rabbit: 0.3, cow: 0.68, sheep: 0.42, horse: 0.98, crab
 const STAND = { seagull: 0.31, bird: 0.19 };   // a landed bird's feet (a gull's legs) or belly below its middle, in its own size
 const MODE = { rest: 0, walk: 1, run: 2, fly: 3, glide: 4, swim: 5, hop: 6, glow: 7 };
 let app = null, species = [], packs = new Map(), groups = new Map(), lastPlan = 0, seed = 'world';
+// The modelled species load when they are wanted (2026-11-14, the owner: "make the actual world load faster", and the
+// travel lag): before, all 30 (50 MB) loaded before the world opened. Now a species' model is fetched in the background
+// the first time a group of it is planned near the camera — or a little beyond, so it is usually ready before it is
+// seen — a few at a time, nearest first; its groups are drawn (fading in) once it has arrived. If it can't load, its
+// built model stands in, as before.
+const spById = new Map(), modelState = new Map(), modelQueue = [];   // species id → 'queued' | 'loading' | 'ready' | 'failed'
+let modelsActive = 0;
+const MODELS_AT_ONCE = 3, PREFETCH = 1.6;   // (models fetched at once; the planning range's multiple a species is fetched within)
 const shared = { herds: new Map(), off: null, seen: 0 };   // herds from the server and its wildlife clock's offset
 let level = localStorage.getItem('mvw.wildlife') || 'normal';   // Display → Wildlife: off, fewer, normal
 bus.on('display', k => { if (k === 'wildlife') { level = localStorage.getItem('mvw.wildlife') || 'normal'; groups.clear(); } });
@@ -61,39 +69,25 @@ export async function init(a) {
   seed = S.world?.worldId || 'world';
   const all = [];
   try {
+    // (the catalogue's files fetched side by side: one after another, 42 of them, took seconds over a distant network)
     const idx = await (await fetch('/shared/world-config/species/index.json')).json();
-    for (const id of idx.species) {
-      const sp = await (await fetch(`/shared/world-config/species/${id}.json`)).json(), why = validateSpecies(sp);
-      if (why.length) { console.warn(`[wildlife] ${id}: ${why.join('; ')}`); continue; }
-      all.push(sp);
+    const list = await Promise.all(idx.species.map(id => fetch(`/shared/world-config/species/${id}.json`).then(r => r.json())));
+    list.forEach((sp, k) => {
+      const why = validateSpecies(sp);
+      if (why.length) { console.warn(`[wildlife] ${idx.species[k]}: ${why.join('; ')}`); return; }
+      all.push(sp); spById.set(sp.id, sp);
       if (sp.tier === 'ambient') species.push(sp);
-    }
+    });
   } catch (e) { console.warn('[wildlife] the species catalogue could not load:', e.message); return; }
-  // modelled animals (render/fauna-skinned.js): a species naming an asset is drawn from it; if it can't load, from its built model
-  const assets = await Promise.all(all.map(sp => (sp.asset ? loadSkinned(sp.asset) : null)));
-  all.forEach((sp, k) => {
-    const A = assets[k]; if (!A) return;
-    const cap = CAP[sp.id] || 160;
-    const pk = { sp, cap, n: 0, skinned: skinnedPack(A, cap, app.stage.scene, `wildlife-${sp.id}`, coatsOf(sp, A)), clips: A.man.clips, span: feetSpan(A.man) };
-    // (a modelled swimmer is seen through the water, as the built ones are: render/water.js underwater)
-    if (SWIMMERS.includes(sp.model) && app.terrain?.uw) new Set(pk.skinned.meshes.map(m => m.material)).forEach(m => app.terrain.uw(m));
-    packs.set(sp.id, pk);
-  });
-  for (const sp of all) {
-    if (packs.has(sp.id)) continue;
-    const cap = CAP[sp.id] || 160, geo = MODELS[sp.model]().clone();
-    geo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4));
-    // (what swims below the sea is seen through its water, with the full sea: render/water.js underwater)
-    const swims = SWIMMERS.includes(sp.model), T = app.terrain;
-    const mesh = new THREE.InstancedMesh(geo, swims && T?.uw ? T.uw(faunaMaterial(sp.model)) : faunaMaterial(sp.model), cap);
-    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
-    mesh.count = 0; mesh.frustumCulled = false; mesh.castShadow = sp.model === 'deer'; mesh.userData.smallCaster = true; mesh.name = `wildlife-${sp.id}`;
-    app.stage.scene.add(mesh);
-    packs.set(sp.id, { sp, mesh, cap, anim: geo.attributes.aAnim, colors: sp.colors.map(c => new THREE.Color(c)) });
-  }
-  // every species' shader compiled now (in the background where the browser can), not in the frame it first appears
+  // the built models now; a modelled species' (render/fauna-skinned.js) when it is first wanted: ensureModel
+  for (const sp of all) if (!sp.asset) addBuilt(sp);
+  // every built species' shader compiled now (in the background where the browser can), not in the frame it first appears
   app.stage.renderer.compileAsync?.(app.stage.scene, app.stage.camera).catch(() => {});
-  app.wildlife = { get count() { let n = 0; for (const P of packs.values()) n += P.skinned ? P.skinned.count : P.mesh.count; return n; }, groups, species, shared, plan: () => plan(performance.now()) };
+  app.wildlife = {
+    get count() { let n = 0; for (const P of packs.values()) n += P.skinned ? P.skinned.count : P.mesh.count; return n; }, groups, species, shared, plan: () => plan(performance.now()),
+    /** The modelled species' models: { id: 'queued' | 'loading' | 'ready' | 'failed' } (absent: not wanted yet). */
+    get models() { return Object.fromEntries(modelState); },
+  };
   bus.on('frame', update);
   for (const ev of ['terrain', 'roads', 'world']) bus.on(ev, () => { GQ.clear(); seaCells.clear(); });   // (the ground changed: reshaped, roads, building pads)
   bus.on('msg:fauna', m => {
@@ -101,22 +95,73 @@ export async function init(a) {
     shared.off = m.wt - now; shared.seen = now;
     const keep = new Set();
     for (const h of m.herds || []) {
-      const pk = packs.get(h.s); if (!pk) continue;
-      keep.add(h.id);
+      const sp = spById.get(h.s); if (!sp) continue;
+      keep.add(h.id); ensureModel(sp, 2);
       const was = shared.herds.get(h.id);
-      shared.herds.set(h.id, { id: h.id, sp: pk.sp, m: h.m, born: was ? was.born : performance.now(), r: h.m.map((_, i) => hash(h.id, i)), st: was?.st || [] });
+      shared.herds.set(h.id, { id: h.id, sp, m: h.m, shown: was?.shown, r: h.m.map((_, i) => hash(h.id, i)), st: was?.st || [] });
     }
     for (const id of [...shared.herds.keys()]) if (!keep.has(id)) shared.herds.delete(id);
   });
+}
+
+/** A species drawn from its built model (render/fauna-models.js): one instanced draw. */
+function addBuilt(sp) {
+  const cap = CAP[sp.id] || 160, geo = MODELS[sp.model]().clone();
+  geo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4));
+  // (what swims below the sea is seen through its water, with the full sea: render/water.js underwater)
+  const swims = SWIMMERS.includes(sp.model), T = app.terrain;
+  const mesh = new THREE.InstancedMesh(geo, swims && T?.uw ? T.uw(faunaMaterial(sp.model)) : faunaMaterial(sp.model), cap);
+  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
+  mesh.count = 0; mesh.frustumCulled = false; mesh.castShadow = sp.model === 'deer'; mesh.userData.smallCaster = true; mesh.name = `wildlife-${sp.id}`;
+  mesh.matrixAutoUpdate = false;   // (it never moves: its animals are placed by their instance matrices)
+  app.stage.scene.add(mesh);
+  const pk = { sp, mesh, cap, anim: geo.attributes.aAnim, colors: sp.colors.map(c => new THREE.Color(c)) };
+  packs.set(sp.id, pk);
+  return pk;
+}
+/** A modelled species from its loaded asset: its draws, ready before it is first seen (the shader — one for every
+ *  modelled species — and the textures sent to the GPU now, not in the frame it appears). */
+function addSkinned(sp, A) {
+  const cap = CAP[sp.id] || 160;
+  const pk = { sp, cap, n: 0, skinned: skinnedPack(A, cap, app.stage.scene, `wildlife-${sp.id}`, coatsOf(sp, A)), clips: A.man.clips, span: feetSpan(A.man) };
+  // (a modelled swimmer is seen through the water, as the built ones are: render/water.js underwater)
+  if (SWIMMERS.includes(sp.model) && app.terrain?.uw) new Set(pk.skinned.meshes.map(m => m.material)).forEach(m => app.terrain.uw(m));
+  const r = app.stage.renderer;
+  try { for (const t of [A.color, A.mask, A.bones]) r.initTexture?.(t); } catch { /* sent with its first draw instead */ }
+  r.compileAsync?.(pk.skinned.meshes[0], app.stage.camera, app.stage.scene).catch(() => {});
+  packs.set(sp.id, pk);
+  return pk;
+}
+/** Ask for a modelled species' model (priority: 2 its animals are here, 1 they are planned near, 0 a little beyond). */
+function ensureModel(sp, pri) {
+  if (!sp?.asset || packs.has(sp.id) || level === 'off') return;
+  const st = modelState.get(sp.id);
+  if (st === 'queued') { const q = modelQueue.find(x => x.sp === sp); if (q && pri > q.pri) q.pri = pri; return; }
+  if (st) return;   // (loading, or failed: its built model stands in)
+  modelState.set(sp.id, 'queued'); modelQueue.push({ sp, pri });
+  pumpModels();
+}
+function pumpModels() {
+  while (modelsActive < MODELS_AT_ONCE && modelQueue.length) {
+    modelQueue.sort((a, b) => b.pri - a.pri);
+    const { sp } = modelQueue.shift();
+    modelState.set(sp.id, 'loading'); modelsActive++;
+    loadSkinned(sp.asset).then(A => {
+      if (A) { addSkinned(sp, A); modelState.set(sp.id, 'ready'); } else { addBuilt(sp); modelState.set(sp.id, 'failed'); }
+    }).catch(() => { if (!packs.has(sp.id)) addBuilt(sp); modelState.set(sp.id, 'failed'); })
+      .finally(() => { modelsActive--; pumpModels(); });
+  }
 }
 
 // ------------------------------------------------------------------ where groups live
 /** The groups that belong around the camera now: from loaded tiles' habitats and nearby lakes. */
 function plan(now) {
   const T = app.terrain; if (!T) return;
-  const ct = app.cam.target, R = RANGE[app.stage.q.name] || 420, hour = S.hour, kind = app.weather?.now?.kind || 'clear';
+  const ct = app.cam.target, R = RANGE[app.stage.q.name] || 420, R2 = R * PREFETCH, hour = S.hour, kind = app.weather?.now?.kind || 'clear';
   const want = new Map();
-  const consider = (key, sp, anchors, areaKm2) => {
+  // near: within the planning range (its groups are wanted now); else within PREFETCH of it, where only its model is
+  // asked for (a group there would be wanted soon)
+  const consider = (key, sp, anchors, areaKm2, near = true) => {
     // (a species of deep water keeps to anchors with that much sea over them: whales, marlin)
     if (sp.depth) { const sea = T.params?.seaLevel ?? 0; anchors = anchors.filter(a => sea - a.y >= sp.depth[0] && sea - a.y <= sp.depth[1]); }
     // (a species of the heights keeps to anchors that high above the sea: eagles over the mountains; one of the
@@ -124,6 +169,8 @@ function plan(now) {
     if (sp.altitude) { const sea = T.params?.seaLevel ?? 0; anchors = anchors.filter(a => a.y - sea >= sp.altitude[0] && a.y - sea <= sp.altitude[1]); }
     if (!anchors.length) return;
     const exp = sp.perKm2 * areaKm2, n = Math.floor(exp) + (hash(key, 1) < exp % 1 ? 1 : 0);
+    if (n > 0) ensureModel(sp, near ? 1 : 0);
+    if (!near) return;
     for (let k = 0; k < Math.min(n, level === 'fewer' ? 1 : 3); k++) {
       const a = anchors[Math.floor(hash(key, 10 + k) * anchors.length)];
       want.set(`${key}:${k}`, { sp, a, key: `${key}:${k}` });
@@ -131,13 +178,13 @@ function plan(now) {
   };
   for (const t of T.tiles.values()) {
     if (!t.hab || t.level !== 0 || !T.shown.has(t.key)) continue;
-    const cx = t.x0 + t.S / 2, cz = t.z0 + t.S / 2;
-    if (Math.hypot(cx - ct.x, cz - ct.z) > R) continue;
+    const cx = t.x0 + t.S / 2, cz = t.z0 + t.S / 2, dt = Math.hypot(cx - ct.x, cz - ct.z);
+    if (dt > R2) continue;
     for (const sp of species) {
       if (!activeAt(sp, hour) || !sp.weather.includes(kind) || sp.habitats.includes('lake') || sp.habitats.includes('river')) continue;
       const pts = []; let frac = 0;
       for (const h of sp.habitats) { const L = t.hab[h]; if (!L) continue; frac += L.length / 3; for (let i = 0; i < L.length; i += 3) pts.push({ x: L[i], y: L[i + 1], z: L[i + 2] }); }
-      consider(`${seed}:${t.key}:${sp.id}`, sp, pts, (t.S * t.S / 1e6) * Math.min(1, frac / 24));
+      consider(`${seed}:${t.key}:${sp.id}`, sp, pts, (t.S * t.S / 1e6) * Math.min(1, frac / 24), dt <= R);
     }
   }
   // the open sea (2026-11-12, the owner: "I can't spot the sharks"): the terrain hides its tiles of deep water (the sea
@@ -158,19 +205,21 @@ function plan(now) {
   for (const L of T.lakes || []) {
     if (L.userData.frozen || L.userData.lake?.pool) continue;   // (a frozen tarn, a waterfall's churning pool: no ducks)
     const r = L.userData.r || L.geometry.parameters?.radius || 60, lx = L.position.x, lz = L.position.z;
-    if (Math.hypot(lx - ct.x, lz - ct.z) > R + r) continue;
+    const dl = Math.hypot(lx - ct.x, lz - ct.z);
+    if (dl > R2 + r) continue;
     for (const sp of species) {
       if (!sp.habitats.includes('lake') || !activeAt(sp, hour) || !sp.weather.includes(kind)) continue;
       const anchors = []; for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; anchors.push({ x: lx + Math.cos(a) * r * 0.62, y: L.position.y, z: lz + Math.sin(a) * r * 0.62, lake: { x: lx, z: lz, r: r * 0.8, y: L.position.y } }); }
-      consider(`${seed}:lake${Math.round(lx)},${Math.round(lz)}:${sp.id}`, sp, anchors, Math.PI * r * r / 1e6);
+      consider(`${seed}:lake${Math.round(lx)},${Math.round(lz)}:${sp.id}`, sp, anchors, Math.PI * r * r / 1e6, dl <= R + r);
     }
   }
   // rivers (otters, beavers): their slow, wide stretches (every RIVER_STRETCH m of course, no rapids or falls), each a
   // place a group swims up and down
   const I = T.ground?.island, rsp = species.filter(sp => sp.habitats.includes('river') && activeAt(sp, hour) && sp.weather.includes(kind));
   if (I?.rivers && rsp.length) for (const Rv of I.rivers) for (const st of riverStretches(Rv)) {
-    if (Math.hypot(st.x - ct.x, st.z - ct.z) > R + RIVER_STRETCH) continue;
-    for (const sp of rsp) consider(`${seed}:${Rv.id}:${st.j}:${sp.id}`, sp, [st], RIVER_STRETCH * st.w / 1e6);
+    const ds = Math.hypot(st.x - ct.x, st.z - ct.z);
+    if (ds > R2 + RIVER_STRETCH) continue;
+    for (const sp of rsp) consider(`${seed}:${Rv.id}:${st.j}:${sp.id}`, sp, [st], RIVER_STRETCH * st.w / 1e6, ds <= R + RIVER_STRETCH);
   }
   // keep the groups still wanted, start new ones, let the others fade out
   for (const [k, g] of groups) if (!want.has(k)) g.leaving = g.leaving ?? now;
@@ -178,7 +227,7 @@ function plan(now) {
     const g = groups.get(k);
     if (g) { g.leaving = null; continue; }
     const sp = w.sp, n = sp.group[0] + Math.floor(hash(k, 3) * (sp.group[1] - sp.group[0] + 1));
-    groups.set(k, { sp, a: w.a, key: k, born: now, leaving: null, flee: null, sk: !!packs.get(sp.id)?.skinned, members: Array.from({ length: n }, (_, i) => ({ r: [hash(k, 100 + i), hash(k, 200 + i), hash(k, 300 + i), hash(k, 400 + i)], col: Math.floor(hash(k, 500 + i) * sp.colors.length), x: w.a.x, y: w.a.y, z: w.a.z, yaw: 0 })) });
+    groups.set(k, { sp, a: w.a, key: k, born: now, shown: null, leaving: null, flee: null, sk: !!packs.get(sp.id)?.skinned, members: Array.from({ length: n }, (_, i) => ({ r: [hash(k, 100 + i), hash(k, 200 + i), hash(k, 300 + i), hash(k, 400 + i)], col: Math.floor(hash(k, 500 + i) * sp.colors.length), x: w.a.x, y: w.a.y, z: w.a.z, yaw: 0 })) });
   }
 }
 
@@ -461,16 +510,19 @@ function pose(g, m, i, t, player) {
 
 function update(dt, now) {
   if (!species.length || !app.terrain) return;
-  if (level === 'off') { for (const pk of packs.values()) if (pk.skinned) { pk.skinned.begin(); pk.skinned.end(); } else pk.mesh.count = 0; return; }
+  if (level === 'off') { for (const pk of packs.values()) if (pk.skinned) { pk.skinned.begin(); pk.skinned.end(); } else { pk.mesh.count = 0; pk.mesh.visible = false; } return; }
   if (now - lastPlan > 500) { lastPlan = now; plan(now); }
   if (now - gqAt > 5000) { gqAt = now; GQ.clear(); }   // (and now and then anyway: a regrade lands a moment after its event)
   const t = app.net?.realNow ? app.net.realNow() % 100000 : now / 1000, cam = app.stage.camera.position;
   const P = app.player && app.player.active && app.player.ctx === -1 ? { x: app.player.x, z: app.player.z } : null;
   for (const pk of packs.values()) { pk.n = 0; pk.skinned?.begin(); }
   for (const [k, g] of groups) {
-    const fade = g.leaving != null ? 1 - (now - g.leaving) / 1500 : Math.min(1, (now - g.born) / 1500);
-    if (g.leaving != null && fade <= 0) { groups.delete(k); continue; }
     const pk = packs.get(g.sp.id);
+    if (!pk) { if (g.leaving != null && now - g.leaving > 1500) groups.delete(k); continue; }   // (its model hasn't arrived: not drawn yet)
+    // (fading in from when it is first drawn: a group whose model arrived later doesn't pop in)
+    if (g.shown == null) { g.shown = now; g.sk = !!pk.skinned; }
+    const fade = g.leaving != null ? 1 - (now - g.leaving) / 1500 : Math.min(1, (now - g.shown) / 1500);
+    if (g.leaving != null && fade <= 0) { groups.delete(k); continue; }
     // life under the sea is seen only close by: far-off schools and turtles aren't moved or drawn
     // (turtles that come up to breathe are seen further: at the surface)
     if ((g.sp.behaviour === 'school' || g.sp.behaviour === 'cruise') && Math.hypot(g.a.x - cam.x, g.a.z - cam.z) > (g.sp.breathe ? 320 : 170) + cam.y * 0.3) continue;
@@ -502,7 +554,9 @@ function update(dt, now) {
   if (shared.off !== null) {
     const wt = now / 1000 + shared.off;
     for (const h of shared.herds.values()) {
-      const pk = packs.get(h.sp.id), fade = Math.min(1, (now - h.born) / 1500);
+      const pk = packs.get(h.sp.id); if (!pk) continue;   // (its model hasn't arrived: not drawn yet)
+      h.shown ??= now;
+      const fade = Math.min(1, (now - h.shown) / 1500);
       h.m.forEach((a, i) => {
         if (pk.n >= pk.cap || (level === 'fewer' && i % 2)) return;
         const u = a[5] > a[4] ? Math.min(1, Math.max(0, (wt - a[4]) / (a[5] - a[4]))) : 1, moving = a[6] && u < 1;
@@ -541,7 +595,7 @@ function update(dt, now) {
   }
   for (const pk of packs.values()) {
     if (pk.skinned) { pk.skinned.end(); continue; }
-    pk.mesh.count = pk.n;
+    pk.mesh.count = pk.n; pk.mesh.visible = pk.n > 0;   // (an empty draw left out of the frame: render/fauna-skinned.js end)
     if (pk.n) { pk.mesh.instanceMatrix.needsUpdate = true; pk.mesh.instanceColor.needsUpdate = true; pk.anim.needsUpdate = true; }
   }
 }

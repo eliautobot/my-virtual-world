@@ -17,13 +17,22 @@ import { GU } from './scene.js';
 const CLIP_OF_MODE = { 0: 'rest', 1: 'walk', 2: 'run', 3: 'trot', 4: 'fly', 5: 'glide', 6: 'swim' };
 const CLIP_NAMES = ['rest', 'walk', 'run', 'trot', 'fly', 'glide', 'swim'];
 
+// The folders' versions (server/asset-compress.js: /assets/fauna/version.json, /assets/fish/version.json): every file of a
+// model asked for at its folder's version, which the browser may keep a year (2026-11-14: each visit downloaded the
+// wildlife's 50 MB again) and the server sends compressed.
+const folderVer = new Map();
+const versionOf = root => {
+  if (!folderVer.has(root)) folderVer.set(root, fetch(`${root}version.json`, { cache: 'no-cache' }).then(r => (r.ok ? r.json() : {})).then(j => j.v || '').catch(() => ''));
+  return folderVer.get(root);
+};
 /** Load a skinned animal asset (its manifest URL); resolves to null when it can't be loaded (the caller keeps the built model). */
 export async function loadSkinned(url) {
   try {
-    const base = url.replace(/[^/]*$/, '');
-    const man = await (await fetch(url)).json();
+    const base = url.replace(/[^/]*$/, ''), root = (/^\/assets\/[^/]+\//.exec(url) || [''])[0];
+    const v = root ? await versionOf(root) : '', q = n => (v ? `${n}?v=${v}` : n);
+    const man = await (await fetch(q(url))).json();
     if (man.v !== 1 || !Array.isArray(man.lods) || !man.anim || !man.clips?.rest) throw new Error('not a skinned animal manifest');
-    const buf = await (await fetch(base + url.split('/').pop().replace(/\.json$/, '.bin'))).arrayBuffer();
+    const buf = await (await fetch(q(base + url.split('/').pop().replace(/\.json$/, '.bin')))).arrayBuffer();
     const at = (off, T, n) => new T(buf, off, n);
     const lods = man.lods.map(L => {
       const g = new THREE.BufferGeometry();
@@ -41,7 +50,7 @@ export async function loadSkinned(url) {
     const bones = new THREE.DataTexture(at(man.anim.offset, Float32Array, nf * nb * 12), nb * 3, nf, THREE.RGBAFormat, THREE.FloatType);
     bones.needsUpdate = true;
     const tl = new THREE.TextureLoader();
-    const tex = (n, srgb) => new Promise((ok, no) => tl.load(base + n, t => { t.flipY = false; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; ok(t); }, undefined, no));
+    const tex = (n, srgb) => new Promise((ok, no) => tl.load(q(base + n), t => { t.flipY = false; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; ok(t); }, undefined, no));
     const [color, mask] = await Promise.all([tex(man.textures.color, true), tex(man.textures.mask, false)]);
     return { man, lods, bones, color, mask };
   } catch (e) {
@@ -79,7 +88,10 @@ mat4 skinMatrix() {
   return M;
 }`;
 
-/** The material: the painted texture, recoloured per animal by the mask, posed by the bone texture. */
+/** The material: the painted texture, recoloured per animal by the mask, posed by the bone texture. Every modelled
+ *  species shares one shader program (2026-11-14: one each made 125 programs to compile at start-up and a program
+ *  switch per species every frame): what differs between them — the bones, the clips, the mask, the painting's
+ *  reference brightness — is in uniforms, so the generated source is the same for all. */
 function material(A) {
   // (a fish's scales shine a little: the manifest's roughness, 2026-11-13)
   const m = new THREE.MeshStandardMaterial({ map: A.color, roughness: A.man.roughness ?? 0.85, metalness: A.man.metalness ?? 0 });
@@ -89,24 +101,24 @@ function material(A) {
     const c = A.man.clips[k] || A.man.clips.rest;
     return new THREE.Vector4(c.start, c.frames, c.fps, 0);
   });
-  const ref = A.man.refLumLinear || A.man.refLum;
+  const ref = A.man.refLumLinear || A.man.refLum, uRef = new THREE.Vector3(ref.body, ref.hair, ref.points);
   m.onBeforeCompile = sh => {
     sh.uniforms.uBones = { value: A.bones }; sh.uniforms.uTime = GU.uTime; sh.uniforms.uClips = { value: clips };
-    sh.uniforms.uMask = { value: A.mask };
+    sh.uniforms.uMask = { value: A.mask }; sh.uniforms.uRef = { value: uRef };
     sh.vertexShader = VERT + '\n' + sh.vertexShader
       .replace('#include <beginnormal_vertex>', 'mat4 mvwSkin = skinMatrix();\nvec3 objectNormal = normalize(mat3(mvwSkin) * normal);')
       .replace('#include <begin_vertex>', 'vec3 transformed = (mvwSkin * vec4(position, 1.0)).xyz;\nvBody = aBody; vHair = aHair; vLegs = aLegs;');
-    sh.fragmentShader = `uniform sampler2D uMask;\nvarying vec3 vBody, vHair, vLegs;\n` + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+    sh.fragmentShader = `uniform sampler2D uMask;\nuniform vec3 uRef;\nvarying vec3 vBody, vHair, vLegs;\n` + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
       {
         // the coat: each painted region gives way to its colour, keeping the painting's light and dark
         vec3 k = texture2D(uMask, vMapUv).rgb;
         float l = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
         vec3 c = diffuseColor.rgb * clamp(1.0 - k.r - k.g - k.b, 0.0, 1.0)
-          + k.r * vBody * (l / ${ref.body.toFixed(5)}) + k.g * vHair * (l / ${ref.hair.toFixed(5)}) + k.b * vLegs * (l / ${ref.points.toFixed(5)});
+          + k.r * vBody * (l / uRef.x) + k.g * vHair * (l / uRef.y) + k.b * vLegs * (l / uRef.z);
         diffuseColor.rgb = min(c, vec3(1.0));
       }`);
   };
-  m.customProgramCacheKey = () => `fauna-skinned-${A.man.model}`;
+  m.customProgramCacheKey = () => 'fauna-skinned-1';   // (the same source for every species: see above)
   return m;
 }
 
@@ -122,11 +134,14 @@ export function skinnedPack(A, cap, scene, name, coats) {
     for (const [n, s] of Object.entries(inst)) g.setAttribute(n, new THREE.InstancedBufferAttribute(new Float32Array(cap * s), s));
     const mesh = new THREE.InstancedMesh(g, mat, cap);
     mesh.count = 0; mesh.frustumCulled = false; mesh.castShadow = false; mesh.userData.smallCaster = true;
+    mesh.matrixAutoUpdate = false;   // (it never moves: its animals are placed by their instance matrices)
     mesh.name = `${name}-lod${k}`;
     scene.add(mesh);
     return mesh;
   });
   const n = meshes.map(() => 0), dist = A.man.lodDist || [35, 90];
+  // the coat each slot holds (a slot's colours go to the GPU only when its coat changes: an animal usually keeps its slot)
+  const coatAt = meshes.map(() => new Int32Array(cap).fill(-1)), coatDirty = meshes.map(() => false);
   const rest = A.man.clips.rest, restRate = rest.fps / rest.frames;
   return {
     meshes, cap, coats,
@@ -139,8 +154,11 @@ export function skinnedPack(A, cap, scene, name, coats) {
       const k = d < dist[0] ? 0 : d < dist[1] ? 1 : 2, mesh = meshes[k], i = n[k];
       if (i >= cap) return false;
       mesh.setMatrixAt(i, m4);
-      const c = coats[coat % coats.length], g = mesh.geometry.attributes;
-      g.aBody.setXYZ(i, c.body.r, c.body.g, c.body.b); g.aHair.setXYZ(i, c.hair.r, c.hair.g, c.hair.b); g.aLegs.setXYZ(i, c.legs.r, c.legs.g, c.legs.b);
+      const ci = coat % coats.length, g = mesh.geometry.attributes;
+      if (coatAt[k][i] !== ci) {
+        const c = coats[ci]; coatAt[k][i] = ci; coatDirty[k] = true;
+        g.aBody.setXYZ(i, c.body.r, c.body.g, c.body.b); g.aHair.setXYZ(i, c.hair.r, c.hair.g, c.hair.b); g.aLegs.setXYZ(i, c.legs.r, c.legs.g, c.legs.b);
+      }
       g.aAnim.setXYZW(i, cycles ? phase : phase / 6.2832, mode ? rate : restRate, mode, 0);
       if (prev) g.aPrev.setXYZW(i, prev[0], prev[2] ? prev[1] : restRate, prev[2], prev[3]); else g.aPrev.setXYZW(i, 0, 0, 0, -1e6);
       n[k] = i + 1;
@@ -149,9 +167,14 @@ export function skinnedPack(A, cap, scene, name, coats) {
     end() {
       meshes.forEach((mesh, k) => {
         mesh.count = n[k];
+        // an empty draw is left out of the frame altogether: three.js sets up its program, uniforms and buffers before
+        // it finds there is nothing to draw (2026-11-14: 90 of them a frame, mostly empty — a slow phone's frame rate
+        // went from 23.5 to 26-27 travelling over the island when they were left out)
+        mesh.visible = n[k] > 0;
         if (n[k]) {
           mesh.instanceMatrix.needsUpdate = true;
-          for (const a of ['aAnim', 'aPrev', 'aBody', 'aHair', 'aLegs']) mesh.geometry.attributes[a].needsUpdate = true;
+          for (const a of ['aAnim', 'aPrev']) mesh.geometry.attributes[a].needsUpdate = true;
+          if (coatDirty[k]) { for (const a of ['aBody', 'aHair', 'aLegs']) mesh.geometry.attributes[a].needsUpdate = true; coatDirty[k] = false; }
         }
       });
     },
