@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "grunt",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 77667e22 from 02_sea_reef/White_Grunt.png; tools/animals/fish_animal.py",
+ "height": 0.5456,
+ "length": 0.9986,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4290,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51480,
+   "uv": 102960,
+   "skin": 137280,
+   "weight": 154440,
+   "index": 171600,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.27300000190734863,
+    -0.24079999327659607
+   ],
+   "max": [
+    0.499099999666214,
+    0.272599995136261,
+    0.2409999966621399
+   ]
+  },
+  {
+   "verts": 1709,
+   "tris": 2000,
+   "pos": 207600,
+   "nrm": 228108,
+   "uv": 248616,
+   "skin": 262288,
+   "weight": 269124,
+   "index": 275960,
+   "indexType": "u16",
+   "min": [
+    -0.49480000138282776,
+    -0.27219998836517334,
+    -0.24070000648498535
+   ],
+   "max": [
+    0.499099999666214,
+    0.2700999975204468,
+    0.2401999980211258
+   ]
+  },
+  {
+   "verts": 802,
+   "tris": 700,
+   "pos": 287960,
+   "nrm": 297584,
+   "uv": 307208,
+   "skin": 313624,
+   "weight": 316832,
+   "index": 320040,
+   "indexType": "u16",
+   "min": [
+    -0.4932999908924103,
+    -0.27219998836517334,
+    -0.2363000065088272
+   ],
+   "max": [
+    0.49639999866485596,
+    0.27000001072883606,
+    0.23899999260902405
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 324240,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "grunt-color.jpg",
+  "mask": "grunt-mask.png"
+ },
+ "card": "grunt-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

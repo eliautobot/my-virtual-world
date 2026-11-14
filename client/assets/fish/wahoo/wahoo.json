@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "wahoo",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project c4787fdf from 03_sea_openwater/Wahoo.png; tools/animals/fish_animal.py",
+ "height": 0.3366,
+ "length": 0.9983,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4383,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52596,
+   "uv": 105192,
+   "skin": 140256,
+   "weight": 157788,
+   "index": 175320,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.1679999977350235,
+    -0.14480000734329224
+   ],
+   "max": [
+    0.49950000643730164,
+    0.16859999299049377,
+    0.14509999752044678
+   ]
+  },
+  {
+   "verts": 1708,
+   "tris": 2000,
+   "pos": 211320,
+   "nrm": 231816,
+   "uv": 252312,
+   "skin": 265976,
+   "weight": 272808,
+   "index": 279640,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.1679999977350235,
+    -0.14480000734329224
+   ],
+   "max": [
+    0.4986000061035156,
+    0.16850000619888306,
+    0.14509999752044678
+   ]
+  },
+  {
+   "verts": 804,
+   "tris": 700,
+   "pos": 291640,
+   "nrm": 301288,
+   "uv": 310936,
+   "skin": 317368,
+   "weight": 320584,
+   "index": 323800,
+   "indexType": "u16",
+   "min": [
+    -0.49869999289512634,
+    -0.16779999434947968,
+    -0.14110000431537628
+   ],
+   "max": [
+    0.49239999055862427,
+    0.16850000619888306,
+    0.1412999927997589
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 328000,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "wahoo-color.jpg",
+  "mask": "wahoo-mask.png"
+ },
+ "card": "wahoo-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

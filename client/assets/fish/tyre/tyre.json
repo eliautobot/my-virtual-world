@@ -1,0 +1,131 @@
+{
+ "v": 1,
+ "model": "tyre",
+ "rig": "mvw-find-v1",
+ "kind": "find",
+ "source": "Tripo Studio project 14c1a990 from 11_junk_treasure/Bald_Tyre.png; tools/animals/fish_animal.py",
+ "height": 0.6183,
+ "length": 0.6194,
+ "roughness": 0.85,
+ "metalness": 0.0,
+ "plane": "lateral",
+ "bones": [
+  "root"
+ ],
+ "lods": [
+  {
+   "verts": 5297,
+   "tris": 5990,
+   "pos": 0,
+   "nrm": 63564,
+   "uv": 127128,
+   "skin": 169504,
+   "weight": 190692,
+   "index": 211880,
+   "indexType": "u16",
+   "min": [
+    -0.30970001220703125,
+    -0.3091000020503998,
+    -0.14399999380111694
+   ],
+   "max": [
+    0.30970001220703125,
+    0.3091999888420105,
+    0.14560000598430634
+   ]
+  },
+  {
+   "verts": 3387,
+   "tris": 3004,
+   "pos": 247820,
+   "nrm": 288464,
+   "uv": 329108,
+   "skin": 356204,
+   "weight": 369752,
+   "index": 383300,
+   "indexType": "u16",
+   "min": [
+    -0.3070000112056732,
+    -0.30880001187324524,
+    -0.14399999380111694
+   ],
+   "max": [
+    0.30970001220703125,
+    0.3073999881744385,
+    0.14550000429153442
+   ]
+  },
+  {
+   "verts": 3062,
+   "tris": 2508,
+   "pos": 401324,
+   "nrm": 438068,
+   "uv": 474812,
+   "skin": 499308,
+   "weight": 511556,
+   "index": 523804,
+   "indexType": "u16",
+   "min": [
+    -0.3070000112056732,
+    -0.3061999976634979,
+    -0.14399999380111694
+   ],
+   "max": [
+    0.30970001220703125,
+    0.3073999881744385,
+    0.14550000429153442
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 538852,
+  "frames": 1,
+  "bones": 1
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 1,
+   "fps": 1
+  }
+ },
+ "textures": {
+  "color": "tyre-color.jpg",
+  "mask": "tyre-mask.png"
+ },
+ "card": "tyre-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

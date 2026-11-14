@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "goldenbass",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 4a6098aa from 10_legends/The_Golden_Bass.png; tools/animals/fish_animal.py",
+ "height": 0.4201,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4204,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 50448,
+   "uv": 100896,
+   "skin": 134528,
+   "weight": 151344,
+   "index": 168160,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.210999995470047,
+    -0.19760000705718994
+   ],
+   "max": [
+    0.5,
+    0.20909999310970306,
+    0.19760000705718994
+   ]
+  },
+  {
+   "verts": 1671,
+   "tris": 2000,
+   "pos": 204160,
+   "nrm": 224212,
+   "uv": 244264,
+   "skin": 257632,
+   "weight": 264316,
+   "index": 271000,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.2079000025987625,
+    -0.19760000705718994
+   ],
+   "max": [
+    0.5,
+    0.20900000631809235,
+    0.19760000705718994
+   ]
+  },
+  {
+   "verts": 764,
+   "tris": 700,
+   "pos": 283000,
+   "nrm": 292168,
+   "uv": 301336,
+   "skin": 307448,
+   "weight": 310504,
+   "index": 313560,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.2079000025987625,
+    -0.19439999759197235
+   ],
+   "max": [
+    0.49309998750686646,
+    0.20819999277591705,
+    0.19670000672340393
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 317760,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "goldenbass-color.jpg",
+  "mask": "goldenbass-mask.png"
+ },
+ "card": "goldenbass-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

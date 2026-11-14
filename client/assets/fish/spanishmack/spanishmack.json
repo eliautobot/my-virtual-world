@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "spanishmack",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 618d0bf9 from 03_sea_openwater/Spanish_Mackerel.png; tools/animals/fish_animal.py",
+ "height": 0.3398,
+ "length": 0.9986,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4130,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 49560,
+   "uv": 99120,
+   "skin": 132160,
+   "weight": 148680,
+   "index": 165200,
+   "indexType": "u16",
+   "min": [
+    -0.4986000061035156,
+    -0.17010000348091125,
+    -0.17649999260902405
+   ],
+   "max": [
+    0.5,
+    0.1696999967098236,
+    0.1754000037908554
+   ]
+  },
+  {
+   "verts": 1548,
+   "tris": 2000,
+   "pos": 201200,
+   "nrm": 219776,
+   "uv": 238352,
+   "skin": 250736,
+   "weight": 256928,
+   "index": 263120,
+   "indexType": "u16",
+   "min": [
+    -0.4986000061035156,
+    -0.16920000314712524,
+    -0.17520000040531158
+   ],
+   "max": [
+    0.5,
+    0.1688999980688095,
+    0.1754000037908554
+   ]
+  },
+  {
+   "verts": 690,
+   "tris": 700,
+   "pos": 275120,
+   "nrm": 283400,
+   "uv": 291680,
+   "skin": 297200,
+   "weight": 299960,
+   "index": 302720,
+   "indexType": "u16",
+   "min": [
+    -0.4986000061035156,
+    -0.16419999301433563,
+    -0.1736000031232834
+   ],
+   "max": [
+    0.49630001187324524,
+    0.1688999980688095,
+    0.17509999871253967
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 306920,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "spanishmack-color.jpg",
+  "mask": "spanishmack-mask.png"
+ },
+ "card": "spanishmack-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

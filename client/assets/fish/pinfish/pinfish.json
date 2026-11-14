@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "pinfish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 03a49bbf from 01_sea_inshore/Pinfish.png; tools/animals/fish_animal.py",
+ "height": 0.6003,
+ "length": 0.9992,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4189,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 50268,
+   "uv": 100536,
+   "skin": 134048,
+   "weight": 150804,
+   "index": 167560,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.2996000051498413,
+    -0.22269999980926514
+   ],
+   "max": [
+    0.49959999322891235,
+    0.30070000886917114,
+    0.2231999933719635
+   ]
+  },
+  {
+   "verts": 1634,
+   "tris": 2000,
+   "pos": 203560,
+   "nrm": 223168,
+   "uv": 242776,
+   "skin": 255848,
+   "weight": 262384,
+   "index": 268920,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.2989000082015991,
+    -0.22269999980926514
+   ],
+   "max": [
+    0.49790000915527344,
+    0.30070000886917114,
+    0.2231999933719635
+   ]
+  },
+  {
+   "verts": 730,
+   "tris": 700,
+   "pos": 280920,
+   "nrm": 289680,
+   "uv": 298440,
+   "skin": 304280,
+   "weight": 307200,
+   "index": 310120,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.2989000082015991,
+    -0.22269999980926514
+   ],
+   "max": [
+    0.49790000915527344,
+    0.30070000886917114,
+    0.2231999933719635
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 314320,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "pinfish-color.jpg",
+  "mask": "pinfish-mask.png"
+ },
+ "card": "pinfish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -3,7 +3,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import fs f
 import {createVehicles} from '../server/world/vehicles.js';import {generateWorld} from '../server/world/generate.js';import {PlayerNav} from '../shared/playernav.js';import {Store} from '../server/store.js';import {decodeVehicles,encodeVehicles} from '../shared/vehicleproto.js';import {blockAt,makeGrid} from '../shared/city.js';import {GROUND_Y} from '../shared/constants.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import {vehicleExitCandidates} from '../shared/driving-classic/vehicle-exit-geometry.mjs';
-import {vehicleChaseCamera} from '../shared/vehicle-camera.js';
+import {vehicleChaseCamera,chasePitch,CHASE_VIEW} from '../shared/vehicle-camera.js';
 import crypto from 'node:crypto';
 import {trafficDensity} from '../shared/vehicle-traffic.js';
 import * as THREE from 'three';
@@ -64,6 +64,29 @@ test('disconnect brakes immediately; the same account resumes with fresh input s
 test('source chase framing looks ahead and clips the rear camera against buildings',()=>{
  const car={x:0,y:0,z:0,yaw:0},open=vehicleChaseCamera(car,2.3,{buildings:[]});assert.deepEqual(open.focus,{x:2,y:.65,z:0});assert.equal(open.fov,62);
  const blocked=vehicleChaseCamera(car,2.3,{buildings:[{x:-4,z:0,w:2,d:8,rot:0,floors:3}]});assert.ok(blocked.dist<open.dist);assert.ok(blocked.dist>=1.5);
+});
+
+test('the driver adjusts the chase camera: turned round the car, tilted and zoomed, still pulled in front of buildings',()=>{
+ const open={buildings:[]},car={x:10,y:2,z:-5,yaw:.7},base=vehicleChaseCamera(car,2.3,open);
+ for(const view of [null,{},{yaw:0,pitch:null,zoom:1}]){const v=vehicleChaseCamera(car,2.3,open,view);
+  assert.ok(Math.abs(v.dist-base.dist)<1e-9&&Math.abs(v.pitch-base.pitch)<1e-9&&Math.abs(v.yaw-base.yaw)<1e-9,'the default view is the source framing exactly');}
+ assert.ok(Math.abs(base.pitch-chasePitch(2.3))<1e-9,'chasePitch is the source framing\'s tilt');
+ const far=vehicleChaseCamera(car,2.3,open,{zoom:2});assert.ok(Math.abs(far.dist-base.dist*2)<1e-6&&Math.abs(far.pitch-base.pitch)<1e-9,'zoom: twice as far back, the same tilt');
+ const huge=vehicleChaseCamera(car,2.3,open,{zoom:50}),tiny=vehicleChaseCamera(car,2.3,open,{zoom:.01});
+ assert.ok(Math.abs(huge.dist-base.dist*CHASE_VIEW.zoomMax)<1e-6&&Math.abs(tiny.dist-base.dist*CHASE_VIEW.zoomMin)<1e-6,'zoom held to its range');
+ const high=vehicleChaseCamera(car,2.3,open,{pitch:.9});assert.ok(Math.abs(high.pitch-.9)<1e-9&&Math.abs(high.dist-base.dist)<1e-6,'tilt: higher, the same distance');
+ assert.ok(Math.abs(vehicleChaseCamera(car,2.3,open,{pitch:-3}).pitch-CHASE_VIEW.pitchMin)<1e-9,'tilt held to its range');
+ const side=vehicleChaseCamera(car,2.3,open,{yaw:Math.PI/2});assert.ok(Math.abs(side.yaw-(base.yaw+Math.PI/2))<1e-9&&Math.abs(side.dist-base.dist)<1e-6,'turned a quarter round the car');
+ // the camera's yaw puts it at target + (sin yaw, cos yaw) × distance (render/camera.js): behind the car by default, beside it turned
+ const at=v=>({x:v.focus.x+Math.sin(v.yaw)*Math.cos(v.pitch)*v.dist,z:v.focus.z+Math.cos(v.yaw)*Math.cos(v.pitch)*v.dist}),fwd={x:Math.cos(car.yaw),z:-Math.sin(car.yaw)};
+ const rel=v=>{const p=at(v);return{ahead:(p.x-car.x)*fwd.x+(p.z-car.z)*fwd.z,side:(p.x-car.x)*-fwd.z+(p.z-car.z)*fwd.x};};
+ assert.ok(rel(base).ahead<-7&&Math.abs(rel(base).side)<1e-6,'the usual view: straight behind');
+ assert.ok(Math.abs(rel(side).side)>8&&Math.abs(rel(side).ahead-2)<.5,'turned: out to the side (level with the look-ahead point)');
+ assert.ok(rel(vehicleChaseCamera(car,2.3,open,{yaw:Math.PI})).ahead>8,'turned right round: in front, looking back');
+ // a wall beside the car: the turned camera comes in front of it, the usual one doesn't need to
+ const c0={x:0,y:0,z:0,yaw:0},wall={buildings:[{x:0,z:-6,w:12,d:2,rot:0,floors:3}]};
+ const usual=vehicleChaseCamera(c0,2.3,wall),turned=vehicleChaseCamera(c0,2.3,wall,{yaw:Math.PI/2});
+ assert.ok(Math.abs(usual.dist-vehicleChaseCamera(c0,2.3,open).dist)<1e-6&&turned.dist<usual.dist&&turned.dist>=1.5,`clipped against the wall it was turned toward (${turned.dist.toFixed(2)} m)`);
 });
 
 test('all six preserved models have grounded, powered four-wheel reference physics',async()=>{
@@ -234,26 +257,41 @@ test('the other-car buffer stays at 100 ms on a steady stream, grows only for re
  assert.ok(settled.max>200&&settled.d.value<=101,`back to 100 ms within ~20 s of the stream steadying (${settled.d.value.toFixed(0)} ms)`);
 });
 
-test('Shift boosts: a burnout from a standstill, then harder acceleration and a higher top speed (shared/vehicle-boost.js)', async () => {
+test('the cars run on at what the old boost gave, with no button, and a burnout is the brake held with the throttle (shared/vehicle-power.js)', async () => {
   const RAPIER = (await import('@dimforge/rapier3d-compat')).default; await RAPIER.init({});
-  const { VehicleDynamics } = await import('../shared/driving-classic/vehicle-dynamics.mjs');
-  const B = await import('../shared/vehicle-boost.js');
-  const run = boost => {
+  const { VehicleDynamics, VEHICLE_HANDLING } = await import('../shared/driving-classic/vehicle-dynamics.mjs');
+  const Pw = await import('../shared/vehicle-power.js');
+  const run = ({ power = true, controls = () => ({ throttle: 1, steer: 0, brake: 0, handbrake: false }), type = 'car', seconds = 14 } = {}) => {
     const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     world.createCollider(RAPIER.ColliderDesc.cuboid(5000, 0.5, 5000).setTranslation(0, -0.5, 0));
-    const d = new VehicleDynamics(world); d.add('a', { type: 'car', position: { x: 0, y: 0.6, z: 0 } });
+    const d = new VehicleDynamics(world); d.add('a', { type, position: { x: 0, y: 0.6, z: 0 } });
     let burn = 0; const at = [];
-    for (let k = 0; k < 12 * 60; k++) {
-      d.setControls('a', { throttle: 1, steer: 0, brake: 0, handbrake: false }); B.setBoost(d, 'a', boost);
-      B.boostBefore(d, 1 / 60); if (d.get('a').burnout) burn++;
-      d.beforeStep(1 / 60); B.boostAfter(d, 1 / 60); world.timestep = 1 / 60; world.step(); d.afterStep(1 / 60);
+    for (let k = 0; k < seconds * 60; k++) {
+      d.setControls('a', controls(k / 60));
+      d.beforeStep(1 / 60); if (d.get('a').burnout) burn++; if (power) Pw.powerAfter(d, 1 / 60);
+      world.timestep = 1 / 60; world.step(); d.afterStep(1 / 60);
       if (k % 60 === 59) at.push(d.get('a').speed);
     }
-    return { burn, at };
+    return { burn, at, x: d.get('a').position.x };
   };
-  const n = run(false), b = run(true);
-  assert.equal(n.burn, 0, 'no burnout without the boost');
-  assert.ok(b.burn > 30 && b.burn < 90, `a burnout of about a second (${b.burn} frames)`);
-  assert.ok(b.at[4] > n.at[4] + 4, 'pulls away harder');
-  assert.ok(b.at.at(-1) > n.at.at(-1) + 3 && b.at.at(-1) < 33 * 1.25 + 4, 'a higher top speed, inside the server\'s pose check');
+  const plain = run({ power: false }), full = run();
+  assert.equal(full.burn, 0, 'the throttle alone never does a burnout');
+  assert.ok(full.at[4] > plain.at[4] + 4, `pulls away harder than the reference engine alone (${full.at[4].toFixed(1)} vs ${plain.at[4].toFixed(1)} m/s)`);
+  const top = full.at.at(-1), max = VEHICLE_HANDLING.car.maxSpeed;
+  assert.ok(top > plain.at.at(-1) + 4, `runs on past the reference top speed (${top.toFixed(1)} m/s, reference ${plain.at.at(-1).toFixed(1)})`);
+  assert.ok(top <= Pw.topSpeed(VEHICLE_HANDLING.car) + 0.5 && top < max * 1.25 + 4, `within its full top speed and the server's pose check (${top.toFixed(1)} m/s)`);
+  for (const type of ['police', 'bus']) {   // the fastest and the slowest: under the pose check too
+    const r = run({ type, seconds: 20 }), H = VEHICLE_HANDLING[type];
+    assert.ok(r.at.at(-1) < H.maxSpeed * 1.25 + 4, `${type}: ${r.at.at(-1).toFixed(1)} m/s inside the pose check`);
+  }
+  const half = run({ controls: () => ({ throttle: 0.5, steer: 0, brake: 0, handbrake: false }) });
+  assert.ok(half.at[4] < full.at[4] - 1, 'half throttle pulls away more gently');
+  // the brake held with the throttle from a standstill: the reference burnout, the car held where it is; let go, it goes
+  const burnout = run({ controls: t => ({ throttle: 1, steer: 0, brake: t < 1.5 ? 1 : 0, handbrake: false }) });
+  assert.ok(burnout.burn > 60, `a burnout while the brake is held (${burnout.burn} frames)`);
+  assert.ok(burnout.at[0] < 2, `held in place during it (${burnout.at[0].toFixed(2)} m/s)`);
+  assert.ok(burnout.at.at(-1) > plain.at.at(-1) + 4, 'then away to full speed');
+  const reverse = run({ controls: () => ({ throttle: -1, steer: 0, brake: 0, handbrake: false }), seconds: 8 });
+  const reverseRef = run({ power: false, controls: () => ({ throttle: -1, steer: 0, brake: 0, handbrake: false }), seconds: 8 });
+  assert.ok(Math.abs(reverse.at.at(-1) - reverseRef.at.at(-1)) < 0.05, 'reversing is the reference engine alone');
 });

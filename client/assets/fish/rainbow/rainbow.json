@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "rainbow",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project af754b15 from 07_lake_trout/Rainbow_Trout.png; tools/animals/fish_animal.py",
+ "height": 0.3592,
+ "length": 0.9999,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4540,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54480,
+   "uv": 108960,
+   "skin": 145280,
+   "weight": 163440,
+   "index": 181600,
+   "indexType": "u16",
+   "min": [
+    -0.4999000132083893,
+    -0.17949999868869781,
+    -0.14869999885559082
+   ],
+   "max": [
+    0.5,
+    0.17970000207424164,
+    0.14890000224113464
+   ]
+  },
+  {
+   "verts": 1723,
+   "tris": 2000,
+   "pos": 217600,
+   "nrm": 238276,
+   "uv": 258952,
+   "skin": 272736,
+   "weight": 279628,
+   "index": 286520,
+   "indexType": "u16",
+   "min": [
+    -0.4999000132083893,
+    -0.17949999868869781,
+    -0.14869999885559082
+   ],
+   "max": [
+    0.4986000061035156,
+    0.17900000512599945,
+    0.14890000224113464
+   ]
+  },
+  {
+   "verts": 782,
+   "tris": 700,
+   "pos": 298520,
+   "nrm": 307904,
+   "uv": 317288,
+   "skin": 323544,
+   "weight": 326672,
+   "index": 329800,
+   "indexType": "u16",
+   "min": [
+    -0.4999000132083893,
+    -0.17790000140666962,
+    -0.14869999885559082
+   ],
+   "max": [
+    0.4986000061035156,
+    0.17790000140666962,
+    0.14890000224113464
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 334000,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "rainbow-color.jpg",
+  "mask": "rainbow-mask.png"
+ },
+ "card": "rainbow-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

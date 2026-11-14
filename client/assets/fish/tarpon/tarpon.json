@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "tarpon",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 20fd30e1 from 01_sea_inshore/Tarpon.png; tools/animals/fish_animal.py",
+ "height": 0.396,
+ "length": 0.9988,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4032,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 48384,
+   "uv": 96768,
+   "skin": 129024,
+   "weight": 145152,
+   "index": 161280,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.1979999989271164,
+    -0.11999999731779099
+   ],
+   "max": [
+    0.49950000643730164,
+    0.1979999989271164,
+    0.11890000104904175
+   ]
+  },
+  {
+   "verts": 1591,
+   "tris": 2000,
+   "pos": 197280,
+   "nrm": 216372,
+   "uv": 235464,
+   "skin": 248192,
+   "weight": 254556,
+   "index": 260920,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.1979999989271164,
+    -0.11999999731779099
+   ],
+   "max": [
+    0.49950000643730164,
+    0.1979999989271164,
+    0.11890000104904175
+   ]
+  },
+  {
+   "verts": 723,
+   "tris": 700,
+   "pos": 272920,
+   "nrm": 281596,
+   "uv": 290272,
+   "skin": 296056,
+   "weight": 298948,
+   "index": 301840,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.1979999989271164,
+    -0.1168999969959259
+   ],
+   "max": [
+    0.4975999891757965,
+    0.19200000166893005,
+    0.11879999935626984
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 306040,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "tarpon-color.jpg",
+  "mask": "tarpon-mask.png"
+ },
+ "card": "tarpon-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

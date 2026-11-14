@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "longgar",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 733781b3 from 08_lake_toothy/Longnose_Gar.png; tools/animals/fish_animal.py",
+ "height": 0.1843,
+ "length": 0.9999,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4160,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 49920,
+   "uv": 99840,
+   "skin": 133120,
+   "weight": 149760,
+   "index": 166400,
+   "indexType": "u16",
+   "min": [
+    -0.4999000132083893,
+    -0.09200000017881393,
+    -0.11060000211000443
+   ],
+   "max": [
+    0.5,
+    0.09229999780654907,
+    0.11159999668598175
+   ]
+  },
+  {
+   "verts": 1649,
+   "tris": 2000,
+   "pos": 202400,
+   "nrm": 222188,
+   "uv": 241976,
+   "skin": 255168,
+   "weight": 261764,
+   "index": 268360,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.09160000085830688,
+    -0.11060000211000443
+   ],
+   "max": [
+    0.5,
+    0.09229999780654907,
+    0.11159999668598175
+   ]
+  },
+  {
+   "verts": 761,
+   "tris": 700,
+   "pos": 280360,
+   "nrm": 289492,
+   "uv": 298624,
+   "skin": 304712,
+   "weight": 307756,
+   "index": 310800,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.09109999984502792,
+    -0.1103999987244606
+   ],
+   "max": [
+    0.5,
+    0.08699999749660492,
+    0.11159999668598175
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 315000,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "longgar-color.jpg",
+  "mask": "longgar-mask.png"
+ },
+ "card": "longgar-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,131 @@
+{
+ "v": 1,
+ "model": "goldenlure",
+ "rig": "mvw-find-v1",
+ "kind": "find",
+ "source": "Tripo Studio project 6f656d99 from 11_junk_treasure/Golden_Lure.png; tools/animals/fish_animal.py",
+ "height": 0.0297,
+ "length": 0.1098,
+ "roughness": 0.3,
+ "metalness": 0.7,
+ "plane": "lateral",
+ "bones": [
+  "root"
+ ],
+ "lods": [
+  {
+   "verts": 4541,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54492,
+   "uv": 108984,
+   "skin": 145312,
+   "weight": 163476,
+   "index": 181640,
+   "indexType": "u16",
+   "min": [
+    -0.05490000173449516,
+    -0.014800000004470348,
+    -0.012500000186264515
+   ],
+   "max": [
+    0.05490000173449516,
+    0.01489999983459711,
+    0.012500000186264515
+   ]
+  },
+  {
+   "verts": 1850,
+   "tris": 2000,
+   "pos": 217640,
+   "nrm": 239840,
+   "uv": 262040,
+   "skin": 276840,
+   "weight": 284240,
+   "index": 291640,
+   "indexType": "u16",
+   "min": [
+    -0.05480000004172325,
+    -0.0142000000923872,
+    -0.012500000186264515
+   ],
+   "max": [
+    0.05490000173449516,
+    0.014800000004470348,
+    0.01209999993443489
+   ]
+  },
+  {
+   "verts": 904,
+   "tris": 700,
+   "pos": 303640,
+   "nrm": 314488,
+   "uv": 325336,
+   "skin": 332568,
+   "weight": 336184,
+   "index": 339800,
+   "indexType": "u16",
+   "min": [
+    -0.054099999368190765,
+    -0.0142000000923872,
+    -0.012400000356137753
+   ],
+   "max": [
+    0.05480000004172325,
+    0.014600000344216824,
+    0.012000000104308128
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 344000,
+  "frames": 1,
+  "bones": 1
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 1,
+   "fps": 1
+  }
+ },
+ "textures": {
+  "color": "goldenlure-color.jpg",
+  "mask": "goldenlure-mask.png"
+ },
+ "card": "goldenlure-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "pompano",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project f2bc0ba0 from 01_sea_inshore/Florida_Pompano.png; tools/animals/fish_animal.py",
+ "height": 0.4562,
+ "length": 0.9988,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4375,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52500,
+   "uv": 105000,
+   "skin": 140000,
+   "weight": 157500,
+   "index": 175000,
+   "indexType": "u16",
+   "min": [
+    -0.499099999666214,
+    -0.2281000018119812,
+    -0.2648000121116638
+   ],
+   "max": [
+    0.49970000982284546,
+    0.2281000018119812,
+    0.26499998569488525
+   ]
+  },
+  {
+   "verts": 1686,
+   "tris": 2000,
+   "pos": 211000,
+   "nrm": 231232,
+   "uv": 251464,
+   "skin": 264952,
+   "weight": 271696,
+   "index": 278440,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.226500004529953,
+    -0.2648000121116638
+   ],
+   "max": [
+    0.49939998984336853,
+    0.22699999809265137,
+    0.26330000162124634
+   ]
+  },
+  {
+   "verts": 768,
+   "tris": 700,
+   "pos": 290440,
+   "nrm": 299656,
+   "uv": 308872,
+   "skin": 315016,
+   "weight": 318088,
+   "index": 321160,
+   "indexType": "u16",
+   "min": [
+    -0.4945000112056732,
+    -0.22519999742507935,
+    -0.2648000121116638
+   ],
+   "max": [
+    0.49939998984336853,
+    0.22380000352859497,
+    0.2587999999523163
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 325360,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "pompano-color.jpg",
+  "mask": "pompano-mask.png"
+ },
+ "card": "pompano-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

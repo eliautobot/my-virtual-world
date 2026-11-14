@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "gag",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 9aebfdf5 from 02_sea_reef/Gag_Grouper.png; tools/animals/fish_animal.py",
+ "height": 0.4721,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4384,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52608,
+   "uv": 105216,
+   "skin": 140288,
+   "weight": 157824,
+   "index": 175360,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.23600000143051147,
+    -0.2206999957561493
+   ],
+   "max": [
+    0.5,
+    0.2361000031232834,
+    0.22110000252723694
+   ]
+  },
+  {
+   "verts": 1763,
+   "tris": 2000,
+   "pos": 211360,
+   "nrm": 232516,
+   "uv": 253672,
+   "skin": 267776,
+   "weight": 274828,
+   "index": 281880,
+   "indexType": "u16",
+   "min": [
+    -0.49790000915527344,
+    -0.23600000143051147,
+    -0.2206999957561493
+   ],
+   "max": [
+    0.4982999861240387,
+    0.2361000031232834,
+    0.21819999814033508
+   ]
+  },
+  {
+   "verts": 832,
+   "tris": 700,
+   "pos": 293880,
+   "nrm": 303864,
+   "uv": 313848,
+   "skin": 320504,
+   "weight": 323832,
+   "index": 327160,
+   "indexType": "u16",
+   "min": [
+    -0.48899999260902405,
+    -0.23600000143051147,
+    -0.2206999957561493
+   ],
+   "max": [
+    0.491100013256073,
+    0.23420000076293945,
+    0.21819999814033508
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 331360,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "gag-color.jpg",
+  "mask": "gag-mask.png"
+ },
+ "card": "gag-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "kingmack",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 036350c4 from 03_sea_openwater/King_Mackerel.png; tools/animals/fish_animal.py",
+ "height": 0.3411,
+ "length": 0.9995,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4400,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52800,
+   "uv": 105600,
+   "skin": 140800,
+   "weight": 158400,
+   "index": 176000,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.1704999953508377,
+    -0.1972000002861023
+   ],
+   "max": [
+    0.4999000132083893,
+    0.17059999704360962,
+    0.19769999384880066
+   ]
+  },
+  {
+   "verts": 1759,
+   "tris": 2000,
+   "pos": 212000,
+   "nrm": 233108,
+   "uv": 254216,
+   "skin": 268288,
+   "weight": 275324,
+   "index": 282360,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.1704999953508377,
+    -0.1972000002861023
+   ],
+   "max": [
+    0.4999000132083893,
+    0.17059999704360962,
+    0.19550000131130219
+   ]
+  },
+  {
+   "verts": 820,
+   "tris": 700,
+   "pos": 294360,
+   "nrm": 304200,
+   "uv": 314040,
+   "skin": 320600,
+   "weight": 323880,
+   "index": 327160,
+   "indexType": "u16",
+   "min": [
+    -0.49779999256134033,
+    -0.1704999953508377,
+    -0.18559999763965607
+   ],
+   "max": [
+    0.4999000132083893,
+    0.16979999840259552,
+    0.1882999986410141
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 331360,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "kingmack-color.jpg",
+  "mask": "kingmack-mask.png"
+ },
+ "card": "kingmack-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

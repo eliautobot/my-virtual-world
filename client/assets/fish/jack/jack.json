@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "jack",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 5637260c from 03_sea_openwater/Jack_Crevalle.png; tools/animals/fish_animal.py",
+ "height": 0.4151,
+ "length": 0.9996,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4240,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 50880,
+   "uv": 101760,
+   "skin": 135680,
+   "weight": 152640,
+   "index": 169600,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.20759999752044678,
+    -0.23469999432563782
+   ],
+   "max": [
+    0.5,
+    0.20749999582767487,
+    0.23469999432563782
+   ]
+  },
+  {
+   "verts": 1640,
+   "tris": 2000,
+   "pos": 205600,
+   "nrm": 225280,
+   "uv": 244960,
+   "skin": 258080,
+   "weight": 264640,
+   "index": 271200,
+   "indexType": "u16",
+   "min": [
+    -0.4991999864578247,
+    -0.20759999752044678,
+    -0.23469999432563782
+   ],
+   "max": [
+    0.49900001287460327,
+    0.20600000023841858,
+    0.23469999432563782
+   ]
+  },
+  {
+   "verts": 740,
+   "tris": 700,
+   "pos": 283200,
+   "nrm": 292080,
+   "uv": 300960,
+   "skin": 306880,
+   "weight": 309840,
+   "index": 312800,
+   "indexType": "u16",
+   "min": [
+    -0.48420000076293945,
+    -0.20759999752044678,
+    -0.23469999432563782
+   ],
+   "max": [
+    0.48989999294281006,
+    0.2021999955177307,
+    0.2345999926328659
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 317000,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "jack-color.jpg",
+  "mask": "jack-mask.png"
+ },
+ "card": "jack-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

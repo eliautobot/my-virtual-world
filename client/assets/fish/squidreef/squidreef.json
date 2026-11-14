@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "squidreef",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 2d11bca5 from 03_sea_openwater/Caribbean_Reef_Squid.png; tools/animals/fish_animal.py",
+ "height": 0.275,
+ "length": 0.9992,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4408,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52896,
+   "uv": 105792,
+   "skin": 141056,
+   "weight": 158688,
+   "index": 176320,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.13760000467300415,
+    -0.1843000054359436
+   ],
+   "max": [
+    0.49959999322891235,
+    0.13740000128746033,
+    0.18410000205039978
+   ]
+  },
+  {
+   "verts": 1802,
+   "tris": 2000,
+   "pos": 212320,
+   "nrm": 233944,
+   "uv": 255568,
+   "skin": 269984,
+   "weight": 277192,
+   "index": 284400,
+   "indexType": "u16",
+   "min": [
+    -0.4984000027179718,
+    -0.13760000467300415,
+    -0.18150000274181366
+   ],
+   "max": [
+    0.49959999322891235,
+    0.13740000128746033,
+    0.1809999942779541
+   ]
+  },
+  {
+   "verts": 894,
+   "tris": 738,
+   "pos": 296400,
+   "nrm": 307128,
+   "uv": 317856,
+   "skin": 325008,
+   "weight": 328584,
+   "index": 332160,
+   "indexType": "u16",
+   "min": [
+    -0.49320000410079956,
+    -0.13680000603199005,
+    -0.18150000274181366
+   ],
+   "max": [
+    0.49239999055862427,
+    0.13740000128746033,
+    0.179299995303154
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 336588,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "squidreef-color.jpg",
+  "mask": "squidreef-mask.png"
+ },
+ "card": "squidreef-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

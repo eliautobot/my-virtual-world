@@ -1,0 +1,131 @@
+{
+ "v": 1,
+ "model": "bottle",
+ "rig": "mvw-find-v1",
+ "kind": "find",
+ "source": "Tripo Studio project 524bdaf3 from 11_junk_treasure/Message_in_a_Bottle.png; tools/animals/fish_animal.py",
+ "height": 0.1068,
+ "length": 0.1124,
+ "roughness": 0.25,
+ "metalness": 0.0,
+ "plane": "lateral",
+ "bones": [
+  "root"
+ ],
+ "lods": [
+  {
+   "verts": 4148,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 49776,
+   "uv": 99552,
+   "skin": 132736,
+   "weight": 149328,
+   "index": 165920,
+   "indexType": "u16",
+   "min": [
+    -0.05620000138878822,
+    -0.053300000727176666,
+    -0.15000000596046448
+   ],
+   "max": [
+    0.05620000138878822,
+    0.05350000038743019,
+    0.15000000596046448
+   ]
+  },
+  {
+   "verts": 1573,
+   "tris": 2000,
+   "pos": 201920,
+   "nrm": 220796,
+   "uv": 239672,
+   "skin": 252256,
+   "weight": 258548,
+   "index": 264840,
+   "indexType": "u16",
+   "min": [
+    -0.0560000017285347,
+    -0.053199999034404755,
+    -0.14990000426769257
+   ],
+   "max": [
+    0.05620000138878822,
+    0.052400000393390656,
+    0.15000000596046448
+   ]
+  },
+  {
+   "verts": 720,
+   "tris": 700,
+   "pos": 276840,
+   "nrm": 285480,
+   "uv": 294120,
+   "skin": 299880,
+   "weight": 302760,
+   "index": 305640,
+   "indexType": "u16",
+   "min": [
+    -0.0560000017285347,
+    -0.053199999034404755,
+    -0.14970000088214874
+   ],
+   "max": [
+    0.05590000003576279,
+    0.052299998700618744,
+    0.15000000596046448
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 309840,
+  "frames": 1,
+  "bones": 1
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 1,
+   "fps": 1
+  }
+ },
+ "textures": {
+  "color": "bottle-color.jpg",
+  "mask": "bottle-mask.png"
+ },
+ "card": "bottle-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

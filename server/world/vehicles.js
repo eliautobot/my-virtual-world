@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import RAPIER from '@dimforge/rapier3d-compat';
 import {VehicleDynamics,vehicleControls,VEHICLE_HANDLING} from '../../shared/driving-classic/vehicle-dynamics.mjs';
-import {setBoost,boostBefore,boostAfter} from '../../shared/vehicle-boost.js';   // Shift: boost and burnout
+import {powerAfter} from '../../shared/vehicle-power.js';   // the cars' full power (what the old boost gave)
 import {VehicleUseLifecycle,VEHICLE_CLEANUP_MS} from '../../shared/driving-classic/vehicle-gameplay.mjs';
 import {findVehicleExit,isVehicleExitClear} from '../../shared/driving-classic/vehicle-exit-safety.mjs';
 import {PHYSICS_GROUPS} from '../../shared/driving-classic/physics-collision-groups.mjs';
@@ -94,7 +94,7 @@ export class Vehicles {
  sendDrive(ws,c,status,point=null){ws.driveVersion=(ws.driveVersion||0)+1;this.players.send(ws,{t:'drive_state',version:ws.driveVersion,id:c?.id||null,status,kind:c?VEHICLE_KINDS[c.k].n:null,point});}
  controls(ws,m){const c=this.owners.get(ws);if(!c||c.owner!==ws||c.driver!==ws.pid||c.physics==='client'||!this.players.canPlay(ws))return;
   if(!Number.isInteger(m.seq)||m.seq<0||m.seq>65535)return;const gap=(m.seq-(c.seq||0))&65535;if(!gap||gap>=32768)return;
-  const now=this.now();c.inputTimes=(c.inputTimes||[]).filter(t=>now-t<1000);if(c.inputTimes.length>=90)return;c.inputTimes.push(now);c.seq=m.seq;c.inputAt=now;this.dynamics.setControls(String(c.id),vehicleControls(m));setBoost(this.dynamics,String(c.id),m.boost===true);
+  const now=this.now();c.inputTimes=(c.inputTimes||[]).filter(t=>now-t<1000);if(c.inputTimes.length>=90)return;c.inputTimes.push(now);c.seq=m.seq;c.inputAt=now;this.dynamics.setControls(String(c.id),vehicleControls(m));
  }
  physicsMode(ws,m){const c=this.owners.get(ws);if(!c||c.owner!==ws||c.driver!==ws.pid||m.id!==c.id||!this.players.canPlay(ws))return;
   if(m.mode==='client'){if(c.physics!=='client')this.toClient(c);this.players.send(ws,{t:'vphysics',id:c.id,mode:'client',state:packPose(c)});}
@@ -188,7 +188,7 @@ export class Vehicles {
   for(const c of this.all.values())if(c.physics==='client'&&(!c.owner||now-(c.inputAt||0)>POSE_TTL))this.toServer(c,c.owner?'timeout':'disconnected');
   this.syncPeople();this.acc=(this.acc||0)+dt;let steps=0;
   if(this.terrain){const pts=[];for(const c of this.all.values())if(this.body(c))pts.push({x:c.x,z:c.z});if(pts.length)this.terrain.update(pts);}
-  while(this.acc>=1/60&&steps++<6){for(const c of this.all.values())if(this.body(c)&&(c.mode!==1||!c.owner||now-(c.inputAt||0)>VEHICLE_INPUT_TTL)){this.dynamics.setControls(String(c.id),BRAKE);setBoost(this.dynamics,String(c.id),false);}if(this.terrain)applyWater(this.dynamics,this.terrain.island,1/60);boostBefore(this.dynamics,1/60);this.dynamics.beforeStep(1/60);boostAfter(this.dynamics,1/60);this.physics.timestep=1/60;this.physics.step();this.dynamics.afterStep(1/60);this.acc-=1/60;}
+  while(this.acc>=1/60&&steps++<6){for(const c of this.all.values())if(this.body(c)&&(c.mode!==1||!c.owner||now-(c.inputAt||0)>VEHICLE_INPUT_TTL))this.dynamics.setControls(String(c.id),BRAKE);if(this.terrain)applyWater(this.dynamics,this.terrain.island,1/60);this.dynamics.beforeStep(1/60);powerAfter(this.dynamics,1/60);this.physics.timestep=1/60;this.physics.step();this.dynamics.afterStep(1/60);this.acc-=1/60;}
   for(const c of this.all.values()){const v=this.body(c);if(v)this.updatePose(c,v);else if(c.physics!=='client'){const radius=this.rig(c).wheelRadius;c.wheels=Array.from({length:4},()=>({spin:(c.s||0)/radius,suspensionLength:.06,contact:true}));}}
   this.lead=Math.min(this.acc,1/30);this.presented=new Map();
   for(const [ws,c]of this.owners)if(c.physics!=='client'&&ws.vehicleProtocol>=2&&ws.readyState===1&&ws.bufferedAmount<500000&&c.owner===ws&&this.players.canPlay(ws)){const packet=encodeVehicles([this.present(c)],now,{version:2,partial:true});ws.send(packet);this.stats.bytes+=packet.byteLength;}

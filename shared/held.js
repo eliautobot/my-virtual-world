@@ -26,6 +26,19 @@ export const BOOK_HANDS = Object.freeze({
  *  to its far edge and round it, the thumb free over the screen. */
 export const PHONE_HAND = Object.freeze({ at: [0.014, -0.03, 0], along: [-0.9, 0.42, 0] });
 
+/** A fishing rod (and the landing net's handle) in the right fist (2026-11-13, the owner: "the fishing pole isn't
+ *  correctly grabbed or held" — it lay square across the fist like a hammer's, so pointing it out bent the wrist 55–115°):
+ *  diagonally across the palm as anglers hold it, the butt running back under the forearm — its line through the fist
+ *  turned ROD_TILT (radians) from square toward the fingers, about the palm's normal (render/char-props.js draws the rod
+ *  and the net so; tools/chars/extra-clips.mjs rodPose turns the hand so; play/fishing-game.js finds the tip so). */
+export const ROD_TILT = 0.6;
+/** The landing net's handle: across the right palm the other way, its hoop out of the bottom of the fist (the little
+ *  finger's side) and on ahead — held as a stick pointed down, the forearm level, the net reaching down to the water with
+ *  the wrist straight. */
+export const NET_TILT = -0.6;
+/** The rod's tip, 1.96 m along it, in the right hand's grip frame (y along the fingers, z out of the palm). */
+export const ROD_TIP = Object.freeze([1.96 * Math.cos(ROD_TILT), 1.96 * Math.sin(ROD_TILT), 0.013]);
+
 const nrm = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 /** A hand's grip frame on a thing, in the thing's frame: z out of the palm (its `palm`, else +n), y the fingers' way

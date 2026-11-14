@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "rockbass",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 9fcadb9b from 05_lake_panfish/Rock_Bass.png; tools/animals/fish_animal.py",
+ "height": 0.4664,
+ "length": 0.9995,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4320,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51840,
+   "uv": 103680,
+   "skin": 138240,
+   "weight": 155520,
+   "index": 172800,
+   "indexType": "u16",
+   "min": [
+    -0.49970000982284546,
+    -0.23309999704360962,
+    -0.21610000729560852
+   ],
+   "max": [
+    0.4997999966144562,
+    0.23330000042915344,
+    0.21490000188350677
+   ]
+  },
+  {
+   "verts": 1658,
+   "tris": 2000,
+   "pos": 208800,
+   "nrm": 228696,
+   "uv": 248592,
+   "skin": 261856,
+   "weight": 268488,
+   "index": 275120,
+   "indexType": "u16",
+   "min": [
+    -0.49970000982284546,
+    -0.23309999704360962,
+    -0.21610000729560852
+   ],
+   "max": [
+    0.49729999899864197,
+    0.23149999976158142,
+    0.21480000019073486
+   ]
+  },
+  {
+   "verts": 751,
+   "tris": 700,
+   "pos": 287120,
+   "nrm": 296132,
+   "uv": 305144,
+   "skin": 311152,
+   "weight": 314156,
+   "index": 317160,
+   "indexType": "u16",
+   "min": [
+    -0.49970000982284546,
+    -0.23309999704360962,
+    -0.2142000049352646
+   ],
+   "max": [
+    0.49729999899864197,
+    0.2257000058889389,
+    0.21480000019073486
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 321360,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "rockbass-color.jpg",
+  "mask": "rockbass-mask.png"
+ },
+ "card": "rockbass-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

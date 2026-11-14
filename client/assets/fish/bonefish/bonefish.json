@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "bonefish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project fe966731 from 01_sea_inshore/Bonefish.png; tools/animals/fish_animal.py",
+ "height": 0.3906,
+ "length": 0.9991,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4278,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51336,
+   "uv": 102672,
+   "skin": 136896,
+   "weight": 154008,
+   "index": 171120,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.19519999623298645,
+    -0.21040000021457672
+   ],
+   "max": [
+    0.49959999322891235,
+    0.19539999961853027,
+    0.21040000021457672
+   ]
+  },
+  {
+   "verts": 1628,
+   "tris": 2000,
+   "pos": 207120,
+   "nrm": 226656,
+   "uv": 246192,
+   "skin": 259216,
+   "weight": 265728,
+   "index": 272240,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.19439999759197235,
+    -0.2101999968290329
+   ],
+   "max": [
+    0.4975999891757965,
+    0.19120000302791595,
+    0.2101999968290329
+   ]
+  },
+  {
+   "verts": 743,
+   "tris": 700,
+   "pos": 284240,
+   "nrm": 293156,
+   "uv": 302072,
+   "skin": 308016,
+   "weight": 310988,
+   "index": 313960,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.19439999759197235,
+    -0.2092999964952469
+   ],
+   "max": [
+    0.4975999891757965,
+    0.18979999423027039,
+    0.20839999616146088
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 318160,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "bonefish-color.jpg",
+  "mask": "bonefish-mask.png"
+ },
+ "card": "bonefish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

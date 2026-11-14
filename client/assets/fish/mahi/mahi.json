@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "mahi",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 8c0a1131 from 03_sea_openwater/Mahi-mahi.png; tools/animals/fish_animal.py",
+ "height": 0.3885,
+ "length": 0.9984,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4394,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52728,
+   "uv": 105456,
+   "skin": 140608,
+   "weight": 158184,
+   "index": 175760,
+   "indexType": "u16",
+   "min": [
+    -0.4984000027179718,
+    -0.1941000074148178,
+    -0.22579999268054962
+   ],
+   "max": [
+    0.5,
+    0.19439999759197235,
+    0.22499999403953552
+   ]
+  },
+  {
+   "verts": 1715,
+   "tris": 2000,
+   "pos": 211760,
+   "nrm": 232340,
+   "uv": 252920,
+   "skin": 266640,
+   "weight": 273500,
+   "index": 280360,
+   "indexType": "u16",
+   "min": [
+    -0.4984000027179718,
+    -0.19339999556541443,
+    -0.22470000386238098
+   ],
+   "max": [
+    0.5,
+    0.19439999759197235,
+    0.22380000352859497
+   ]
+  },
+  {
+   "verts": 809,
+   "tris": 698,
+   "pos": 292360,
+   "nrm": 302068,
+   "uv": 311776,
+   "skin": 318248,
+   "weight": 321484,
+   "index": 324720,
+   "indexType": "u16",
+   "min": [
+    -0.4984000027179718,
+    -0.19099999964237213,
+    -0.22470000386238098
+   ],
+   "max": [
+    0.4948999881744385,
+    0.19040000438690186,
+    0.22380000352859497
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 328908,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "mahi-color.jpg",
+  "mask": "mahi-mask.png"
+ },
+ "card": "mahi-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

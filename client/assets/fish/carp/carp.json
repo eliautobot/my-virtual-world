@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "carp",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 1ac4f548 from 09_lake_bottom/Common_Carp.png; tools/animals/fish_animal.py",
+ "height": 0.4755,
+ "length": 0.9997,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 3926,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 47112,
+   "uv": 94224,
+   "skin": 125632,
+   "weight": 141336,
+   "index": 157040,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.23829999566078186,
+    -0.1517000049352646
+   ],
+   "max": [
+    0.49970000982284546,
+    0.23720000684261322,
+    0.15230000019073486
+   ]
+  },
+  {
+   "verts": 1579,
+   "tris": 2000,
+   "pos": 193040,
+   "nrm": 211988,
+   "uv": 230936,
+   "skin": 243568,
+   "weight": 249884,
+   "index": 256200,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.23829999566078186,
+    -0.15119999647140503
+   ],
+   "max": [
+    0.4966999888420105,
+    0.23720000684261322,
+    0.15230000019073486
+   ]
+  },
+  {
+   "verts": 718,
+   "tris": 700,
+   "pos": 268200,
+   "nrm": 276816,
+   "uv": 285432,
+   "skin": 291176,
+   "weight": 294048,
+   "index": 296920,
+   "indexType": "u16",
+   "min": [
+    -0.49779999256134033,
+    -0.2379000037908554,
+    -0.1509000062942505
+   ],
+   "max": [
+    0.4966999888420105,
+    0.2363000065088272,
+    0.15119999647140503
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 301120,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "carp-color.jpg",
+  "mask": "carp-mask.png"
+ },
+ "card": "carp-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "pickerel",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project ed2a1057 from 08_lake_toothy/Chain_Pickerel.png; tools/animals/fish_animal.py",
+ "height": 0.2319,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4114,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 49368,
+   "uv": 98736,
+   "skin": 131648,
+   "weight": 148104,
+   "index": 164560,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.1160999983549118,
+    -0.09690000116825104
+   ],
+   "max": [
+    0.5,
+    0.11580000072717667,
+    0.09719999879598618
+   ]
+  },
+  {
+   "verts": 1601,
+   "tris": 2000,
+   "pos": 200560,
+   "nrm": 219772,
+   "uv": 238984,
+   "skin": 251792,
+   "weight": 258196,
+   "index": 264600,
+   "indexType": "u16",
+   "min": [
+    -0.4984999895095825,
+    -0.1160999983549118,
+    -0.09669999778270721
+   ],
+   "max": [
+    0.5,
+    0.11550000309944153,
+    0.09679999947547913
+   ]
+  },
+  {
+   "verts": 739,
+   "tris": 700,
+   "pos": 276600,
+   "nrm": 285468,
+   "uv": 294336,
+   "skin": 300248,
+   "weight": 303204,
+   "index": 306160,
+   "indexType": "u16",
+   "min": [
+    -0.4984999895095825,
+    -0.1120000034570694,
+    -0.09449999779462814
+   ],
+   "max": [
+    0.4959000051021576,
+    0.11500000208616257,
+    0.09679999947547913
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 310360,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "pickerel-color.jpg",
+  "mask": "pickerel-mask.png"
+ },
+ "card": "pickerel-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

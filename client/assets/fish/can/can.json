@@ -1,0 +1,131 @@
+{
+ "v": 1,
+ "model": "can",
+ "rig": "mvw-find-v1",
+ "kind": "find",
+ "source": "Tripo Studio project 17bb114d from 11_junk_treasure/Rusty_Can.png; tools/animals/fish_animal.py",
+ "height": 0.1299,
+ "length": 0.0831,
+ "roughness": 0.6,
+ "metalness": 0.3,
+ "plane": "lateral",
+ "bones": [
+  "root"
+ ],
+ "lods": [
+  {
+   "verts": 4311,
+   "tris": 5999,
+   "pos": 0,
+   "nrm": 51732,
+   "uv": 103464,
+   "skin": 137952,
+   "weight": 155196,
+   "index": 172440,
+   "indexType": "u16",
+   "min": [
+    -0.04170000180602074,
+    -0.06499999761581421,
+    -0.04129999876022339
+   ],
+   "max": [
+    0.0414000004529953,
+    0.0649000033736229,
+    0.041099999099969864
+   ]
+  },
+  {
+   "verts": 1743,
+   "tris": 1999,
+   "pos": 208436,
+   "nrm": 229352,
+   "uv": 250268,
+   "skin": 264212,
+   "weight": 271184,
+   "index": 278156,
+   "indexType": "u16",
+   "min": [
+    -0.0414000004529953,
+    -0.06459999829530716,
+    -0.04089999943971634
+   ],
+   "max": [
+    0.04129999876022339,
+    0.06419999897480011,
+    0.041099999099969864
+   ]
+  },
+  {
+   "verts": 936,
+   "tris": 863,
+   "pos": 290152,
+   "nrm": 301384,
+   "uv": 312616,
+   "skin": 320104,
+   "weight": 323848,
+   "index": 327592,
+   "indexType": "u16",
+   "min": [
+    -0.0414000004529953,
+    -0.06449999660253525,
+    -0.04089999943971634
+   ],
+   "max": [
+    0.041200000792741776,
+    0.06310000270605087,
+    0.041099999099969864
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 332772,
+  "frames": 1,
+  "bones": 1
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 1,
+   "fps": 1
+  }
+ },
+ "textures": {
+  "color": "can-color.jpg",
+  "mask": "can-mask.png"
+ },
+ "card": "can-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

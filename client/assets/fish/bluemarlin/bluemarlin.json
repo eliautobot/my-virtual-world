@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "bluemarlin",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 34a5aa2a from 03_sea_openwater/Blue_Marlin.png; tools/animals/fish_animal.py",
+ "height": 0.4684,
+ "length": 0.9997,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4180,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 50160,
+   "uv": 100320,
+   "skin": 133760,
+   "weight": 150480,
+   "index": 167200,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.23389999568462372,
+    -0.1704999953508377
+   ],
+   "max": [
+    0.49970000982284546,
+    0.2345000058412552,
+    0.17059999704360962
+   ]
+  },
+  {
+   "verts": 1625,
+   "tris": 2000,
+   "pos": 203200,
+   "nrm": 222700,
+   "uv": 242200,
+   "skin": 255200,
+   "weight": 261700,
+   "index": 268200,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.23389999568462372,
+    -0.1687999963760376
+   ],
+   "max": [
+    0.49900001287460327,
+    0.23199999332427979,
+    0.17000000178813934
+   ]
+  },
+  {
+   "verts": 752,
+   "tris": 700,
+   "pos": 280200,
+   "nrm": 289224,
+   "uv": 298248,
+   "skin": 304264,
+   "weight": 307272,
+   "index": 310280,
+   "indexType": "u16",
+   "min": [
+    -0.4959999918937683,
+    -0.23389999568462372,
+    -0.1687999963760376
+   ],
+   "max": [
+    0.49900001287460327,
+    0.23199999332427979,
+    0.16779999434947968
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 314480,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "bluemarlin-color.jpg",
+  "mask": "bluemarlin-mask.png"
+ },
+ "card": "bluemarlin-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

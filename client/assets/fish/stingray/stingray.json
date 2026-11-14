@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "stingray",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 47a94f73 from 01_sea_inshore/Southern_Stingray.png; tools/animals/fish_animal.py",
+ "height": 0.203,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "vertical",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4907,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 58884,
+   "uv": 117768,
+   "skin": 157024,
+   "weight": 176652,
+   "index": 196280,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.10159999877214432,
+    -0.4999000132083893
+   ],
+   "max": [
+    0.5,
+    0.10140000283718109,
+    0.49950000643730164
+   ]
+  },
+  {
+   "verts": 1847,
+   "tris": 2000,
+   "pos": 232280,
+   "nrm": 254444,
+   "uv": 276608,
+   "skin": 291384,
+   "weight": 298772,
+   "index": 306160,
+   "indexType": "u16",
+   "min": [
+    -0.49779999256134033,
+    -0.10159999877214432,
+    -0.4999000132083893
+   ],
+   "max": [
+    0.5,
+    0.10140000283718109,
+    0.4993000030517578
+   ]
+  },
+  {
+   "verts": 858,
+   "tris": 700,
+   "pos": 318160,
+   "nrm": 328456,
+   "uv": 338752,
+   "skin": 345616,
+   "weight": 349048,
+   "index": 352480,
+   "indexType": "u16",
+   "min": [
+    -0.49779999256134033,
+    -0.10159999877214432,
+    -0.4999000132083893
+   ],
+   "max": [
+    0.49970000982284546,
+    0.10090000182390213,
+    0.4993000030517578
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 356680,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "stingray-color.jpg",
+  "mask": "stingray-mask.png"
+ },
+ "card": "stingray-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,80 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Fishing game — the fish (Tripo models)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; font: 13px/1.35 system-ui, sans-serif; background: #1d2228; color: #e8ecef; overflow: hidden; }
+  #view { position: absolute; left: 0; top: 0; right: 300px; bottom: 0; }
+  #panel { position: absolute; right: 0; top: 0; width: 300px; bottom: 0; overflow-y: auto; background: #262c33; border-left: 1px solid #39424c; padding: 10px 12px; box-sizing: border-box; }
+  h1 { font-size: 15px; margin: 2px 0 8px; } h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #9fb0bf; margin: 14px 0 6px; }
+  select, button { font: inherit; color: #e8ecef; background: #323a43; border: 1px solid #46515d; border-radius: 5px; padding: 4px 7px; }
+  button { cursor: pointer; } button:hover { background: #3c4651; } button.on { background: #2f6fb3; border-color: #3d84cf; }
+  .row { display: flex; gap: 6px; align-items: center; margin: 4px 0; flex-wrap: wrap; } select { width: 100%; }
+  #card { width: 100%; aspect-ratio: 2 / 1; object-fit: contain; background: #1d2228; border-radius: 6px; }
+  .note { color: #9fb0bf; font-size: 12px; }
+</style>
+<script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
+</head><body>
+<div id="view"></div>
+<div id="panel">
+  <h1>The fishing game's fish</h1>
+  <div class="note">The Tripo models (2026-11-13), as the game draws them: drag to turn, wheel to zoom.</div>
+  <h2>Fish</h2>
+  <div class="row"><select id="fish"></select></div>
+  <div class="row"><button id="prev">◀ Previous</button><button id="next">Next ▶</button></div>
+  <h2>Animation</h2>
+  <div class="row"><button data-c="0" class="on">Held up (flopping)</button><button data-c="6">Swimming</button><button data-c="2">Thrashing</button></div>
+  <h2>Fishdex picture</h2>
+  <img id="card" alt="">
+  <div class="note" id="info"></div>
+</div>
+<script type="module">
+// One fish (or find) at a time, from /assets/fish/<id>/ (tools/animals/fish_animal.py), drawn by the wildlife's skinned
+// draw (render/fauna-skinned.js) as the catch is in the game: window.__show(u, yaw, pitch, clip) renders one frozen
+// frame (for frame grids: tools/animals/fish_grid.mjs).
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GU } from '/js/render/scene.js';
+import { loadSkinned, skinnedPack, coatsOf } from '/js/render/fauna-skinned.js';
+import { SPECIES, FINDS } from '/shared/fish-species.js';
+const q = new URLSearchParams(location.search), view = document.getElementById('view');
+const R = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); R.setPixelRatio(Math.min(2, devicePixelRatio)); R.outputColorSpace = THREE.SRGBColorSpace; view.appendChild(R.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x9fc3d8);
+scene.add(new THREE.HemisphereLight(0xeef5ff, 0x40505a, 1.6)); const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.position.set(3, 6, 4); scene.add(sun);
+const cam = new THREE.PerspectiveCamera(30, 1, 0.01, 100); cam.position.set(0, 0.35, 2.4);
+const ctl = new OrbitControls(cam, R.domElement); ctl.target.set(0, 0, 0); ctl.update();
+const size = () => { const w = view.clientWidth, h = view.clientHeight; R.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); };
+addEventListener('resize', size); size();
+const ids = (await (await fetch('/assets/fish/index.json')).json()).models;
+const nameOf = id => (SPECIES.find(s => s.id === id) || FINDS.find(f => f.id === id) || { name: id }).name;
+const sel = document.getElementById('fish');
+sel.innerHTML = ids.map(id => `<option value="${id}">${nameOf(id)}</option>`).join('');
+if (q.get('f') && ids.includes(q.get('f'))) sel.value = q.get('f');
+let P = null, clip = +(q.get('clip') || 0); const packs = new Map(), m4 = new THREE.Matrix4();
+async function show(id) {
+  if (P) { P.pack.begin(); P.pack.end(); }
+  if (!packs.has(id)) { const A = await loadSkinned(`/assets/fish/${id}/${id}.json`); packs.set(id, A && { A, pack: skinnedPack(A, 1, scene, id, coatsOf({}, A)) }); }
+  P = packs.get(id);
+  document.getElementById('card').src = `/assets/fish/${id}/${id}-card.png`;
+  const M = P?.A.man; document.getElementById('info').textContent = M ? `${M.kind}: ${M.lods[0].tris} triangles up close; bends ${M.plane}` : 'could not load';
+  window.__ready = true;
+}
+sel.onchange = () => show(sel.value);
+document.getElementById('prev').onclick = () => { sel.selectedIndex = (sel.selectedIndex + ids.length - 1) % ids.length; show(sel.value); };
+document.getElementById('next').onclick = () => { sel.selectedIndex = (sel.selectedIndex + 1) % ids.length; show(sel.value); };
+document.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { clip = +b.dataset.c; document.querySelectorAll('[data-c]').forEach(x => x.classList.toggle('on', x === b)); });
+// a fish is a metre long here (the game scales it to its length); a find at its own size, shown bigger
+const put = () => { if (!P) return; const k = P.A.man.kind === 'find' ? 1 / Math.max(0.1, P.A.man.length) : 1; P.pack.begin(); P.pack.put(m4.makeScale(k, k, k), 0, 0, clip === 2 ? 1.8 : 1.4, clip, 0, null, true); P.pack.end(); };
+let auto = true;
+const loop = t => { if (auto) { GU.uTime.value = t / 1000; put(); ctl.update(); R.render(scene, cam); } requestAnimationFrame(loop); };
+requestAnimationFrame(loop);
+window.__show = (u, yawDeg = 90, pitchDeg = 8, c = clip, dist = 2.2) => {
+  auto = false; clip = c;
+  const C = P.A.man.clips[{ 0: 'rest', 2: 'run', 6: 'swim' }[c] || 'rest'];
+  GU.uTime.value = c === 0 ? u * C.frames / C.fps : u / (c === 2 ? 1.8 : 1.4);
+  put();
+  const yaw = yawDeg * Math.PI / 180, pt = pitchDeg * Math.PI / 180;
+  cam.position.set(Math.sin(yaw) * Math.cos(pt) * dist, Math.sin(pt) * dist, Math.cos(yaw) * Math.cos(pt) * dist); cam.lookAt(0, 0, 0);
+  R.render(scene, cam); return true;
+};
+await show(sel.value);
+</script></body></html>

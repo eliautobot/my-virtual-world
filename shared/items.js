@@ -6,7 +6,7 @@
 // own in its attrs.vc), rarity, stack (the most a plain stack holds), unique (each piece is one of a kind: a fish with
 // its own length and weight, kept apart and shown grouped), trade (may be given or traded; default yes), desc }.
 import { SPECIES, FINDS, RARITY } from './fish-species.js';
-import { LURES, RODS, REELS, LINES, LEADER } from './fishing-gear.js';
+import { LURES, RODS, REELS, LINES, LEADER, HOOKS } from './fishing-gear.js';
 import { FOOD } from './food.js';
 
 /** The categories, in the order the inventory shows them. */
@@ -82,7 +82,7 @@ registerItems([
   ...SPECIES.map(s => ({ id: `fish:${s.id}`, name: s.name, icon: fishIcon(s), cat: 'fish', value: vcOf(s.val), rarity: s.rarity, unique: true, stack: 1, desc: `${s.water === 'sea' ? 'A sea fish' : 'A lake fish'}${s.legend ? ' — a legend' : ''}.` })),
   ...FINDS.map(f => ({ id: `find:${f.id}`, name: f.name, icon: f.icon, cat: f.kind === 'junk' ? 'junk' : 'treasure', value: vcOf(f.val), rarity: f.kind === 'junk' ? 'common' : f.kind === 'coins' ? 'rare' : 'uncommon', stack: f.kind === 'junk' ? 99 : 20, desc: f.kind === 'junk' ? 'Up from the bottom. The dock store takes it off your hands.' : 'Up from the bottom.' })),
   ...LURES.map(l => ({ id: `lure:${l.id}`, name: l.name, icon: l.icon, cat: 'bait', value: Math.round(l.price * 100 / l.pack), stack: 999, desc: l.blurb })),
-  ...[...RODS, ...REELS, ...LINES, LEADER].map(g => ({ id: `gear:${g.id}`, name: g.name, icon: g.id.startsWith('reel') ? '⚙️' : '🎣', cat: 'tackle', value: vcOf(g.price || 0), rarity: g.tier >= 5 ? 'legendary' : g.tier >= 4 ? 'epic' : g.tier >= 3 ? 'rare' : g.tier >= 2 ? 'uncommon' : 'common', stack: 9, desc: g.blurb })),
+  ...[...RODS, ...REELS, ...LINES, ...HOOKS, LEADER].map(g => ({ id: `gear:${g.id}`, name: g.name, icon: g.id.startsWith('reel') ? '⚙️' : g.id.startsWith('hook') ? '🪝' : '🎣', cat: 'tackle', value: vcOf(g.price || 0), rarity: g.tier >= 5 ? 'legendary' : g.tier >= 4 ? 'epic' : g.tier >= 3 ? 'rare' : g.tier >= 2 ? 'uncommon' : 'common', stack: 9, desc: g.blurb })),
   // food and drink: the cafés' and restaurants' menu items (to take away)
   ...FOOD.map(f => ({ id: `food:${f.id}`, name: f.name, icon: f.icon || '🍽️', cat: 'food', value: f.price || 0, stack: 99, desc: f.course === 'drink' ? 'A drink.' : 'Something to eat.' })),
   // the shops' goods

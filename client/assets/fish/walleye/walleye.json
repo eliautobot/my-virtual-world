@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "walleye",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project bdf6f65f from 07_lake_trout/Walleye.png; tools/animals/fish_animal.py",
+ "height": 0.4189,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4405,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52860,
+   "uv": 105720,
+   "skin": 140960,
+   "weight": 158580,
+   "index": 176200,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.2093999981880188,
+    -0.1851000040769577
+   ],
+   "max": [
+    0.5,
+    0.2094999998807907,
+    0.18520000576972961
+   ]
+  },
+  {
+   "verts": 1760,
+   "tris": 2000,
+   "pos": 212200,
+   "nrm": 233320,
+   "uv": 254440,
+   "skin": 268520,
+   "weight": 275560,
+   "index": 282600,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.20919999480247498,
+    -0.1851000040769577
+   ],
+   "max": [
+    0.49559998512268066,
+    0.2094999998807907,
+    0.18520000576972961
+   ]
+  },
+  {
+   "verts": 835,
+   "tris": 700,
+   "pos": 294600,
+   "nrm": 304620,
+   "uv": 314640,
+   "skin": 321320,
+   "weight": 324660,
+   "index": 328000,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.20679999887943268,
+    -0.18410000205039978
+   ],
+   "max": [
+    0.48829999566078186,
+    0.20730000734329224,
+    0.1834000051021576
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 332200,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "walleye-color.jpg",
+  "mask": "walleye-mask.png"
+ },
+ "card": "walleye-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

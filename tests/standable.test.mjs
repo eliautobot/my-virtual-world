@@ -101,7 +101,7 @@ test('swim clips, the mended walk and run, the holding, doing and eating clips: 
   assert.deepEqual(list.clips.map(c => c.name), ['swim_idle', 'swim', 'swim_under', 'walk', 'run',
     'hold_walk', 'hold_walk_phone', 'hold_idle', 'hold_phone', 'hold_drink', 'hold_sit_phone', 'hold_sit_drink', 'hold_sit_read',
     'act_cook', 'act_wash', 'act_browse', 'act_use', 'act_lift', 'act_pingpong', 'eat_hands', 'eat_hand', 'eat_lap', 'eat_stand', 'eat_stand_hands', 'act_prep',
-    'eat_knife', 'eat_spoon', 'helm', 'fish_idle', 'fish_cast', 'fish_reel', 'fish_fight', 'fish_net', 'fish_show']);
+    'eat_knife', 'eat_spoon', 'helm', 'fish_idle', 'fish_cast', 'fish_reel', 'fish_fight', 'fish_net', 'fish_show', 'fish_hold_line', 'fish_hold_gill', 'fish_hold_two']);
   // (the walk and run take the place of the bake's own, at its length: their pace and stride stay)
   const m01 = JSON.parse(fs.readFileSync('client/assets/chars/m01.json', 'utf8'));
   for (const c of list.clips.filter(x => x.mended)) assert.equal(c.len, m01.clips.find(x => x.name === c.name).len, c.name);

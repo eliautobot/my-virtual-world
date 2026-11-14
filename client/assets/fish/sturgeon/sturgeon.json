@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "sturgeon",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 3ef31c86 from 09_lake_bottom/Lake_Sturgeon.png; tools/animals/fish_animal.py",
+ "height": 0.2091,
+ "length": 0.9997,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4367,
+   "tris": 5999,
+   "pos": 0,
+   "nrm": 52404,
+   "uv": 104808,
+   "skin": 139744,
+   "weight": 157212,
+   "index": 174680,
+   "indexType": "u16",
+   "min": [
+    -0.4997999966144562,
+    -0.10530000180006027,
+    -0.20890000462532043
+   ],
+   "max": [
+    0.4999000132083893,
+    0.10379999876022339,
+    0.2084999978542328
+   ]
+  },
+  {
+   "verts": 1740,
+   "tris": 1999,
+   "pos": 210676,
+   "nrm": 231556,
+   "uv": 252436,
+   "skin": 266356,
+   "weight": 273316,
+   "index": 280276,
+   "indexType": "u16",
+   "min": [
+    -0.4977000057697296,
+    -0.10530000180006027,
+    -0.20890000462532043
+   ],
+   "max": [
+    0.4957999885082245,
+    0.10379999876022339,
+    0.2084999978542328
+   ]
+  },
+  {
+   "verts": 838,
+   "tris": 699,
+   "pos": 292272,
+   "nrm": 302328,
+   "uv": 312384,
+   "skin": 319088,
+   "weight": 322440,
+   "index": 325792,
+   "indexType": "u16",
+   "min": [
+    -0.4977000057697296,
+    -0.10429999977350235,
+    -0.20890000462532043
+   ],
+   "max": [
+    0.49470001459121704,
+    0.09929999709129333,
+    0.2084999978542328
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 329988,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "sturgeon-color.jpg",
+  "mask": "sturgeon-mask.png"
+ },
+ "card": "sturgeon-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

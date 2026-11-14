@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "greensunfish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 508ab36a from 05_lake_panfish/Green_Sunfish.png; tools/animals/fish_animal.py",
+ "height": 0.6295,
+ "length": 0.9969,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4016,
+   "tris": 5999,
+   "pos": 0,
+   "nrm": 48192,
+   "uv": 96384,
+   "skin": 128512,
+   "weight": 144576,
+   "index": 160640,
+   "indexType": "u16",
+   "min": [
+    -0.4986000061035156,
+    -0.31520000100135803,
+    -0.30059999227523804
+   ],
+   "max": [
+    0.4982999861240387,
+    0.314300000667572,
+    0.30169999599456787
+   ]
+  },
+  {
+   "verts": 1575,
+   "tris": 1999,
+   "pos": 196636,
+   "nrm": 215536,
+   "uv": 234436,
+   "skin": 247036,
+   "weight": 253336,
+   "index": 259636,
+   "indexType": "u16",
+   "min": [
+    -0.4986000061035156,
+    -0.31520000100135803,
+    -0.30059999227523804
+   ],
+   "max": [
+    0.4975000023841858,
+    0.31029999256134033,
+    0.30169999599456787
+   ]
+  },
+  {
+   "verts": 717,
+   "tris": 699,
+   "pos": 271632,
+   "nrm": 280236,
+   "uv": 288840,
+   "skin": 294576,
+   "weight": 297444,
+   "index": 300312,
+   "indexType": "u16",
+   "min": [
+    -0.4986000061035156,
+    -0.31520000100135803,
+    -0.30059999227523804
+   ],
+   "max": [
+    0.4846000075340271,
+    0.30889999866485596,
+    0.2994000017642975
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 304508,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "greensunfish-color.jpg",
+  "mask": "greensunfish-mask.png"
+ },
+ "card": "greensunfish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

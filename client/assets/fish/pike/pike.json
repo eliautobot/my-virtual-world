@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "pike",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project f29ffa90 from 08_lake_toothy/Northern_Pike.png; tools/animals/fish_animal.py",
+ "height": 0.2784,
+ "length": 0.9994,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4467,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53604,
+   "uv": 107208,
+   "skin": 142944,
+   "weight": 160812,
+   "index": 178680,
+   "indexType": "u16",
+   "min": [
+    -0.49970000982284546,
+    -0.1388999968767166,
+    -0.16439999639987946
+   ],
+   "max": [
+    0.49970000982284546,
+    0.13950000703334808,
+    0.16439999639987946
+   ]
+  },
+  {
+   "verts": 1846,
+   "tris": 2000,
+   "pos": 214680,
+   "nrm": 236832,
+   "uv": 258984,
+   "skin": 273752,
+   "weight": 281136,
+   "index": 288520,
+   "indexType": "u16",
+   "min": [
+    -0.49790000915527344,
+    -0.1387999951839447,
+    -0.16349999606609344
+   ],
+   "max": [
+    0.49799999594688416,
+    0.13819999992847443,
+    0.16439999639987946
+   ]
+  },
+  {
+   "verts": 884,
+   "tris": 698,
+   "pos": 300520,
+   "nrm": 311128,
+   "uv": 321736,
+   "skin": 328808,
+   "weight": 332344,
+   "index": 335880,
+   "indexType": "u16",
+   "min": [
+    -0.4916999936103821,
+    -0.1387999951839447,
+    -0.16349999606609344
+   ],
+   "max": [
+    0.49799999594688416,
+    0.13819999992847443,
+    0.1623000055551529
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 340068,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "pike-color.jpg",
+  "mask": "pike-mask.png"
+ },
+ "card": "pike-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

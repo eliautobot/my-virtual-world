@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "peacock",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 4b2a1a9b from 06_lake_bass/Peacock_Bass.png; tools/animals/fish_animal.py",
+ "height": 0.4215,
+ "length": 0.9995,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4305,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51660,
+   "uv": 103320,
+   "skin": 137760,
+   "weight": 154980,
+   "index": 172200,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.21070000529289246,
+    -0.2093999981880188
+   ],
+   "max": [
+    0.49950000643730164,
+    0.21080000698566437,
+    0.20990000665187836
+   ]
+  },
+  {
+   "verts": 1702,
+   "tris": 2000,
+   "pos": 208200,
+   "nrm": 228624,
+   "uv": 249048,
+   "skin": 262664,
+   "weight": 269472,
+   "index": 276280,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.21070000529289246,
+    -0.2093999981880188
+   ],
+   "max": [
+    0.49950000643730164,
+    0.20909999310970306,
+    0.20990000665187836
+   ]
+  },
+  {
+   "verts": 783,
+   "tris": 700,
+   "pos": 288280,
+   "nrm": 297676,
+   "uv": 307072,
+   "skin": 313336,
+   "weight": 316468,
+   "index": 319600,
+   "indexType": "u16",
+   "min": [
+    -0.4948999881744385,
+    -0.21070000529289246,
+    -0.2093999981880188
+   ],
+   "max": [
+    0.49729999899864197,
+    0.20819999277591705,
+    0.20579999685287476
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 323800,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "peacock-color.jpg",
+  "mask": "peacock-mask.png"
+ },
+ "card": "peacock-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

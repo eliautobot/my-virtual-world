@@ -8,12 +8,12 @@
 // starter's kit, as before.
 import { subj } from '../economy/economy.js';
 import { moduleLevel } from '../../shared/play.js';
-import { RODS, REELS, LINES, LEADER, LURES, LURE_BY_ID, BOAT_UPGRADES, UPGRADE_BY_ID, SKILLS, SKILL_MAX, RESPEC_PRICE, GEAR, STARTER, loadout } from '../../shared/fishing-gear.js';
+import { RODS, REELS, LINES, HOOKS, LEADER, LURES, LURE_BY_ID, BOAT_UPGRADES, UPGRADE_BY_ID, SKILLS, SKILL_MAX, RESPEC_PRICE, GEAR, STARTER, loadout } from '../../shared/fishing-gear.js';
 import { FishError } from './fish-market.js';
 import { SPECIES, speciesOf } from '../../shared/fish-species.js';
 
 const fail = (status, code, msg) => { throw new FishError(status, code, msg); };
-const SLOTS = { rod: RODS, reel: REELS, line: LINES };
+const SLOTS = { rod: RODS, reel: REELS, line: LINES, hook: HOOKS };
 const parse = s => { try { return JSON.parse(s || '{}') || {}; } catch { return {}; } };
 const MAX_PACKS = 20;
 
@@ -74,7 +74,8 @@ export class Angler {
       const best = SLOTS[slot].filter(g => H.gear.has(g.id)).sort((a, b) => b.tier - a.tier)[0];
       return best ? best.id : STARTER[slot];
     };
-    return { rod: pick('rod'), reel: pick('reel'), line: pick('line'), leader: H.gear.has(LEADER.id) && kit.leader !== false, lures: H.lures, boat: { ...(kit.boat || {}) }, skills: { ...(kit.skills || {}) } };
+    // (and the angler's fishing level: a beginner's line guard, bigger fish for the higher ranks — shared/fishing-gear.js RANKS)
+    return { rod: pick('rod'), reel: pick('reel'), line: pick('line'), hook: pick('hook'), leader: H.gear.has(LEADER.id) && kit.leader !== false, lures: H.lures, boat: { ...(kit.boat || {}) }, skills: { ...(kit.skills || {}) }, level: this.level(id) };
   }
   /** The kit's numbers for the boat (shared/boat-model.js newBoat): its top speed (engine and seamanship) and the anchor's hold. */
   boatKit(id) { const L = loadout(this.tripKit(id)); return { speed: L.boatSpeed, anchor: L.boat.anchor }; }
@@ -83,15 +84,15 @@ export class Angler {
   view(account) {
     const id = account.id, { kit, stats } = this.row(id), lvl = this.level(id), H = this.holds(id), T = this.tripKit(id);
     const E = this.econ, store = this.market?.storeAt(id) || null;
-    const gear = g => ({ id: g.id, name: g.name, tier: g.tier, price: g.price, level: g.level, blurb: g.blurb, have: !!H?.gear.has(g.id), using: T.rod === g.id || T.reel === g.id || T.line === g.id || (g.id === LEADER.id && T.leader), locked: lvl < g.level });
+    const gear = g => ({ id: g.id, name: g.name, tier: g.tier, price: g.price, level: g.level, blurb: g.blurb, have: !!H?.gear.has(g.id), using: T.rod === g.id || T.reel === g.id || T.line === g.id || T.hook === g.id || (g.id === LEADER.id && T.leader), locked: lvl < g.level });
     let vc = null; try { vc = E ? E.walletView(E.walletFor(subj('account', id))).available : null; } catch { vc = null; }
     return {
       open: !!(E && this.inv), atStore: store ? { name: store.name || 'Dock Store' } : null, level: lvl, vc, points: this.points(id, kit),
-      rods: RODS.map(gear), reels: REELS.map(gear), lines: LINES.map(gear), leader: gear(LEADER),
+      rods: RODS.map(gear), reels: REELS.map(gear), lines: LINES.map(gear), hooks: HOOKS.map(gear), leader: gear(LEADER),
       lures: LURES.map(l => ({ id: l.id, name: l.name, icon: l.icon, water: l.water, kind: l.kind, pack: l.pack, price: l.price, level: l.level, blurb: l.blurb, have: H?.lures[l.id] || 0, locked: lvl < l.level })),
       boat: BOAT_UPGRADES.map(u => { const t = Math.max(0, Math.min(3, kit.boat?.[u.id] || 0)); return { id: u.id, name: u.name, icon: u.icon, unit: u.unit, blurb: u.blurb, tier: t, value: u.tiers[t], next: t < 3 ? { tier: t + 1, value: u.tiers[t + 1], price: u.price[t + 1], level: u.level[t + 1], locked: lvl < u.level[t + 1] } : null }; }),
       skills: SKILLS.map(s => ({ id: s.id, name: s.name, icon: s.icon, blurb: s.blurb, rank: Math.min(SKILL_MAX, kit.skills?.[s.id] || 0) })), skillMax: SKILL_MAX, respec: RESPEC_PRICE,
-      kit: { rod: T.rod, reel: T.reel, line: T.line, leader: !!T.leader }, boatKit: this.boatKit(id), stats,
+      kit: { rod: T.rod, reel: T.reel, line: T.line, hook: T.hook, leader: !!T.leader }, boatKit: this.boatKit(id), stats,
     };
   }
 

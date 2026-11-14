@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "sheepshead",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 948c177d from 01_sea_inshore/Sheepshead.png; tools/animals/fish_animal.py",
+ "height": 0.5474,
+ "length": 0.9989,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4485,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53820,
+   "uv": 107640,
+   "skin": 143520,
+   "weight": 161460,
+   "index": 179400,
+   "indexType": "u16",
+   "min": [
+    -0.49939998984336853,
+    -0.27469998598098755,
+    -0.24009999632835388
+   ],
+   "max": [
+    0.49950000643730164,
+    0.2727000117301941,
+    0.24089999496936798
+   ]
+  },
+  {
+   "verts": 1796,
+   "tris": 2000,
+   "pos": 215400,
+   "nrm": 236952,
+   "uv": 258504,
+   "skin": 272872,
+   "weight": 280056,
+   "index": 287240,
+   "indexType": "u16",
+   "min": [
+    -0.49939998984336853,
+    -0.2734000086784363,
+    -0.23999999463558197
+   ],
+   "max": [
+    0.49639999866485596,
+    0.2727000117301941,
+    0.24089999496936798
+   ]
+  },
+  {
+   "verts": 837,
+   "tris": 700,
+   "pos": 299240,
+   "nrm": 309284,
+   "uv": 319328,
+   "skin": 326024,
+   "weight": 329372,
+   "index": 332720,
+   "indexType": "u16",
+   "min": [
+    -0.4916999936103821,
+    -0.2734000086784363,
+    -0.23999999463558197
+   ],
+   "max": [
+    0.48030000925064087,
+    0.2655999958515167,
+    0.2313999980688095
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 336920,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "sheepshead-color.jpg",
+  "mask": "sheepshead-mask.png"
+ },
+ "card": "sheepshead-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

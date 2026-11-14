@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "bluefin",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project b38ed4fa from 03_sea_openwater/Bluefin_Tuna.png; tools/animals/fish_animal.py",
+ "height": 0.4177,
+ "length": 0.9992,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4512,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54144,
+   "uv": 108288,
+   "skin": 144384,
+   "weight": 162432,
+   "index": 180480,
+   "indexType": "u16",
+   "min": [
+    -0.4991999864578247,
+    -0.2087000012397766,
+    -0.23569999635219574
+   ],
+   "max": [
+    0.5,
+    0.20900000631809235,
+    0.23589999973773956
+   ]
+  },
+  {
+   "verts": 1805,
+   "tris": 2000,
+   "pos": 216480,
+   "nrm": 238140,
+   "uv": 259800,
+   "skin": 274240,
+   "weight": 281460,
+   "index": 288680,
+   "indexType": "u16",
+   "min": [
+    -0.4991999864578247,
+    -0.2076999992132187,
+    -0.23510000109672546
+   ],
+   "max": [
+    0.5,
+    0.20890000462532043,
+    0.23579999804496765
+   ]
+  },
+  {
+   "verts": 827,
+   "tris": 700,
+   "pos": 300680,
+   "nrm": 310604,
+   "uv": 320528,
+   "skin": 327144,
+   "weight": 330452,
+   "index": 333760,
+   "indexType": "u16",
+   "min": [
+    -0.4991999864578247,
+    -0.2076999992132187,
+    -0.23510000109672546
+   ],
+   "max": [
+    0.49779999256134033,
+    0.20890000462532043,
+    0.22779999673366547
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 337960,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "bluefin-color.jpg",
+  "mask": "bluefin-mask.png"
+ },
+ "card": "bluefin-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

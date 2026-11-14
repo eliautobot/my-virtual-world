@@ -61,7 +61,7 @@ function act(name, body, ctx) {
     if (ground && ctx.pos) { const p = groundPos(ground, minute, plan.water); if (Math.hypot(p.x - ctx.pos.x, p.z - ctx.pos.z) > ground.r + Math.min(+body.d0 || 0, L.reach * 1.3) + 25) ground = null; }
     const fished = ground && (state.fished[ground.id] || 0) >= ground.fish;
     const n = ++state.hooks, rng = new RNG(`${ctx.secret}:hook:${n}`);
-    const what = rollBite(rng, fished ? null : ground, { lure, hour: hourAt(data, minute), difficulty: course.difficulty, luck: L.luck, minute, legend: plan.legend, water: plan.water, size: course.size, trolling: lu.kind === 'troll', maxKg: L.maxKg });
+    const what = rollBite(rng, fished ? null : ground, { lure, hour: hourAt(data, minute), difficulty: course.difficulty, luck: L.luck, minute, legend: plan.legend, water: plan.water, size: course.size, trolling: lu.kind === 'troll', maxKg: L.maxKg, level: L.level });
     state.lastHook = ctx.serverMs;
     if (!what) { state.hooked = null; return { hook: null, why: 'Nothing took it' }; }
     if (lu.bait) state.used[lure] = (state.used[lure] || 0) + 1;   // a fish took the bait

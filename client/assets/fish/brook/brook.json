@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "brook",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project dffee92c from 07_lake_trout/Brook_Trout.png; tools/animals/fish_animal.py",
+ "height": 0.3295,
+ "length": 0.999,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4431,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53172,
+   "uv": 106344,
+   "skin": 141792,
+   "weight": 159516,
+   "index": 177240,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.1647000014781952,
+    -0.16140000522136688
+   ],
+   "max": [
+    0.49970000982284546,
+    0.1648000031709671,
+    0.1615000069141388
+   ]
+  },
+  {
+   "verts": 1657,
+   "tris": 2000,
+   "pos": 213240,
+   "nrm": 233124,
+   "uv": 253008,
+   "skin": 266264,
+   "weight": 272892,
+   "index": 279520,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.16449999809265137,
+    -0.16050000488758087
+   ],
+   "max": [
+    0.49900001287460327,
+    0.16449999809265137,
+    0.1615000069141388
+   ]
+  },
+  {
+   "verts": 759,
+   "tris": 700,
+   "pos": 291520,
+   "nrm": 300628,
+   "uv": 309736,
+   "skin": 315808,
+   "weight": 318844,
+   "index": 321880,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.1639000028371811,
+    -0.16050000488758087
+   ],
+   "max": [
+    0.49889999628067017,
+    0.1615000069141388,
+    0.1615000069141388
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 326080,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "brook-color.jpg",
+  "mask": "brook-mask.png"
+ },
+ "card": "brook-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

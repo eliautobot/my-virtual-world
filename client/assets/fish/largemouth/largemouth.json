@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "largemouth",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 63ad20a6 from 06_lake_bass/Largemouth_Bass.png; tools/animals/fish_animal.py",
+ "height": 0.4246,
+ "length": 0.9997,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4283,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51396,
+   "uv": 102792,
+   "skin": 137056,
+   "weight": 154188,
+   "index": 171320,
+   "indexType": "u16",
+   "min": [
+    -0.49970000982284546,
+    -0.21230000257492065,
+    -0.20389999449253082
+   ],
+   "max": [
+    0.5,
+    0.21230000257492065,
+    0.2037999927997589
+   ]
+  },
+  {
+   "verts": 1693,
+   "tris": 2000,
+   "pos": 207320,
+   "nrm": 227636,
+   "uv": 247952,
+   "skin": 261496,
+   "weight": 268268,
+   "index": 275040,
+   "indexType": "u16",
+   "min": [
+    -0.49639999866485596,
+    -0.21230000257492065,
+    -0.20360000431537628
+   ],
+   "max": [
+    0.49799999594688416,
+    0.21230000257492065,
+    0.20260000228881836
+   ]
+  },
+  {
+   "verts": 804,
+   "tris": 700,
+   "pos": 287040,
+   "nrm": 296688,
+   "uv": 306336,
+   "skin": 312768,
+   "weight": 315984,
+   "index": 319200,
+   "indexType": "u16",
+   "min": [
+    -0.49639999866485596,
+    -0.21230000257492065,
+    -0.20360000431537628
+   ],
+   "max": [
+    0.49160000681877136,
+    0.20880000293254852,
+    0.20260000228881836
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 323400,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "largemouth-color.jpg",
+  "mask": "largemouth-mask.png"
+ },
+ "card": "largemouth-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

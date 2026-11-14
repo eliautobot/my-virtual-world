@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "oldgoliath",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 2736d389 from 10_legends/Old_Goliath.png; tools/animals/fish_animal.py",
+ "height": 0.5152,
+ "length": 0.9986,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4236,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 50832,
+   "uv": 101664,
+   "skin": 135552,
+   "weight": 152496,
+   "index": 169440,
+   "indexType": "u16",
+   "min": [
+    -0.49900001287460327,
+    -0.25760000944137573,
+    -0.23109999299049377
+   ],
+   "max": [
+    0.49959999322891235,
+    0.25760000944137573,
+    0.23160000145435333
+   ]
+  },
+  {
+   "verts": 1716,
+   "tris": 2000,
+   "pos": 205440,
+   "nrm": 226032,
+   "uv": 246624,
+   "skin": 260352,
+   "weight": 267216,
+   "index": 274080,
+   "indexType": "u16",
+   "min": [
+    -0.4968999922275543,
+    -0.25760000944137573,
+    -0.2289000004529953
+   ],
+   "max": [
+    0.4957999885082245,
+    0.2551000118255615,
+    0.2282000035047531
+   ]
+  },
+  {
+   "verts": 788,
+   "tris": 700,
+   "pos": 286080,
+   "nrm": 295536,
+   "uv": 304992,
+   "skin": 311296,
+   "weight": 314448,
+   "index": 317600,
+   "indexType": "u16",
+   "min": [
+    -0.4968999922275543,
+    -0.25360000133514404,
+    -0.226500004529953
+   ],
+   "max": [
+    0.4957999885082245,
+    0.25220000743865967,
+    0.22750000655651093
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 321800,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "oldgoliath-color.jpg",
+  "mask": "oldgoliath-mask.png"
+ },
+ "card": "oldgoliath-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

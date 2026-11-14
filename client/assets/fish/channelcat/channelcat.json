@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "channelcat",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 03d66376 from 09_lake_bottom/Channel_Catfish.png; tools/animals/fish_animal.py",
+ "height": 0.2598,
+ "length": 0.9999,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4681,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 56172,
+   "uv": 112344,
+   "skin": 149792,
+   "weight": 168516,
+   "index": 187240,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.1298000067472458,
+    -0.1867000013589859
+   ],
+   "max": [
+    0.4999000132083893,
+    0.12999999523162842,
+    0.18709999322891235
+   ]
+  },
+  {
+   "verts": 1829,
+   "tris": 1998,
+   "pos": 223240,
+   "nrm": 245188,
+   "uv": 267136,
+   "skin": 281768,
+   "weight": 289084,
+   "index": 296400,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.1298000067472458,
+    -0.1867000013589859
+   ],
+   "max": [
+    0.4993000030517578,
+    0.12860000133514404,
+    0.18700000643730164
+   ]
+  },
+  {
+   "verts": 866,
+   "tris": 698,
+   "pos": 308388,
+   "nrm": 318780,
+   "uv": 329172,
+   "skin": 336100,
+   "weight": 339564,
+   "index": 343028,
+   "indexType": "u16",
+   "min": [
+    -0.4977000057697296,
+    -0.12890000641345978,
+    -0.1867000013589859
+   ],
+   "max": [
+    0.4993000030517578,
+    0.12860000133514404,
+    0.1868000030517578
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 347216,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "channelcat-color.jpg",
+  "mask": "channelcat-mask.png"
+ },
+ "card": "channelcat-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "yellowfin",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 3bcdb6de from 03_sea_openwater/Yellowfin_Tuna.png; tools/animals/fish_animal.py",
+ "height": 0.4148,
+ "length": 0.9984,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4569,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54828,
+   "uv": 109656,
+   "skin": 146208,
+   "weight": 164484,
+   "index": 182760,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.20739999413490295,
+    -0.2198999971151352
+   ],
+   "max": [
+    0.49959999322891235,
+    0.20739999413490295,
+    0.2198999971151352
+   ]
+  },
+  {
+   "verts": 1777,
+   "tris": 2000,
+   "pos": 218760,
+   "nrm": 240084,
+   "uv": 261408,
+   "skin": 275624,
+   "weight": 282732,
+   "index": 289840,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.20739999413490295,
+    -0.2198999971151352
+   ],
+   "max": [
+    0.49880000948905945,
+    0.20469999313354492,
+    0.21899999678134918
+   ]
+  },
+  {
+   "verts": 828,
+   "tris": 700,
+   "pos": 301840,
+   "nrm": 311776,
+   "uv": 321712,
+   "skin": 328336,
+   "weight": 331648,
+   "index": 334960,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.20739999413490295,
+    -0.21250000596046448
+   ],
+   "max": [
+    0.4984000027179718,
+    0.20029999315738678,
+    0.21119999885559082
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 339160,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "yellowfin-color.jpg",
+  "mask": "yellowfin-mask.png"
+ },
+ "card": "yellowfin-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "pumpkinseed",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 2ef9eddf from 05_lake_panfish/Pumpkinseed.png; tools/animals/fish_animal.py",
+ "height": 0.6542,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4162,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 49944,
+   "uv": 99888,
+   "skin": 133184,
+   "weight": 149832,
+   "index": 166480,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.32710000872612,
+    -0.272599995136261
+   ],
+   "max": [
+    0.5,
+    0.32710000872612,
+    0.27250000834465027
+   ]
+  },
+  {
+   "verts": 1665,
+   "tris": 2000,
+   "pos": 202480,
+   "nrm": 222460,
+   "uv": 242440,
+   "skin": 255760,
+   "weight": 262420,
+   "index": 269080,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.32710000872612,
+    -0.26930001378059387
+   ],
+   "max": [
+    0.49639999866485596,
+    0.3257000148296356,
+    0.27250000834465027
+   ]
+  },
+  {
+   "verts": 779,
+   "tris": 700,
+   "pos": 281080,
+   "nrm": 290428,
+   "uv": 299776,
+   "skin": 306008,
+   "weight": 309124,
+   "index": 312240,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.32710000872612,
+    -0.26930001378059387
+   ],
+   "max": [
+    0.4828000068664551,
+    0.3174999952316284,
+    0.2705000042915344
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 316440,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "pumpkinseed-color.jpg",
+  "mask": "pumpkinseed-mask.png"
+ },
+ "card": "pumpkinseed-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

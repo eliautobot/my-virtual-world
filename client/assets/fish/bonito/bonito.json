@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "bonito",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 245bc459 from 03_sea_openwater/Atlantic_Bonito.png; tools/animals/fish_animal.py",
+ "height": 0.3357,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4221,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 50652,
+   "uv": 101304,
+   "skin": 135072,
+   "weight": 151956,
+   "index": 168840,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.16820000112056732,
+    -0.20589999854564667
+   ],
+   "max": [
+    0.5,
+    0.16750000417232513,
+    0.20569999516010284
+   ]
+  },
+  {
+   "verts": 1616,
+   "tris": 2000,
+   "pos": 204840,
+   "nrm": 224232,
+   "uv": 243624,
+   "skin": 256552,
+   "weight": 263016,
+   "index": 269480,
+   "indexType": "u16",
+   "min": [
+    -0.49970000982284546,
+    -0.16820000112056732,
+    -0.20589999854564667
+   ],
+   "max": [
+    0.5,
+    0.16740000247955322,
+    0.20569999516010284
+   ]
+  },
+  {
+   "verts": 716,
+   "tris": 700,
+   "pos": 281480,
+   "nrm": 290072,
+   "uv": 298664,
+   "skin": 304392,
+   "weight": 307256,
+   "index": 310120,
+   "indexType": "u16",
+   "min": [
+    -0.4975000023841858,
+    -0.1665000021457672,
+    -0.20340000092983246
+   ],
+   "max": [
+    0.49570000171661377,
+    0.1606999933719635,
+    0.20559999346733093
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 314320,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "bonito-color.jpg",
+  "mask": "bonito-mask.png"
+ },
+ "card": "bonito-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "redfish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 5ee9f178 from 01_sea_inshore/Red_Drum.png; tools/animals/fish_animal.py",
+ "height": 0.463,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4255,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51060,
+   "uv": 102120,
+   "skin": 136160,
+   "weight": 153180,
+   "index": 170200,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.23149999976158142,
+    -0.2703999876976013
+   ],
+   "max": [
+    0.5,
+    0.23149999976158142,
+    0.2703999876976013
+   ]
+  },
+  {
+   "verts": 1654,
+   "tris": 2000,
+   "pos": 206200,
+   "nrm": 226048,
+   "uv": 245896,
+   "skin": 259128,
+   "weight": 265744,
+   "index": 272360,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.23010000586509705,
+    -0.2703999876976013
+   ],
+   "max": [
+    0.49559998512268066,
+    0.23149999976158142,
+    0.2689000070095062
+   ]
+  },
+  {
+   "verts": 756,
+   "tris": 700,
+   "pos": 284360,
+   "nrm": 293432,
+   "uv": 302504,
+   "skin": 308552,
+   "weight": 311576,
+   "index": 314600,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.22910000383853912,
+    -0.2676999866962433
+   ],
+   "max": [
+    0.49559998512268066,
+    0.219200000166893,
+    0.2678000032901764
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 318800,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "redfish-color.jpg",
+  "mask": "redfish-mask.png"
+ },
+ "card": "redfish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

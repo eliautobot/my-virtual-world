@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "spottedbass",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 99922692 from 06_lake_bass/Spotted_Bass.png; tools/animals/fish_animal.py",
+ "height": 0.3661,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4336,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52032,
+   "uv": 104064,
+   "skin": 138752,
+   "weight": 156096,
+   "index": 173440,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.18359999358654022,
+    -0.16859999299049377
+   ],
+   "max": [
+    0.5,
+    0.18250000476837158,
+    0.16859999299049377
+   ]
+  },
+  {
+   "verts": 1693,
+   "tris": 2000,
+   "pos": 209440,
+   "nrm": 229756,
+   "uv": 250072,
+   "skin": 263616,
+   "weight": 270388,
+   "index": 277160,
+   "indexType": "u16",
+   "min": [
+    -0.49720001220703125,
+    -0.18359999358654022,
+    -0.16859999299049377
+   ],
+   "max": [
+    0.5,
+    0.18250000476837158,
+    0.1670999974012375
+   ]
+  },
+  {
+   "verts": 779,
+   "tris": 700,
+   "pos": 289160,
+   "nrm": 298508,
+   "uv": 307856,
+   "skin": 314088,
+   "weight": 317204,
+   "index": 320320,
+   "indexType": "u16",
+   "min": [
+    -0.49720001220703125,
+    -0.18279999494552612,
+    -0.16740000247955322
+   ],
+   "max": [
+    0.4975000023841858,
+    0.1777999997138977,
+    0.1670999974012375
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 324520,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "spottedbass-color.jpg",
+  "mask": "spottedbass-mask.png"
+ },
+ "card": "spottedbass-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

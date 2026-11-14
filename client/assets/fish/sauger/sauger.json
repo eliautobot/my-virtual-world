@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "sauger",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 35a07261 from 07_lake_trout/Sauger.png; tools/animals/fish_animal.py",
+ "height": 0.3623,
+ "length": 0.999,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4388,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52656,
+   "uv": 105312,
+   "skin": 140416,
+   "weight": 157968,
+   "index": 175520,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.18160000443458557,
+    -0.17020000517368317
+   ],
+   "max": [
+    0.49900001287460327,
+    0.18070000410079956,
+    0.17000000178813934
+   ]
+  },
+  {
+   "verts": 1692,
+   "tris": 2000,
+   "pos": 211520,
+   "nrm": 231824,
+   "uv": 252128,
+   "skin": 265664,
+   "weight": 272432,
+   "index": 279200,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.18160000443458557,
+    -0.16940000653266907
+   ],
+   "max": [
+    0.49630001187324524,
+    0.18050000071525574,
+    0.17000000178813934
+   ]
+  },
+  {
+   "verts": 784,
+   "tris": 700,
+   "pos": 291200,
+   "nrm": 300608,
+   "uv": 310016,
+   "skin": 316288,
+   "weight": 319424,
+   "index": 322560,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.17990000545978546,
+    -0.16750000417232513
+   ],
+   "max": [
+    0.49630001187324524,
+    0.17870000004768372,
+    0.1671999990940094
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 326760,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "sauger-color.jpg",
+  "mask": "sauger-mask.png"
+ },
+ "card": "sauger-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

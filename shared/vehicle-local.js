@@ -5,7 +5,7 @@ import {buildVehicleStatics,bodyOffset} from './vehicle-world.js';
 import {TerrainColliders} from './terrain-physics.js';
 import {applyWater} from './vehicle-water.js';
 import {PHYSICS_GROUPS} from './driving-classic/physics-collision-groups.mjs';
-import {setBoost,boostBefore,boostAfter} from './vehicle-boost.js';
+import {powerAfter} from './vehicle-power.js';
 export const LOCAL_STEP=1/60;
 const ID={x:0,y:0,z:0,w:1};
 const cross=(w,o)=>({x:w.y*o.z-w.z*o.y,y:w.z*o.x-w.x*o.z,z:w.x*o.y-w.y*o.x});
@@ -36,7 +36,7 @@ export class LocalVehicleSim{
  advance(dt,input,sync=null){
   if(this.terrain&&this.cur)this.terrain.update([{x:this.cur.x,z:this.cur.z}]);
   this.acc+=Math.max(0,Math.min(dt,.25));let n=0;
-  while(this.acc>=LOCAL_STEP&&n<8){sync?.(this);this.dynamics.setControls(this.id,input);setBoost(this.dynamics,this.id,input?.boost===true);if(this.island)applyWater(this.dynamics,this.island,LOCAL_STEP);boostBefore(this.dynamics,LOCAL_STEP);this.dynamics.beforeStep(LOCAL_STEP);boostAfter(this.dynamics,LOCAL_STEP);this.physics.step();this.dynamics.afterStep(LOCAL_STEP);
+  while(this.acc>=LOCAL_STEP&&n<8){sync?.(this);this.dynamics.setControls(this.id,input);if(this.island)applyWater(this.dynamics,this.island,LOCAL_STEP);this.dynamics.beforeStep(LOCAL_STEP);powerAfter(this.dynamics,LOCAL_STEP);this.physics.step();this.dynamics.afterStep(LOCAL_STEP);
    this.acc-=LOCAL_STEP;n++;this.steps++;this.prev=this.cur;this.cur=this.snapshot();}
   if(this.acc>=LOCAL_STEP)this.acc=0;// a long stall drops time instead of fast-forwarding the car
   return n;

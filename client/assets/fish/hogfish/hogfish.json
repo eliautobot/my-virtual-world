@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "hogfish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project c7e3e9fb from 02_sea_reef/Hogfish.png; tools/animals/fish_animal.py",
+ "height": 0.5331,
+ "length": 0.9984,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4300,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51600,
+   "uv": 103200,
+   "skin": 137600,
+   "weight": 154800,
+   "index": 172000,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.266400009393692,
+    -0.2468000054359436
+   ],
+   "max": [
+    0.499099999666214,
+    0.26669999957084656,
+    0.2468000054359436
+   ]
+  },
+  {
+   "verts": 1709,
+   "tris": 2000,
+   "pos": 208000,
+   "nrm": 228508,
+   "uv": 249016,
+   "skin": 262688,
+   "weight": 269524,
+   "index": 276360,
+   "indexType": "u16",
+   "min": [
+    -0.498199999332428,
+    -0.266400009393692,
+    -0.2460000067949295
+   ],
+   "max": [
+    0.499099999666214,
+    0.26669999957084656,
+    0.24570000171661377
+   ]
+  },
+  {
+   "verts": 799,
+   "tris": 700,
+   "pos": 288360,
+   "nrm": 297948,
+   "uv": 307536,
+   "skin": 313928,
+   "weight": 317124,
+   "index": 320320,
+   "indexType": "u16",
+   "min": [
+    -0.498199999332428,
+    -0.266400009393692,
+    -0.2460000067949295
+   ],
+   "max": [
+    0.4934999942779541,
+    0.26669999957084656,
+    0.24570000171661377
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 324520,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "hogfish-color.jpg",
+  "mask": "hogfish-mask.png"
+ },
+ "card": "hogfish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "ghostmarlin",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project fa1d1a74 from 10_legends/The_Ghost_Marlin.png; tools/animals/fish_animal.py",
+ "height": 0.4516,
+ "length": 0.9989,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4504,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54048,
+   "uv": 108096,
+   "skin": 144128,
+   "weight": 162144,
+   "index": 180160,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.2257000058889389,
+    -0.18569999933242798
+   ],
+   "max": [
+    0.49889999628067017,
+    0.22589999437332153,
+    0.18629999458789825
+   ]
+  },
+  {
+   "verts": 1756,
+   "tris": 2000,
+   "pos": 216160,
+   "nrm": 237232,
+   "uv": 258304,
+   "skin": 272352,
+   "weight": 279376,
+   "index": 286400,
+   "indexType": "u16",
+   "min": [
+    -0.499099999666214,
+    -0.22540000081062317,
+    -0.18459999561309814
+   ],
+   "max": [
+    0.49889999628067017,
+    0.22499999403953552,
+    0.18629999458789825
+   ]
+  },
+  {
+   "verts": 813,
+   "tris": 700,
+   "pos": 298400,
+   "nrm": 308156,
+   "uv": 317912,
+   "skin": 324416,
+   "weight": 327668,
+   "index": 330920,
+   "indexType": "u16",
+   "min": [
+    -0.499099999666214,
+    -0.22540000081062317,
+    -0.18440000712871552
+   ],
+   "max": [
+    0.49889999628067017,
+    0.2223999947309494,
+    0.18629999458789825
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 335120,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "ghostmarlin-color.jpg",
+  "mask": "ghostmarlin-mask.png"
+ },
+ "card": "ghostmarlin-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

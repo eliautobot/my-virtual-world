@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "perch",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project c93adc89 from 05_lake_panfish/Yellow_Perch.png; tools/animals/fish_animal.py",
+ "height": 0.4612,
+ "length": 0.9991,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4296,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51552,
+   "uv": 103104,
+   "skin": 137472,
+   "weight": 154656,
+   "index": 171840,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.2303999960422516,
+    -0.18299999833106995
+   ],
+   "max": [
+    0.4997999966144562,
+    0.23080000281333923,
+    0.18400000035762787
+   ]
+  },
+  {
+   "verts": 1653,
+   "tris": 2000,
+   "pos": 207840,
+   "nrm": 227676,
+   "uv": 247512,
+   "skin": 260736,
+   "weight": 267348,
+   "index": 273960,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.2295999974012375,
+    -0.18299999833106995
+   ],
+   "max": [
+    0.4982999861240387,
+    0.23080000281333923,
+    0.18400000035762787
+   ]
+  },
+  {
+   "verts": 753,
+   "tris": 700,
+   "pos": 285960,
+   "nrm": 294996,
+   "uv": 304032,
+   "skin": 310056,
+   "weight": 313068,
+   "index": 316080,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.22859999537467957,
+    -0.18209999799728394
+   ],
+   "max": [
+    0.4952000081539154,
+    0.22869999706745148,
+    0.18400000035762787
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 320280,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "perch-color.jpg",
+  "mask": "perch-mask.png"
+ },
+ "card": "perch-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

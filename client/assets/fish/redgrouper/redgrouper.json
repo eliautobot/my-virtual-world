@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "redgrouper",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 7340a348 from 02_sea_reef/Red_Grouper.png; tools/animals/fish_animal.py",
+ "height": 0.451,
+ "length": 0.9997,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4394,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52728,
+   "uv": 105456,
+   "skin": 140608,
+   "weight": 158184,
+   "index": 175760,
+   "indexType": "u16",
+   "min": [
+    -0.49970000982284546,
+    -0.22540000081062317,
+    -0.23090000450611115
+   ],
+   "max": [
+    0.5,
+    0.225600004196167,
+    0.23119999468326569
+   ]
+  },
+  {
+   "verts": 1717,
+   "tris": 2000,
+   "pos": 211760,
+   "nrm": 232364,
+   "uv": 252968,
+   "skin": 266704,
+   "weight": 273572,
+   "index": 280440,
+   "indexType": "u16",
+   "min": [
+    -0.49970000982284546,
+    -0.22499999403953552,
+    -0.23080000281333923
+   ],
+   "max": [
+    0.4993000030517578,
+    0.225600004196167,
+    0.23119999468326569
+   ]
+  },
+  {
+   "verts": 795,
+   "tris": 700,
+   "pos": 292440,
+   "nrm": 301980,
+   "uv": 311520,
+   "skin": 317880,
+   "weight": 321060,
+   "index": 324240,
+   "indexType": "u16",
+   "min": [
+    -0.4977000057697296,
+    -0.22499999403953552,
+    -0.22509999573230743
+   ],
+   "max": [
+    0.4993000030517578,
+    0.225600004196167,
+    0.23019999265670776
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 328440,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "redgrouper-color.jpg",
+  "mask": "redgrouper-mask.png"
+ },
+ "card": "redgrouper-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

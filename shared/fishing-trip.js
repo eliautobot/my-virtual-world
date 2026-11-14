@@ -205,7 +205,7 @@ export const lureMatch = (s, lure) => (s.lures.includes(lure) ? 1 : 0.06);
 /**
  * What bites: the server's roll (its own RNG: the browser can't know or pick). ground: one of the trip's (or null:
  * open water); ctx: { lure, hour, difficulty, luck (0..), minute (into the trip), legend (the trip's), water, size
- * (the trip's size bias), trolling }. → { kind: 'fish', species, u, cm, kg, size, slots } | { kind: 'find', id } |
+ * (the trip's size bias), trolling, maxKg, level (the angler's: bigger, rarer ones to the higher ranks) }. → { kind: 'fish', species, u, cm, kg, size, slots } | { kind: 'find', id } |
  * null (nothing that takes this lure here).
  */
 export function rollBite(rng, ground, ctx) {
@@ -219,18 +219,20 @@ export function rollBite(rng, ground, ctx) {
   // junk and treasure from the bottom
   if ((lure.kind === 'bottom' || ground?.kind === 'wreck') && rng.chance(ground?.kind === 'wreck' ? 0.07 : 0.035)) return { kind: 'find', id: rng.weighted(FINDS.map(f => [f.id, f.w])) };
   const pop = ground ? ground.pop : population(OPEN[water], water, ctx.difficulty);
+  // (the higher the angler's rank, the more often the rarer and the bigger ones come: 2026-11-13 — up to +40 % at level 18)
+  const rankUp = Math.min(0.4, Math.max(0, ((ctx.level || 1) - 1) * 0.024));
   const entries = [];
   for (const [id, w0] of pop) {
     const s = speciesOf(id);
     let w = w0 * lureMatch(s, ctx.lure) * (0.15 + activity(s, ctx.hour));
     if (lure.kind === 'troll' && !s.lures.includes('skirt')) w *= 0.2;
-    if (s.rarity !== 'common') w *= 1 + (ctx.luck || 0) * (s.rarity === 'uncommon' ? 0.5 : 1.2);
+    if (s.rarity !== 'common') w *= 1 + (ctx.luck || 0) * (s.rarity === 'uncommon' ? 0.5 : 1.2) + rankUp * (s.rarity === 'uncommon' ? 0.5 : 1);
     if (w > 0.001) entries.push([s, w]);
   }
   if (!entries.length) return null;
   const s = rng.weighted(entries);
   // its size: bigger ones on harder trips and with luck (u nearer 1)
-  const bias = 1 + (ctx.size || 0) * 1.4 + (ctx.luck || 0) * 1.5;
+  const bias = 1 + (ctx.size || 0) * 1.4 + (ctx.luck || 0) * 1.5 + rankUp;
   let u = Math.pow(rng.next(), 1 / bias), f = fishOf(s, u);
   // one too heavy for the angler's rod (ctx.maxKg) is usually a smaller one (2026-10-15, polish: a beginner lost one
   // fish in eight to "too heavy"); now and then the big one still comes — the one that got away, and a reason to upgrade

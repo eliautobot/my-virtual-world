@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "yellowtail",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project c7f93018 from 02_sea_reef/Yellowtail_Snapper.png; tools/animals/fish_animal.py",
+ "height": 0.3994,
+ "length": 0.9981,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4290,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51480,
+   "uv": 102960,
+   "skin": 137280,
+   "weight": 154440,
+   "index": 171600,
+   "indexType": "u16",
+   "min": [
+    -0.499099999666214,
+    -0.1995999962091446,
+    -0.22339999675750732
+   ],
+   "max": [
+    0.49900001287460327,
+    0.19979999959468842,
+    0.22360000014305115
+   ]
+  },
+  {
+   "verts": 1711,
+   "tris": 2000,
+   "pos": 207600,
+   "nrm": 228132,
+   "uv": 248664,
+   "skin": 262352,
+   "weight": 269196,
+   "index": 276040,
+   "indexType": "u16",
+   "min": [
+    -0.49900001287460327,
+    -0.19830000400543213,
+    -0.22339999675750732
+   ],
+   "max": [
+    0.49709999561309814,
+    0.1988999992609024,
+    0.22360000014305115
+   ]
+  },
+  {
+   "verts": 785,
+   "tris": 700,
+   "pos": 288040,
+   "nrm": 297460,
+   "uv": 306880,
+   "skin": 313160,
+   "weight": 316300,
+   "index": 319440,
+   "indexType": "u16",
+   "min": [
+    -0.49900001287460327,
+    -0.19830000400543213,
+    -0.22339999675750732
+   ],
+   "max": [
+    0.49709999561309814,
+    0.19509999454021454,
+    0.22360000014305115
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 323640,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "yellowtail-color.jpg",
+  "mask": "yellowtail-mask.png"
+ },
+ "card": "yellowtail-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

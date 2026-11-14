@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "oldwhiskers",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project dde70a68 from 10_legends/Old_Whiskers.png; tools/animals/fish_animal.py",
+ "height": 0.4142,
+ "length": 0.9992,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4501,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54012,
+   "uv": 108024,
+   "skin": 144032,
+   "weight": 162036,
+   "index": 180040,
+   "indexType": "u16",
+   "min": [
+    -0.49970000982284546,
+    -0.20749999582767487,
+    -0.20010000467300415
+   ],
+   "max": [
+    0.49950000643730164,
+    0.20669999718666077,
+    0.20020000636577606
+   ]
+  },
+  {
+   "verts": 1777,
+   "tris": 2000,
+   "pos": 216040,
+   "nrm": 237364,
+   "uv": 258688,
+   "skin": 272904,
+   "weight": 280012,
+   "index": 287120,
+   "indexType": "u16",
+   "min": [
+    -0.4977000057697296,
+    -0.2069000005722046,
+    -0.19699999690055847
+   ],
+   "max": [
+    0.4975999891757965,
+    0.20499999821186066,
+    0.1987999975681305
+   ]
+  },
+  {
+   "verts": 833,
+   "tris": 698,
+   "pos": 299120,
+   "nrm": 309116,
+   "uv": 319112,
+   "skin": 325776,
+   "weight": 329108,
+   "index": 332440,
+   "indexType": "u16",
+   "min": [
+    -0.48330000042915344,
+    -0.20669999718666077,
+    -0.19699999690055847
+   ],
+   "max": [
+    0.49570000171661377,
+    0.20419999957084656,
+    0.1987999975681305
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 336628,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "oldwhiskers-color.jpg",
+  "mask": "oldwhiskers-mask.png"
+ },
+ "card": "oldwhiskers-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

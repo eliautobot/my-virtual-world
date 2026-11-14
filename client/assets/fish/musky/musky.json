@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "musky",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project cb5112cf from 08_lake_toothy/Muskellunge.png; tools/animals/fish_animal.py",
+ "height": 0.2774,
+ "length": 0.9995,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4416,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52992,
+   "uv": 105984,
+   "skin": 141312,
+   "weight": 158976,
+   "index": 176640,
+   "indexType": "u16",
+   "min": [
+    -0.4999000132083893,
+    -0.13830000162124634,
+    -0.11699999868869781
+   ],
+   "max": [
+    0.49959999322891235,
+    0.13910000026226044,
+    0.11699999868869781
+   ]
+  },
+  {
+   "verts": 1717,
+   "tris": 2000,
+   "pos": 212640,
+   "nrm": 233244,
+   "uv": 253848,
+   "skin": 267584,
+   "weight": 274452,
+   "index": 281320,
+   "indexType": "u16",
+   "min": [
+    -0.49939998984336853,
+    -0.1379999965429306,
+    -0.11620000004768372
+   ],
+   "max": [
+    0.4993000030517578,
+    0.13750000298023224,
+    0.11509999632835388
+   ]
+  },
+  {
+   "verts": 804,
+   "tris": 700,
+   "pos": 293320,
+   "nrm": 302968,
+   "uv": 312616,
+   "skin": 319048,
+   "weight": 322264,
+   "index": 325480,
+   "indexType": "u16",
+   "min": [
+    -0.49939998984336853,
+    -0.13779999315738678,
+    -0.1160999983549118
+   ],
+   "max": [
+    0.4993000030517578,
+    0.13510000705718994,
+    0.11509999632835388
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 329680,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "musky-color.jpg",
+  "mask": "musky-mask.png"
+ },
+ "card": "musky-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

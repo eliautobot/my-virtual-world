@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "cobia",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 0905651f from 03_sea_openwater/Cobia.png; tools/animals/fish_animal.py",
+ "height": 0.3518,
+ "length": 0.9983,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4407,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52884,
+   "uv": 105768,
+   "skin": 141024,
+   "weight": 158652,
+   "index": 176280,
+   "indexType": "u16",
+   "min": [
+    -0.4984000027179718,
+    -0.17589999735355377,
+    -0.21549999713897705
+   ],
+   "max": [
+    0.4999000132083893,
+    0.17589999735355377,
+    0.21549999713897705
+   ]
+  },
+  {
+   "verts": 1783,
+   "tris": 2000,
+   "pos": 212280,
+   "nrm": 233676,
+   "uv": 255072,
+   "skin": 269336,
+   "weight": 276468,
+   "index": 283600,
+   "indexType": "u16",
+   "min": [
+    -0.4984000027179718,
+    -0.17589999735355377,
+    -0.21389999985694885
+   ],
+   "max": [
+    0.4999000132083893,
+    0.17440000176429749,
+    0.21549999713897705
+   ]
+  },
+  {
+   "verts": 848,
+   "tris": 696,
+   "pos": 295600,
+   "nrm": 305776,
+   "uv": 315952,
+   "skin": 322736,
+   "weight": 326128,
+   "index": 329520,
+   "indexType": "u16",
+   "min": [
+    -0.49399998784065247,
+    -0.17419999837875366,
+    -0.20810000598430634
+   ],
+   "max": [
+    0.4999000132083893,
+    0.17440000176429749,
+    0.20880000293254852
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 333696,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "cobia-color.jpg",
+  "mask": "cobia-mask.png"
+ },
+ "card": "cobia-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

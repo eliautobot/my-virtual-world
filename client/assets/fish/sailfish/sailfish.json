@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "sailfish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project cfea5510 from 03_sea_openwater/Sailfish.png; tools/animals/fish_animal.py",
+ "height": 0.4551,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4574,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54888,
+   "uv": 109776,
+   "skin": 146368,
+   "weight": 164664,
+   "index": 182960,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.22709999978542328,
+    -0.19679999351501465
+   ],
+   "max": [
+    0.5,
+    0.2280000001192093,
+    0.19679999351501465
+   ]
+  },
+  {
+   "verts": 1851,
+   "tris": 2000,
+   "pos": 218960,
+   "nrm": 241172,
+   "uv": 263384,
+   "skin": 278192,
+   "weight": 285596,
+   "index": 293000,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.22689999639987946,
+    -0.19660000503063202
+   ],
+   "max": [
+    0.5,
+    0.2280000001192093,
+    0.19679999351501465
+   ]
+  },
+  {
+   "verts": 875,
+   "tris": 696,
+   "pos": 305000,
+   "nrm": 315500,
+   "uv": 326000,
+   "skin": 333000,
+   "weight": 336500,
+   "index": 340000,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.22689999639987946,
+    -0.19660000503063202
+   ],
+   "max": [
+    0.5,
+    0.22709999978542328,
+    0.1940000057220459
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 344176,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "sailfish-color.jpg",
+  "mask": "sailfish-mask.png"
+ },
+ "card": "sailfish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

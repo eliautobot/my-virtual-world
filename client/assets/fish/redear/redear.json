@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "redear",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 688b2160 from 05_lake_panfish/Redear_Sunfish.png; tools/animals/fish_animal.py",
+ "height": 0.6137,
+ "length": 0.9995,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4349,
+   "tris": 5999,
+   "pos": 0,
+   "nrm": 52188,
+   "uv": 104376,
+   "skin": 139168,
+   "weight": 156564,
+   "index": 173960,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.30649998784065247,
+    -0.2498999983072281
+   ],
+   "max": [
+    0.5,
+    0.30720001459121704,
+    0.2506999969482422
+   ]
+  },
+  {
+   "verts": 1785,
+   "tris": 1999,
+   "pos": 209956,
+   "nrm": 231376,
+   "uv": 252796,
+   "skin": 267076,
+   "weight": 274216,
+   "index": 281356,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.30630001425743103,
+    -0.2498999983072281
+   ],
+   "max": [
+    0.49810001254081726,
+    0.3066999912261963,
+    0.2506999969482422
+   ]
+  },
+  {
+   "verts": 853,
+   "tris": 699,
+   "pos": 293352,
+   "nrm": 303588,
+   "uv": 313824,
+   "skin": 320648,
+   "weight": 324060,
+   "index": 327472,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.30630001425743103,
+    -0.24789999425411224
+   ],
+   "max": [
+    0.4765999913215637,
+    0.3066999912261963,
+    0.2492000013589859
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 331668,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "redear-color.jpg",
+  "mask": "redear-mask.png"
+ },
+ "card": "redear-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

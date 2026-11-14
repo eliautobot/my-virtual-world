@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "bluegill",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project a16e9af7 from 05_lake_panfish/Bluegill.png; tools/animals/fish_animal.py",
+ "height": 0.6349,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4289,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51468,
+   "uv": 102936,
+   "skin": 137248,
+   "weight": 154404,
+   "index": 171560,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.3174000084400177,
+    -0.275299996137619
+   ],
+   "max": [
+    0.5,
+    0.3174999952316284,
+    0.2754000127315521
+   ]
+  },
+  {
+   "verts": 1617,
+   "tris": 2000,
+   "pos": 207560,
+   "nrm": 226964,
+   "uv": 246368,
+   "skin": 259304,
+   "weight": 265772,
+   "index": 272240,
+   "indexType": "u16",
+   "min": [
+    -0.4968999922275543,
+    -0.31529998779296875,
+    -0.275299996137619
+   ],
+   "max": [
+    0.5,
+    0.3165999948978424,
+    0.2754000127315521
+   ]
+  },
+  {
+   "verts": 737,
+   "tris": 700,
+   "pos": 284240,
+   "nrm": 293084,
+   "uv": 301928,
+   "skin": 307824,
+   "weight": 310772,
+   "index": 313720,
+   "indexType": "u16",
+   "min": [
+    -0.4968999922275543,
+    -0.31529998779296875,
+    -0.2727999985218048
+   ],
+   "max": [
+    0.5,
+    0.30889999866485596,
+    0.27250000834465027
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 317920,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "bluegill-color.jpg",
+  "mask": "bluegill-mask.png"
+ },
+ "card": "bluegill-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

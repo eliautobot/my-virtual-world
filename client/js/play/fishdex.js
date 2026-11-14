@@ -10,7 +10,7 @@ import { getJSON } from '../core/net.js';
 import { SPECIES, RARITY, speciesOf, toLb } from '/shared/fish-species.js';
 import { TRIPS, GROUNDS, OPEN } from '/shared/fishing-trip.js';
 import { LURE_BY_ID } from '/shared/fishing-gear.js';
-import { catchModel } from '../render/fish-models.js';
+import { catchModel, fishCard, fishModelsReady } from '../render/fish-models.js';
 
 let app = null, E = {}, data = null, sel = null, filter = 'all', only = 'all', loading = false;
 const pics = new Map();   // species → a picture (data URL), drawn once
@@ -101,9 +101,12 @@ function dropRenderer() { if (!R || drawing) return; R.dispose(); R.forceContext
 /** Draws the pictures not drawn yet (the listed ones first), a few a frame, then shows them. */
 async function drawPics() {
   if (drawing) return;
-  const want = [...listed(), ...SPECIES].filter((s, i, a) => !pics.has(s.id) && a.indexOf(s) === i);
-  if (!want.length) return;
   drawing = true;
+  // (a species with a Tripo model has its picture made with it: its card, 2026-11-13)
+  await fishModelsReady();
+  for (const s of SPECIES) { const c = !pics.has(s.id) && fishCard(s.id); if (c) pics.set(s.id, c); }
+  const want = [...listed(), ...SPECIES].filter((s, i, a) => !pics.has(s.id) && a.indexOf(s) === i);
+  if (!want.length) { drawing = false; render(); return; }
   try {
     const r = renderer();
     for (let k = 0; k < want.length; k++) {

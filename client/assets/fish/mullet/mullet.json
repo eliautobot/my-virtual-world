@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "mullet",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 8e963322 from 01_sea_inshore/Striped_Mullet.png; tools/animals/fish_animal.py",
+ "height": 0.322,
+ "length": 0.9991,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4421,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53052,
+   "uv": 106104,
+   "skin": 141472,
+   "weight": 159156,
+   "index": 176840,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.16120000183582306,
+    -0.17010000348091125
+   ],
+   "max": [
+    0.49959999322891235,
+    0.1607999950647354,
+    0.17090000212192535
+   ]
+  },
+  {
+   "verts": 1747,
+   "tris": 2000,
+   "pos": 212840,
+   "nrm": 233804,
+   "uv": 254768,
+   "skin": 268744,
+   "weight": 275732,
+   "index": 282720,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.16099999845027924,
+    -0.16930000483989716
+   ],
+   "max": [
+    0.49959999322891235,
+    0.1606999933719635,
+    0.17090000212192535
+   ]
+  },
+  {
+   "verts": 823,
+   "tris": 700,
+   "pos": 294720,
+   "nrm": 304596,
+   "uv": 314472,
+   "skin": 321056,
+   "weight": 324348,
+   "index": 327640,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.1590999960899353,
+    -0.1679999977350235
+   ],
+   "max": [
+    0.49729999899864197,
+    0.15680000185966492,
+    0.16949999332427979
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 331840,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "mullet-color.jpg",
+  "mask": "mullet-mask.png"
+ },
+ "card": "mullet-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

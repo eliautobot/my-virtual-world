@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "alligatorgar",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project e288a2aa from 09_lake_bottom/Alligator_Gar.png; tools/animals/fish_animal.py",
+ "height": 0.2055,
+ "length": 0.9983,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4474,
+   "tris": 5999,
+   "pos": 0,
+   "nrm": 53688,
+   "uv": 107376,
+   "skin": 143168,
+   "weight": 161064,
+   "index": 178960,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.10270000249147415,
+    -0.18729999661445618
+   ],
+   "max": [
+    0.49950000643730164,
+    0.10279999673366547,
+    0.18799999356269836
+   ]
+  },
+  {
+   "verts": 1928,
+   "tris": 1999,
+   "pos": 214956,
+   "nrm": 238092,
+   "uv": 261228,
+   "skin": 276652,
+   "weight": 284364,
+   "index": 292076,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.10249999910593033,
+    -0.18729999661445618
+   ],
+   "max": [
+    0.49950000643730164,
+    0.10109999775886536,
+    0.18799999356269836
+   ]
+  },
+  {
+   "verts": 1095,
+   "tris": 855,
+   "pos": 304072,
+   "nrm": 317212,
+   "uv": 330352,
+   "skin": 339112,
+   "weight": 343492,
+   "index": 347872,
+   "indexType": "u16",
+   "min": [
+    -0.4968000054359436,
+    -0.09880000352859497,
+    -0.18729999661445618
+   ],
+   "max": [
+    0.4959999918937683,
+    0.10080000013113022,
+    0.18799999356269836
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 353004,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "alligatorgar-color.jpg",
+  "mask": "alligatorgar-mask.png"
+ },
+ "card": "alligatorgar-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

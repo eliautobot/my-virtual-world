@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "bowfin",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 77ff6842 from 08_lake_toothy/Bowfin.png; tools/animals/fish_animal.py",
+ "height": 0.3382,
+ "length": 0.9999,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4054,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 48648,
+   "uv": 97296,
+   "skin": 129728,
+   "weight": 145944,
+   "index": 162160,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.1687999963760376,
+    -0.16590000689029694
+   ],
+   "max": [
+    0.4999000132083893,
+    0.16940000653266907,
+    0.1657000035047531
+   ]
+  },
+  {
+   "verts": 1568,
+   "tris": 2000,
+   "pos": 198160,
+   "nrm": 216976,
+   "uv": 235792,
+   "skin": 248336,
+   "weight": 254608,
+   "index": 260880,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.16830000281333923,
+    -0.16590000689029694
+   ],
+   "max": [
+    0.4986000061035156,
+    0.16850000619888306,
+    0.1657000035047531
+   ]
+  },
+  {
+   "verts": 711,
+   "tris": 700,
+   "pos": 272880,
+   "nrm": 281412,
+   "uv": 289944,
+   "skin": 295632,
+   "weight": 298476,
+   "index": 301320,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.16830000281333923,
+    -0.16590000689029694
+   ],
+   "max": [
+    0.4986000061035156,
+    0.16850000619888306,
+    0.1657000035047531
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 305520,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "bowfin-color.jpg",
+  "mask": "bowfin-mask.png"
+ },
+ "card": "bowfin-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

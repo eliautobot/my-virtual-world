@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "flounder",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 68dc30f4 from 01_sea_inshore/Southern_Flounder.png; tools/animals/fish_animal.py",
+ "height": 0.6544,
+ "length": 0.9988,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4143,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 49716,
+   "uv": 99432,
+   "skin": 132576,
+   "weight": 149148,
+   "index": 165720,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.3269999921321869,
+    -0.24809999763965607
+   ],
+   "max": [
+    0.5,
+    0.32739999890327454,
+    0.2475000023841858
+   ]
+  },
+  {
+   "verts": 1658,
+   "tris": 2000,
+   "pos": 201720,
+   "nrm": 221616,
+   "uv": 241512,
+   "skin": 254776,
+   "weight": 261408,
+   "index": 268040,
+   "indexType": "u16",
+   "min": [
+    -0.49810001254081726,
+    -0.32510000467300415,
+    -0.24699999392032623
+   ],
+   "max": [
+    0.4966999888420105,
+    0.325300008058548,
+    0.24699999392032623
+   ]
+  },
+  {
+   "verts": 784,
+   "tris": 700,
+   "pos": 280040,
+   "nrm": 289448,
+   "uv": 298856,
+   "skin": 305128,
+   "weight": 308264,
+   "index": 311400,
+   "indexType": "u16",
+   "min": [
+    -0.49810001254081726,
+    -0.32170000672340393,
+    -0.24609999358654022
+   ],
+   "max": [
+    0.49239999055862427,
+    0.3158999979496002,
+    0.24699999392032623
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 315600,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "flounder-color.jpg",
+  "mask": "flounder-mask.png"
+ },
+ "card": "flounder-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

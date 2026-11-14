@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "seatrout",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 93764574 from 01_sea_inshore/Spotted_Seatrout.png; tools/animals/fish_animal.py",
+ "height": 0.418,
+ "length": 0.9993,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4242,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 50904,
+   "uv": 101808,
+   "skin": 135744,
+   "weight": 152712,
+   "index": 169680,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.20900000631809235,
+    -0.16369999945163727
+   ],
+   "max": [
+    0.5,
+    0.20900000631809235,
+    0.16349999606609344
+   ]
+  },
+  {
+   "verts": 1675,
+   "tris": 2000,
+   "pos": 205680,
+   "nrm": 225780,
+   "uv": 245880,
+   "skin": 259280,
+   "weight": 265980,
+   "index": 272680,
+   "indexType": "u16",
+   "min": [
+    -0.4993000030517578,
+    -0.2076999992132187,
+    -0.163100004196167
+   ],
+   "max": [
+    0.499099999666214,
+    0.20900000631809235,
+    0.16349999606609344
+   ]
+  },
+  {
+   "verts": 768,
+   "tris": 700,
+   "pos": 284680,
+   "nrm": 293896,
+   "uv": 303112,
+   "skin": 309256,
+   "weight": 312328,
+   "index": 315400,
+   "indexType": "u16",
+   "min": [
+    -0.49799999594688416,
+    -0.2076999992132187,
+    -0.163100004196167
+   ],
+   "max": [
+    0.4975999891757965,
+    0.2087000012397766,
+    0.16349999606609344
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 319600,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "seatrout-color.jpg",
+  "mask": "seatrout-mask.png"
+ },
+ "card": "seatrout-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

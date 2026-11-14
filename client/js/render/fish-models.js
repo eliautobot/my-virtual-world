@@ -194,3 +194,29 @@ export function catchModel(what, shadow = true) {
   o.castShadow = shadow; o.name = `fish-${what.species}`;
   return o;
 }
+
+// ------------------------------------------------------------------ the modelled fish (Tripo, 2026-11-13)
+// The owner: "replacing all the fishing game fishes and items using new tripo model, and new animations" — each species
+// (and each find) that has one is drawn from its baked, skinned model (tools/animals/fish_animal.py → /assets/fish/<id>/:
+// the manifest and meshes as the wildlife's, render/fauna-skinned.js; one metre long nose to tail along +x, a find at its
+// own size), with its clips: rest (held up: hanging still, then flopping), swim, run (thrashing, leaping). The ones
+// without a model yet keep the built one above. /assets/fish/index.json lists the models there are.
+const modelIndex = new Set();
+let indexReady = null;
+/** The ids that have a model: a Promise of the Set (empty if the list can't load). */
+export function fishModelsReady() {
+  return (indexReady ||= fetch('/assets/fish/index.json').then(r => (r.ok ? r.json() : [])).then(L => { for (const id of L.models || L) modelIndex.add(id); return modelIndex; }).catch(() => modelIndex));
+}
+/** The ids that have a model, as far as known now (a Set, filled once the list has loaded). */
+export function fishModels() { fishModelsReady(); return modelIndex; }
+const assetCache = new Map();
+/** The skinned model of a species or find (a Promise of the loaded asset, or of null when it has none or can't load). */
+export function fishAsset(id) {
+  return fishModelsReady().then(S => {
+    if (!id || !S.has(id)) return null;
+    if (!assetCache.has(id)) assetCache.set(id, import('./fauna-skinned.js').then(m => m.loadSkinned(`/assets/fish/${id}/${id}.json`)));
+    return assetCache.get(id);
+  });
+}
+/** Its picture for the Fishdex (side on, on a clear ground), or null when it has no model. */
+export function fishCard(id) { return fishModels().has(id) ? `/assets/fish/${id}/${id}-card.png` : null; }

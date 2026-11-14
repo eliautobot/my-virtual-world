@@ -8,17 +8,20 @@
 // in (render/spray.js); the drops that fall back ring the water again. Ripples beyond the water's marks (a far
 // ground's) are drawn as soft rings over it. Pooled and cheap: one line, one lure, one ring mesh, one fish.
 import * as THREE from 'three';
-import { catchModel } from './fish-models.js';
+import { catchModel, fishAsset } from './fish-models.js';
 import { waterMarks } from './water-marks.js';
 import { spray } from './spray.js';
 
 const LINE_PTS = 28, RINGS = 24;
 const _v = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _e = new THREE.Euler();
+const _turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);   // (a model's +x, nose, to the +z the game aims)
 
 export class FishingFx {
   /** @param stage the page's Stage (render/scene.js) */
-  constructor(stage) {
-    const scene = this.scene = stage.scene;
+  /** @param stage the page's Stage (render/scene.js) @param {{ uw?: function }} o uw: the terrain's under-the-water
+   *  look for a material (render/terrain.js uw), so a hooked fish is seen through the water */
+  constructor(stage, o = {}) {
+    const scene = this.scene = stage.scene; this.uw = o.uw || null;
     this.marks = waterMarks(stage); this.spray = spray(stage, this.marks);
     // the line
     const lg = new THREE.BufferGeometry(); this.lp = new Float32Array(LINE_PTS * 3);
@@ -58,18 +61,67 @@ export class FishingFx {
     this.shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false }));
     this.shadow.visible = false; this.shadow.renderOrder = 2; this.shadow.name = 'fish-shadow';
     this.fishObj = null; this.fishKey = '';
+    // the modelled fish (Tripo, 2026-11-13): one skinned draw per species caught so far, its clip flopping when held
+    // up, thrashing when it leaps (render/fish-models.js fishAsset)
+    this.packs = new Map(); this.packOn = null; this.stage = stage;
     scene.add(this.lineObj, this.bobber, this.lureObj, this.aimRing, this.aimArc, this.rings, this.shadow);
   }
-  /** The line from the rod's tip to `end`; sag: how far it hangs (0 tight … 1 lying slack on the water), down to `floor` at most. */
-  line(tip, end, sag = 0, floor = -Infinity) {
-    if (!tip || !end) { this.lineObj.visible = false; return; }
-    const L = tip.distanceTo(end), drop = sag * Math.min(4, 0.25 + L * 0.18);
-    for (let i = 0; i < LINE_PTS; i++) {
-      const u = i / (LINE_PTS - 1);
-      const y = Math.max(floor, tip.y + (end.y - tip.y) * u - drop * 4 * u * (1 - u) * (1 - 0.5 * u));
-      this.lp[i * 3] = tip.x + (end.x - tip.x) * u; this.lp[i * 3 + 1] = i === LINE_PTS - 1 ? end.y : y; this.lp[i * 3 + 2] = tip.z + (end.z - tip.z) * u;
+  /**
+   * The line from the rod's tip to `end`: a rope (2026-11-13, the owner: "when the line is casted it has no physics, I
+   * want it to flow, not be a static line") — LINE_PTS points carried on by their own momentum, pulled down by their
+   * weight and slowed by the air, held to their length (it goes slack, never stretches), floating where it reaches the
+   * water (`floor`, its height: they lie on it and drift slowly); the ends held at the tip and at `end`. sag: how much
+   * line is out beyond the straight run to the end (0 tight … 1 lying slack on the water), so a tight line runs straight
+   * and a slack one bellies, lies on the water and follows the rod's moves a moment late.
+   */
+  line(tip, end, sag = 0, floor = -Infinity, tension = 0) {
+    if (!tip || !end) { this.lineObj.visible = false; this.rope = null; return; }
+    const N = LINE_PTS, now = performance.now() / 1000, L = tip.distanceTo(end);
+    let R = this.rope;
+    // (from hidden, or the ends jumped — a new cast, a teleport: laid straight from the tip to the end)
+    if (!R || Math.hypot(R.e[0] - end.x, R.e[1] - end.y, R.e[2] - end.z) > 25 || Math.hypot(R.t[0] - tip.x, R.t[1] - tip.y, R.t[2] - tip.z) > 25) {
+      R = this.rope = { p: new Float32Array(N * 3), q: new Float32Array(N * 3), t: [0, 0, 0], e: [0, 0, 0], at: now, len: L };
+      for (let i = 0; i < N; i++) { const u = i / (N - 1); for (let k = 0; k < 3; k++) R.p[i * 3 + k] = R.q[i * 3 + k] = (k ? (k === 1 ? tip.y + (end.y - tip.y) * u : tip.z + (end.z - tip.z) * u) : tip.x + (end.x - tip.x) * u); }
+    }
+    const dt = Math.min(1 / 30, Math.max(1 / 240, now - R.at)); R.at = now;
+    R.t[0] = tip.x; R.t[1] = tip.y; R.t[2] = tip.z; R.e[0] = end.x; R.e[1] = end.y; R.e[2] = end.z;
+    // the line out: a fish pulling holds it taut — the straight run, nothing over (2026-11-13, the owner: "the line is
+    // sagging too much, like it's loose ... the fish should be pulling the line, it needs to show that tension"); slack
+    // (sag): as much again as it says, bellying, lying on the water. Eased: line paid out or reeled in takes a moment.
+    const slack = Math.max(0, sag), want = slack < 0.06 ? L * 0.997 : L * (1 + 0.012 + 0.28 * slack) + 0.03;
+    R.len += (want - R.len) * Math.min(1, dt * (want < R.len ? 14 : 5)); if (slack >= 0.06) R.len = Math.max(R.len, L);
+    // (a taut line hardly sags under its own weight)
+    const seg = R.len / (N - 1), P = R.p, Q = R.q, g = 9.8 * 0.55 * dt * dt * (slack < 0.06 ? 0.08 : Math.min(1, 0.25 + slack * 2.5)), air = 0.985;
+    // (a taut line cuts straight into the water to the fish; only a slack one lies along the surface)
+    if (slack < 0.06) floor = -Infinity;
+    // momentum, weight and the air; on the water: floating, the drift slowed
+    for (let i = 1; i < N - 1; i++) {
+      const j = i * 3;
+      for (let k = 0; k < 3; k++) { const v = (P[j + k] - Q[j + k]) * air; Q[j + k] = P[j + k]; P[j + k] += v; }
+      P[j + 1] -= g;
+      if (P[j + 1] < floor) { P[j + 1] = floor; Q[j] += (P[j] - Q[j]) * 0.25; Q[j + 2] += (P[j + 2] - Q[j + 2]) * 0.25; Q[j + 1] = floor; }
+    }
+    // held to its length (only where stretched: a line goes slack), the ends pinned
+    for (let it = 0; it < 14; it++) {
+      P[0] = tip.x; P[1] = tip.y; P[2] = tip.z; const z = (N - 1) * 3; P[z] = end.x; P[z + 1] = end.y; P[z + 2] = end.z;
+      for (let i = 0; i < N - 1; i++) {
+        const a = i * 3, b = a + 3, dx = P[b] - P[a], dy = P[b + 1] - P[a + 1], dz = P[b + 2] - P[a + 2], d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (d <= seg || d < 1e-6) continue;
+        const c = (d - seg) / d * 0.5, wa = i === 0 ? 0 : 1, wb = i === N - 2 ? 0 : 1, sw = wa + wb || 1;
+        P[a] += dx * c * 2 * wa / sw; P[a + 1] += dy * c * 2 * wa / sw; P[a + 2] += dz * c * 2 * wa / sw;
+        P[b] -= dx * c * 2 * wb / sw; P[b + 1] -= dy * c * 2 * wb / sw; P[b + 2] -= dz * c * 2 * wb / sw;
+      }
+    }
+    for (let i = 1; i < N - 1; i++) if (P[i * 3 + 1] < floor) P[i * 3 + 1] = floor;
+    this.lp.set(P);
+    // under heavy load it hums: a fine quiver across it, most in the middle (drawn only: the rope itself stays put)
+    if (tension > 0.6) {
+      const a = 0.012 * (tension - 0.6) / 0.4, ph = now * 47;
+      for (let i = 1; i < N - 1; i++) { const u = i / (N - 1), w = Math.sin(Math.PI * u) * a * Math.sin(ph + i * 1.7); this.lp[i * 3] += w; this.lp[i * 3 + 1] += w * 0.6; }
     }
     this.lineObj.geometry.attributes.position.needsUpdate = true; this.lineObj.visible = true;
+    // (and its colour brightens as it tightens)
+    this.lineObj.material.opacity = 0.75 + 0.25 * Math.min(1, tension + (slack < 0.06 ? 0.3 : 0));
   }
   /** The bobber (kind 'float') or the lure at p; null hides both. dip: how far the bobber is pulled under (m). */
   lure(p, kind = 'float', colour = '#e8d040', dip = 0, yaw = 0) {
@@ -124,31 +176,101 @@ export class FishingFx {
     }
     if (mode === 'shake' && (S.th -= dt) <= 0) { S.th = 0.3 + Math.random() * 0.4; this.splash(x, y, z, Math.max(0.08, len * 0.3)); }
   }
+  /** How deep the fish's model is, back to belly with its fins, for each metre of its length (a guess till it has loaded). */
+  depthOf(what) { const P = what ? this.packs.get(what.find || what.species) : null; return P?.A?.height || 0.35; }
   /**
    * The fish: species `id` (or a find: { find }) `len` m long at p, its nose along yaw (pitch: up), drawn `mode` —
    * 'under' (only its shadow on the surface above it), 'air' (itself, leaping), 'held', or null (hidden).
    */
-  fish(what, mode, p, yaw = 0, pitch = 0, len = 0.4, roll = 0) {
+  fish(what, mode, p, yaw = 0, pitch = 0, len = 0.4, roll = 0, act = null) {
     const key = what ? what.find || what.species : '';
     if (key !== this.fishKey) {
       if (this.fishObj) this.scene.remove(this.fishObj);
       this.fishObj = key ? catchModel(what) : null; this.fishKey = key;
       if (this.fishObj) { this.fishObj.visible = false; this.scene.add(this.fishObj); }
+      if (key && !this.packs.has(key)) {
+        this.packs.set(key, null);
+        fishAsset(key).then(A => { if (A) import('./fauna-skinned.js').then(m => {
+          const pack = m.skinnedPack(A, 1, this.scene, `catch-${key}`, m.coatsOf({}, A));
+          if (this.uw) new Set(pack.meshes.map(x => x.material)).forEach(x => this.uw(x));   // (seen through the water)
+          this.packs.set(key, { A, pack, was: -1 });
+        }); });
+      }
     }
     const show = mode === 'air' || mode === 'held';
+    // the model, if this one has one: posed by its clip (held: rest, flopping now and then; in the air: thrashing; in
+    // the water on the line — 2026-11-13, the owner: "have the fish actually be loaded so it's visible when caught, coming
+    // up the water ... struggling within the water itself" — swimming hard on its runs, thrashing as it shakes its head,
+    // a little below the surface, deeper as it dives, up to it as it tires and comes close)
+    const P = key ? this.packs.get(key) : null;
+    if (this.packOn && this.packOn !== P) { this.packOn.pack.begin(); this.packOn.pack.end(); this.packOn = null; }
+    let under = false;
+    if (P) {
+      P.pack.begin();
+      if ((show || (mode === 'under' && !what.find)) && p) {
+        let y = p.y, pt = pitch, clip = mode === 'held' ? 0 : 2, rate = 1.2 + 0.5 / Math.max(0.25, len);
+        if (mode === 'under') {
+          under = true;
+          const m = act?.mode || 'run', depth = act?.depth ?? 0.4;
+          clip = m === 'shake' || m === 'jump' ? 2 : 6;
+          rate = (clip === 2 ? 1.5 : m === 'rest' ? 0.6 : m === 'toward' ? 1.6 : 1.25) * (0.8 + 0.4 / Math.max(0.3, len));
+          y -= depth; pt = m === 'dive' ? -0.35 : act?.up ? 0.2 : 0;
+        }
+        _q.setFromEuler(_e.set(-pt, yaw, roll, 'YXZ')).multiply(_turn);
+        const k = what.find ? 1 : len;
+        if (P.was !== clip) { P.was = clip; P.ph = Math.random(); }   // (each time it is shown, from somewhere in its clip)
+        P.pack.put(_m.compose(_v.set(p.x, y, p.z), _q, _s.set(k, k, k)), 0, P.ph, clip ? rate : 0, clip, 0, null, true);
+      }
+      P.pack.end(); this.packOn = P;
+    }
     if (this.fishObj) {
-      this.fishObj.visible = !!show && !!p;
+      this.fishObj.visible = !!show && !!p && !P;
       if (show && p) {
         this.fishObj.position.copy(p); this.fishObj.rotation.copy(_e.set(-pitch, yaw, roll, 'YXZ'));
         if (!what.find) this.fishObj.scale.setScalar(len); else this.fishObj.scale.setScalar(1);
       }
     }
     this.shadow.visible = mode === 'under' && !!p;
-    if (this.shadow.visible) { this.shadow.position.set(p.x, p.y, p.z); this.shadow.rotation.set(0, yaw, 0); this.shadow.scale.set(Math.max(0.25, len * 0.45), 1, Math.max(0.5, len * 1.2)); }
+    if (this.shadow.visible) {
+      this.shadow.position.set(p.x, p.y, p.z); this.shadow.rotation.set(0, yaw, 0); this.shadow.scale.set(Math.max(0.25, len * 0.45), 1, Math.max(0.5, len * 1.2));
+      this.shadow.material.opacity = under ? 0.18 : 1;   // (the fish itself seen below: only a faint shade on the surface)
+    }
+  }
+  /**
+   * A burst of light round the catch as it is held up (2026-11-13: "more flare"): sparks in its rarity's colour flying out
+   * and up from it and fading; a big one (epic, legendary, a trophy) twice as many, further, with a ring of light.
+   */
+  burst(x, y, z, color = '#ffd36a', big = false, size = 0.5) {
+    const n = big ? 160 : 70, B = this.bursts ||= [];
+    const g = new THREE.BufferGeometry(), pos = new Float32Array(n * 3), vel = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, e = Math.random() * 1.2 - 0.3, sp = (big ? 1.6 : 1.0) * (0.6 + Math.random()) * (0.6 + size * 0.5);
+      vel[i * 3] = Math.cos(a) * Math.cos(e) * sp; vel[i * 3 + 1] = Math.sin(e) * sp + 0.6; vel[i * 3 + 2] = Math.sin(a) * Math.cos(e) * sp;
+      pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+    }
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const m = new THREE.PointsMaterial({ color: new THREE.Color(color), size: big ? 0.075 : 0.055, transparent: true, opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
+    const pts = new THREE.Points(g, m); pts.frustumCulled = false; pts.renderOrder = 6; this.scene.add(pts);
+    B.push({ pts, vel, age: 0, life: big ? 1.8 : 1.3 });
+    if (big) {   // and a ring of light spreading from it
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 48), new THREE.MeshBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+      ring.position.set(x, y, z); ring.lookAt(x, y + 1, z); ring.renderOrder = 6; this.scene.add(ring);
+      B.push({ ring, age: 0, life: 1.0 });
+    }
   }
   hideAll() { this.line(null); this.lure(null); this.aim(null); this.fish(null, null); }
   /** Once a frame: the far ripples spread and fade (the marks and the spray keep themselves). */
   update(dt) {
+    for (const b of this.bursts || []) {   // (the catch's bursts: sparks flying, slowing, falling a little, fading)
+      b.age += dt; const u = b.age / b.life;
+      if (b.pts) {
+        const P = b.pts.geometry.attributes.position, a = P.array, v = b.vel, drag = Math.exp(-dt * 2.2);
+        for (let i = 0; i < v.length; i += 3) { v[i] *= drag; v[i + 1] = v[i + 1] * drag - 1.4 * dt; v[i + 2] *= drag; a[i] += v[i] * dt; a[i + 1] += v[i + 1] * dt; a[i + 2] += v[i + 2] * dt; }
+        P.needsUpdate = true; b.pts.material.opacity = Math.max(0, 1 - u * u);
+      } else if (b.ring) { const r = 0.2 + u * 2.4; b.ring.scale.set(r, r, r); b.ring.material.opacity = 0.8 * (1 - u); }
+      if (u >= 1) { const o = b.pts || b.ring; this.scene.remove(o); o.geometry.dispose(); o.material.dispose(); b.done = true; }
+    }
+    if (this.bursts?.some(b => b.done)) this.bursts = this.bursts.filter(b => !b.done);
     let any = false;
     for (let i = 0; i < RINGS; i++) {
       if (this.rAge[i] >= this.rLife[i]) { if (this.rFade.array[i] !== 0) { this.rFade.array[i] = 0; this.rings.setMatrixAt(i, _m.makeScale(0, 0, 0)); any = true; } continue; }

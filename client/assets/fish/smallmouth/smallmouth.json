@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "smallmouth",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 745ab645 from 06_lake_bass/Smallmouth_Bass.png; tools/animals/fish_animal.py",
+ "height": 0.4991,
+ "length": 0.9983,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4275,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51300,
+   "uv": 102600,
+   "skin": 136800,
+   "weight": 153900,
+   "index": 171000,
+   "indexType": "u16",
+   "min": [
+    -0.4982999861240387,
+    -0.24950000643730164,
+    -0.1753000020980835
+   ],
+   "max": [
+    0.5,
+    0.24959999322891235,
+    0.1753000020980835
+   ]
+  },
+  {
+   "verts": 1666,
+   "tris": 2000,
+   "pos": 207000,
+   "nrm": 226992,
+   "uv": 246984,
+   "skin": 260312,
+   "weight": 266976,
+   "index": 273640,
+   "indexType": "u16",
+   "min": [
+    -0.4945000112056732,
+    -0.24869999289512634,
+    -0.1753000020980835
+   ],
+   "max": [
+    0.5,
+    0.24959999322891235,
+    0.1753000020980835
+   ]
+  },
+  {
+   "verts": 763,
+   "tris": 700,
+   "pos": 285640,
+   "nrm": 294796,
+   "uv": 303952,
+   "skin": 310056,
+   "weight": 313108,
+   "index": 316160,
+   "indexType": "u16",
+   "min": [
+    -0.4945000112056732,
+    -0.24789999425411224,
+    -0.1746000051498413
+   ],
+   "max": [
+    0.48980000615119934,
+    0.2371000051498413,
+    0.1753000020980835
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 320360,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "smallmouth-color.jpg",
+  "mask": "smallmouth-mask.png"
+ },
+ "card": "smallmouth-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

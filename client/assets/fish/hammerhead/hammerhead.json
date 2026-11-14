@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "hammerhead",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 4c50c798 from 04_sea_sharks/Great_Hammerhead.png; tools/animals/fish_animal.py",
+ "height": 0.4938,
+ "length": 0.9979,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4433,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53196,
+   "uv": 106392,
+   "skin": 141856,
+   "weight": 159588,
+   "index": 177320,
+   "indexType": "u16",
+   "min": [
+    -0.49900001287460327,
+    -0.24690000712871552,
+    -0.30000001192092896
+   ],
+   "max": [
+    0.49889999628067017,
+    0.24690000712871552,
+    0.3001999855041504
+   ]
+  },
+  {
+   "verts": 1682,
+   "tris": 2000,
+   "pos": 213320,
+   "nrm": 233504,
+   "uv": 253688,
+   "skin": 267144,
+   "weight": 273872,
+   "index": 280600,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.2451999932527542,
+    -0.30000001192092896
+   ],
+   "max": [
+    0.49889999628067017,
+    0.24529999494552612,
+    0.3001999855041504
+   ]
+  },
+  {
+   "verts": 771,
+   "tris": 700,
+   "pos": 292600,
+   "nrm": 301852,
+   "uv": 311104,
+   "skin": 317272,
+   "weight": 320356,
+   "index": 323440,
+   "indexType": "u16",
+   "min": [
+    -0.49790000915527344,
+    -0.2443999946117401,
+    -0.30000001192092896
+   ],
+   "max": [
+    0.4984000027179718,
+    0.23960000276565552,
+    0.3001999855041504
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 327640,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "hammerhead-color.jpg",
+  "mask": "hammerhead-mask.png"
+ },
+ "card": "hammerhead-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

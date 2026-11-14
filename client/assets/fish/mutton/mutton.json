@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "mutton",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 841895e2 from 02_sea_reef/Mutton_Snapper.png; tools/animals/fish_animal.py",
+ "height": 0.5107,
+ "length": 0.9972,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4080,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 48960,
+   "uv": 97920,
+   "skin": 130560,
+   "weight": 146880,
+   "index": 163200,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.25529998540878296,
+    -0.28600001335144043
+   ],
+   "max": [
+    0.49720001220703125,
+    0.25540000200271606,
+    0.28630000352859497
+   ]
+  },
+  {
+   "verts": 1614,
+   "tris": 2000,
+   "pos": 199200,
+   "nrm": 218568,
+   "uv": 237936,
+   "skin": 250848,
+   "weight": 257304,
+   "index": 263760,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.25529998540878296,
+    -0.28600001335144043
+   ],
+   "max": [
+    0.49720001220703125,
+    0.25540000200271606,
+    0.28630000352859497
+   ]
+  },
+  {
+   "verts": 737,
+   "tris": 700,
+   "pos": 275760,
+   "nrm": 284604,
+   "uv": 293448,
+   "skin": 299344,
+   "weight": 302292,
+   "index": 305240,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.25130000710487366,
+    -0.28600001335144043
+   ],
+   "max": [
+    0.4912000000476837,
+    0.25540000200271606,
+    0.28630000352859497
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 309440,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "mutton-color.jpg",
+  "mask": "mutton-mask.png"
+ },
+ "card": "mutton-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

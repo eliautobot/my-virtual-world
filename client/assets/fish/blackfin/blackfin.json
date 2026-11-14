@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "blackfin",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 82d5b85c from 03_sea_openwater/Blackfin_Tuna.png; tools/animals/fish_animal.py",
+ "height": 0.4304,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4434,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53208,
+   "uv": 106416,
+   "skin": 141888,
+   "weight": 159624,
+   "index": 177360,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.2152000069618225,
+    -0.2224999964237213
+   ],
+   "max": [
+    0.5,
+    0.2152000069618225,
+    0.22259999811649323
+   ]
+  },
+  {
+   "verts": 1768,
+   "tris": 2000,
+   "pos": 213360,
+   "nrm": 234576,
+   "uv": 255792,
+   "skin": 269936,
+   "weight": 277008,
+   "index": 284080,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.21359999477863312,
+    -0.2224999964237213
+   ],
+   "max": [
+    0.4986000061035156,
+    0.2152000069618225,
+    0.22259999811649323
+   ]
+  },
+  {
+   "verts": 809,
+   "tris": 700,
+   "pos": 296080,
+   "nrm": 305788,
+   "uv": 315496,
+   "skin": 321968,
+   "weight": 325204,
+   "index": 328440,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.21330000460147858,
+    -0.21889999508857727
+   ],
+   "max": [
+    0.49559998512268066,
+    0.20280000567436218,
+    0.22259999811649323
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 332640,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "blackfin-color.jpg",
+  "mask": "blackfin-mask.png"
+ },
+ "card": "blackfin-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

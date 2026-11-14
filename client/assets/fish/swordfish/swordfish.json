@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "swordfish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project de333e04 from 03_sea_openwater/Swordfish.png; tools/animals/fish_animal.py",
+ "height": 0.3924,
+ "length": 0.9997,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4199,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 50388,
+   "uv": 100776,
+   "skin": 134368,
+   "weight": 151164,
+   "index": 167960,
+   "indexType": "u16",
+   "min": [
+    -0.49970000982284546,
+    -0.19619999825954437,
+    -0.15520000457763672
+   ],
+   "max": [
+    0.5,
+    0.19619999825954437,
+    0.15539999306201935
+   ]
+  },
+  {
+   "verts": 1656,
+   "tris": 2000,
+   "pos": 203960,
+   "nrm": 223832,
+   "uv": 243704,
+   "skin": 256952,
+   "weight": 263576,
+   "index": 270200,
+   "indexType": "u16",
+   "min": [
+    -0.499099999666214,
+    -0.19580000638961792,
+    -0.15330000221729279
+   ],
+   "max": [
+    0.5,
+    0.19599999487400055,
+    0.15360000729560852
+   ]
+  },
+  {
+   "verts": 783,
+   "tris": 700,
+   "pos": 282200,
+   "nrm": 291596,
+   "uv": 300992,
+   "skin": 307256,
+   "weight": 310388,
+   "index": 313520,
+   "indexType": "u16",
+   "min": [
+    -0.499099999666214,
+    -0.1940000057220459,
+    -0.15189999341964722
+   ],
+   "max": [
+    0.5,
+    0.19599999487400055,
+    0.15240000188350677
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 317720,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "swordfish-color.jpg",
+  "mask": "swordfish-mask.png"
+ },
+ "card": "swordfish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

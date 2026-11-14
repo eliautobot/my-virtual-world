@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "bluecat",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 96e21509 from 09_lake_bottom/Blue_Catfish.png; tools/animals/fish_animal.py",
+ "height": 0.3459,
+ "length": 0.9998,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4276,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51312,
+   "uv": 102624,
+   "skin": 136832,
+   "weight": 153936,
+   "index": 171040,
+   "indexType": "u16",
+   "min": [
+    -0.4997999966144562,
+    -0.17329999804496765,
+    -0.19300000369548798
+   ],
+   "max": [
+    0.5,
+    0.17260000109672546,
+    0.19269999861717224
+   ]
+  },
+  {
+   "verts": 1648,
+   "tris": 2000,
+   "pos": 207040,
+   "nrm": 226816,
+   "uv": 246592,
+   "skin": 259776,
+   "weight": 266368,
+   "index": 272960,
+   "indexType": "u16",
+   "min": [
+    -0.4997999966144562,
+    -0.17329999804496765,
+    -0.1906999945640564
+   ],
+   "max": [
+    0.5,
+    0.17260000109672546,
+    0.19269999861717224
+   ]
+  },
+  {
+   "verts": 746,
+   "tris": 700,
+   "pos": 284960,
+   "nrm": 293912,
+   "uv": 302864,
+   "skin": 308832,
+   "weight": 311816,
+   "index": 314800,
+   "indexType": "u16",
+   "min": [
+    -0.49779999256134033,
+    -0.17219999432563782,
+    -0.1906999945640564
+   ],
+   "max": [
+    0.5,
+    0.17260000109672546,
+    0.16779999434947968
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 319000,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "bluecat-color.jpg",
+  "mask": "bluecat-mask.png"
+ },
+ "card": "bluecat-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

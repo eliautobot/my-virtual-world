@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "bullhead",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 7e1ccb02 from 05_lake_panfish/Brown_Bullhead.png; tools/animals/fish_animal.py",
+ "height": 0.3454,
+ "length": 0.9999,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4414,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52968,
+   "uv": 105936,
+   "skin": 141248,
+   "weight": 158904,
+   "index": 176560,
+   "indexType": "u16",
+   "min": [
+    -0.4999000132083893,
+    -0.17270000278949738,
+    -0.29019999504089355
+   ],
+   "max": [
+    0.5,
+    0.17270000278949738,
+    0.29030001163482666
+   ]
+  },
+  {
+   "verts": 1734,
+   "tris": 1998,
+   "pos": 212560,
+   "nrm": 233368,
+   "uv": 254176,
+   "skin": 268048,
+   "weight": 274984,
+   "index": 281920,
+   "indexType": "u16",
+   "min": [
+    -0.4999000132083893,
+    -0.17139999568462372,
+    -0.29019999504089355
+   ],
+   "max": [
+    0.498199999332428,
+    0.17159999907016754,
+    0.29030001163482666
+   ]
+  },
+  {
+   "verts": 806,
+   "tris": 696,
+   "pos": 293908,
+   "nrm": 303580,
+   "uv": 313252,
+   "skin": 319700,
+   "weight": 322924,
+   "index": 326148,
+   "indexType": "u16",
+   "min": [
+    -0.4927000105381012,
+    -0.16769999265670776,
+    -0.29019999504089355
+   ],
+   "max": [
+    0.4959000051021576,
+    0.16949999332427979,
+    0.28850001096725464
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 330324,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "bullhead-color.jpg",
+  "mask": "bullhead-mask.png"
+ },
+ "card": "bullhead-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

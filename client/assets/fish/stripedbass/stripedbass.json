@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "stripedbass",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 3a2751ab from 06_lake_bass/Striped_Bass.png; tools/animals/fish_animal.py",
+ "height": 0.3261,
+ "length": 1.0,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4458,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53496,
+   "uv": 106992,
+   "skin": 142656,
+   "weight": 160488,
+   "index": 178320,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.16290000081062317,
+    -0.13650000095367432
+   ],
+   "max": [
+    0.5,
+    0.1632000058889389,
+    0.1362999975681305
+   ]
+  },
+  {
+   "verts": 1862,
+   "tris": 2000,
+   "pos": 214320,
+   "nrm": 236664,
+   "uv": 259008,
+   "skin": 273904,
+   "weight": 281352,
+   "index": 288800,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.16269999742507935,
+    -0.13650000095367432
+   ],
+   "max": [
+    0.49729999899864197,
+    0.1632000058889389,
+    0.1356000006198883
+   ]
+  },
+  {
+   "verts": 868,
+   "tris": 700,
+   "pos": 300800,
+   "nrm": 311216,
+   "uv": 321632,
+   "skin": 328576,
+   "weight": 332048,
+   "index": 335520,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.16269999742507935,
+    -0.13650000095367432
+   ],
+   "max": [
+    0.49559998512268066,
+    0.1632000058889389,
+    0.1356000006198883
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 339720,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "stripedbass-color.jpg",
+  "mask": "stripedbass-mask.png"
+ },
+ "card": "stripedbass-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

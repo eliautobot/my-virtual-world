@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "bluefish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 8a0b184f from 03_sea_openwater/Bluefish.png; tools/animals/fish_animal.py",
+ "height": 0.4902,
+ "length": 0.9992,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4518,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54216,
+   "uv": 108432,
+   "skin": 144576,
+   "weight": 162648,
+   "index": 180720,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.2451000064611435,
+    -0.30559998750686646
+   ],
+   "max": [
+    0.4991999864578247,
+    0.2451000064611435,
+    0.3068000078201294
+   ]
+  },
+  {
+   "verts": 1806,
+   "tris": 2000,
+   "pos": 216720,
+   "nrm": 238392,
+   "uv": 260064,
+   "skin": 274512,
+   "weight": 281736,
+   "index": 288960,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.24410000443458557,
+    -0.30559998750686646
+   ],
+   "max": [
+    0.4975999891757965,
+    0.2451000064611435,
+    0.3068000078201294
+   ]
+  },
+  {
+   "verts": 839,
+   "tris": 700,
+   "pos": 300960,
+   "nrm": 311028,
+   "uv": 321096,
+   "skin": 327808,
+   "weight": 331164,
+   "index": 334520,
+   "indexType": "u16",
+   "min": [
+    -0.49630001187324524,
+    -0.24410000443458557,
+    -0.30559998750686646
+   ],
+   "max": [
+    0.4975999891757965,
+    0.2451000064611435,
+    0.29490000009536743
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 338720,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "bluefish-color.jpg",
+  "mask": "bluefish-mask.png"
+ },
+ "card": "bluefish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

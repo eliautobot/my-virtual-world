@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "tilapia",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project f302e0c6 from 05_lake_panfish/Blue_Tilapia.png; tools/animals/fish_animal.py",
+ "height": 0.5466,
+ "length": 0.9983,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4053,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 48636,
+   "uv": 97272,
+   "skin": 129696,
+   "weight": 145908,
+   "index": 162120,
+   "indexType": "u16",
+   "min": [
+    -0.4982999861240387,
+    -0.2732999920845032,
+    -0.29499998688697815
+   ],
+   "max": [
+    0.5,
+    0.2732999920845032,
+    0.2955999970436096
+   ]
+  },
+  {
+   "verts": 1582,
+   "tris": 2000,
+   "pos": 198120,
+   "nrm": 217104,
+   "uv": 236088,
+   "skin": 248744,
+   "weight": 255072,
+   "index": 261400,
+   "indexType": "u16",
+   "min": [
+    -0.4982999861240387,
+    -0.2732999920845032,
+    -0.29499998688697815
+   ],
+   "max": [
+    0.4966000020503998,
+    0.2732999920845032,
+    0.2955999970436096
+   ]
+  },
+  {
+   "verts": 715,
+   "tris": 700,
+   "pos": 273400,
+   "nrm": 281980,
+   "uv": 290560,
+   "skin": 296280,
+   "weight": 299140,
+   "index": 302000,
+   "indexType": "u16",
+   "min": [
+    -0.4982999861240387,
+    -0.2732999920845032,
+    -0.29499998688697815
+   ],
+   "max": [
+    0.4966000020503998,
+    0.2728999853134155,
+    0.2851000130176544
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 306200,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "tilapia-color.jpg",
+  "mask": "tilapia-mask.png"
+ },
+ "card": "tilapia-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

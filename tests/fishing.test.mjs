@@ -17,10 +17,10 @@ import { courseOf } from '../shared/play.js';
 const HABITATS = new Set([...Object.values(GROUNDS).flatMap(g => g.hab), ...OPEN.sea, ...OPEN.lake]);
 const KITS = {
   starter: loadout({}),
-  glass: loadout({ rod: 'rod_glass', reel: 'reel_spin', line: 'line_mono15' }),
-  graphite: loadout({ rod: 'rod_graphite', reel: 'reel_bait', line: 'line_braid30' }),
-  carbon: loadout({ rod: 'rod_carbon', reel: 'reel_biggame', line: 'line_braid65' }),
-  legend: loadout({ rod: 'rod_legend', reel: 'reel_trophy', line: 'line_legend', skills: { fighting: 5 } }),
+  glass: loadout({ rod: 'rod_glass', reel: 'reel_spin', line: 'line_mono15', hook: 'hook_circle' }),
+  graphite: loadout({ rod: 'rod_graphite', reel: 'reel_bait', line: 'line_braid30', hook: 'hook_octopus' }),
+  carbon: loadout({ rod: 'rod_carbon', reel: 'reel_biggame', line: 'line_braid65', hook: 'hook_forged' }),
+  legend: loadout({ rod: 'rod_legend', reel: 'reel_trophy', line: 'line_legend', hook: 'hook_legend', skills: { fighting: 5 } }),
 };
 function fight(sp, f, L, seed, skill = 1) {
   const F = fightSetup(sp, f, L, { d0: L.reach * 0.8, seed });
@@ -305,4 +305,31 @@ test('a fish too heavy for the angler\'s rod usually comes up smaller (the roll 
     if (a?.kg > 8) over++; if (b?.kg > 8) overWith++;
   }
   assert.ok(over > 20 && overWith < over * 0.6, `over the rod: ${over} without, ${overWith} with the rod known`);
+});
+
+test('gear matters: a poor hook straightens on the big fish a strong line would hold; a leader stops the teeth (2026-11-13)', async () => {
+  const { assistAt, rankOf } = await import('../shared/fishing-gear.js');
+  const big = ['yellowfin', 'amberjack', 'tarpon', 'cobia'].map(id => [speciesOf(id), fishOf(speciesOf(id), 0.6)]);
+  const runs = kit => { const L = loadout(kit), out = {}; for (const [sp, f] of big) for (let i = 0; i < 6; i++) { const F = fight(sp, f, L, 300 + i); out[F.out] = (out[F.out] || 0) + 1; } return out; };
+  const j = runs({ rod: 'rod_carbon', reel: 'reel_biggame', line: 'line_braid65' }), forged = runs({ rod: 'rod_carbon', reel: 'reel_biggame', line: 'line_braid65', hook: 'hook_forged' });
+  assert.ok((j.bent || 0) >= 6 && !(forged.bent > 0), `the starter J-hook straightens (${JSON.stringify(j)}); the forged one holds (${JSON.stringify(forged)})`);
+  assert.ok((forged.landed || 0) > (j.landed || 0) + 6, 'better tackle lands more');
+  // teeth: a musky on a tight line, with and without a leader
+  const mu = speciesOf('musky'), mf = fishOf(mu, 0.6), bites = leader => { let n = 0; for (let i = 0; i < 20; i++) { const F = fight(mu, mf, loadout({ rod: 'rod_glass', reel: 'reel_spin', line: 'line_mono15', hook: 'hook_circle', leader }), 400 + i, 0.3); if (F.out === 'bite') n++; } return n; };
+  assert.ok(bites(false) > bites(true), `toothy fish bite through more without a leader (${bites(false)} vs ${bites(true)})`);
+  // the angler's rank: a beginner's line guard fades by level 9
+  assert.equal(assistAt(1), 1); assert.equal(assistAt(9), 0); assert.equal(rankOf(1).name, 'Novice'); assert.equal(rankOf(20).name, 'Legend');
+});
+
+test('each kind of fish fights its own way: small ones dart, runners scream off, bulldogs head for the rocks, flat fish plant, jumpers tail-walk (2026-11-13)', () => {
+  const L = KITS.carbon, seen = id => { const sp = speciesOf(id), f = fishOf(sp, 0.5), evs = new Set(); for (let i = 0; i < 4; i++) { const F = fightSetup(sp, f, L, { d0: 25, seed: 500 + i }); while (!F.out) for (const e of fightStep(F, botInput(F, 1))) evs.add(e); } return evs; };
+  assert.ok(seen('bluegill').has('zig'), 'a bluegill darts');
+  assert.ok(seen('skipjack').has('blitz') && seen('wahoo').has('blitz'), 'a skipjack, a wahoo make screaming runs');
+  assert.ok(!seen('yellowfin').has('rocks'), 'a tuna sounds deep, but there are no rocks out in the blue');
+  assert.ok(seen('goliath').has('rocks'), 'a grouper heads for the rocks');
+  assert.ok(seen('stingray').has('plant'), 'a ray plants itself on the bottom');
+  assert.ok(seen('pike').has('teeth'), 'a pike shakes its toothy head');
+  const sf = speciesOf('sailfish'), f = fishOf(sf, 0.6); let most = 0;
+  for (let i = 0; i < 6; i++) { const F = fightSetup(sf, f, L, { d0: 25, seed: 600 + i }); let run = 0; while (!F.out) { const e = fightStep(F, botInput(F, 1)); if (e.includes('jump')) { run++; most = Math.max(most, run); } else if (F.mode !== 'jump' && e.length && !e.includes('spike')) run = 0; } }
+  assert.ok(most >= 2, `a sailfish tail-walks (${most} jumps in a row)`);
 });

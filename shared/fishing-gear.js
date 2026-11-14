@@ -55,7 +55,18 @@ export const LINES = Object.freeze([
   { id: 'line_biggame', name: 'Big Game 130 lb', tier: 5, kgf: 59, vis: 0.8, price: 2800, level: 14, blurb: 'Marlin line.' },
   { id: 'line_legend', name: 'Legend Braid 200 lb', tier: 6, kgf: 90, vis: 0.8, price: 8000, level: 18, blurb: 'The strongest line there is — for the legends.' },
 ].map(Object.freeze));
-/** A fluorocarbon leader: fish see the line less (more bites). Bought once. */
+// hooks (2026-11-13, the owner: "what kind of fish hook ... more expensive gear means better performing gear"): sharp
+// (how long you have to set it: × the rod's window, and the perfect hook's), hold (how well it stays in: a jump on a slack
+// line, a slack line, a thrashing head all throw a poor hook sooner), strength (kgf: a spike past it straightens it — the
+// fish is gone; the line or the hook, whichever is weaker, fails first)
+export const HOOKS = Object.freeze([
+  { id: 'hook_j', name: 'Bronze J-Hook', tier: 1, sharp: 1.0, hold: 0.85, strength: 8, price: 0, level: 1, blurb: 'The hook in every starter kit. Fish throw it easily.' },
+  { id: 'hook_circle', name: 'Circle Hook', tier: 2, sharp: 1.05, hold: 1.0, strength: 18, price: 80, level: 2, blurb: 'Sets itself in the corner of the jaw: far fewer thrown hooks.' },
+  { id: 'hook_octopus', name: 'Laser-Sharp Octopus', tier: 3, sharp: 1.25, hold: 1.1, strength: 40, price: 320, level: 5, blurb: 'Chemically sharpened: more time to set it, and it stays put.' },
+  { id: 'hook_forged', name: 'Forged Big-Game Hook', tier: 4, sharp: 1.15, hold: 1.25, strength: 110, price: 1200, level: 9, blurb: 'Won\'t straighten on tuna, sharks or a grouper heading for the rocks.' },
+  { id: 'hook_legend', name: 'Titanium Legend Hook', tier: 5, sharp: 1.35, hold: 1.4, strength: 400, price: 4800, level: 15, blurb: 'The sharpest, strongest hook made — for the legends.' },
+].map(Object.freeze));
+/** A fluorocarbon leader: fish see the line less (more bites), and toothy fish rarely bite through it. Bought once. */
 export const LEADER = Object.freeze({ id: 'leader_fluoro', name: 'Fluorocarbon Leader', vis: -0.3, price: 120, level: 4, blurb: 'Nearly invisible under water: more bites from wary fish.' });
 
 // ------------------------------------------------------------------------------------------- the boat's upgrades
@@ -84,24 +95,38 @@ export const SKILLS = Object.freeze([
 export const SKILL_MAX = 5;
 export const RESPEC_PRICE = 250;
 
-export const GEAR = Object.freeze(Object.fromEntries([...RODS, ...REELS, ...LINES, LEADER].map(g => [g.id, g])));
+export const GEAR = Object.freeze(Object.fromEntries([...RODS, ...REELS, ...LINES, ...HOOKS, LEADER].map(g => [g.id, g])));
 /** What every angler starts with. */
-export const STARTER = Object.freeze({ rod: 'rod_starter', reel: 'reel_spincast', line: 'line_mono8', leader: false, lures: { worm: 10, shrimp: 10, spinner: 1, soft: 4 }, boat: {}, skills: {} });
+export const STARTER = Object.freeze({ rod: 'rod_starter', reel: 'reel_spincast', line: 'line_mono8', hook: 'hook_j', leader: false, lures: { worm: 10, shrimp: 10, spinner: 1, soft: 4 }, boat: {}, skills: {} });
 
+// The angler's rank by their fishing level (2026-11-13, the owner: "difficulty depends on the skill level of the player,
+// their actual level, leveling up, how they rank"): a beginner has a line guard (assist, 1 at level 1 fading to 0 at
+// RANK_ASSIST_TO) — the line strains longer before it snaps, a slack line and a jump give a little more time — and bigger
+// fish come to the higher ranks (shared/fishing-trip.js rollBite)
+export const RANKS = Object.freeze([
+  { from: 1, name: 'Novice', icon: '🪝' }, { from: 4, name: 'Angler', icon: '🎣' }, { from: 8, name: 'Pro', icon: '⭐' },
+  { from: 13, name: 'Master', icon: '🏅' }, { from: 18, name: 'Legend', icon: '👑' },
+].map(Object.freeze));
+export const RANK_ASSIST_TO = 9;
+export const rankOf = level => [...RANKS].reverse().find(r => (level || 1) >= r.from) || RANKS[0];
+export const assistAt = level => Math.max(0, Math.min(1, (RANK_ASSIST_TO - Math.max(1, level || 1)) / (RANK_ASSIST_TO - 1)));
 /**
- * A player's kit as numbers the game uses: { rod, reel, line, reach, win, power, maxKg, feel, speed, drag, cap, kgf, vis,
- * boat: { engine, cooler, finder, holders, lights, livewell, anchor }, skills, luck, trader }. kit: { rod, reel, line,
- * leader, boat: { id: tier }, skills: { id: rank } } (missing parts: the starter's).
+ * A player's kit as numbers the game uses: { rod, reel, line, hook, reach, win, power, maxKg, feel, speed, drag, cap, kgf, vis,
+ * hookHold, hookKgf, sharp, leader, level, assist, rank,
+ * boat: { engine, cooler, finder, holders, lights, livewell, anchor }, skills, luck, trader }. kit: { rod, reel, line, hook,
+ * leader, boat: { id: tier }, skills: { id: rank }, level } (missing parts: the starter's; no level: a beginner's).
  */
 export function loadout(kit = {}) {
   const rod = GEAR[kit.rod] || GEAR[STARTER.rod], reel = GEAR[kit.reel] || GEAR[STARTER.reel], line = GEAR[kit.line] || GEAR[STARTER.line];
+  const hook = HOOKS.find(h => h.id === kit.hook) || GEAR[STARTER.hook], level = Math.max(1, Math.floor(kit.level || 1));
   const sk = id => Math.max(0, Math.min(SKILL_MAX, Math.floor(kit.skills?.[id] || 0)));
   const per = id => SKILLS.find(s => s.id === id).per * sk(id);
   const boat = {};
   for (const u of BOAT_UPGRADES) boat[u.id] = u.tiers[Math.max(0, Math.min(3, Math.floor(kit.boat?.[u.id] || 0)))];
   return {
-    rod: rod.id, reel: reel.id, line: line.id,
-    reach: rod.reach * (1 + per('casting')), win: rod.win * (1 + per('hookset')), power: rod.power * (1 + per('fighting')), maxKg: rod.maxKg, feel: rod.feel,
+    rod: rod.id, reel: reel.id, line: line.id, hook: hook.id,
+    reach: rod.reach * (1 + per('casting')), win: rod.win * (1 + per('hookset')) * hook.sharp, sharp: hook.sharp, hookHold: hook.hold, hookKgf: hook.strength,
+    leader: !!kit.leader, level, assist: assistAt(level), rank: rankOf(level).name, power: rod.power * (1 + per('fighting')), maxKg: rod.maxKg, feel: rod.feel,
     speed: reel.speed, drag: Math.min(reel.drag, 0.6 * line.kgf), cap: reel.cap, kgf: line.kgf,
     vis: Math.max(0.15, line.vis + (kit.leader ? LEADER.vis : 0)), calm: 1 - 0.5 * per('fighting'),
     boat, boatSpeed: 1 + boat.engine / 100 + per('seaman'), luck: per('luck'), trader: per('trader'),

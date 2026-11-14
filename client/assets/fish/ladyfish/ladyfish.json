@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "ladyfish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project bf18b276 from 01_sea_inshore/Ladyfish.png; tools/animals/fish_animal.py",
+ "height": 0.305,
+ "length": 0.9997,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4458,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53496,
+   "uv": 106992,
+   "skin": 142656,
+   "weight": 160488,
+   "index": 178320,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.1525000035762787,
+    -0.18000000715255737
+   ],
+   "max": [
+    0.49970000982284546,
+    0.1525000035762787,
+    0.1793999969959259
+   ]
+  },
+  {
+   "verts": 1738,
+   "tris": 2000,
+   "pos": 214320,
+   "nrm": 235176,
+   "uv": 256032,
+   "skin": 269936,
+   "weight": 276888,
+   "index": 283840,
+   "indexType": "u16",
+   "min": [
+    -0.49880000948905945,
+    -0.1525000035762787,
+    -0.17990000545978546
+   ],
+   "max": [
+    0.49939998984336853,
+    0.15219999849796295,
+    0.1793999969959259
+   ]
+  },
+  {
+   "verts": 804,
+   "tris": 700,
+   "pos": 295840,
+   "nrm": 305488,
+   "uv": 315136,
+   "skin": 321568,
+   "weight": 324784,
+   "index": 328000,
+   "indexType": "u16",
+   "min": [
+    -0.4952999949455261,
+    -0.1509999930858612,
+    -0.17990000545978546
+   ],
+   "max": [
+    0.49939998984336853,
+    0.14970000088214874,
+    0.1785999983549118
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 332200,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "ladyfish-color.jpg",
+  "mask": "ladyfish-mask.png"
+ },
+ "card": "ladyfish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

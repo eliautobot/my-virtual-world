@@ -53,7 +53,7 @@ import {
 import { BOTH_R, BOTH_LIFT, BITE_TIP, toolTip, toolDir, TABLE_TOP, DISH_AHEAD, WRIST_MAX, STOVE_PAN, PREP_BOARD } from '../../shared/eating.js';
 import { steer, claw, punch, foos, whack, flippers, hockey } from '../../shared/arcade-motion.js';
 import { MIC, BASS, BASS_SHAPE, bassPt, bassDir, stringZ, PHONES } from '../../shared/stage.js';
-import { BOOK_HANDS, PHONE_HAND, thingFrame, pointOf, dirOf } from '../../shared/held.js';
+import { BOOK_HANDS, PHONE_HAND, thingFrame, pointOf, dirOf, ROD_TILT, NET_TILT } from '../../shared/held.js';
 
 // a book or a phone held (shared/held.js): the middle of the thing from the shoulders' middle (offsets for an arm of 0.46 m,
 // as L.at), its face turned to the eyes; a hand's hold on it: its palm on the thing's back at the hand's place there
@@ -367,9 +367,11 @@ export const HOLDS = [
         Left: { at: L.at('Left', [-0.11, -0.2 - sw, 0.33]), along: V(-0.5, 0.45, 0.75), palm: V(-0.35, -0.8, 0.3), grip: 0.85, pole: V(0.5, -1, -0.3) } };
     },
   },
-  { // the rod held ready, forward and up: the right fist at the reel before the belly, the left on the fore grip
+  { // the rod held ready, forward and up: the right fist at the reel before the belly, the left arm at ease
     name: 'fish_idle', base: 'idle', still: 1, frames: 24, dur: 4,
-    pose(u, L) { return rodPose(L, V(-0.1, 0.6, 0.8), [0.14, -0.28 + 0.01 * Math.sin(TAU * u), 0.15], 0.06, 0.12); },
+    // (2026-11-13: one-handed, as anglers wait for a bite — the left arm hangs easy; reaching across to the rod put the
+    // left elbow into the chest on bigger bodies)
+    pose(u, L) { const P = rodPose(L, V(-0.1, 0.6, 0.8), [0.08, -0.3 + 0.01 * Math.sin(TAU * u), 0.25], 0.06, -0.16); delete P.Left; return P; },
   },
   { // a cast: the rod swung back over the right shoulder, snapped forward to point the line out, the follow-through
     name: 'fish_cast', base: 'idle', still: 1, frames: 30, dur: 1.3,
@@ -378,35 +380,42 @@ export const HOLDS = [
       const k = u < 0.32 ? smooth(u / 0.32) : u < 0.52 ? 1 - smooth((u - 0.32) / 0.2) : 0;           // 1: all the way back
       const f = u < 0.32 ? 0 : u < 0.52 ? smooth((u - 0.32) / 0.2) * 1 : 1 - 0.6 * smooth((u - 0.52) / 0.48);   // the snap past ready, settling
       const D = nrm(lerpDir(lerpDir(ready, out, f), back, k));
-      const w = lerpPt(lerpPt([0.14, -0.28, 0.15], [0.13, -0.26, 0.2], f), [0.12, 0.0, 0.04], k);
-      return { ...rodPose(L, D, w, 0.06 - 0.1 * k, 0.12 - 0.37 * smooth(k)), lean: -0.08 * k + 0.1 * f * (1 - k) };   // (the left hand down to the butt as it goes back)
+      const w = lerpPt(lerpPt([0.08, -0.3, 0.25], [0.08, -0.26, 0.28], f), [0.02, 0.14, 0.14], k);
+      return { ...rodPose(L, D, w, 0.06 - 0.1 * k, -0.16 - 0.08 * smooth(k)), lean: -0.08 * k + 0.1 * f * (1 - k) };   // (the left hand down to the butt as it goes back)
     },
   },
   { // reeling: the rod held up, the left hand turning the reel's handle round under it
     name: 'fish_reel', base: 'idle', still: 1, frames: 16, dur: 0.9,
     pose(u, L) {
-      const D = nrm(V(-0.1, 0.7, 0.7)), P = rodPose(L, D, [0.13, -0.22, 0.13], 0.1), a = TAU * u;
-      const hub = add(P.rodAt, add(scale(D, 0.07), [0.07 * L.k, -0.09 * L.k, 0]));                 // the reel under the rod, its handle out to the left
-      const up = nrm(cross(D, V(1, 0, 0))), r = 0.055 * L.k;
-      const knob = add(hub, add(scale(up, r * Math.cos(a)), scale(D, r * Math.sin(a))));
-      P.Left = { at: L.wristFor('Left', V(0.3, -0.6, 0.6), V(1, 0.1, 0.2), [0, 0, 0], knob), along: V(0.3, -0.6, 0.6), palm: V(1, 0.1, 0.2), grip: 0.7, pole: V(0.6, -1, -0.2) };
-      delete P.rodAt; return P;
+      const D = nrm(V(-0.1, 0.7, 0.7)), P = rodPose(L, D, [0.08, -0.26, 0.25], 0.1), a = TAU * u, { d, e, palm } = P.rodAxes;
+      // the reel's handle (render/char-props.js rod: its axle out the palm's side, to the body's left, its knob on it
+      // standing out along e): the left fist round the knob, the knob's way through it, its palm toward the reel, turning
+      // it in a small circle (the knob drawn still: the hand stays on it)
+      const knob = add(P.rodAt, add(add(scale(d, -0.02), scale(e, 0.103)), scale(palm, 0.075))), r = 0.018;
+      const at = add(knob, add(scale(e, r * Math.cos(a)), scale(d, r * Math.sin(a))));
+      const tilts = [-0.6, -0.3, 0, 0.3, 0.6, 0.9, 1.2], ks = [gripLine(L, 'Left', e, at, scale(palm, -1), Infinity, tilts), gripLine(L, 'Left', scale(e, -1), at, scale(palm, -1), Infinity, tilts)];
+      const k = ks[0].cost <= ks[1].cost ? ks[0] : ks[1];   // (a knob is pinched any way round)
+      P.Left = { at: k.at, along: k.along, palm: k.palm, grip: 0.85, pole: k.pole, eased: true };
+      if (SEQ.next) Object.assign(SEQ.next, { lPole: k.pole, lPalm: k.palm });
+      delete P.rodAt; delete P.rodAxes; return P;
     },
   },
   { // fighting a fish: leaning back, the rod high, the left hand up it, pumping it up, then down again winning line
     name: 'fish_fight', base: 'idle', still: 1, frames: 32, dur: 1.8,
     pose(u, L) {
       const pump = 0.5 - 0.5 * Math.cos(TAU * u), D = nrm(lerpDir(V(-0.1, 0.62, 0.78), V(-0.08, 0.93, 0.36), pump));
-      return { ...rodPose(L, D, [0.13, -0.28 + 0.12 * pump, 0.15 - 0.03 * pump], -0.05, 0.16), lean: -0.15 - 0.07 * pump };
+      return { ...rodPose(L, D, [0.08, -0.28 + 0.12 * pump, 0.25 - 0.03 * pump], -0.05, -0.16), lean: -0.15 - 0.07 * pump };
     },
   },
-  { // landing it: bent forward over the side, both hands on the net's handle (the right at its grip, the left down it),
+  { // landing it: bent forward over the side, both hands on the net's handle (the right at its grip, the left above it),
     // reaching it out and down to the water, then scooping up
     name: 'fish_net', base: 'idle', still: 1, frames: 28, dur: 1.6,
     pose(u, L) {
       const k = u < 0.55 ? smooth(u / 0.55) : 1 - 0.6 * smooth((u - 0.55) / 0.45);   // reaching down, then lifting
-      const D = nrm(lerpDir(V(-0.1, -0.12, 0.99), V(-0.08, -0.58, 0.81), k));
-      return { ...rodPose(L, D, [0.13, -0.18 - 0.04 * k, 0.08 + 0.04 * k], 0.35 + 0.15 * k, 0.13), lean: 0.2 + 0.25 * k };
+      // (2026-11-13: the right forearm level before the belly, the handle out of the bottom of the fist down to the water
+      // with the wrist straight — shared/held.js NET_TILT; the left fist on its grip just above the right)
+      const D = nrm(lerpDir(V(-0.05, -0.72, 0.69), V(-0.04, -0.9, 0.43), k));
+      return { ...rodPose(L, D, [0.1, -0.24 - 0.04 * k, 0.3 + 0.02 * k], 0.35 + 0.15 * k, -0.12, { tilt: NET_TILT, back: true }), lean: 0.2 + 0.25 * k };
     },
   },
   { // the catch held up to show it: both hands before the chest a little apart, palms up under it
@@ -418,32 +427,150 @@ export const HOLDS = [
         Left: { at: L.at('Left', [-0.06, -0.2 + b, 0.33]), along: V(-0.65, 0.1, 0.75), palm: V(-0.1, 1, -0.15), grip: 0.6, pole: V(0.6, -1, -0.2) } };
     },
   },
+  // ---- holding the catch as anglers do (2026-11-13, the owner: "the character holding the fish on the line and hook, or by
+  // its gills, or if it's too heavy with both hands"): which one by its weight (play/fishing-game.js holdStyle).
+  // 2026-11-13, the owner: "the hand holding the fish is twisted and grabbing it the wrong way, and the other hand is
+  // positioned as if holding the fish as well": a one-handed hold is a fist turned as a hand is shaken (the palm toward
+  // the body's middle, +x for the right, the thumb up, the fingers ahead), its hole upright so what hangs from it hangs
+  // straight down through it; the other arm hangs as it does standing (nothing posed on it)
+  { // a small one up by the line: the right fist raised before the shoulder pinching the line, the fish hanging under it
+    // turning; the head bowed a little to look at it
+    name: 'fish_hold_line', base: 'idle', still: 1, frames: 32, dur: 3.2,
+    pose(u, L) {
+      const sw = 0.012 * Math.sin(TAU * u), lift = 0.008 * Math.sin(TAU * 2 * u);
+      return { head: 0.04,
+        Right: { at: L.at('Right', [0.05 + sw, 0.06 + lift, 0.31]), along: V(0.2, 0.55, 0.81), palm: V(0.97, -0.08, -0.2), grip: 0.95, pole: V(-0.55, -1, -0.15) } };
+    },
+  },
+  { // a middling one by its gills: the right fist before the chest round the back of its head, the fish hanging nose up
+    // before the body, its side to whoever looks; the head bowed to it
+    name: 'fish_hold_gill', base: 'idle', still: 1, frames: 32, dur: 3.2,
+    pose(u, L) {
+      const b = 0.008 * Math.sin(TAU * u);
+      return { head: 0.1, lean: -0.03,
+        Right: { at: L.at('Right', [0.06, -0.1 + b, 0.33]), along: V(0.25, 0.12, 0.96), palm: V(0.96, -0.05, -0.25), grip: 0.9, pole: V(-0.55, -1, -0.2) } };
+    },
+  },
+  { // a heavy one in both arms: the hands a shoulders' width apart under it, palms up, the fingers ahead, held before the
+    // belly, leaning back against its weight, the arms tiring a little and lifting it again
+    name: 'fish_hold_two', base: 'idle', still: 1, frames: 40, dur: 4,
+    pose(u, L) {
+      const sag = 0.025 * (0.5 - 0.5 * Math.cos(TAU * u)), b = 0.005 * Math.sin(TAU * 3 * u);
+      return { head: 0.1, lean: -0.08 - 0.02 * sag / 0.025,
+        Right: { at: L.at('Right', [-0.02, -0.26 - sag + b, 0.3]), along: V(0.15, 0.08, 0.98), palm: V(0.05, 1, -0.08), grip: 0.4, pole: V(-0.45, -1, -0.35) },
+        Left: { at: L.at('Left', [0.02, -0.26 - sag + b, 0.3]), along: V(-0.15, 0.08, 0.98), palm: V(-0.05, 1, -0.08), grip: 0.4, pole: V(0.45, -1, -0.35) } };
+    },
+  },
 ];
 /**
  * Holding a rod pointed along D (the body's frame: x the left, y up, z ahead): the right fist at `wrist` (from the right
- * shoulder, as L.at) turned so its grip's x lies along the rod (the thumb on top, the reel hanging below in the fingers),
- * the left hand `ahead` metres up the rod from the right's grip (behind it: on the butt), its thumb toward the tip; the
- * head bowed `head`.
- * rodAt: where the rod passes through the right fist. A shorter arm than that reaches takes the left hand along the rod
- * toward the right one (no nearer than a hand's breadth), until it can.
+ * shoulder, as L.at) round the reel seat, the reel hanging under the rod in the fingers, the thumb on top; the left hand
+ * `ahead` metres up the rod from the right's grip (behind it: on the butt), its thumb toward the tip; the head bowed `head`.
+ * 2026-11-13 (the owner: "the fishing pole isn't correctly grabbed or held" — the rod lay square across each fist, so the
+ * wrists bent 55–115° to point it): the rod lies diagonally across each palm (shared/held.js ROD_TILT for the right fist,
+ * which carries it; the left's as suits it), and each hand turns round the rod — the right only a little, its reel kept
+ * under — and takes the elbow that leaves its wrist the straightest and its forearm least turned (easyElbow).
+ * rodAt: the right grip's origin (on the palm; the rod's line ROD_Z out of it); rodAxes: d (to the tip), e (the reel's
+ * way from the rod) and the right palm. A shorter arm than that reaches takes the left hand along the rod toward the
+ * right one (no nearer than a hand's breadth), until it can.
  */
-function rodPose(L, D, wrist, head = 0.04, ahead = -0.22) {
-  const d = nrm(D), square = v => nrm(sub(v, scale(d, dot(v, d))));
-  const palmR = square(V(1, 0.15, 0)), alongR = nrm(cross(palmR, d));     // (x = y × z = d)
-  const palmL = scale(palmR, -1), alongL = nrm(cross(d, palmL));          // (the left's x is its little finger's side: back down the rod)
-  const R = L.at('Right', wrist), rodAt = sub(R, L.wristFor('Right', alongR, palmR, [0, 0, 0], [0, 0, 0]));
-  const far = 0.46 * L.k * 0.96, sg = Math.sign(ahead) || 1;
-  let a = Math.abs(ahead), wl;
-  for (;;) {
-    wl = L.wristFor('Left', alongL, palmL, [0, 0, 0], add(rodAt, scale(d, sg * a * L.k)));
-    if (len(sub(wl, L.LeftArm)) <= far || a <= 0.095) break;
-    a = Math.max(0.095, a - 0.01);
+const ROD_Z = 0.013;
+/** The frame before's choices in the clip being baked (the bake sets prev, rodPose next): a hand doesn't jump between
+ *  two ways of holding from one frame to the next — each choice pays for straying from the last. */
+const SEQ = { prev: null, next: null };
+function rodPose(L, D, wrist, head = 0.04, ahead = -0.22, o = {}) {
+  // (o.tilt, o.back: the net's handle — across the palm the other way, out of the bottom of the fist: shared/held.js NET_TILT)
+  const d = nrm(D), square = v => nrm(sub(v, scale(d, dot(v, d)))), p0 = square(V(1, 0.15, 0)), tilt = o.tilt ?? ROD_TILT, dt = o.back ? scale(d, -1) : d;
+  // (2026-11-13, "the arms are going into and through the body ... please fix and verify": the rod brought out from the
+  // body — up to 20 cm, within reach — just as far as this body needs for both arms and the rod's butt behind the fist
+  // (the net's grip end) to keep out of it; a big belly takes it further out than a slim one)
+  const R0 = L.at('Right', wrist), back = o.back ? 0.34 : 0.29, reachR = (L.seg.Right[0] + L.seg.Right[1]) * 0.97;
+  const far = (L.seg.Left[0] + L.seg.Left[1]) * 0.985, sg = Math.sign(ahead) || 1, aMax = o.back ? 0.17 : sg < 0 ? 0.27 : 0.16;   // (the net: the left fist just above the right — up its grip it came to the chin)
+  let best = null;
+  // (through a clip the left hand keeps its place on the rod and the fist its way in; how far out may drift 3 cm a frame —
+  // a hand doesn't jump from one way of holding to another between frames)
+  const P0 = SEQ.prev?.push != null ? SEQ.prev : null, pushes = P0 ? [P0.push, P0.push + 0.03, P0.push - 0.03].filter(v => v >= 0 && v < 0.2101) : [0, 0.03, 0.06, 0.09, 0.12, 0.15, 0.18, 0.21];
+  search: for (const push of pushes) for (const inw of P0 ? [P0.inw] : [0, 0.05]) {   // (out ahead; in toward the middle, for a wide body)
+    const R = add(R0, [inw, 0, push]);
+    if ((push || inw) && len(sub(R, L.RightArm)) > reachR && push !== Math.min(...pushes)) continue;   // (out of reach: not further — but always some way)
+    let r = null;
+    for (let k = -4; k <= 4; k++) {   // (rolled at most 0.4 either way: the reel stays under)
+      const palm = nrm(rotv(rotAbout(d, k * 0.1, [0, 0, 0]), p0)), along = onRod('Right', dt, palm, tilt);
+      const el = easyElbow(L, 'Right', R, along, palm), ax = add(sub(R, L.wristFor('Right', along, palm, [0, 0, 0], [0, 0, 0])), scale(palm, ROD_Z));
+      let butt = -1;
+      for (const t of [0.35, 0.7, 1]) butt = Math.max(butt, L.trunk.depth(sub(ax, scale(d, back * t))) + 0.02);
+      const cost = el.cost + Math.abs(k) * 1.5 + Math.max(0, butt) * 3000 + (SEQ.prev ? Math.abs(k - SEQ.prev.k) * 4 : 0);
+      if (!r || cost < r.cost) r = { R, palm, along, ...el, cost, butt, axis: ax, k };
+    }
+    // the left hand on the rod: about `ahead` from the right (up to 12 cm either way, as this body can reach it clear)
+    for (const da of P0 ? [P0.da] : [0, 0.06, -0.06, 0.12, -0.12]) {
+      const a = Math.min(aMax, Math.max(0.095, Math.abs(ahead) + da));   // (on the grip: render/char-props.js — the rod's cork behind the reel or its fore grip, the net's grip)
+      const P = add(r.axis, scale(d, sg * a * L.k)), l = gripLine(L, 'Left', d, P, scale(p0, -1), far) || { ...nearestGrip(L, 'Left', d, P, scale(p0, -1)), cost: 400, into: 0.2 };
+      const keep = P0 ? Math.abs(push - P0.push) * 400 + Math.abs(inw - P0.inw) * 400 + Math.abs(da - P0.da) * 300 + (P0.lPalm ? Math.acos(Math.max(-1, Math.min(1, dot(l.palm, P0.lPalm)))) * 20 : 0) : 0;
+      const into = Math.max(r.into - L.restInto.Right, l.into - L.restInto.Left, r.butt), total = r.cost + l.cost + push * 150 + inw * 150 + Math.abs(da) * 100 + keep;
+      if (!best || total < best.total) best = { r, l, total, push, into, inw, da };
+      if (into <= 0.005 && l.cost < 400) break search;   // (clear of the body: no further)
+    }
   }
-  return { head, rodAt,
-    Right: { at: R, along: alongR, palm: palmR, grip: 0.95, pole: V(-0.5, -1, -0.3) },
-    Left: { at: wl, along: alongL, palm: palmL, grip: 0.9, pole: V(0.6, -1, -0.2) } };
+  if (process.env.DEBUG_ROD) console.log('   rod', JSON.stringify({ push: best.push, inw: best.inw, da: best.da, into: +(best.into * 100).toFixed(1), rInto: +(best.r.into * 100).toFixed(1), lInto: +(best.l.into * 100).toFixed(1), lCost: +best.l.cost.toFixed(0), rCost: +best.r.cost.toFixed(0), total: +best.total.toFixed(0), lAt: best.l.at.map(v => +v.toFixed(3)), lPole: best.l.pole.map(v => +v.toFixed(2)), S: L.LeftArm.map(v => +v.toFixed(3)), lIntoNow: +(armInTrunk(L, 'Left', L.LeftArm, add(L.LeftArm, scale(reach(L.LeftArm, L.seg.Left[0], L.seg.Left[1], best.l.at, best.l.pole).arm, L.seg.Left[0])), best.l.at) * 100).toFixed(1) }));
+  SEQ.next = { push: best.push, inw: best.inw, da: best.da, k: best.r.k, rPole: best.r.pole, lPole: best.l.pole, lPalm: best.l.palm };
+  const { r, l } = best, R = r.R, rodAt = sub(R, L.wristFor('Right', r.along, r.palm, [0, 0, 0], [0, 0, 0]));
+  return { head, rodAt, rodAxes: { d, e: nrm(cross(r.palm, dt)), palm: r.palm },
+    Right: { at: R, along: r.along, palm: r.palm, grip: 0.95, pole: r.pole, eased: true },
+    Left: { at: l.at, along: l.along, palm: l.palm, grip: 0.95, pole: l.pole, eased: true } };
 }
-function lerpPt(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+/** A hand's fingers on a line along d (a rod, a handle: through the fist), its palm `palm` (⊥ d), the line across the palm
+ *  `tilt` from square toward the fingers — the right's grip x (the index side) toward d, the left's thumb toward d. */
+const onRod = (side, d, palm, tilt) => nrm(add(scale(d, Math.sin(tilt)), scale(side === 'Right' ? cross(palm, d) : cross(d, palm), Math.cos(tilt))));
+/** A free hand (it carries nothing: any turn round the line, as across the palm as suits it) gripping a line along d at P:
+ *  of every way, the one with the straightest wrist and least-turned forearm (easyElbow), preferring the palm `pref`'s
+ *  side a little; its wrist within `far` of the shoulder. → { at, along, palm, pole, cost } or null. */
+function gripLine(L, side, d, P, pref, far, tilts = [0.3, 0.6, 0.9]) {
+  let best = null;
+  for (let k = 0; k < 16; k++) for (const t of tilts) {
+    const palm = nrm(rotv(rotAbout(d, k / 16 * TAU, [0, 0, 0]), pref)), along = onRod(side, d, palm, t);
+    const at = L.wristFor(side, along, palm, [0, 0, ROD_Z], P), out = len(sub(at, L[side + 'Arm'])) - far;
+    if (out > 0) continue;
+    const el = easyElbow(L, side, at, along, palm), turn = Math.min(k, 16 - k) * 22.5;   // (degrees from `pref`)
+    const pp = side === 'Left' ? SEQ.prev?.lPalm : null, cost = el.cost + 0.08 * turn + Math.abs(t - 0.6) * 6 + (pp ? Math.acos(Math.max(-1, Math.min(1, dot(palm, pp)))) * 50 : 0);
+    if (!best || cost < best.cost) best = { at, along, palm, pole: el.pole, cost, bend: el.bend, into: el.into };
+  }
+  return best;
+}
+/** Out of reach every way: the way that leaves the wrist nearest the shoulder (the arm stretched toward it). */
+function nearestGrip(L, side, d, P, pref) {
+  let best = null;
+  for (let k = 0; k < 36; k++) for (const t of [0.2, 0.5, 0.8]) {
+    const palm = nrm(rotv(rotAbout(d, k / 36 * TAU, [0, 0, 0]), pref)), along = onRod(side, d, palm, t), at = L.wristFor(side, along, palm, [0, 0, ROD_Z], P);
+    const dist = len(sub(at, L[side + 'Arm']));
+    if (!best || dist < best.dist) best = { at, along, palm, dist };
+  }
+  const el = easyElbow(L, side, best.at, best.along, best.palm);
+  return { ...best, pole: el.pole, into: el.into, bend: el.bend };
+}
+/**
+ * The elbow for a wrist at W, the hand turned (along, palm): of the places it can be (a circle round the shoulder–wrist
+ * line), the one that bends the wrist least from the forearm and turns the forearm least from a handshake's (the palm
+ * toward the body's middle as the elbow bends), not up above that line nor across the body.
+ * → { pole (for reach), cost (degrees), bend (degrees) }
+ */
+function easyElbow(L, side, W, along, palm, prevPole = SEQ.prev?.[side === 'Right' ? 'rPole' : 'lPole']) {
+  const S = L[side + 'Arm'], [a, b] = L.seg[side], v = sub(W, S), u = nrm(v), dd = Math.max(Math.abs(a - b) + 1e-3, Math.min(a + b - 1e-3, len(v)));
+  const x = (a * a - b * b + dd * dd) / (2 * dd), h = Math.sqrt(Math.max(0, a * a - x * x)), C = add(S, scale(u, x)), T = add(S, scale(u, dd));
+  const p1 = nrm(cross(u, Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0])), p2 = cross(u, p1), inward = side === 'Right' ? 1 : -1;
+  const deg = c => Math.acos(Math.max(-1, Math.min(1, c))) * 180 / PI;
+  let best = null;
+  for (let i = 0; i < 32; i++) {
+    const th = i / 32 * TAU, q = add(scale(p1, Math.cos(th)), scale(p2, Math.sin(th))), E = add(C, scale(q, h));
+    const fore = nrm(sub(T, E)), upper = nrm(sub(E, S)), bend = deg(dot(fore, along));
+    const n = cross(upper, fore), sn = len(n);
+    const twist = sn > 0.15 ? deg(dot(nrm(sub(palm, scale(fore, dot(palm, fore)))), scale(nrm(n), side === 'Right' ? -1 : 1))) : 0;
+    const into = armInTrunk(L, side, S, E, T);   // (into the body: metres; as far as the arm rests against it standing let be)
+    const cost = bend + 1.5 * Math.max(0, bend - 45) + 0.6 * Math.max(0, twist - 55) * Math.min(1, sn / 0.5) + Math.max(0, q[1] - 0.15) * 90 + Math.max(0, inward * q[0] - 0.3) * 90 + Math.max(0, into - L.restInto[side]) * 3000 + (prevPole ? Math.acos(Math.max(-1, Math.min(1, dot(q, prevPole)))) * 80 : 0);
+    if (!best || cost < best.cost) best = { pole: q, cost, bend, into };
+  }
+  return best;
+}function lerpPt(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
 // ------------------------------------------------------------------ nights out (a set of their own: --set venue)
 // The people at work on a night out (2026-10-24, the product owner: "we need new animations and interactions ... the
 // lounge needs bartenders, several, musicians ... the night club needs bartenders, several, nightclub dancers as well
@@ -710,6 +837,105 @@ function headFrame(R) {
   return (HEADS[R.kind] = { o: [H[0] + (wl - wr) / 2, ey, zc - 0.01], x: [(wl + wr) / 2 / PHONES.w, 0, 0], y: [0, (crown + 0.012 - ey) / PHONES.top, 0], z: [0, 0, 1] });
 }
 /** The body's landmarks in a frame: each joint, and the mouth (in front of and below the head's joint). */
+// ------------------------------------------------------------------ the body, so arms keep out of it
+// (2026-11-13, the owner, of the fishing poses: "the arms are going into and through the body ... please fix and verify"):
+// each character's own trunk from its mesh (clothes and all: a jacket's bulk), posed with the frame; a point's depth in it.
+const TRUNK = new Set(['Hips', 'Spine', 'Spine1', 'Spine2', 'Neck']);   // (not the collarbones: their skin is the shoulder's cap, over the arm)
+/** The trunk's vertices (bind space, with their bones and weights) and the arms' thickness (upper arm, forearm: the
+ *  sleeve's radius round the bone, its 75th percentile), from the full mesh. Cached on R. */
+function bodyOf(R) {
+  if (R.body) return R.body;
+  const lod = R.man.lods[0], bin = fs.readFileSync(path.join(DIR, R.kind + '.bin'));
+  const arr = (T, a) => new T(bin.buffer.slice(bin.byteOffset + a.off, bin.byteOffset + a.off + a.len));
+  const P = arr(Float32Array, lod.pos), Jv = arr(Uint8Array, lod.j), Wv = arr(Uint8Array, lod.w), n = lod.verts;
+  const trunk = [], radii = { LeftArm: [], RightArm: [], LeftForeArm: [], RightForeArm: [] };
+  const seg = { LeftArm: ['LeftArm', 'LeftForeArm'], RightArm: ['RightArm', 'RightForeArm'], LeftForeArm: ['LeftForeArm', 'LeftHand'], RightForeArm: ['RightForeArm', 'RightHand'] };
+  for (let v = 0; v < n; v++) {
+    let b = Jv[v * 4], bw = Wv[v * 4];
+    for (let k = 1; k < 4; k++) if (Wv[v * 4 + k] > bw) { bw = Wv[v * 4 + k]; b = Jv[v * 4 + k]; }
+    const nm = R.N[b], p = [P[v * 3], P[v * 3 + 1], P[v * 3 + 2]];
+    let tw = 0; for (let k = 0; k < 4; k++) if (TRUNK.has(R.N[Jv[v * 4 + k]])) tw += Wv[v * 4 + k] / 255;
+    if (tw >= 0.9) trunk.push({ p, j: [0, 1, 2, 3].map(k => Jv[v * 4 + k]), w: [0, 1, 2, 3].map(k => Wv[v * 4 + k] / 255) });
+    else if (radii[nm]) {
+      const [a, c] = seg[nm].map(x => R.J[R.idx[x]]), ax = nrm(sub(c, a)), rel = sub(p, a);
+      radii[nm].push(len(sub(rel, scale(ax, dot(rel, ax)))));
+    }
+  }
+  const q75 = a => { a.sort((x, y) => x - y); return a.length ? a[Math.floor(a.length * 0.75)] : 0.045; };
+  return (R.body = { trunk, arm: { Left: [q75(radii.LeftArm), q75(radii.LeftForeArm)], Right: [q75(radii.RightArm), q75(radii.RightForeArm)] } });
+}
+/**
+ * The trunk as posed in frame F: slices 2 cm high, each its middle and how far its surface lies from it in each of 32
+ * directions. depth(p): how far p is inside it (metres; below 0: outside, by as much).
+ */
+function trunkIn(R, F) {
+  const B = bodyOf(R), pts = B.trunk.map(t => { const q = [0, 0, 0]; for (let k = 0; k < 4; k++) if (t.w[k]) { const a = app(F[t.j[k]], t.p); q[0] += a[0] * t.w[k]; q[1] += a[1] * t.w[k]; q[2] += a[2] * t.w[k]; } return q; });
+  // each slice's middle on the spine (the hips' joint up through the spine's to the neck's, as posed), not the vertices'
+  // mean (an open jacket's front or a hem's flare drew that off); its surface as far as the vertices go in each of 32
+  // directions, then the middle of three slices' (a stray vertex or a thin slice let be)
+  const X = jointsOf(R, F), chain = ['Hips', 'Spine', 'Spine1', 'Spine2', 'Neck', 'Head'].map(n => X[R.idx[n]]).filter(Boolean);
+  const spineAt = y => {
+    if (y <= chain[0][1]) return chain[0];
+    for (let i = 1; i < chain.length; i++) if (y <= chain[i][1]) { const t = (y - chain[i - 1][1]) / Math.max(1e-6, chain[i][1] - chain[i - 1][1]); return add(chain[i - 1], scale(sub(chain[i], chain[i - 1]), t)); }
+    return chain[chain.length - 1];
+  };
+  const DY = 0.02, NS = 32, y0 = Math.min(...pts.map(p => p[1])), y1 = Math.max(...pts.map(p => p[1])), nb = Math.ceil((y1 - y0) / DY) + 1;
+  const sl = Array.from({ length: nb }, (_, i) => { const c = spineAt(y0 + (i + 0.5) * DY); return { n: 0, cx: c[0], cz: c[2], r: new Float64Array(NS).fill(-1) }; });
+  for (const p of pts) {
+    const s = sl[Math.floor((p[1] - y0) / DY)], dx = p[0] - s.cx, dz = p[2] - s.cz;
+    const k = ((Math.round(Math.atan2(dz, dx) / TAU * NS) % NS) + NS) % NS;
+    s.r[k] = Math.max(s.r[k], Math.hypot(dx, dz)); s.n++;
+  }
+  for (const s of sl) {   // (a direction with no vertex: as its nearest neighbours)
+    if (!s.n) continue;
+    const r = Float64Array.from(s.r);
+    for (let k = 0; k < NS; k++) if (r[k] < 0) {
+      let a = 1, b = 1;
+      while (a < NS && r[(k - a + NS) % NS] < 0) a++;
+      while (b < NS && r[(k + b) % NS] < 0) b++;
+      s.r[k] = a < NS && b < NS ? (r[(k - a + NS) % NS] * b + r[(k + b) % NS] * a) / (a + b) : 0;
+    }
+  }
+  for (let i = 0; i < nb; i++) if (!sl[i].n) {   // (a slice with no vertex: as the nearer of those either side)
+    let a = i - 1, b = i + 1;
+    while (a >= 0 && !sl[a].n) a--;
+    while (b < nb && !sl[b].n) b++;
+    const src = a >= 0 && (b >= nb || i - a <= b - i) ? sl[a] : b < nb ? sl[b] : null;
+    if (src) sl[i] = { n: -1, cx: sl[i].cx, cz: sl[i].cz, r: src.r };
+  }
+  const med = sl.map((s, i) => {   // (the middle of three slices', each direction)
+    if (!s.n) return s;
+    const nbr = [sl[i - 1], s, sl[i + 1]].filter(q => q && q.n);
+    const r = new Float64Array(NS);
+    for (let k = 0; k < NS; k++) { const v = nbr.map(q => q.r[k]).sort((x, y) => x - y); r[k] = v[Math.floor(v.length / 2)]; }
+    return { ...s, r };
+  });
+  const depth = p => {
+    const i = Math.floor((p[1] - y0) / DY);
+    if (i < 0 || i >= nb || !med[i].n) return -1;
+    const s = med[i], dx = p[0] - s.cx, dz = p[2] - s.cz, a = Math.atan2(dz, dx) / TAU * NS, k0 = Math.floor(a), f = a - k0;
+    const r = s.r[((k0 % NS) + NS) % NS] * (1 - f) + s.r[(((k0 + 1) % NS) + NS) % NS] * f;
+    return r - Math.hypot(dx, dz);
+  };
+  return { depth };
+}
+/** How far each arm (Left, Right) already sits into the trunk in the idle's first frame (a sleeve against the side, the
+ *  clothes' own overlap), at least a centimetre: as much is let be in a hold. Cached on R. */
+function restInto(R) {
+  if (R.restInto) return R.restInto;
+  const F = frameOf(R, (R.clip('idle') || R.man.clips[0]).off), X = jointsOf(R, F), LB = { trunk: trunkIn(R, F), armR: bodyOf(R).arm }, i = R.idx;
+  return (R.restInto = Object.fromEntries(['Left', 'Right'].map(sd => [sd, Math.max(0.01, armInTrunk(LB, sd, X[i[sd + 'Arm']], X[i[sd + 'ForeArm']], X[i[sd + 'Hand']]))])));
+}
+/** How deep an arm (shoulder S, elbow E, wrist W) goes into the trunk, its own thickness counted: the worst of points
+ *  down the upper arm's lower part (its root is in the shoulder, under the deltoid and the chest's edge) and the forearm; a little touching (an arm resting against the side) let be. */
+function armInTrunk(L, side, S, E, W) {
+  const T = L.trunk, [ru, rf] = L.armR[side];
+  let worst = -1;
+  for (const t of [0.7, 0.85, 1]) worst = Math.max(worst, T.depth(add(S, scale(sub(E, S), t))) + ru);   // (its root is in the shoulder: from its lower part)
+  for (const t of [0.2, 0.45, 0.7, 0.95]) worst = Math.max(worst, T.depth(add(E, scale(sub(W, E), t))) + rf * (1 - 0.3 * t));
+  return worst;
+}
+
 function landmarks(R, X, desk, F) {
   const L = { desk };
   R.N.forEach((n, b) => { if (X[b]) L[n] = X[b]; });
@@ -719,6 +945,11 @@ function landmarks(R, X, desk, F) {
   const J = R.J, i = R.idx, arm = s => len(sub(J[i[s + 'ForeArm']], J[i[s + 'Arm']])) + len(sub(J[i[s + 'Hand']], J[i[s + 'ForeArm']]));
   L.k = (arm('Left') + arm('Right')) / 2 / 0.46;
   L.at = (side, v) => add(L[side + 'Arm'], scale(v, L.k));
+  let trunk = null;
+  Object.defineProperty(L, 'trunk', { get: () => (trunk ||= trunkIn(R, F)) });   // (the trunk as posed: only when asked)
+  L.armR = bodyOf(R).arm;
+  L.restInto = restInto(R);   // (how far each arm already rests into the body standing: let be)
+  L.seg = Object.fromEntries(['Left', 'Right'].map(sd => [sd, [len(sub(J[i[sd + 'ForeArm']], J[i[sd + 'Arm']])), len(sub(J[i[sd + 'Hand']], J[i[sd + 'ForeArm']]))]]));   // (upper arm, forearm)
   // the wrist that brings a cup in the right hand, the hand turned (along, palm), to rest on the lips: its middle ahead of
   // the mouth and a little below, so the rim meets them
   const h = handOf(R, 'Right');
@@ -801,6 +1032,11 @@ function holdFrame(R, F0, hold, u, desk) {
     // turned toward it until it is, the wrist placed again so the point still reaches (the arm follows)
     if (s.target) Object.assign(s, wristLimited(L, side, X0[R.idx[side + 'Arm']], a, b, s));
     // (an arm is placed by where its wrist goes, or by the directions of its two bones)
+    // (fishing: each elbow where its wrist is straightest and the arm keeps out of the body — easyElbow)
+    if (/^fish_/.test(hold.name) && s.at && s.along && s.palm && !s.eased) {
+      s.pole = easyElbow(L, side, s.at, s.along, s.palm, SEQ.prev?.[side === 'Right' ? 'rPole' : 'lPole'] ?? null).pole;
+      SEQ.next = { ...(SEQ.next || {}), [side === 'Right' ? 'rPole' : 'lPole']: s.pole };
+    }
     const r = s.at ? reach(X0[R.idx[side + 'Arm']], a, b, s.at, s.pole) : { arm: s.arm, fore: s.fore };
     Object.assign(d, { [side + 'Arm']: r.arm, [side + 'ForeArm']: r.fore, [side + 'Hand']: s.along });
     palm[side] = s.palm; hands[side] = s.grip;
@@ -812,7 +1048,8 @@ function holdFrame(R, F0, hold, u, desk) {
     }
   }
   d.palm = palm;
-  return { F: poseFrom(R, F0, { d, hands, noTwist: o['no-twist'] }), h };
+  const Fout = poseFrom(R, F0, { d, hands, noTwist: o['no-twist'] });
+  return { F: Fout, h };
 }
 
 /**
@@ -919,7 +1156,7 @@ function bake(kind) {
     mended[name] = { len: L.frames.length, dur: c.dur, stride: c.stride, per: L.per, s: L.s, gap: +L.gap.toFixed(2), seamBefore: +L.seamBefore.toFixed(2) };
   }
   // holding, after the loops: from the walk (mended), the idle and the seated idle
-  const holds = {}, reachErr = {}, bendMax = {}, desk = deskOf(R) || [0, 0.755, 0.55];
+  const holds = {}, reachErr = {}, bendMax = {}, intoMax = {}, jumpMax = {}, desk = deskOf(R) || [0, 0.755, 0.55];
   for (const hold of HOLDS) {
     const base = mendedFrames[hold.base] ? { frames: mendedFrames[hold.base] } : R.clip(hold.base);
     if (!base) throw new Error(`${kind}: no ${hold.base} to hold from`);
@@ -928,21 +1165,42 @@ function bake(kind) {
     const nb = base.frames ? base.frames.length : base.len, n = hold.still ? hold.frames : Math.floor(nb / hold.step);
     for (let fr = 0; fr < n; fr++) {
       const at = hold.still ? 0 : fr * hold.step, Fb = base.frames ? base.frames[at] : frameOf(R, base.off + at);
+      if (fr === 0) SEQ.prev = null;
+      SEQ.next = null;
       const { F, h } = holdFrame(R, Fb, hold, fr / n, desk);
+      SEQ.prev = SEQ.next;
       for (const m of F) frames.push(m);
       if (o.verify) {   // how far each wrist ended from where it was sent
         const X = jointsOf(R, F);
-        for (const side of ['Left', 'Right']) if (h[side]?.at) reachErr[hold.name] = Math.max(reachErr[hold.name] || 0, len(sub(X[idx[side + 'Hand']], h[side].at)));
+        for (const side of ['Left', 'Right']) if (h[side]?.at) { const k = /^fish_/.test(hold.name) ? `${hold.name}.${side[0]}` : hold.name; reachErr[k] = Math.max(reachErr[k] || 0, len(sub(X[idx[side + 'Hand']], h[side].at))); }
         // eating: how far the hand turns from its forearm (worst, degrees)
         for (const side of ['Left', 'Right']) if (h[side]?.target) {
           const fo = nrm(sub(X[idx[side + 'Hand']], X[idx[side + 'ForeArm']])), hd = nrm(sub(X[idx[side + 'HandMiddle1']], X[idx[side + 'Hand']]));
           bendMax[hold.name] = Math.max(bendMax[hold.name] || 0, Math.acos(Math.max(-1, Math.min(1, dot(fo, hd)))) * 180 / PI);
         }
+        // fishing: the most an elbow or a wrist moves from one frame to the next (cm: a pop where a hand changes its hold)
+        if (/^fish_/.test(hold.name)) { const now = ['LeftForeArm', 'LeftHand', 'RightForeArm', 'RightHand'].map(b => X[idx[b]]); if (fr > 0 && hold.__last) jumpMax[hold.name] = Math.max(jumpMax[hold.name] || 0, ...now.map((q, i) => len(sub(q, hold.__last[i])) * 100)); hold.__last = now; }
+        // fishing: how deep each arm goes into the body (its own thickness counted; cm), as posed
+        if (hold.name === 'fish_idle' && fr === 0) { const Fb0 = frameOf(R, (R.clip('idle') || R.man.clips[0]).off), X0b = jointsOf(R, Fb0), LB = { trunk: trunkIn(R, Fb0), armR: bodyOf(R).arm }; for (const side of ['Left', 'Right']) { const k = `idle(base).${side[0]}`; intoMax[k] = Math.max(intoMax[k] ?? -1, armInTrunk(LB, side, X0b[idx[side + 'Arm']], X0b[idx[side + 'ForeArm']], X0b[idx[side + 'Hand']]) * 100); } }
+        if (/^fish_/.test(hold.name)) { const LB = { trunk: trunkIn(R, F), armR: bodyOf(R).arm }; for (const side of ['Left', 'Right']) { const k = `${hold.name}.${side[0]}`; intoMax[k] = Math.max(intoMax[k] ?? -1, (armInTrunk(LB, side, X[idx[side + 'Arm']], X[idx[side + 'ForeArm']], X[idx[side + 'Hand']]) - restInto(R)[side]) * 100); } }   // (beyond its resting contact)
+        if (process.env.DEBUG_CLIP === hold.name) {   // (lab: frame by frame)
+          const LB = { trunk: trunkIn(R, F), armR: bodyOf(R).arm }, row = [];
+          for (const side of ['Left', 'Right']) {
+            const S = X[idx[side + 'Arm']], E = X[idx[side + 'ForeArm']], W = X[idx[side + 'Hand']], fo = nrm(sub(W, E)), hd = nrm(sub(X[idx[side + 'HandMiddle1']], W));
+            row.push(`${side[0]} bend ${Math.round(Math.acos(Math.max(-1, Math.min(1, dot(fo, hd)))) * 180 / PI)} into ${((armInTrunk(LB, side, S, E, W) - restInto(R)[side]) * 100).toFixed(1)} elbow ${sub(E, S).map(v => v.toFixed(2)).join(',')} wrist ${sub(W, S).map(v => v.toFixed(2)).join(',')}`);
+          }
+          console.log(kind, hold.name, (fr / n).toFixed(2), row.join(' | '));
+        }
+        // fishing: the same for each hand (R/L) on the rod, the net, the catch
+        if (/^fish_/.test(hold.name)) for (const side of ['Left', 'Right']) if (h[side]) {
+          const fo = nrm(sub(X[idx[side + 'Hand']], X[idx[side + 'ForeArm']])), hd = nrm(sub(X[idx[side + 'HandMiddle1']], X[idx[side + 'Hand']])), k = `${hold.name}.${side[0]}`;
+          bendMax[k] = Math.max(bendMax[k] || 0, Math.acos(Math.max(-1, Math.min(1, dot(fo, hd)))) * 180 / PI);
+        }
       }
     }
     holds[hold.name] = n;
   }
-  if (o.verify) console.log(kind, 'loops', JSON.stringify(mended), 'holds: worst reach miss (m)', JSON.stringify(Object.fromEntries(Object.entries(reachErr).map(([k, v]) => [k, +v.toFixed(3)]))), 'eating: worst wrist bend (°)', JSON.stringify(Object.fromEntries(Object.entries(bendMax).map(([k, v]) => [k, Math.round(v)]))));
+  if (o.verify) console.log(kind, 'loops', JSON.stringify(mended), 'holds: worst reach miss (m)', JSON.stringify(Object.fromEntries(Object.entries(reachErr).map(([k, v]) => [k, +v.toFixed(3)]))), 'eating: worst wrist bend (°)', JSON.stringify(Object.fromEntries(Object.entries(bendMax).map(([k, v]) => [k, Math.round(v)]))), 'fishing: arms into the body beyond resting against it (cm)', JSON.stringify(Object.fromEntries(Object.entries(intoMax).map(([k, v]) => [k, +v.toFixed(1)]))), 'fishing: biggest step between frames (cm)', JSON.stringify(Object.fromEntries(Object.entries(jumpMax).map(([k, v]) => [k, +v.toFixed(1)]))));
   if (o.verify) {
     // a stroke pushes when the hand moves back along the body through the water: there the palm should face the way the
     // hand moves (dot > 0: palm first; < 0: the back of the hand first)

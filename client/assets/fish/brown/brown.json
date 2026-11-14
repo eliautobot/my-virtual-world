@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "brown",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 3ce45f4f from 07_lake_trout/Brown_Trout.png; tools/animals/fish_animal.py",
+ "height": 0.3287,
+ "length": 0.9997,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4304,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 51648,
+   "uv": 103296,
+   "skin": 137728,
+   "weight": 154944,
+   "index": 172160,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.16449999809265137,
+    -0.15610000491142273
+   ],
+   "max": [
+    0.49970000982284546,
+    0.16419999301433563,
+    0.155799999833107
+   ]
+  },
+  {
+   "verts": 1593,
+   "tris": 2000,
+   "pos": 208160,
+   "nrm": 227276,
+   "uv": 246392,
+   "skin": 259136,
+   "weight": 265508,
+   "index": 271880,
+   "indexType": "u16",
+   "min": [
+    -0.499099999666214,
+    -0.16449999809265137,
+    -0.15610000491142273
+   ],
+   "max": [
+    0.49790000915527344,
+    0.16380000114440918,
+    0.155799999833107
+   ]
+  },
+  {
+   "verts": 699,
+   "tris": 700,
+   "pos": 283880,
+   "nrm": 292268,
+   "uv": 300656,
+   "skin": 306248,
+   "weight": 309044,
+   "index": 311840,
+   "indexType": "u16",
+   "min": [
+    -0.49720001220703125,
+    -0.16249999403953552,
+    -0.15610000491142273
+   ],
+   "max": [
+    0.4952000081539154,
+    0.16380000114440918,
+    0.155799999833107
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 316040,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "brown-color.jpg",
+  "mask": "brown-mask.png"
+ },
+ "card": "brown-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

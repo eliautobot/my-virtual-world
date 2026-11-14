@@ -29,16 +29,18 @@ import { initFishdex } from './fishdex.js';
 import { heights, waterUnder } from '../render/sea-probe.js';
 import { kitFor, hourAt } from '/shared/fishing.js';
 import { biteEvery, bountiesMet, TRIP_BY_ID } from '/shared/fishing-trip.js';
-import { LURE_BY_ID, luresFor } from '/shared/fishing-gear.js';
+import { LURE_BY_ID, luresFor, rankOf } from '/shared/fishing-gear.js';
 import { speciesOf, findOf, RARITY, sizeOf, valueOf, toLb } from '/shared/fish-species.js';
+import { ROD_TIP } from '/shared/held.js';
 import { fightSetup, fightStep, FIGHT_DT, botInput } from '/shared/fishing-fight.js';
 
-const TIP = [1.96, 0, 0.013];          // the rod's tip in the right hand's grip frame (render/char-props.js rod)
+const TIP = ROD_TIP;                   // the rod's tip in the right hand's grip frame (shared/held.js: across the palm)
 const AIM_SWING = 1.3, CAST_MIN = 4, AIM_ARC = 1.3;
 const TEST = new URLSearchParams(location.search).has('fishtest');   // (lab checks: quick bites, a steady hand)
 let app = null, fx = null, nav = null, E = {}, cat = null, prog = null, trip = null, A = null, lastMs = 0;
+let streak = 0;   // (fish landed in a row without losing one: shown with the catch, 2026-11-13)
 const keys = new Set();
-const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _tip = new THREE.Vector3(), _q = [0, 0, 0];
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _tip = new THREE.Vector3(), _q = [0, 0, 0];
 
 export function init(a) {
   app = a;
@@ -51,7 +53,9 @@ export function init(a) {
   bus.on('boating', ev => { E.btn.classList.toggle('hidden', !ev.on); if (!ev.on) { stand(); if (trip) finish('Back ashore'); closePick(); } });
   bus.on('boat-fish', ev => { if (ev.on) sitDown(); else stand(); });
   bus.on('frame', (dt, now) => frame(Math.min(0.1, dt), now / 1000));
-  app.fishing = { get trip() { return trip; }, get state() { return A?.st || null; }, open: openPick, start, finish: () => finish(null), get nav() { return nav; }, debug: { auto: false, fast: false } };
+  app.fishing = { get trip() { return trip; }, get state() { return A?.st || null; }, open: openPick, start, finish: () => finish(null), get nav() { return nav; }, debug: { auto: false, fast: false, showCatch: c => showCatch(c) },
+    // (for the lab checks: the camera's shot now, how the catch is held, the fish's depth in the water, the line's strain)
+    get look() { return { shot: A?.cine?.kind || null, pinned: !!app.cam?.pinOn, style: A?.style || null, depth: A?.depth ?? null, strain: A?.F?.strain ?? null, held: A?.hp ? [A.hp.x, A.hp.y, A.hp.z] : null, glam: !!A?.glam, mode: A?.F?.mode || null, steer: !E.steer.classList.contains('hidden'), badge: E.gauge.querySelector('.fg-mode')?.textContent || null, rank: trip?.L?.rank || null }; } };
   if (TEST) Object.assign(app.fishing.debug, { auto: true, fast: true });
 }
 
@@ -74,9 +78,25 @@ function build(root) {
   E.lure = E.ctl.querySelector('.fc-lure'); E.lure.onclick = () => nextLure();
   E.ctl.querySelector('.fc-in').onclick = () => reelIn();
   E.bow = E.ctl.querySelector('.fc-bow'); E.bow.addEventListener('pointerdown', e => { e.preventDefault(); if (A) A.bowQ = true; });
-  E.gauge = root.appendChild(h(`<div id="fishgauge" class="hidden"><div class="fg-row"><small>TENSION</small><span class="fg-bar fg-t"><i></i><em></em></span></div>
+  E.gauge = root.appendChild(h(`<div id="fishgauge" class="hidden"><div class="fg-mode"></div><div class="fg-row"><small>TENSION</small><span class="fg-bar fg-t"><i></i><em></em></span></div>
     <div class="fg-row"><small>FISH</small><span class="fg-bar fg-s"><i></i></span><b class="fg-line"></b></div><div class="fg-hint"></div></div>`));
   E.prompt = root.appendChild(h('<div id="fishprompt" class="hidden"></div>'));
+  // (2026-11-13, the owner: "more flare and more fun, engaging ... effects"): a banner for the big moments (fish on, a
+  // perfect hook, the catch's rarity, a record), the screen's edges reddening as the line strains, a flash for a legend
+  E.banner = root.appendChild(h('<div id="fishbanner" class="hidden"><b></b><small></small></div>'));
+  // steering (2026-11-13: "fun and intuitive, on mobile and desktop"): two big arrows while a fish is on — hold the one
+  // that lights up to pull against its run (A / D, ← / → on a keyboard; the stick works too)
+  E.steer = root.appendChild(h('<div id="fishsteer" class="hidden"><button type="button" class="fs-l" aria-label="Pull left">◀<kbd>A</kbd></button><button type="button" class="fs-r" aria-label="Pull right"><kbd>D</kbd>▶</button></div>'));
+  for (const [sel, d] of [['.fs-l', -1], ['.fs-r', 1]]) {
+    const b = E.steer.querySelector(sel);
+    b.addEventListener('pointerdown', e => { e.preventDefault(); try { b.setPointerCapture?.(e.pointerId); } catch { /* gone */ } if (A) A.steerBtn = d; b.classList.add('down'); });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, () => { if (A && A.steerBtn === d) A.steerBtn = 0; b.classList.remove('down'); });
+  }
+  // the glamour shot's frame: black bars, the name, its size, a stamp for what's special about it
+  E.glam = root.appendChild(h('<div id="fishglam" class="hidden"><i class="fg-bar-t"></i><i class="fg-bar-b"></i><div class="fg-title"><em class="fg-stamp"></em><b></b><small></small></div><div class="fg-skip">tap to skip</div></div>'));
+  E.glam.addEventListener('pointerdown', () => { if (A?.glam) A.glam.dur = 0; });
+  E.vig = root.appendChild(h('<div id="fishvig"></div>'));
+  E.flash = root.appendChild(h('<div id="fishflash"></div>'));
   E.card = root.appendChild(h('<div id="fishcard" class="panel hidden" role="dialog" aria-label="Your catch"></div>'));
   E.card.addEventListener('click', onCardClick);
   E.pick = root.appendChild(h('<div id="fishpick" class="panel hidden" role="dialog" aria-label="Fishing trips"><div class="rp-head"><h3>🎣 Fishing trips</h3><button type="button" class="btn small rp-x">✕</button></div><div class="rp-body"></div></div>'));
@@ -99,7 +119,7 @@ function onKey(e) {
   if (c === 'KeyS' && A.st === 'fight') { A.bowQ = true; return true; }
   if (c === 'KeyE' && (A.st === 'fight' || A.st === 'reelfind')) { A.landQ = true; return true; }
   if (c === 'KeyE' && busy()) return true;   // (a fish on, a cast going: E doesn't stand you up)
-  if (c === 'KeyE' && A.st === 'reveal') { closeCard(); return true; }
+  if (c === 'KeyE' && A.st === 'reveal') { if (A.glam) A.glam.dur = 0; else closeCard(); return true; }
   if (c === 'KeyL' && !e.repeat) { nextLure(); return true; }
   if (c === 'KeyR' && !e.repeat) { reelIn(); return true; }
   if ((c === 'KeyA' || c === 'KeyD' || c === 'ArrowLeft' || c === 'ArrowRight') && busy()) return true;
@@ -144,7 +164,7 @@ async function start(courseId) {
   trip = { id: r.run, m, course: c, data: r.data, plan: r.data.plan, water, L: kitFor(kit, water), t0: performance.now(), caught: [], lures: { ...(kit.lures || {}) }, lure: null, best: r.best };
   trip.lure = luresFor(water).find(l => trip.lures[l.id] > 0)?.id || 'spinner';
   getJSON('/api/fishing/dex').then(d => { if (trip?.id === r.run) trip.dex = d; }).catch(() => {});   // (the catch card: new to your Fishdex, over the record)
-  fx ||= new FishingFx(app.stage); nav ||= new TripNav(app, () => fx);
+  fx ||= new FishingFx(app.stage, { uw: app.terrain?.uw }); nav ||= new TripNav(app, () => fx);
   nav.begin(trip);
   E.hud.classList.remove('hidden');
   E.hud.querySelector('.fh-name').textContent = `🎣 ${c.label}`;
@@ -202,7 +222,7 @@ function hudTrip(force = false) {
   const met = new Set(bountiesMet(trip.plan.bounties, trip.caught.filter(c => c.species).map(c => ({ ...c, kept: c.kept }))));
   E.hud.querySelector('.fh-bounties').innerHTML = trip.plan.bounties.map(b => `<div class="${met.has(b.id) ? 'done' : ''}">${met.has(b.id) ? '✅' : '○'} ${esc(b.label)} <small>+${b.reward}</small></div>`).join('');
   const used = trip.caught.filter(c => c.kept).reduce((a, c) => a + (c.slots || 1), 0);
-  E.hud.querySelector('.fh-cool').textContent = `🧊 ${used}/${trip.L.boat.cooler} · ${trip.caught.filter(c => c.kept).length} kept`;
+  E.hud.querySelector('.fh-cool').textContent = `🧊 ${used}/${trip.L.boat.cooler} · ${trip.caught.filter(c => c.kept).length} kept · ${rankOf(trip.L.level).icon} ${trip.L.rank || 'Novice'} · Lv ${trip.L.level || 1}${trip.L.assist > 0.05 ? ' · 🔰 line guard' : ''}`;
 }
 
 // ------------------------------------------------------------------ the lure
@@ -228,7 +248,8 @@ function sitDown() {
 function stand() {
   if (!A) return;
   if (A.hook && A.st !== 'reveal') post('/api/play/act', { run: trip?.id, act: 'lose', body: { hook: A.hook, why: 'off' } }).catch(() => {});
-  A = null; fx?.hideAll();
+  if (A.cine) endShot();
+  A = null; fx?.hideAll(); E.vig.style.opacity = 0; E.steer.classList.add('hidden'); E.glam.classList.add('hidden');
   E.ctl.classList.add('hidden'); E.gauge.classList.add('hidden'); E.prompt.classList.add('hidden'); E.card.classList.add('hidden');
   document.body.classList.remove('fishing');
   app.boating?.hold(false); app.boating?.pose(null);
@@ -236,13 +257,15 @@ function stand() {
 function toReady(msg) {
   if (!A) return;
   if (msg) app.toast(msg, '', 2400);
+  if (A.cine) endShot();
   A = { st: 'ready', t: 0 };
-  fx?.hideAll(); E.gauge.classList.add('hidden'); E.prompt.classList.add('hidden'); E.bow.classList.add('hidden'); E.ring.style.strokeDasharray = '0 276';
+  fx?.hideAll(); E.gauge.classList.add('hidden'); E.steer.classList.add('hidden'); E.glam.classList.add('hidden'); E.vig.style.opacity = 0; E.prompt.classList.add('hidden'); E.bow.classList.add('hidden'); E.ring.style.strokeDasharray = '0 276';
   app.boating?.hold(false); app.boating?.pose(null); setAct();
 }
 /** The big button's label: what pressing it does now. */
 function setAct() {
-  const L = { ready: trip ? 'CAST' : 'TRIPS', aim: 'LET GO', cast: '…', wait: 'REEL', strike: 'HOOK!', hooking: '…', fight: A?.ready ? 'LAND' : 'REEL', land: '…', reveal: 'OK', reelfind: A?.ready ? 'LAND' : 'REEL' }[A?.st] || '';
+  const fm = A?.st === 'fight' && !A.ready ? A.F?.mode : null;
+  const L = { ready: trip ? 'CAST' : 'TRIPS', aim: 'LET GO', cast: '…', wait: 'REEL', strike: 'HOOK!', hooking: '…', fight: A?.ready ? 'LAND' : fm === 'rocks' ? 'CRANK!' : fm === 'plant' ? 'PUMP' : fm === 'blitz' ? 'EASE' : 'REEL', land: '…', reveal: 'OK', reelfind: A?.ready ? 'LAND' : 'REEL' }[A?.st] || '';
   if (E.actL.textContent !== L) E.actL.textContent = L;
   E.act.classList.toggle('hot', A?.st === 'strike' || !!A?.ready);
   const hint = isTouch() ? '' : { ready: 'hold Space', aim: 'release', wait: 'hold: reel · tap: twitch', strike: 'Space!', fight: A?.ready ? 'E' : 'hold Space' }[A?.st] || '';
@@ -263,7 +286,7 @@ function down() {
   else if (A.st === 'wait' && A.nib && !A.nib.strike) spook();
   else if (A.st === 'strike') strikeIt();
   else if ((A.st === 'fight' || A.st === 'reelfind') && A.ready) A.landQ = true;
-  else if (A.st === 'reveal') closeCard();
+  else if (A.st === 'reveal') { if (A.glam) A.glam.dur = 0; else closeCard(); }
   setAct();
 }
 function up() {
@@ -380,6 +403,9 @@ function twitch() {
 async function strikeIt() {
   if (!A || (A.st !== 'strike' && !A.nib?.strike)) return;
   prompt(null);
+  // (how quickly you struck: within a quarter of a second of it going under, a perfect hook — the fish starts the fight
+  // stunned a moment, 2026-11-13)
+  const react = A.nib?.strike ? performance.now() / 1000 - A.nib.at : 1, perfect = react < 0.28 && !app.fishing.debug.auto;
   const lure = A.lure, ground = A.nib && A.ground ? A.ground : groundAt(lure.x, lure.z), s = spotNow(), d0 = s ? Math.hypot(lure.x - s.x, lure.z - s.z) : 15;
   A.st = 'hooking'; app.boating.hold(true); setAct();
   let r;
@@ -397,11 +423,16 @@ async function strikeIt() {
     A = { st: 'fight', hook: r.hook, what: r.what, sp, F: fightSetup(sp, { kg: r.what.kg }, trip.L, { d0: r.d0, seed: r.seed }), dir, fx: 0, acc: 0, lure, jump: null, hint: '', t0: performance.now() };
     const big = r.what.kg > Math.max(4, trip.L.maxKg * 0.6) ? 'Big one! ' : '';
     if (r.what.kg > trip.L.maxKg) { A.heavy = true; A.hint = `Too heavy for your rod (it lifts ${trip.L.maxKg} kg) — it'll likely win`; app.toast(`🐟 A monster! Too heavy for your rod — a stronger one lands these (the dock store)`, 'warn', 3200); }   // (shared/fishing-fight.js HEAVY_S)
-    else app.toast(`🐟 ${big}Fish on!`, 'good', 1800);
+    // the moment it's on: a banner (a big one, a rare one — its colour), the camera over your shoulder down the line
+    const rar = RARITY[sp?.rarity] || RARITY.common, rare = ['rare', 'epic', 'legendary'].includes(sp?.rarity);
+    if (perfect) { A.F.mode = 'rest'; A.F.modeT = 1.6; A.F.dir = 0; }   // (stunned: a moment's rest to start)
+    banner(perfect ? 'PERFECT HOOK!' : `${big ? 'BIG ONE! ' : ''}FISH ON!`, perfect ? `${big}Fish on — it's stunned a moment` : rare ? `Something ${rar.label.toLowerCase()} is pulling…` : 'Reel when it gives, hold when it runs', perfect ? '#7cf0ff' : rare ? rar.color : '#ffd36a', 1500);
+    if (sp?.rarity === 'legendary') { flashScreen('#ffcf4a'); shake(500); }
+    A.px = lure.x; A.pz = lure.z; shot('hook', 2.4);
     fx.lure(null);
     fx.splash(lure.x, lure.y, lure.z, 0.3);
   }
-  E.gauge.classList.remove('hidden');
+  E.gauge.classList.remove('hidden'); if (r.what.kind !== 'find') E.steer.classList.remove('hidden');
   app.boating.hold(true); setAct();
 }
 
@@ -413,7 +444,7 @@ function fightFrame(dt, now) {
     let inp;
     if (auto) inp = botInput(F, 0.95);
     else {
-      const steer = Math.max(-1, Math.min(1, (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) + (j?.on ? j.x : 0)));
+      const steer = Math.max(-1, Math.min(1, (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) + (j?.on ? j.x : 0) + (A.steerBtn || 0)));
       inp = { reel: !!A.held, steer, bow: !!A.bowQ, land: !!A.landQ };
     }
     A.bowQ = false; A.landQ = false;
@@ -430,27 +461,48 @@ function fightFrame(dt, now) {
   const len = Math.min(3.5, A.what.cm / 100), swim = Math.atan2(fxp - (A.px ?? fxp), fzp - (A.pz ?? fzp)), moved = Math.hypot(fxp - (A.px ?? fxp), fzp - (A.pz ?? fzp));
   if (moved > 0.01) A.swim = swim; A.px = fxp; A.pz = fzp;
   const yawF = A.swim ?? A.dir + Math.PI;
+  A.wy = wy;
   if (A.jump) {
     const u = (performance.now() - A.jump.t0) / 1000 / A.jump.dur;
-    if (u >= 1) { fx.splash(fxp, wy, fzp, len * 0.8); A.jump = null; }
-    else { _a.set(fxp, wy + A.jump.h * 4 * u * (1 - u), fzp); fx.fish(A.what, 'air', _a, yawF, 1.0 - 2 * u, len, Math.sin(u * 9) * 0.4); }
+    if (u >= 1) { fx.splash(fxp, wy, fzp, len * 0.8); A.jump = null; if (len > 0.8) shake(260); }
+    else { _a.set(fxp, wy + A.jump.h * 4 * u * (1 - u), fzp); fx.fish(A.what, 'air', _a, yawF, 1.0 - 2 * u, len, Math.sin(u * 9) * 0.4); (A.jp ||= new THREE.Vector3()).copy(_a); A.jlen = len; }
   }
-  if (!A.jump) { fx.fish(A.what, 'under', _a.set(fxp, wy + 0.01, fzp), yawF, 0, len); fx.stir(fxp, wy, fzp, len, F.mode, dt); }   // (and the water it stirs)
+  // in the water: the fish itself (fishing-fx), a little under the surface — deeper on a dive, up to it as it tires and
+  // comes close, so you see it come up the water (2026-11-13, the owner)
+  const tired = 1 - F.S / F.p.S0, near = Math.max(0, 1 - (F.d - 3) / 9);
+  const depthW = F.mode === 'dive' ? 0.55 + len * 0.2 : (0.14 + len * 0.1) * (1 - 0.5 * Math.max(tired, near));
+  A.depth = A.depth == null ? depthW : A.depth + (depthW - A.depth) * Math.min(1, dt * 2.5);
+  const nose = len * 0.45, mx = fxp + Math.sin(yawF) * nose, mz = fzp + Math.cos(yawF) * nose;
+  if (!A.jump) { fx.fish(A.what, 'under', _a.set(fxp, wy + 0.01, fzp), yawF, 0, len, 0, { mode: F.mode, depth: A.depth, up: near > 0.5 }); fx.stir(fxp, wy, fzp, len, F.mode, dt); }   // (and the water it stirs)
+  if (!A.cine && F.d < 9) shot('close', 0);   // (once it's close, the camera comes round to watch it fight in the water)
   const tip = rodTip();
-  if (tip) fx.line(tip, _b.set(fxp, wy, fzp), F.T < 0.15 * F.p.P ? 0.35 : 0.03);
+  // (taut while it pulls; slack only when it isn't — and the line hums as the tension nears the drag)
+  if (tip) fx.line(tip, A.jump ? _b.copy(_a) : _b.set(mx, wy - A.depth * 0.8, mz), F.T < 0.12 * F.p.P ? 0.3 : 0, wy, Math.min(1, F.T / trip.L.drag));
   app.boating.pose(F.mode === 'jump' ? CLIP.fish_fight : A.held || auto ? CLIP.fish_reel : CLIP.fish_fight);
   gauges();
 }
 function fightEvent(ev) {
   const F = A.F;
-  if (ev === 'jump') { const len = Math.min(3.5, A.what.cm / 100); A.jump = { t0: performance.now(), dur: 0.85 + Math.min(0.5, len * 0.25), h: Math.min(2.6, 0.5 + len * 0.9) }; fx.splash(A.px ?? 0, surface(A.px ?? 0, A.pz ?? 0)?.y ?? 0, A.pz ?? 0, len * 0.7); prompt('BOW!', 'warn'); E.bow.classList.remove('hidden'); }
+  // (a leap seen from beside it, drawn slower: the fight's own clock keeps its pace)
+  if (ev === 'jump') { const len = Math.min(3.5, A.what.cm / 100); A.jump = { t0: performance.now(), dur: (0.85 + Math.min(0.5, len * 0.25)) * 1.5, h: Math.min(2.6, 0.5 + len * 0.9) }; shot('jump', A.jump.dur + 0.3); fx.splash(A.px ?? 0, surface(A.px ?? 0, A.pz ?? 0)?.y ?? 0, A.pz ?? 0, len * 0.7); prompt('BOW!', 'warn'); E.bow.classList.remove('hidden'); }
   else if (ev === 'bowed') { prompt(null); E.bow.classList.add('hidden'); A.hint = 'Bowed to it — it tires'; }
   else if (ev === 'spike') A.flash = performance.now();
   else if (ev === 'slack') A.hint = 'Slack line — reel!';
+  else if (ev === 'strain') { A.hint = 'The line is straining — ease off!'; prompt('EASE OFF!', 'warn'); setTimeout(() => { if (A?.st === 'fight' && !A.ready && !A.jump) prompt(null); }, 700); }
+  // its signature moves: what it's doing and what to do (2026-11-13: each kind of fish fights its own way)
+  else if (ev === 'blitz') flashPrompt('SCREAMING RUN!', 'warn', 'Let it run — ease off REEL, steer against it');
+  else if (ev === 'rocks') flashPrompt('IT\'S HEADING FOR THE ROCKS!', 'warn', 'Crank! Keep its head up or it wraps the line');
+  else if (ev === 'plant') flashPrompt('PLANTED ON THE BOTTOM', '', 'Pump it up — tap REEL, pause, tap');
+  else if (ev === 'teeth') { A.hint = 'Teeth! Ease off REEL while it shakes its head'; if (!A.teethSeen) { A.teethSeen = true; flashPrompt('HEAD SHAKES!', 'warn', A.hint); } }
+  else if (ev === 'pump') { const s = surface(A.px ?? 0, A.pz ?? 0); if (s) fx.ripple(A.px, s.y, A.pz, 0.8, 0.8); }
   else if (ev === 'ready') { A.ready = true; prompt(isTouch() ? 'LAND IT!' : 'LAND IT! (E)', 'hot'); setAct(); }
   else if (ev === 'landed') { prompt(null); netIt(); }
-  else if (['snap', 'spat', 'spool', 'free', 'heavy'].includes(ev)) {
-    const why = { snap: 'The line snapped', spat: 'It threw the hook', spool: 'It took all your line', free: 'It pulled free', heavy: 'Too strong for your rod — it pulled free. A stronger rod lands it (the dock store)' }[ev];
+  else if (['snap', 'spat', 'spool', 'free', 'heavy', 'snag', 'bite', 'bent'].includes(ev)) {
+    if (streak >= 2) app.toast(`Streak over at ${streak}`, '', 1600);
+    streak = 0; if (ev === 'snap') { shake(420); flashScreen('#ff4d3d'); }
+    const why = { snap: 'The line snapped', spat: 'It threw the hook', spool: 'It took all your line', free: 'It pulled free', heavy: 'Too strong for your rod — it pulled free. A stronger rod lands it (the dock store)',
+      snag: 'It wrapped the line round the rocks — crank harder when it heads for them', bite: 'Its teeth cut the line — a fluorocarbon leader stops that (the dock store)', bent: 'The hook straightened — a stronger hook holds big fish (the dock store)' }[ev];
+    if (ev === 'snag' || ev === 'bite') ev = 'snap';   // (the line is cut: the lure goes with it)
     if (ev === 'heavy') { post('/api/play/act', { run: trip?.id, act: 'lose', body: { hook: A.hook, why: 'free' } }).catch(() => {}); toReady(`❌ ${why}`); return; }
     post('/api/play/act', { run: trip?.id, act: 'lose', body: { hook: A.hook, why: ev } }).catch(() => {});
     if (ev === 'snap' && trip && !LURE_BY_ID[trip.lure]?.bait) { trip.lures[trip.lure] = Math.max(0, (trip.lures[trip.lure] || 1) - 1); lureUi(); if (!trip.lures[trip.lure]) nextLure(); }   // (a lure lost; bait went when the fish took it)
@@ -466,10 +518,18 @@ function gauges() {
   E.gauge.querySelector('.fg-t em').style.left = `${Math.min(100, L.drag / L.kgf * 100).toFixed(1)}%`;
   E.gauge.querySelector('.fg-s i').style.width = `${Math.max(0, F.S / F.p.S0 * 100).toFixed(1)}%`;
   E.gauge.querySelector('.fg-line').textContent = `${F.d.toFixed(0)} m`;
-  const run = F.mode === 'run' && F.dir ? (F.dir > 0 ? (isTouch() ? '◀ It runs right — pull left' : '◀ It runs right — hold A') : (isTouch() ? 'It runs left — pull right ▶' : 'It runs left — hold D ▶')) : F.mode === 'dive' ? '⤓ It dives — hold on' : F.mode === 'toward' ? 'It comes at you — reel fast!' : '';
+  const run = (F.mode === 'run' || F.mode === 'blitz') && F.dir ? (F.dir > 0 ? '◀ It runs right — pull left' : 'It runs left — pull right ▶') : F.mode === 'dive' ? '⤓ It dives — hold on' : F.mode === 'toward' ? 'It comes at you — reel fast!' : F.mode === 'rocks' ? 'Crank! Keep it off the rocks' : F.mode === 'plant' ? 'Pump it up: tap REEL' : '';
+  // what it's doing now, and the arrow to pull with lit
+  const MODE = { run: F.p.size === 'small' ? '🐟 Darting' : '🏃 Running', blitz: '⚡ Screaming run', rest: '💤 Resting — reel!', dive: '⤓ Diving deep', shake: F.p.toothy ? '✂ Head-shakes (teeth!)' : '🌀 Head-shakes', toward: '↩ Coming at you', jump: '💥 Leaping', rocks: '🪨 Heading for the rocks', plant: '🪸 Planted on the bottom' };
+  const mtxt = A.ready ? '✅ Beaten' : MODE[F.mode] || ''; const mb = E.gauge.querySelector('.fg-mode'); if (mb.textContent !== mtxt) { mb.textContent = mtxt; mb.dataset.m = A.ready ? 'ready' : F.mode; }
+  const pull = (F.mode === 'run' || F.mode === 'blitz') && F.dir ? -F.dir : 0;
+  E.steer.querySelector('.fs-l').classList.toggle('go', pull < 0); E.steer.querySelector('.fs-r').classList.toggle('go', pull > 0);
   const hint = A.ready ? 'Beaten — land it!' : F.T > L.drag * 0.98 ? 'Line running out — ease off' : run || A.hint;
   const q = E.gauge.querySelector('.fg-hint'); if (q.textContent !== hint) q.textContent = hint;
   E.ring.style.strokeDasharray = `${(Math.min(1, t) * 276).toFixed(1)} 276`; E.ring.style.stroke = col;
+  // the screen's edges redden as the line nears breaking, and pulse as it strains
+  E.vig.style.opacity = Math.min(0.85, Math.max(0, (t - 0.72) / 0.28) * 0.5 + (F.strain || 0) / 1.3 * 0.6).toFixed(2);
+  E.gauge.classList.toggle('strain', (F.strain || 0) > 0.2);
   if (A.hint && !A.heavy && Math.random() < 0.01) A.hint = '';
 }
 function reelFindFrame(dt) {
@@ -480,7 +540,7 @@ function reelFindFrame(dt) {
   if (A.ready && (A.landQ || auto)) { prompt(null); netIt(); return; }
   A.landQ = false;
   const x = s.x + Math.sin(A.dir) * A.d, z = s.z + Math.cos(A.dir) * A.d, sf = surface(x, z);
-  const tip = rodTip(); if (tip) fx.line(tip, _b.set(x, sf ? sf.y : s.y - 1, z), 0.05);
+  const tip = rodTip(); if (tip) fx.line(tip, _b.set(x, (sf ? sf.y : s.y - 1) - 0.3, z), A.held || auto ? 0 : 0.15, sf ? sf.y : -Infinity, A.held || auto ? 0.5 : 0);
   app.boating.pose(A.held || auto ? CLIP.fish_reel : CLIP.fish_fight);
   E.gauge.querySelector('.fg-line').textContent = `${A.d.toFixed(0)} m`;
   E.gauge.querySelector('.fg-hint').textContent = A.ready ? 'Land it!' : 'Something heavy — reel it in';
@@ -490,7 +550,7 @@ function reelFindFrame(dt) {
 async function netIt() {
   const what = A.what, hook = A.hook, sp = A.sp;
   A = { ...A, st: 'land', t0: performance.now() };
-  app.boating.pose(CLIP.fish_net); E.gauge.classList.add('hidden'); E.bow.classList.add('hidden'); fx.line(null); E.ring.style.strokeDasharray = '0 276';
+  app.boating.pose(CLIP.fish_net); E.gauge.classList.add('hidden'); E.steer.classList.add('hidden'); E.bow.classList.add('hidden'); fx.line(null); E.ring.style.strokeDasharray = '0 276'; E.vig.style.opacity = 0;
   const s = spotNow();
   if (s) { const x = s.x + Math.sin(s.yaw) * 1.4, z = s.z + Math.cos(s.yaw) * 1.4, sf = surface(x, z); if (sf) fx.splash(x, sf.y, z, Math.min(1.2, (what.cm || 40) / 100)); }
   await new Promise(r => setTimeout(r, 1100));
@@ -503,9 +563,16 @@ async function netIt() {
   const vc = c.find ? 0 : valueOf(speciesOf(c.species), c.kg, c.u);
   const entry = { ...c, name, vc };
   trip.caught.push(entry);
-  A = { st: 'reveal', c: entry, sp, t0: performance.now(), full: r.full };
-  app.boating.pose(CLIP.fish_show);
-  card(entry, r);
+  const style = holdStyle(entry);
+  A = { st: 'reveal', c: entry, sp, t0: performance.now(), full: r.full, style };
+  app.boating.pose(CLIP[`fish_hold_${style}`] ?? CLIP.fish_show);
+  if (!c.find) streak++;
+  glamour(entry, r, sp);
+  // the moment: its rarity's colour bursting round it, a legend's flash, the streak; the camera before you
+  const rar = sp ? RARITY[sp.rarity] : null, isNew = sp && trip?.dex && !(trip.dex.mine[c.species]?.n > 1);
+  A.burst = { color: rar?.color || '#c9b28a', big: ['epic', 'legendary'].includes(sp?.rarity) || (sp && sizeOf(c.u).crown) };
+  if (sp?.rarity === 'legendary') flashScreen('#ffcf4a');
+  void isNew;
   if (c.species && trip.dex) { trip.dex.mine[c.species] ||= { n: 0, kg: 0 }; trip.dex.mine[c.species].n++; const rec = trip.dex.records[c.species]; if (!rec || c.kg > rec.kg) trip.dex.records[c.species] = { kg: c.kg, cm: c.cm, mine: true }; }
   hudTrip(true);
   bus.emit('fish-caught', { species: c.species, find: c.find, kg: c.kg });
@@ -536,17 +603,44 @@ async function onCardClick(e) {
   }
   closeCard();
 }
-function closeCard() { E.card.classList.add('hidden'); if (A?.st === 'reveal') toReady(); }
-/** The catch held up in both hands (fish_show): between the grips, lying across you. */
+function closeCard() { E.card.classList.add('hidden'); if (A?.st === 'reveal') { fx?.line(null); toReady(); } }
+/** The catch held up (2026-11-13: by its hold style — play holdStyle): a small one hanging from the line under the raised
+ *  fist, nose up, turning on it; a middling one by the back of its head in the fist, hanging nose up before you, its side
+ *  to you; a heavy one lying across both palms. Its side faces ahead (its back toward your right, its nose up or to your
+ *  left). The fist's hole (play/extra-clips fish_hold_*) is upright, the palm toward the body's middle, so it is gripped
+ *  from your right: its back against the palm, the fingers round its near side. */
 function holdFrame(now) {
   const X = app.player?.extra, chars = app.agents?.chars, look = app.player?.look?.app || {}; if (!X) return;
-  const c = A.c, len = c.find ? 1 : Math.min(1.5, c.cm / 100);
-  const qR = chars?.gripPoint?.(PLAYER_APP, X.clip, X.ph, 'R', [0, 0, 0.05]), qL = qR ? [...qR] : null, qL2 = chars?.gripPoint?.(PLAYER_APP, X.clip, X.ph, 'L', [0, 0, 0.05], [0, 0, 0]);
-  if (qR && qL2) { qL[0] = (qR[0] + qL2[0]) / 2; qL[1] = (qR[1] + qL2[1]) / 2 + 0.05; qL[2] = (qR[2] + qL2[2]) / 2; bodyToWorld(qL, look.height || 1, look.build || 1, X.yaw, X.x, X.y, X.z, _a); }
-  else _a.set(X.x + Math.sin(X.yaw) * 0.35, X.y + 1.25, X.z + Math.cos(X.yaw) * 0.35);
-  fx.fish(c.find ? { find: c.find } : c, 'held', _a, X.yaw + Math.PI / 2, 0, len, 0.15 * Math.sin(now * 2));
+  const c = A.c, dbg = app.fishing.debug, len = c.find ? 1 : Math.min(1.6, (dbg.cm || c.cm) / 100), st = dbg.style || A.style || 'two';
+  if (dbg.style && dbg.style !== A.posed) app.boating.pose(CLIP[`fish_hold_${dbg.style}`] ?? CLIP.fish_show);   // (the lab: each hold in turn)
+  A.posed = dbg.style || A.style;
+  const grip = (side, off) => { const q = chars?.gripPoint?.(PLAYER_APP, X.clip, X.ph, side, off); return q ? bodyToWorld(q, look.height || 1, look.build || 1, X.yaw, X.x, X.y, X.z, new THREE.Vector3()) : null; };
+  const R = grip('R', [0, 0, 0.05]), Lh = st === 'two' ? grip('L', [0, 0, 0.05]) : null, what = c.find ? { find: c.find } : c;
+  const deep = c.find ? 0 : fx.depthOf(what) * len, lx = Math.cos(X.yaw), lz = -Math.sin(X.yaw);   // (the body's left)
+  let yaw = X.yaw + Math.PI / 2, pitch = 0, roll = 0;
+  if (st === 'two' || !R) {
+    // on the palms (the grips are 5 cm above them), its belly on them: its middle a quarter of its depth above, and its
+    // deep fore body between the hands (its nose to your left: its middle a tenth of its length to your right)
+    const aft = c.find ? 0 : 0.1 * len;
+    if (R && Lh) _a.copy(R).add(Lh).multiplyScalar(0.5).add(_b.set(-lx * aft, -0.05 + (c.find ? 0.12 : 0.25 * deep), -lz * aft)); else _a.set(X.x + Math.sin(X.yaw) * 0.35, X.y + 1.15, X.z + Math.cos(X.yaw) * 0.35);
+    roll = 0.06 * Math.sin(now * 2);
+    fx.line(null);
+  } else if (st === 'line') {
+    // hanging on a hand's length of line out of the bottom of the fist, nose up, turning slowly on it
+    const drop = c.find ? 0.16 : 0.14, half = c.find ? 0.06 : len * 0.5;
+    _a.set(R.x, R.y - drop - half, R.z); pitch = c.find ? 0 : Math.PI / 2; roll = c.find ? 0 : 0.5 * Math.sin(now * 0.9); yaw += 0.35 * Math.sin(now * 0.7);
+    fx.line(_b.set(R.x, R.y - 0.03, R.z), _c.set(R.x, R.y - drop + 0.005, R.z), 0, -Infinity);
+  } else {   // by the gills: the fist round the back of its head a fifth of its length down from its nose, hanging below
+    const k = Math.max(0, deep * 0.3 - 0.04);   // (its back at the palm, 5 cm to the right of the grip: its middle that far left of it)
+    _a.set(R.x + lx * k, R.y - (c.find ? 0.05 : len * 0.3), R.z + lz * k); pitch = c.find ? 0 : Math.PI / 2; roll = 0.05 * Math.sin(now * 1.3);
+    fx.line(null);
+  }
+  fx.fish(what, 'held', _a, yaw, pitch, len, roll);
+  (A.hp ||= new THREE.Vector3()).copy(_a);
+  if (A.burst) { fx.burst?.(_a.x, _a.y, _a.z, A.burst.color, A.burst.big, len); A.burst = null; }
+  if (A.glam) { if (now - A.glam.t0 >= A.glam.dur) glamourDone(); return; }
   const age = (performance.now() - A.t0) / 1000;
-  if (age > 9 || (app.fishing.debug.auto && age > 7)) closeCard();
+  if (age > (app.fishing.debug.hold || 9) || (app.fishing.debug.auto && !app.fishing.debug.hold && age > 7)) closeCard();
 }
 
 // ------------------------------------------------------------------ every frame
@@ -554,13 +648,102 @@ function prompt(text, kind = '') {
   if (!text) { E.prompt.classList.add('hidden'); return; }
   E.prompt.textContent = text; E.prompt.className = kind; E.prompt.classList.remove('hidden');
 }
+/** A move's call: big words for a moment and the hint under the gauges. */
+function flashPrompt(text, kind, hint) {
+  prompt(text, kind); if (hint && A) A.hint = hint;
+  clearTimeout(flashPrompt.t); flashPrompt.t = setTimeout(() => { if (A?.st === 'fight' && !A.ready && !A.jump) prompt(null); }, 1300);
+}
+/** A big moment's banner: its words, a line under them, in a colour (a rarity's), for a while. */
+function banner(text, sub = '', color = '#ffd36a', ms = 1700) {
+  const b = E.banner; b.querySelector('b').textContent = text; b.querySelector('small').textContent = sub;
+  b.style.setProperty('--c', color); b.classList.remove('hidden', 'go'); void b.offsetWidth; b.classList.add('go');
+  clearTimeout(b._t); b._t = setTimeout(() => b.classList.add('hidden'), ms);
+}
+/** The screen jolts (a snapped line, a big fish's leap). */
+function shake(ms = 380) { document.body.classList.remove('fish-shake'); void document.body.offsetWidth; document.body.classList.add('fish-shake'); setTimeout(() => document.body.classList.remove('fish-shake'), ms); }
+function flashScreen(color) { E.flash.style.setProperty('--c', color); E.flash.classList.remove('go'); void E.flash.offsetWidth; E.flash.classList.add('go'); }
+
+// ------------------------------------------------------------------ the camera's shots (2026-11-13, the owner: "camera angles when a fish gets caught")
+// Held shots (render/camera.js pinTo, its glide in and out): over your shoulder down the line as it takes the hook; beside
+// the fish as it leaps; before you as you hold the catch up, going slowly round. Each frame the shot follows its subject.
+const _cp = new THREE.Vector3(), _cl = new THREE.Vector3();
+function shot(kind, secs) { if (!A) return; A.cine = { kind, until: secs ? performance.now() / 1000 + secs : Infinity, t0: performance.now() / 1000 }; }
+function endShot() { if (A?.cine) A.cine = null; app.cam?.unpin?.(); }
+function shotFrame(now) {
+  const C = A?.cine, cam = app.cam; if (!C || !cam?.pinTo) return;
+  if (now > C.until) { endShot(); return; }
+  const s = spotNow(); if (!s) return;
+  if (C.kind === 'hook' && A.px != null) {        // over the shoulder, down the line to where it took it
+    const dx = A.px - s.x, dz = A.pz - s.z, d = Math.hypot(dx, dz) || 1, ux = dx / d, uz = dz / d;
+    _cp.set(s.x - ux * 3.4 + uz * 1.1, s.y + 2.6, s.z - uz * 3.4 - ux * 1.1); _cl.set(s.x + dx * 0.75, (A.wy ?? s.y) - 0.1, s.z + dz * 0.75);
+  } else if (C.kind === 'close' && A.px != null) {  // it's near: from above and beside, you and the fish fighting in the water below
+    const dx = A.px - s.x, dz = A.pz - s.z, d = Math.hypot(dx, dz) || 1, ux = dx / d, uz = dz / d, mx = s.x + dx * 0.6, mz = s.z + dz * 0.6, wy = A.wy ?? s.y;
+    _cp.set(mx + uz * 3.4 - ux * 1.6, wy + 3.2, mz - ux * 3.4 - uz * 1.6); _cl.set(A.px, wy - 0.25, A.pz);
+  } else if (C.kind === 'jump' && A.jp) {          // beside the leaping fish, low over the water
+    const dx = A.jp.x - s.x, dz = A.jp.z - s.z, d = Math.hypot(dx, dz) || 1, ux = dx / d, uz = dz / d, k = Math.min(9, 3.5 + A.jlen * 2.5);
+    _cp.set(A.jp.x - ux * k * 0.55 + uz * k, A.jp.y + 0.9, A.jp.z - uz * k * 0.55 - ux * k); _cl.copy(A.jp);
+  } else if (C.kind === 'glam' && A.hp && A.glam) {  // the glamour shot: from right up on the catch, drawing back and round to you
+    const u = Math.min(1, (now - A.glam.t0) / Math.max(0.5, A.glam.dur)), k = u * u * (3 - 2 * u), len = Math.min(1.6, (A.c?.cm || 40) / 100);
+    const a = s.yaw + 0.9 - 0.75 * k, r = (0.45 + len * 0.75) + (1.9 + len) * k;
+    _cp.set(A.hp.x + Math.sin(a) * r, A.hp.y + 0.04 + 0.32 * k, A.hp.z + Math.cos(a) * r); _cl.set(A.hp.x, A.hp.y + 0.05 + 0.08 * k, A.hp.z);
+  } else if (C.kind === 'hold' && A.hp) {          // before you, the catch held up, going slowly round
+    const v = app.fishing.debug.view;   // (the lab: { a: round from ahead, r: how far, h: how high over it } to look close)
+    const a = s.yaw + (v ? v.a : 0.35 * Math.sin((now - C.t0) * 0.35)), r = v ? v.r : 2.6 + Math.min(1.4, (A.c?.cm || 40) / 100);
+    _cp.set(s.x + Math.sin(a) * r, A.hp.y + (v ? v.h : 0.3), s.z + Math.cos(a) * r); _cl.set(A.hp.x, A.hp.y + (v ? v.ly ?? 0.1 : 0.1), A.hp.z);
+  } else return;
+  if (!cam.pinOn) cam.pinTo(_cp, _cl); else { cam.pin.pos.copy(_cp); cam.pin.look.copy(_cl); }
+}
+/**
+ * The glamour shot (2026-11-13, the owner: "every time there's a catch there should be a glamour shot ... the camera
+ * zooms in and shows the fish ... more if it's the first, a legendary, a bigger fish"): the camera starts up close on the
+ * catch held up and draws back round it to you, between black bars, its name and size, a flash like a photo — and a stamp
+ * for what's special (NEW SPECIES, TROPHY, WORLD RECORD, LEGENDARY, a streak), the special ones held longer. Then its card.
+ * A tap (or Space) skips to the card.
+ */
+function glamour(c, r, sp) {
+  const rar = sp ? RARITY[sp.rarity] : null, size = sp ? sizeOf(c.u) : null, kgTxt = c.kg < 10 ? c.kg.toFixed(2) : c.kg.toFixed(1);
+  const first = sp && trip?.dex && !(trip.dex.mine[c.species]?.n > 1), record = sp && trip?.dex && trip.dex.records[c.species]?.mine && trip.dex.records[c.species].kg === c.kg;
+  const stamp = sp?.rarity === 'legendary' ? 'LEGENDARY' : record ? 'WORLD RECORD 🥇' : size?.crown ? 'TROPHY 👑' : first ? 'NEW SPECIES' : streak >= 3 ? `🔥 ${streak} IN A ROW` : size?.id === 'large' ? 'BIG ONE' : '';
+  const special = !!stamp, dur = app.fishing.debug.glam || (sp?.rarity === 'legendary' ? 5 : special ? 3.8 : 2.6);   // (debug.glam: the lab checks hold it to look at)
+  A.glam = { t0: performance.now() / 1000, dur, args: [c, r], special };
+  const G = E.glam; G.style.setProperty('--c', rar?.color || '#e9d8b4');
+  G.querySelector('b').textContent = c.name;
+  G.querySelector('small').textContent = sp ? `${c.cm} cm · ${kgTxt} kg${size ? ` · ${size.label}` : ''}${rar ? ` · ${rar.label}` : ''}` : (findOf(c.find)?.name ? 'Up from the bottom' : '');
+  G.querySelector('.fg-stamp').textContent = stamp; G.querySelector('.fg-stamp').classList.toggle('hidden', !stamp);
+  G.classList.toggle('special', special); G.classList.toggle('legend', sp?.rarity === 'legendary');
+  G.classList.remove('hidden', 'go'); void G.offsetWidth; G.classList.add('go');
+  flashScreen('#ffffff');   // (the camera's flash)
+  if (sp?.rarity === 'legendary') setTimeout(() => flashScreen('#ffcf4a'), 450);
+  A.burst = { color: rar?.color || '#c9b28a', big: special };
+  shot('glam', 0);
+}
+/** The glamour shot over: the card, and the camera holding you and the catch, going slowly round. */
+function glamourDone() {
+  const G = A.glam; A.glam = null; E.glam.classList.add('hidden'); A.t0 = performance.now();   // (the card's own time from now)
+  card(...G.args); shot('hold', 0);
+}
+/** The lab: a catch held up as if just landed (no fight, no card) — { species, cm, kg } or { find } — to look at each hold;
+ *  null puts it down. Only from 'ready', fishing from the boat. */
+function showCatch(c) {
+  if (!c) { if (A?.st === 'reveal') closeCard(); return true; }
+  if (!A || A.st !== 'ready' || !spotNow()) return false;
+  const sp = c.species ? speciesOf(c.species) : null, entry = { ...c, name: sp?.name || c.find, vc: 0 }, style = holdStyle(entry);
+  A = { st: 'reveal', c: entry, sp, t0: performance.now(), style };
+  app.boating.pose(CLIP[`fish_hold_${style}`] ?? CLIP.fish_show); shot('hold', 0);
+  return style;
+}
+/** How the catch is held: a small one by the line, a middling one by its gills, a heavy one in both arms; a find as suits it. */
+function holdStyle(c) {
+  if (c.find) return { boot: 'line', can: 'line', pouch: 'line', goldenlure: 'line', bottle: 'gill', tyre: 'two' }[c.find] || 'two';
+  return c.kg < 1.2 ? 'line' : c.kg < 7 ? 'gill' : 'two';
+}
 function frame(dt0, now) {
   // by the time that really passed (as the boat): a slow frame doesn't slow the fish down
   const ms = performance.now(), dt = Math.min(TEST ? 2 : 0.25, lastMs ? (ms - lastMs) / 1000 : dt0); lastMs = ms;
   if (!app.boating?.active) return;
   if (trip) { hudTrip(); nav?.update(dt, performance.now() / 1000); }
   if (!A && !fx) return;
-  fx ||= new FishingFx(app.stage);
+  fx ||= new FishingFx(app.stage, { uw: app.terrain?.uw });
   fx.update(dt);
   if (!A) return;
   const t = performance.now() / 1000;
@@ -589,10 +772,15 @@ function frame(dt0, now) {
     const tip = rodTip(); if (tip) fx.line(tip, _a, A.held ? 0.15 : 0.7, A.lure.y);
     app.boating.pose(A.held && t - (A.downAt || 0) / 1000 > 0.22 ? CLIP.fish_reel : CLIP.fish_idle);
   } else if (A.st === 'hooking') {
-    const tip = rodTip(); if (tip && A.lure) fx.line(tip, _a.set(A.lure.x, A.lure.y, A.lure.z), 0.05);
+    const tip = rodTip(); if (tip && A.lure) fx.line(tip, _a.set(A.lure.x, A.lure.y, A.lure.z), 0.05, A.lure.y);
   } else if (A.st === 'fight') fightFrame(dt, t);
   else if (A.st === 'reelfind') reelFindFrame(dt);
   else if (A.st === 'reveal') holdFrame(t);
+  else if (A.st === 'land' && A.what && !A.what.find) {   // in the net at the boat's side: thrashing at the surface
+    const s = spotNow();
+    if (s) { const x = s.x + Math.sin(s.yaw) * 1.4, z = s.z + Math.cos(s.yaw) * 1.4, sf = surface(x, z); if (sf) fx.fish(A.what, 'under', _a.set(x, sf.y, z), s.yaw + Math.PI / 2, 0, Math.min(1.6, A.what.cm / 100), 0, { mode: 'shake', depth: 0.06, up: true }); }
+  }
   else if (A.st === 'ready') { app.boating.pose(null); }
+  shotFrame(t);
   setAct();
 }

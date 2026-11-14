@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "bullshark",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project de99d485 from 04_sea_sharks/Bull_Shark.png; tools/animals/fish_animal.py",
+ "height": 0.4141,
+ "length": 0.9995,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4508,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54096,
+   "uv": 108192,
+   "skin": 144256,
+   "weight": 162288,
+   "index": 180320,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.20720000565052032,
+    -0.27880001068115234
+   ],
+   "max": [
+    0.49950000643730164,
+    0.2069000005722046,
+    0.2793999910354614
+   ]
+  },
+  {
+   "verts": 1712,
+   "tris": 2000,
+   "pos": 216320,
+   "nrm": 236864,
+   "uv": 257408,
+   "skin": 271104,
+   "weight": 277952,
+   "index": 284800,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.20669999718666077,
+    -0.2786000072956085
+   ],
+   "max": [
+    0.49950000643730164,
+    0.2069000005722046,
+    0.2782999873161316
+   ]
+  },
+  {
+   "verts": 797,
+   "tris": 700,
+   "pos": 296800,
+   "nrm": 306364,
+   "uv": 315928,
+   "skin": 322304,
+   "weight": 325492,
+   "index": 328680,
+   "indexType": "u16",
+   "min": [
+    -0.49950000643730164,
+    -0.20509999990463257,
+    -0.2786000072956085
+   ],
+   "max": [
+    0.4894999861717224,
+    0.20229999721050262,
+    0.2782999873161316
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 332880,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "bullshark-color.jpg",
+  "mask": "bullshark-mask.png"
+ },
+ "card": "bullshark-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

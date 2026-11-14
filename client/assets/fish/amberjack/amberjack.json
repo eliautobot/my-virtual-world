@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "amberjack",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 25bb9acb from 02_sea_reef/Greater_Amberjack.png; tools/animals/fish_animal.py",
+ "height": 0.4603,
+ "length": 0.9996,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4388,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52656,
+   "uv": 105312,
+   "skin": 140416,
+   "weight": 157968,
+   "index": 175520,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.23010000586509705,
+    -0.2549999952316284
+   ],
+   "max": [
+    0.49959999322891235,
+    0.23019999265670776,
+    0.2547000050544739
+   ]
+  },
+  {
+   "verts": 1723,
+   "tris": 2000,
+   "pos": 211520,
+   "nrm": 232196,
+   "uv": 252872,
+   "skin": 266656,
+   "weight": 273548,
+   "index": 280440,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.23010000586509705,
+    -0.2549999952316284
+   ],
+   "max": [
+    0.49950000643730164,
+    0.23000000417232513,
+    0.2547000050544739
+   ]
+  },
+  {
+   "verts": 798,
+   "tris": 700,
+   "pos": 292440,
+   "nrm": 302016,
+   "uv": 311592,
+   "skin": 317976,
+   "weight": 321168,
+   "index": 324360,
+   "indexType": "u16",
+   "min": [
+    -0.4977000057697296,
+    -0.227400004863739,
+    -0.2418999969959259
+   ],
+   "max": [
+    0.49950000643730164,
+    0.22920000553131104,
+    0.24480000138282776
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 328560,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "amberjack-color.jpg",
+  "mask": "amberjack-mask.png"
+ },
+ "card": "amberjack-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

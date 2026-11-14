@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "abyssalsquid",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project dfa9a9a7 from 10_legends/The_Abyssal_Squid.png; tools/animals/fish_animal.py",
+ "height": 0.6731,
+ "length": 0.991,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 5388,
+   "tris": 5999,
+   "pos": 0,
+   "nrm": 64656,
+   "uv": 129312,
+   "skin": 172416,
+   "weight": 193968,
+   "index": 215520,
+   "indexType": "u16",
+   "min": [
+    -0.49619999527931213,
+    -0.33660000562667847,
+    -0.3790000081062317
+   ],
+   "max": [
+    0.49480000138282776,
+    0.33649998903274536,
+    0.3797000050544739
+   ]
+  },
+  {
+   "verts": 2561,
+   "tris": 1999,
+   "pos": 251516,
+   "nrm": 282248,
+   "uv": 312980,
+   "skin": 333468,
+   "weight": 343712,
+   "index": 353956,
+   "indexType": "u16",
+   "min": [
+    -0.49239999055862427,
+    -0.33660000562667847,
+    -0.37540000677108765
+   ],
+   "max": [
+    0.49480000138282776,
+    0.335099995136261,
+    0.3797000050544739
+   ]
+  },
+  {
+   "verts": 2283,
+   "tris": 1661,
+   "pos": 365952,
+   "nrm": 393348,
+   "uv": 420744,
+   "skin": 439008,
+   "weight": 448140,
+   "index": 457272,
+   "indexType": "u16",
+   "min": [
+    -0.46630001068115234,
+    -0.33660000562667847,
+    -0.37389999628067017
+   ],
+   "max": [
+    0.49480000138282776,
+    0.32260000705718994,
+    0.3476000130176544
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 467240,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "abyssalsquid-color.jpg",
+  "mask": "abyssalsquid-mask.png"
+ },
+ "card": "abyssalsquid-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

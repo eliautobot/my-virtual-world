@@ -25,6 +25,7 @@ import { PROP } from '/shared/anims.js';
 import { SKIN_GLSL, APP_GLSL } from './char-glsl.js';
 import { FOOD, FOOD_BY_N } from '/shared/food.js';
 import { EAT_CLIP, BOTH_R, BOTH_LIFT, HELD_SCALE, BITE_TIP, TOOL_Z, TOOL_LEN, toolDir } from '/shared/eating.js';
+import { ROD_TILT, NET_TILT } from '/shared/held.js';
 import { lin } from './furniture.js';
 import { PHONES } from '/shared/stage.js';
 import { BOOK, PHONE, BOOK_HANDS, PHONE_HAND, gripOn } from '/shared/held.js';
@@ -98,7 +99,12 @@ function dumbbell(f) {
 // of the palm, the reel hanging below in the fingers (+y), its handle out the palm's side (the body's left). Along x, a
 // thing drawn up y (FB's cylinders) is turned by ALONG_X.
 const ALONG_X = (z = 0.013) => basis([0, 1, 0], [1, 0, 0], [0, 0, -1], [0, 0, z]);
-function rod(f) {
+// (2026-11-13: diagonally across the palm — shared/held.js ROD_TILT — not square across the fist: the whole rod, reel
+// and all, and the net turned about the palm's normal, the fingers wrapped round it as tools/chars/extra-clips.mjs turns
+// the hand)
+const ACROSS = basis([Math.cos(ROD_TILT), Math.sin(ROD_TILT), 0], [-Math.sin(ROD_TILT), Math.cos(ROD_TILT), 0], [0, 0, 1], [0, 0, 0]);
+function rod(f) { within(f, ACROSS, () => rodSquare(f)); }
+function rodSquare(f) {
   within(f, ALONG_X(), () => {
     f.col('#1c1d20'); f.cyl(0, 0, 0.0145, -0.3, -0.285, 8);                          // the butt cap
     f.col('#b98c5c'); f.cyl(0, 0, 0.0135, -0.285, -0.075, 8, 0.012);                 // cork: the rear grip
@@ -145,17 +151,22 @@ function mallet(f) {
   within(f, ALONG_X(), () => { f.col('#7c2d12'); f.cyl(0, 0, 0.014, -0.08, 0.3, 8); });
   within(f, new THREE.Matrix4().setPosition(0.3, 0, 0.013), () => { f.col('#ef4444'); f.cyl(0, 0, 0.05, -0.02, 0.11, 14); f.col('#fca5a5'); f.cyl(0, 0, 0.051, 0.1, 0.11, 14); });
 }
+// The landing net (2026-11-13): its handle across the palm the other way (shared/held.js NET_TILT), running out of the
+// bottom of the fist to the hoop (along -x of that frame); the hoop in line with the handle, its bag hanging from it on the
+// thumb's side's far side (-y: below, as the net is held reaching down)
+const NET_ACROSS = basis([Math.cos(NET_TILT), Math.sin(NET_TILT), 0], [-Math.sin(NET_TILT), Math.cos(NET_TILT), 0], [0, 0, 1], [0, 0, 0]);
 function net(f) {
-  within(f, ALONG_X(0.014), () => {
-    f.col('#2a2d33'); f.cyl(0, 0, 0.0135, -0.2, 0.25, 8);                            // the grip
-    f.col('#8c949e'); f.cyl(0, 0, 0.011, 0.25, 1.0, 6);                              // the handle
+  within(f, NET_ACROSS, () => {
+    within(f, ALONG_X(0.014), () => {
+      f.col('#2a2d33'); f.cyl(0, 0, 0.0135, -0.25, 0.34, 8);                           // the grip, on up past the fist for the other hand
+      f.col('#8c949e'); f.cyl(0, 0, 0.011, -1.0, -0.25, 6);                            // the handle
+    });
+    within(f, basis([1, 0, 0], [0, 1, 0], [0, 0, 1], [-1.235, 0, 0.014]), () => netHoop(f));
   });
-  // the hoop and its bag at the handle's end: the ring square to the fingers (open upward while the hand holds the handle
-  // ahead and down), the mesh hanging below it
-  within(f, basis([1, 0, 0], [0, -1, 0], [0, 0, -1], [1.235, 0, 0.014]), () => {
-    f.col('#8c949e'); f.lathe(0, 0, [[0.22, -0.008], [0.235, -0.008], [0.235, 0.008], [0.22, 0.008]], 14);
-    f.col('#4f5a52', 0.0); f.lathe(0, 0, [[0.225, 0], [0.19, -0.12], [0.11, -0.24], [0.02, -0.3], [0, -0.3]], 12);
-  });
+}
+function netHoop(f) {
+  f.col('#8c949e'); f.lathe(0, 0, [[0.22, -0.008], [0.235, -0.008], [0.235, 0.008], [0.22, 0.008]], 14);
+  f.col('#4f5a52', 0.0); f.lathe(0, 0, [[0.225, 0], [0.19, -0.12], [0.11, -0.24], [0.02, -0.3], [0, -0.3]], 12);
 }
 function bag(f) {
   f.col('#8a6238'); f.rod([0.004, 0.01, -0.05], [0.006, -0.11, -0.062], 0.004, 4); f.rod([0.004, 0.01, 0.05], [0.006, -0.11, 0.062], 0.004, 4);

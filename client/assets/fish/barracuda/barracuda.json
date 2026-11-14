@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "barracuda",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 87082306 from 03_sea_openwater/Great_Barracuda.png; tools/animals/fish_animal.py",
+ "height": 0.2489,
+ "length": 0.999,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4432,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53184,
+   "uv": 106368,
+   "skin": 141824,
+   "weight": 159552,
+   "index": 177280,
+   "indexType": "u16",
+   "min": [
+    -0.4991999864578247,
+    -0.12460000067949295,
+    -0.13099999725818634
+   ],
+   "max": [
+    0.4997999966144562,
+    0.12430000305175781,
+    0.1315000057220459
+   ]
+  },
+  {
+   "verts": 1774,
+   "tris": 2000,
+   "pos": 213280,
+   "nrm": 234568,
+   "uv": 255856,
+   "skin": 270048,
+   "weight": 277144,
+   "index": 284240,
+   "indexType": "u16",
+   "min": [
+    -0.4991999864578247,
+    -0.12460000067949295,
+    -0.13099999725818634
+   ],
+   "max": [
+    0.49880000948905945,
+    0.12389999628067017,
+    0.1315000057220459
+   ]
+  },
+  {
+   "verts": 851,
+   "tris": 700,
+   "pos": 296240,
+   "nrm": 306452,
+   "uv": 316664,
+   "skin": 323472,
+   "weight": 326876,
+   "index": 330280,
+   "indexType": "u16",
+   "min": [
+    -0.4984000027179718,
+    -0.12139999866485596,
+    -0.12219999730587006
+   ],
+   "max": [
+    0.49880000948905945,
+    0.12229999899864197,
+    0.12700000405311584
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 334480,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "barracuda-color.jpg",
+  "mask": "barracuda-mask.png"
+ },
+ "card": "barracuda-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "skipjack",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project b98bf223 from 03_sea_openwater/Skipjack_Tuna.png; tools/animals/fish_animal.py",
+ "height": 0.438,
+ "length": 0.9986,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4557,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54684,
+   "uv": 109368,
+   "skin": 145824,
+   "weight": 164052,
+   "index": 182280,
+   "indexType": "u16",
+   "min": [
+    -0.499099999666214,
+    -0.219200000166893,
+    -0.19599999487400055
+   ],
+   "max": [
+    0.49950000643730164,
+    0.21879999339580536,
+    0.19599999487400055
+   ]
+  },
+  {
+   "verts": 1807,
+   "tris": 2000,
+   "pos": 218280,
+   "nrm": 239964,
+   "uv": 261648,
+   "skin": 276104,
+   "weight": 283332,
+   "index": 290560,
+   "indexType": "u16",
+   "min": [
+    -0.499099999666214,
+    -0.21889999508857727,
+    -0.195700004696846
+   ],
+   "max": [
+    0.4952999949455261,
+    0.2152000069618225,
+    0.19429999589920044
+   ]
+  },
+  {
+   "verts": 854,
+   "tris": 700,
+   "pos": 302560,
+   "nrm": 312808,
+   "uv": 323056,
+   "skin": 329888,
+   "weight": 333304,
+   "index": 336720,
+   "indexType": "u16",
+   "min": [
+    -0.49540001153945923,
+    -0.21649999916553497,
+    -0.19499999284744263
+   ],
+   "max": [
+    0.4952999949455261,
+    0.2117999941110611,
+    0.18170000612735748
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 340920,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "skipjack-color.jpg",
+  "mask": "skipjack-mask.png"
+ },
+ "card": "skipjack-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

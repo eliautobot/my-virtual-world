@@ -81,7 +81,8 @@ mat4 skinMatrix() {
 
 /** The material: the painted texture, recoloured per animal by the mask, posed by the bone texture. */
 function material(A) {
-  const m = new THREE.MeshStandardMaterial({ map: A.color, roughness: 0.85, metalness: 0 });
+  // (a fish's scales shine a little: the manifest's roughness, 2026-11-13)
+  const m = new THREE.MeshStandardMaterial({ map: A.color, roughness: A.man.roughness ?? 0.85, metalness: A.man.metalness ?? 0 });
   // (a see-through animal, as a jellyfish: its manifest's opacity)
   if (A.man.opacity) { m.transparent = true; m.opacity = A.man.opacity; m.depthWrite = false; m.side = THREE.DoubleSide; }
   const clips = CLIP_NAMES.map(k => {

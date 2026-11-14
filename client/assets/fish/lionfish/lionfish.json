@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "lionfish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project a4942d61 from 02_sea_reef/Lionfish.png; tools/animals/fish_animal.py",
+ "height": 0.8138,
+ "length": 0.9976,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 6106,
+   "tris": 5997,
+   "pos": 0,
+   "nrm": 73272,
+   "uv": 146544,
+   "skin": 195392,
+   "weight": 219816,
+   "index": 244240,
+   "indexType": "u16",
+   "min": [
+    -0.4975999891757965,
+    -0.40790000557899475,
+    -0.27720001339912415
+   ],
+   "max": [
+    0.5,
+    0.4059000015258789,
+    0.27649998664855957
+   ]
+  },
+  {
+   "verts": 3673,
+   "tris": 2833,
+   "pos": 280224,
+   "nrm": 324300,
+   "uv": 368376,
+   "skin": 397760,
+   "weight": 412452,
+   "index": 427144,
+   "indexType": "u16",
+   "min": [
+    -0.4966000020503998,
+    -0.4075999855995178,
+    -0.272599995136261
+   ],
+   "max": [
+    0.5,
+    0.4059000015258789,
+    0.27649998664855957
+   ]
+  },
+  {
+   "verts": 3496,
+   "tris": 2625,
+   "pos": 444144,
+   "nrm": 486096,
+   "uv": 528048,
+   "skin": 556016,
+   "weight": 570000,
+   "index": 583984,
+   "indexType": "u16",
+   "min": [
+    -0.4966000020503998,
+    -0.4075999855995178,
+    -0.272599995136261
+   ],
+   "max": [
+    0.5,
+    0.4059000015258789,
+    0.2687000036239624
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 599736,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "lionfish-color.jpg",
+  "mask": "lionfish-mask.png"
+ },
+ "card": "lionfish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "flathead",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project f5bd64ec from 09_lake_bottom/Flathead_Catfish.png; tools/animals/fish_animal.py",
+ "height": 0.3081,
+ "length": 0.9995,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4481,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53772,
+   "uv": 107544,
+   "skin": 143392,
+   "weight": 161316,
+   "index": 179240,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.15410000085830688,
+    -0.19609999656677246
+   ],
+   "max": [
+    0.49950000643730164,
+    0.15399999916553497,
+    0.195700004696846
+   ]
+  },
+  {
+   "verts": 1756,
+   "tris": 2000,
+   "pos": 215240,
+   "nrm": 236312,
+   "uv": 257384,
+   "skin": 271432,
+   "weight": 278456,
+   "index": 285480,
+   "indexType": "u16",
+   "min": [
+    -0.4977000057697296,
+    -0.15369999408721924,
+    -0.19419999420642853
+   ],
+   "max": [
+    0.49950000643730164,
+    0.1527000069618225,
+    0.195700004696846
+   ]
+  },
+  {
+   "verts": 812,
+   "tris": 700,
+   "pos": 297480,
+   "nrm": 307224,
+   "uv": 316968,
+   "skin": 323464,
+   "weight": 326712,
+   "index": 329960,
+   "indexType": "u16",
+   "min": [
+    -0.4977000057697296,
+    -0.15360000729560852,
+    -0.19419999420642853
+   ],
+   "max": [
+    0.4941999912261963,
+    0.15060000121593475,
+    0.19169999659061432
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 334160,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "flathead-color.jpg",
+  "mask": "flathead-mask.png"
+ },
+ "card": "flathead-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

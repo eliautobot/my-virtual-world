@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "littletunny",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 735559ba from 03_sea_openwater/Little_Tunny.png; tools/animals/fish_animal.py",
+ "height": 0.3868,
+ "length": 0.9998,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4482,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53784,
+   "uv": 107568,
+   "skin": 143424,
+   "weight": 161352,
+   "index": 179280,
+   "indexType": "u16",
+   "min": [
+    -0.4997999966144562,
+    -0.19339999556541443,
+    -0.2046000063419342
+   ],
+   "max": [
+    0.5,
+    0.19339999556541443,
+    0.20479999482631683
+   ]
+  },
+  {
+   "verts": 1791,
+   "tris": 2000,
+   "pos": 215280,
+   "nrm": 236772,
+   "uv": 258264,
+   "skin": 272592,
+   "weight": 279756,
+   "index": 286920,
+   "indexType": "u16",
+   "min": [
+    -0.4997999966144562,
+    -0.19189999997615814,
+    -0.2046000063419342
+   ],
+   "max": [
+    0.4984999895095825,
+    0.19269999861717224,
+    0.2037000060081482
+   ]
+  },
+  {
+   "verts": 853,
+   "tris": 700,
+   "pos": 298920,
+   "nrm": 309156,
+   "uv": 319392,
+   "skin": 326216,
+   "weight": 329628,
+   "index": 333040,
+   "indexType": "u16",
+   "min": [
+    -0.4997999966144562,
+    -0.19189999997615814,
+    -0.2046000063419342
+   ],
+   "max": [
+    0.49300000071525574,
+    0.1899999976158142,
+    0.2037000060081482
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 337240,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "littletunny-color.jpg",
+  "mask": "littletunny-mask.png"
+ },
+ "card": "littletunny-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

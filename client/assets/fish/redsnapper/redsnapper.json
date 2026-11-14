@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "redsnapper",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 3485835f from 02_sea_reef/Red_Snapper.png; tools/animals/fish_animal.py",
+ "height": 0.5103,
+ "length": 0.998,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4340,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 52080,
+   "uv": 104160,
+   "skin": 138880,
+   "weight": 156240,
+   "index": 173600,
+   "indexType": "u16",
+   "min": [
+    -0.4986000061035156,
+    -0.25529998540878296,
+    -0.24619999527931213
+   ],
+   "max": [
+    0.49939998984336853,
+    0.2549999952316284,
+    0.24650000035762787
+   ]
+  },
+  {
+   "verts": 1693,
+   "tris": 2000,
+   "pos": 209600,
+   "nrm": 229916,
+   "uv": 250232,
+   "skin": 263776,
+   "weight": 270548,
+   "index": 277320,
+   "indexType": "u16",
+   "min": [
+    -0.4959999918937683,
+    -0.2549999952316284,
+    -0.24580000340938568
+   ],
+   "max": [
+    0.49939998984336853,
+    0.25429999828338623,
+    0.24650000035762787
+   ]
+  },
+  {
+   "verts": 774,
+   "tris": 700,
+   "pos": 289320,
+   "nrm": 298608,
+   "uv": 307896,
+   "skin": 314088,
+   "weight": 317184,
+   "index": 320280,
+   "indexType": "u16",
+   "min": [
+    -0.4823000133037567,
+    -0.25200000405311584,
+    -0.24580000340938568
+   ],
+   "max": [
+    0.49790000915527344,
+    0.25060001015663147,
+    0.24619999527931213
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 324480,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "redsnapper-color.jpg",
+  "mask": "redsnapper-mask.png"
+ },
+ "card": "redsnapper-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

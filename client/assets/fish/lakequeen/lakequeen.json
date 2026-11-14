@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "lakequeen",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 37f0d102 from 10_legends/The_Lake_Queen.png; tools/animals/fish_animal.py",
+ "height": 0.2725,
+ "length": 0.9994,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4539,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54468,
+   "uv": 108936,
+   "skin": 145248,
+   "weight": 163404,
+   "index": 181560,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.13609999418258667,
+    -0.15929999947547913
+   ],
+   "max": [
+    0.49939998984336853,
+    0.1363999992609024,
+    0.1590999960899353
+   ]
+  },
+  {
+   "verts": 1819,
+   "tris": 2000,
+   "pos": 217560,
+   "nrm": 239388,
+   "uv": 261216,
+   "skin": 275768,
+   "weight": 283044,
+   "index": 290320,
+   "indexType": "u16",
+   "min": [
+    -0.4982999861240387,
+    -0.1354999989271164,
+    -0.15929999947547913
+   ],
+   "max": [
+    0.4993000030517578,
+    0.13619999587535858,
+    0.1590999960899353
+   ]
+  },
+  {
+   "verts": 863,
+   "tris": 700,
+   "pos": 302320,
+   "nrm": 312676,
+   "uv": 323032,
+   "skin": 329936,
+   "weight": 333388,
+   "index": 336840,
+   "indexType": "u16",
+   "min": [
+    -0.4982999861240387,
+    -0.13539999723434448,
+    -0.15449999272823334
+   ],
+   "max": [
+    0.49869999289512634,
+    0.13420000672340393,
+    0.1590999960899353
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 341040,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "lakequeen-color.jpg",
+  "mask": "lakequeen-mask.png"
+ },
+ "card": "lakequeen-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

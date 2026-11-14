@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "whitecrappie",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project e8dc0b54 from 05_lake_panfish/White_Crappie.png; tools/animals/fish_animal.py",
+ "height": 0.4636,
+ "length": 0.9985,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4440,
+   "tris": 5999,
+   "pos": 0,
+   "nrm": 53280,
+   "uv": 106560,
+   "skin": 142080,
+   "weight": 159840,
+   "index": 177600,
+   "indexType": "u16",
+   "min": [
+    -0.4984999895095825,
+    -0.2321999967098236,
+    -0.1890999972820282
+   ],
+   "max": [
+    0.5,
+    0.2313999980688095,
+    0.1890999972820282
+   ]
+  },
+  {
+   "verts": 1781,
+   "tris": 1999,
+   "pos": 213596,
+   "nrm": 234968,
+   "uv": 256340,
+   "skin": 270588,
+   "weight": 277712,
+   "index": 284836,
+   "indexType": "u16",
+   "min": [
+    -0.4984999895095825,
+    -0.2321999967098236,
+    -0.1876000016927719
+   ],
+   "max": [
+    0.49900001287460327,
+    0.2313999980688095,
+    0.188400000333786
+   ]
+  },
+  {
+   "verts": 831,
+   "tris": 699,
+   "pos": 296832,
+   "nrm": 306804,
+   "uv": 316776,
+   "skin": 323424,
+   "weight": 326748,
+   "index": 330072,
+   "indexType": "u16",
+   "min": [
+    -0.4984999895095825,
+    -0.22789999842643738,
+    -0.1876000016927719
+   ],
+   "max": [
+    0.49900001287460327,
+    0.21899999678134918,
+    0.1860000044107437
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 334268,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "whitecrappie-color.jpg",
+  "mask": "whitecrappie-mask.png"
+ },
+ "card": "whitecrappie-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

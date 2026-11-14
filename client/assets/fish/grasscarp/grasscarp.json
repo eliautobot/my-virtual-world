@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "grasscarp",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 873c629f from 09_lake_bottom/Grass_Carp.png; tools/animals/fish_animal.py",
+ "height": 0.3357,
+ "length": 0.9994,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4040,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 48480,
+   "uv": 96960,
+   "skin": 129280,
+   "weight": 145440,
+   "index": 161600,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.1678999960422516,
+    -0.14180000126361847
+   ],
+   "max": [
+    0.49939998984336853,
+    0.16779999434947968,
+    0.1412999927997589
+   ]
+  },
+  {
+   "verts": 1608,
+   "tris": 2000,
+   "pos": 197600,
+   "nrm": 216896,
+   "uv": 236192,
+   "skin": 249056,
+   "weight": 255488,
+   "index": 261920,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.1670999974012375,
+    -0.14180000126361847
+   ],
+   "max": [
+    0.4993000030517578,
+    0.1656000018119812,
+    0.1412999927997589
+   ]
+  },
+  {
+   "verts": 748,
+   "tris": 700,
+   "pos": 273920,
+   "nrm": 282896,
+   "uv": 291872,
+   "skin": 297856,
+   "weight": 300848,
+   "index": 303840,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.1670999974012375,
+    -0.14180000126361847
+   ],
+   "max": [
+    0.49639999866485596,
+    0.16359999775886536,
+    0.1412999927997589
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 308040,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "grasscarp-color.jpg",
+  "mask": "grasscarp-mask.png"
+ },
+ "card": "grasscarp-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

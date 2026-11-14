@@ -2,6 +2,31 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.7.0 (2026-11-14)
+
+- **A new fishing game**: every fish and find is now a detailed, animated model (87 species including the six legends,
+  plus the old boot, the can, the bottle, the pouch, the golden lure and the tyre), seen fighting in the water on the
+  line, leaping, and flopping when held up. The line flows and goes taut while a fish pulls, the camera follows the
+  hook, the fight and the catch, and every catch gets a glamour shot (more for a new species, a trophy, a record or a
+  legend).
+- **Skill and gear matter**: ranks with a beginner's line guard that fades as you level up, hooks as tackle (better and
+  stronger as they cost more), and each fish fights its own way (darting, running, bolting for the rocks, tail-walking,
+  biting through the line or planting on the bottom), with a word on the button for what to do and big steering arrows
+  on touch screens.
+- **Natural poses**: the catch is held up by the line, by the gills or in both arms; the rod and the landing net are
+  gripped the way anglers hold them, and arms keep clear of the body on every character.
+- **Driving without a boost**: cars now reach their full speed on the throttle alone (the speed the boost used to give),
+  so there is no boost button any more. Shift brakes, and holding the brake with the throttle from a standstill still
+  does a burnout.
+- **Brakes you hold on touch screens**: Brake and Handbrake work only while your finger is on them, and let go the moment
+  it lifts. A quick tap no longer leaves one switched on.
+- **A driving camera you can move**: look around the car with the mouse or a finger, zoom with the wheel or a pinch, and
+  raise or lower the view. While you drive it swings back behind the car on its own; your zoom and height are kept for
+  the next drive, and C puts the usual view back.
+
+To update a Docker install: `docker compose pull`, then `docker compose up -d`. Your world, accounts and licence stay in
+the Docker volumes.
+
 ## v2.6.0 (2026-11-13)
 
 **A breaking update: back up before you update.** This release changes how a Docker install gets the program and

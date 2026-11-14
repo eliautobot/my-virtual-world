@@ -418,6 +418,40 @@ one before, in each water's own line.
    - **The fish** (`client/js/render/fish-models.js`): every species built from its body spec - a lofted body, its
      tail and fins, a bill, hammer, whiskers or snout, its own painted skin (back to belly, its pattern, the eye); the
      squid and the ray their own way; the finds. `client/dev/fish.html` shows them all (`tools-bin/fish-shot.mjs`).
+     **Tripo models (2026-11-13):** a species or find listed in `client/assets/fish/index.json` is drawn from its own
+     modelled, skinned asset instead (`client/assets/fish/<id>/`, made from the owner's pictures in Tripo Studio and
+     rigged and animated by `tools/animals/fish_animal.py` in the character module: a spine down the fish's centre line,
+     its clips *rest* - held up, hanging still then flopping - *swim*, and *run* - thrashing on the line and leaping):
+     the catch held up and the leap (`render/fishing-fx.js`, its clip by the moment), and its Fishdex picture (its baked
+     card). The others keep the built model until theirs is made. `client/dev/fish-view.html` shows each model with its
+     clips; `tests/fish-assets.test.mjs` checks every listed one.
+   - **The revamp (2026-11-13, the owner: camera angles, holds, a line that flows, the fish seen in the water, more
+     flair, harder):** the hooked fish is drawn in the water (swimming on its runs, thrashing as it shakes, deeper on a
+     dive, up to the surface as it tires and comes close) and at the boat's side in the net; the line is a rope
+     (`fishing-fx.js line`: momentum, weight, floating on the water, slack or tight); the camera's held shots
+     (`fishing-game.js shot`): over the shoulder as it takes the hook, from above and beside once it's close, beside a
+     leap (drawn slower), before you holding the catch up, going slowly round; the catch held as anglers do by its
+     weight (`holdStyle`: under 1.2 kg by the line, under 7 kg by its gills, heavier in both arms - clips
+     `fish_hold_line`, `fish_hold_gill`, `fish_hold_two`, tools/chars/extra-clips.mjs); banners (fish on, a perfect hook -
+     struck within 0.28 s, the fish starts stunned - new species, trophy, legendary, a streak), the screen's edges
+     reddening as the line strains, a jolt and a flash when it snaps or a legend bites, sparks in the rarity's colour
+     round the catch. Harder: reeling while it takes line strains the line (`shared/fishing-fight.js` STRAIN_S: 1.3 s at
+     the drag snaps it), slack throws the hook sooner (1.9 s), a jump's bow window 0.65 s - a good angler's fights are as
+     before; holding REEL all fight now loses about four fish in ten.
+   - **Skill, gear and each fish's own fight (2026-11-13, round two):** hooks are tackle too (`shared/fishing-gear.js`
+     HOOKS: sharp - more time to set it; hold - thrown less on a jump or a slack line; strength - a spike past it straightens
+     it, `bent`), sold and chosen at the dock store like rods, reels and lines. The angler's level is in the trip's kit:
+     a rank (Novice, Angler, Pro, Master, Legend), a beginner's line guard fading by level 9 (`assist`: the line strains
+     longer, slack and a jump give more time) and rarer, bigger fish for the higher ranks (`rollBite`). Each fish fights
+     its own way (`shared/fishing-fight.js`): small ones dart in short zigzag bursts, big ones run long and heavy; runners
+     open with a screaming run (`blitz`: let it go), divers and bulldogs that live by cover bolt for it (`rocks`: crank, or
+     it wraps the line - `snag`), jumpers tail-walk (chained jumps), toothy fish's head-shakes cut a tight line without a
+     leader (`bite`), flat fish plant on the bottom (`plant`: pump it - tap REEL). The screen says what it is doing and
+     what to do (a badge, the button's word: CRANK!, PUMP, EASE), with two big arrows to pull against its runs (touch;
+     A/D on a keyboard). Every catch gets a glamour shot (the camera up close on it drawing back round to you between black
+     bars, its name and size, a flash, a stamp for a new species, a trophy, a world record, a legend or a streak, held
+     longer for those), then its card. The line runs taut while a fish pulls (hums near the drag) and only bellies or
+     floats when slack.
    - **Splashes** (`client/js/render/fishing-fx.js`): rings spreading on the water and thrown drops; the line, the
      bobber and lures, the aim, the fish's shadow. One draw call each, pooled.
    - **Checks:** `tests/docks-http.test.mjs` (a trip from a marina: grounds on that sea within the reach, the kit, a

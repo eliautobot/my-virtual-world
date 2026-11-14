@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "whitebass",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 688baae0 from 06_lake_bass/White_Bass.png; tools/animals/fish_animal.py",
+ "height": 0.4189,
+ "length": 0.9991,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4597,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 55164,
+   "uv": 110328,
+   "skin": 147104,
+   "weight": 165492,
+   "index": 183880,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.20909999310970306,
+    -0.1860000044107437
+   ],
+   "max": [
+    0.49950000643730164,
+    0.20980000495910645,
+    0.1860000044107437
+   ]
+  },
+  {
+   "verts": 1946,
+   "tris": 2000,
+   "pos": 219880,
+   "nrm": 243232,
+   "uv": 266584,
+   "skin": 282152,
+   "weight": 289936,
+   "index": 297720,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.20819999277591705,
+    -0.1860000044107437
+   ],
+   "max": [
+    0.498199999332428,
+    0.20880000293254852,
+    0.1860000044107437
+   ]
+  },
+  {
+   "verts": 908,
+   "tris": 700,
+   "pos": 309720,
+   "nrm": 320616,
+   "uv": 331512,
+   "skin": 338776,
+   "weight": 342408,
+   "index": 346040,
+   "indexType": "u16",
+   "min": [
+    -0.49959999322891235,
+    -0.20000000298023224,
+    -0.1860000044107437
+   ],
+   "max": [
+    0.498199999332428,
+    0.19850000739097595,
+    0.18559999763965607
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 350240,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "whitebass-color.jpg",
+  "mask": "whitebass-mask.png"
+ },
+ "card": "whitebass-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

@@ -89,10 +89,11 @@ function tackle(A) {
   if (!A) return '<p class="hint">Loading…</p>';
   const lb = kg => Math.round(kg * 2.2046);
   const leader = A.leader;
-  return `<p class="hint">What you buy goes into your inventory (rods, reels and lines can be given or traded). The tackle you fish with is your choice — a trip takes it from your inventory.</p>
+  return `<p class="hint">What you buy goes into your inventory (rods, reels, lines and hooks can be given or traded). Better tackle fights better: the reel's drag and the line's strength decide how hard you can pull, the hook how well it holds. The tackle you fish with is your choice — a trip takes it from your inventory.</p>
     <h4>Rods</h4>${A.rods.map(g => gearRow(g, x => `${x.reach} m cast · lifts up to ${x.maxKg} kg · ${Math.round(x.win * 1000) / 1000} s to set the hook`, A)).join('')}
     <h4>Reels</h4>${A.reels.map(g => gearRow(g, x => `${x.speed} m/s · ${x.drag} kg drag · ${x.cap} m of line`, A)).join('')}
     <h4>Lines</h4>${A.lines.map(g => gearRow(g, x => `breaks at ${lb(x.kgf)} lb (${x.kgf} kg)`, A, 6)).join('')}
+    ${A.hooks ? `<h4>Hooks</h4>${A.hooks.map(g => gearRow(g, x => `${x.sharp > 1 ? `+${Math.round((x.sharp - 1) * 100)} % time to set it · ` : ''}${x.hold >= 1 ? `holds ${x.hold >= 1.2 ? 'very well' : 'well'}` : 'thrown easily'} · straightens at ${x.strength} kg`, A)).join('')}` : ''}
     <h4>Leader</h4>${leader.have ? `<div class="fm-row"><div class="fm-l"><b>${esc(leader.name)}</b><small class="dim">${esc(leader.blurb)}</small></div><div class="fm-r"><button type="button" class="btn small${leader.using ? ' on' : ''}" data-leader="${leader.using ? 0 : 1}">${leader.using ? '✔ On' : 'Off'}</button></div></div>` : gearRow(leader, () => 'Fish see the line less: more bites', A)}`;
 }
 function bait(A) {

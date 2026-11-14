@@ -29,10 +29,31 @@ import { loadLook, saveLook } from '../ui/customizer.js';
 import { auth } from '../core/auth.js';
 import { PF_OBSERVING, PF_USING } from '/shared/playerproto.js';
 import { PlayerNav, pushApart, RUN_SPEED } from '/shared/playernav.js';
-import { vehicleChaseCamera } from '/shared/vehicle-camera.js';
+import { vehicleChaseCamera, CHASE_VIEW } from '/shared/vehicle-camera.js';
 import { OutdoorGround } from '/shared/city-edge.js';
 // The car pose is already smoothed by interpolation, so the chase camera tracks it tighter than the walking camera.
 const DRIVE_CAM_RATES = { follow: 18, turn: 14 };
+// The driving camera is the driver's to adjust (2026-11-13: "right now the camera is fixed while driving"): the mouse or a
+// finger on the world turns it round the car and tilts it, the wheel or a pinch zooms it. How far back and how high it
+// is are kept on this device for the next drive; turned round, it swings back behind the car a moment after the driver
+// stops looking while the car is moving (parked, it stays where it was put). C puts it back to the usual view.
+// DV.set: the camera's goals as written last frame — whatever differs now is what the person did since.
+const DRIVE_VIEW_KEY = 'mvw.driveView', DRIVE_LOOK_HOLD = 1400, DRIVE_LOOK_RETURN = 2.4;
+const DV = { yaw: 0, pitch: null, zoom: 1, set: null, lookAt: -1e9, savedAt: 0, dirty: false };
+try {
+  const v = JSON.parse(localStorage.getItem(DRIVE_VIEW_KEY) || 'null');
+  if (v && Number.isFinite(v.zoom)) DV.zoom = clamp(v.zoom, CHASE_VIEW.zoomMin, CHASE_VIEW.zoomMax);
+  if (v && Number.isFinite(v.pitch)) DV.pitch = clamp(v.pitch, CHASE_VIEW.pitchMin, CHASE_VIEW.pitchMax);
+} catch { /* no storage, or nothing saved: the usual view */ }
+function saveDriveView(force = false) {
+  if (!DV.dirty || (!force && performance.now() - DV.savedAt < 1000)) return;
+  DV.dirty = false; DV.savedAt = performance.now();
+  try {
+    if (DV.zoom === 1 && DV.pitch === null) localStorage.removeItem(DRIVE_VIEW_KEY);   // (the usual view: nothing to keep)
+    else localStorage.setItem(DRIVE_VIEW_KEY, JSON.stringify({ zoom: +DV.zoom.toFixed(3), pitch: DV.pitch === null ? null : +DV.pitch.toFixed(3) }));
+  } catch { /* storage full or blocked: kept for this visit */ }
+}
+function resetDriveView() { DV.yaw = 0; DV.pitch = null; DV.zoom = 1; DV.dirty = true; saveDriveView(true); }
 
 const R = 0.26, WALK = 1.55, RUN = RUN_SPEED, SUB = 0.12, NONE = [];   // (the server holds players to RUN_SPEED)
 const MOVE_CODES = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight']);
@@ -42,7 +63,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const nowS = () => performance.now() / 1000;
 
 let app, cam, agents, inter, g;
-let hash = null, B0 = null, promptT = 0, busy = false, runToggle = false, saved = null, driveCam = null, handbrakeToggle = false;
+let hash = null, B0 = null, promptT = 0, busy = false, saved = null, driveCam = null;
+// The touch screen's Brake and Handbrake while driving: on while a finger is on the button (2026-11-13: "press while
+// touching", not a tap to switch on and another to switch off). The pointer holding each, so another finger lifting elsewhere
+// doesn't let go of it.
+const held = { brake: null, handbrake: null };
 // The shared world (WP1.10): moves go to the server about 10 times a second; it corrects impossible ones.
 const NET = { seq: 0, at: 0, last: '', beatAt: 0 };
 let pnav = null;   // doorways, for the soft push (rebuilt after an edit)
@@ -82,23 +107,25 @@ export function init(a) {
     if (blocked) return { throttle: 0, steer: 0, brake: 1, handbrake: false };
     return { throttle: clamp(Number(keys.has('KeyW') || keys.has('ArrowUp')) - Number(keys.has('KeyS') || keys.has('ArrowDown')) - (joy.on ? joy.y : 0), -1, 1),
       steer: clamp(Number(keys.has('KeyA') || keys.has('ArrowLeft')) - Number(keys.has('KeyD') || keys.has('ArrowRight')) - (joy.on ? joy.x : 0), -1, 1),
-      brake: 0, boost: keys.has('ShiftLeft') || keys.has('ShiftRight') || runToggle, handbrake: keys.has('Space') || handbrakeToggle };   // Shift boosts (S brakes)
+      brake: keys.has('ShiftLeft') || keys.has('ShiftRight') || held.brake !== null ? 1 : 0, handbrake: keys.has('Space') || held.handbrake !== null };   // Shift brakes (as does S); with the throttle from a stop: a burnout
   };
   P.onVehicleEnter = (o = {}) => {   // a car, or an aircraft (player/flight.js: o.keys, its own help)
     if (!P.active) return;
     cam.setFP(false);   // first person is on foot only (its angle back before the walking camera is kept)
-    driveCam ||= { dist: cam.goalDist, pitch: cam.goalPitch, yaw: cam.goalYaw, fov: cam.fovBase ?? app.stage.camera.fov, minDist: cam.minDist };
+    driveCam ||= { dist: cam.goalDist, pitch: cam.goalPitch, yaw: cam.goalYaw, fov: cam.fovBase ?? app.stage.camera.fov, minDist: cam.minDist, minPitch: cam.minPitch, maxPitch: cam.maxPitch };
+    DV.set = null; DV.yaw = 0; DV.lookAt = -1e9;   // (a fresh drive starts behind the car, at the driver's own zoom and height)
     P.state = 'drive'; P.slot = null; P.emote = null; P.tween = null; P.vx = P.vz = 0;
     if (E.prompt) { E.prompt.classList.add('hidden'); E.prompt._h = null; }   // (the prompt that offered it)
-    runToggle = handbrakeToggle = false; keys.clear(); joy.x = joy.y = 0;
+    letGo(); keys.clear(); joy.x = joy.y = 0;
     const i = agents.extra.indexOf(P.extra); if (i >= 0) agents.extra.splice(i, 1);
     app.stage.camera.fov = 62; cam.rates = DRIVE_CAM_RATES; refreshVehicleHud();
-    app.toast(o.keys || 'W/S throttle, brake & reverse · A/D steer · Shift boost (from a stop: burnout) · Space handbrake · H horn · R radio · E exit when stopped', 'good', 6000);
+    app.toast(o.keys || (isTouch() ? 'Stick: drive & steer · hold Brake / Handbrake · drag the world: look around · pinch: zoom · Exit when stopped' : 'W/S throttle, brake & reverse · A/D steer · Shift brake (with W from a stop: burnout) · Space handbrake · mouse: look around · scroll: zoom · C: camera back · H horn · R radio · E exit when stopped'), 'good', 6000);
   };
   P.onVehicleExit = point => {
     if (point && Number.isFinite(point.x) && Number.isFinite(point.z)) { P.x = point.x; P.y = point.y; P.z = point.z; P.ctx = -1; }
-    P.state = 'walk'; P.vx = P.vz = 0; P.tween = null; runToggle = handbrakeToggle = false; keys.clear(); cam.rates = null;
-    if (driveCam) { cam.goalDist = driveCam.dist; cam.goalPitch = driveCam.pitch; app.stage.camera.fov = driveCam.fov; cam.minDist = driveCam.minDist; driveCam = null; }
+    P.state = 'walk'; P.vx = P.vz = 0; P.tween = null; letGo(); keys.clear(); cam.rates = null;
+    DV.set = null; DV.yaw = 0; saveDriveView(true);
+    if (driveCam) { Object.assign(cam, { minPitch: driveCam.minPitch ?? cam.minPitch, maxPitch: driveCam.maxPitch ?? cam.maxPitch }); cam.goalDist = driveCam.dist; cam.goalPitch = driveCam.pitch; app.stage.camera.fov = driveCam.fov; cam.minDist = driveCam.minDist; driveCam = null; }
     cam.follow = () => ({ x: P.x, y: P.y + 1.1, z: P.z });
     if (P.active && !agents.extra.includes(P.extra)) agents.extra.push(P.extra);
     NET.last = ''; promptT = 0; if (E.prompt) E.prompt._h = null; refreshVehicleHud();
@@ -112,7 +139,7 @@ export function init(a) {
   // Driving input leaves the moment the held-key set changes, not on the next frame.
   window.addEventListener('keydown', e => { if (!typing(e) && !e.ctrlKey && !e.metaKey) { keys.add(e.code); if (P.state === 'drive') app.driving?.sendInput(); } });
   window.addEventListener('keyup', e => { keys.delete(e.code); if (P.state === 'drive') app.driving?.sendInput(); });
-  window.addEventListener('blur', () => keys.clear());
+  window.addEventListener('blur', () => { keys.clear(); letGo(); });
   bus.on('mode', (m, prev) => { if (m === 'play') enter(); else if (prev === 'play') leave(); });
   bus.on('world', ev => { grids.clear(); pnav = null; if (ev && ev.blds && ev.blds.size) { rebuildHash(); checkGone(); } });
   bus.on('decor', () => rebuildHash());
@@ -488,7 +515,7 @@ function enter() {
   P.y = groundY();
   if (P.ctx >= 0) setFocus(P.ctx >> 6, P.ctx & 63);
   if (S.focus.b >= 0) app.applyFocus();   // full walls and a ceiling in Play mode (main.js wallMode)
-  saved = { minDist: cam.minDist };
+  saved = { minDist: cam.minDist, minPitch: cam.minPitch, maxPitch: cam.maxPitch };
   cam.follow = () => ({ x: P.x, y: P.y + 1.1, z: P.z });
   cam.panEnabled = false; cam.keysEnabled = false; cam.eReserved = true; cam.minDist = 3;
   cam.goalDist = me && me.cam ? me.cam.dist : 13; cam.goalPitch = me && me.cam ? me.cam.pitch : 0.62;
@@ -524,7 +551,7 @@ function leave() {
   const k = agents.extra.indexOf(P.extra); if (k >= 0) agents.extra.splice(k, 1);
   cam.follow = null; cam.panEnabled = true; cam.keysEnabled = true; cam.eReserved = false;
   cam.look = false; cam.onLock = null; cam.lookPaused = null; cam.unlockMouse();
-  if (saved) cam.minDist = saved.minDist;
+  if (saved) Object.assign(cam, { minDist: saved.minDist, minPitch: saved.minPitch ?? cam.minPitch, maxPitch: saved.maxPitch ?? cam.maxPitch });   // (the driving camera's tilt range too)
   cam.goal.copy(cam.target);
   document.body.classList.remove('play');
   for (const el of [E.hud, E.bar, E.joy, E.btns]) el.classList.add('hidden');
@@ -542,20 +569,26 @@ function checkGone() {
 }
 
 // ------------------------------------------------------------------ frame update
+/** Lets go of the touch screen's held Brake and Handbrake (into or out of a vehicle, the page hidden). */
+function letGo() {
+  held.brake = held.handbrake = null;
+  E.btns?.querySelector('[data-a="brake"]')?.classList.remove('on'); E.btns?.querySelector('[data-a="jump"]')?.classList.remove('on');
+}
 function refreshVehicleHud() {
   if (!E.btns || !E.hud) return;
   const driving = !!(app.driving?.id || app.driving?.observedDriver);
   document.body.classList.toggle('driving', driving);
-  const jumpButton = E.btns.querySelector('[data-a="jump"]'), runButton = E.btns.querySelector('[data-a="run"]');
+  const jumpButton = E.btns.querySelector('[data-a="jump"]'), brakeButton = E.btns.querySelector('[data-a="brake"]');
   const observing = !!app.driving?.observedDriver;
   for (const b of E.btns.querySelectorAll('button')) b.disabled = observing;
   E.btns.querySelector('[data-a="e"]').textContent = driving ? 'Exit' : 'E';
   jumpButton.textContent = driving ? 'Handbrake' : P.swim ? (P.diving ? '⤒' : '⤓') : '⤒'; jumpButton.title = driving ? 'Handbrake' : P.swim ? (P.diving ? 'Come up' : 'Dive') : 'Jump';
-  jumpButton.classList.toggle('on', driving && handbrakeToggle);
-  // On foot the stick runs when pushed all the way, so the third button is Chat (like the sim's); driving, it is Boost.
-  runButton.classList.toggle('hidden', !driving); E.btns.querySelector('[data-a="chat"]').classList.toggle('hidden', driving);
-  runButton.classList.toggle('on', runToggle);
-  const text = observing ? 'Your vehicle is controlled in another tab' : driving ? 'W/S throttle, brake & reverse · A/D steer · Shift boost · Space handbrake · E exit when stopped'
+  if (!driving) letGo();
+  jumpButton.classList.toggle('on', driving && held.handbrake !== null);
+  // On foot the stick runs when pushed all the way, so the third button is Chat (like the sim's); driving, it is Brake.
+  brakeButton.classList.toggle('hidden', !driving); E.btns.querySelector('[data-a="chat"]').classList.toggle('hidden', driving);
+  brakeButton.classList.toggle('on', held.brake !== null);
+  const text = observing ? 'Your vehicle is controlled in another tab' : driving ? (isTouch() ? 'Stick: drive & steer · hold Brake / Handbrake · drag the world: look around · pinch: zoom' : 'W/S throttle, brake & reverse · A/D steer · Shift brake · Space handbrake · mouse: look · scroll: zoom · C: camera back · E exit when stopped')
     : P.swim ? (isTouch() ? 'Drag the stick to swim · ⤓ dives' : `WASD swim · Shift faster · Space ${P.diving ? 'come up' : 'dive'} · Esc leave`)
     : isTouch() ? 'Stick: walk (all the way: run) · drag the world: look · E: interact or talk · keep zooming in: first person' : 'Mouse look · WASD walk · Shift run · E interact · Space jump · Z/X/C emotes · scroll in: first person · Esc frees the cursor, again leaves';
   E.hud.querySelector('.keys').textContent = text;
@@ -564,9 +597,22 @@ function updateDriving(dt, t) {
   const d = app.driving.driving || app.driving.observedDriver; if (!d) { P.vx = P.vz = 0; return; }
   if (!driveCam) P.onVehicleEnter();
   P.x = d.x; P.y = d.y; P.z = d.z; P.ctx = -1; P.yaw = P.tyaw = d.yaw + Math.PI / 2; P.speed = Math.abs(d.v);
-  const rig = app.driving.rigs[d.k], chase = vehicleChaseCamera(d, rig?.halfLength || 2.3, S.world);
-  cam.minDist = 1.5; cam.goalDist = chase.dist; cam.goalPitch = chase.pitch;
+  // what the driver did to the camera since the last frame: turned or tilted it (the mouse, a finger), zoomed it (the wheel, a pinch)
+  const now = performance.now();
+  if (DV.set) {
+    const dy = angDiff(DV.set.yaw, cam.goalYaw), dp = cam.goalPitch - DV.set.pitch, dz = DV.set.dist > 0 ? cam.goalDist / DV.set.dist : 1;
+    if (Math.abs(dy) > 1e-5) { DV.yaw = angDiff(0, DV.yaw + dy); DV.lookAt = now; }
+    if (Math.abs(dp) > 1e-5) { DV.pitch = clamp(DV.set.pitch + dp, CHASE_VIEW.pitchMin, CHASE_VIEW.pitchMax); DV.lookAt = now; DV.dirty = true; }
+    if (Math.abs(dz - 1) > 1e-4) { DV.zoom = clamp(DV.zoom * dz, CHASE_VIEW.zoomMin, CHASE_VIEW.zoomMax); DV.dirty = true; }
+  }
+  // turned round while the car is moving: back behind it a moment after the driver stops looking
+  if (DV.yaw && Math.abs(d.v) > 2.5 && now - DV.lookAt > DRIVE_LOOK_HOLD) { DV.yaw *= Math.exp(-dt * DRIVE_LOOK_RETURN); if (Math.abs(DV.yaw) < 0.003) DV.yaw = 0; }
+  saveDriveView();
+  const rig = app.driving.rigs[d.k], chase = vehicleChaseCamera(d, rig?.halfLength || 2.3, S.world, DV);
+  cam.minDist = 1.5; cam.minPitch = CHASE_VIEW.pitchMin; cam.maxPitch = CHASE_VIEW.pitchMax;
+  cam.goalDist = chase.dist; cam.goalPitch = chase.pitch;
   cam.goalYaw = cam.yaw + angDiff(cam.yaw, chase.yaw);
+  DV.set = { yaw: cam.goalYaw, pitch: cam.goalPitch, dist: cam.goalDist };
   cam.follow = () => chase.focus;
   if (S.focus.b >= 0) setFocus(-1);
   GU.uFade.value.set(P.x, P.y + 1.0, P.z, 3.4);
@@ -601,7 +647,7 @@ function update(dt, t) {
     if (joy.on) { ix += joy.x; iz += joy.y; }
   }
   const mag = Math.min(1, Math.hypot(ix, iz));
-  const running = keys.has('ShiftLeft') || keys.has('ShiftRight') || runToggle || (joy.on && mag > 0.93);
+  const running = keys.has('ShiftLeft') || keys.has('ShiftRight') || (joy.on && mag > 0.93);
   if (mag > 0.08) { if (P.state === 'use') standUp(); P.emote = null; }
   let vx = 0, vz = 0;
   if (mag > 0.08 && P.state !== 'use' && !P.tween) {
@@ -858,7 +904,7 @@ async function talk(i) {
   } catch (err) { app.toast(err.message || String(err), 'bad'); }
 }
 function jump() {
-  if (app.driving?.id) { handbrakeToggle = !handbrakeToggle; refreshVehicleHud(); return; }
+  if (app.driving?.id) return;   // driving, the button is the Handbrake: held (buildHud), not a tap
   if (P.state === 'use' || P.tween || P.air || !E.elev.classList.contains('hidden')) return;
   if (P.swim) {   // in deep water the jump key dives and comes back up
     if (!P.diving && P.wet && P.wet.level - P.wet.bed < DIVE_MIN) { app.toast('Too shallow to dive here', '', 1500); return; }
@@ -912,7 +958,10 @@ function onKey(e) {
   }
   if (c === 'KeyE') { if (!e.repeat) interact(); return true; }
   if (c === 'Space') { if (!app.driving?.id && !e.repeat) jump(); return true; }
-  if (app.driving?.id) return EAT_CODES.has(c) || ['KeyZ', 'KeyX', 'KeyC'].includes(c);
+  if (app.driving?.id) {
+    if (c === 'KeyC') { if (!e.repeat) { resetDriveView(); app.toast('Camera: the usual view behind the car', '', 1500); } return true; }   // (the driving camera)
+    return EAT_CODES.has(c) || ['KeyZ', 'KeyX'].includes(c);
+  }
   if (c === 'KeyZ') { if (!e.repeat) emote('wave'); return true; }
   if (c === 'KeyX') { if (!e.repeat) emote('dance'); return true; }
   if (c === 'KeyC') { if (!e.repeat) emote('clap'); return true; }
@@ -934,7 +983,7 @@ function buildHud(root) {
   E.elevGrid.onclick = e => { const b = e.target.closest('[data-f]'); if (b) ride(+b.dataset.f); };
   E.fade = root.appendChild(h('<div id="fade"></div>'));
   E.joy = root.appendChild(h('<div id="joy" class="hidden"><i></i></div>'));
-  E.btns = root.appendChild(h('<div id="pbtns" class="hidden"><button class="btn" data-a="e" title="Interact">E</button><button class="btn" data-a="jump" title="Jump">⤒</button><button class="btn hidden" data-a="run" title="Boost (from a stop: burnout)">🔥</button><button class="btn chat" data-a="chat" title="Chats with your agents">💬</button></div>'));
+  E.btns = root.appendChild(h('<div id="pbtns" class="hidden"><button class="btn" data-a="e" title="Interact">E</button><button class="btn" data-a="jump" title="Jump">⤒</button><button class="btn hidden" data-a="brake" title="Brake (hold; with the stick forward from a stop: burnout)">Brake</button><button class="btn chat" data-a="chat" title="Chats with your agents">💬</button></div>'));
   const knob = E.joy.querySelector('i');
   const moveJoy = e => {
     const r = E.joy.getBoundingClientRect(), r0 = r.width / 2;
@@ -948,12 +997,24 @@ function buildHud(root) {
   const endJoy = e => { if (e.pointerId !== joy.id) return; joy.on = false; joy.x = joy.y = 0; knob.style.transform = ''; };
   E.joy.addEventListener('pointerup', endJoy);
   E.joy.addEventListener('pointercancel', endJoy);
+  // Driving, Brake and Handbrake are on while a finger is on them and off the moment it lifts (the button keeps the finger
+  // that pressed it, so a thumb sliding a little off it while braking still brakes).
+  const hold = (k, b, e) => { held[k] = e.pointerId; try { b.setPointerCapture?.(e.pointerId); } catch { /* lifted already */ } b.classList.add('on'); app.driving?.sendInput?.(); };
+  const release = e => {
+    let changed = false;
+    for (const k of ['brake', 'handbrake']) if (held[k] !== null && held[k] === e.pointerId) { held[k] = null; changed = true; }
+    if (!changed) return;
+    E.btns.querySelector('[data-a="brake"]').classList.toggle('on', held.brake !== null);
+    E.btns.querySelector('[data-a="jump"]').classList.toggle('on', !!app.driving?.id && held.handbrake !== null);
+    app.driving?.sendInput?.();
+  };
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) E.btns.addEventListener(ev, release);
   E.btns.addEventListener('pointerdown', e => {
     const b = e.target.closest('[data-a]'); if (!b) return;
     e.preventDefault();
     if (b.dataset.a === 'e') interact();
-    else if (b.dataset.a === 'jump') jump();
-    else if (b.dataset.a === 'run') { runToggle = !runToggle; b.classList.toggle('on', runToggle); }
+    else if (b.dataset.a === 'jump') { if (app.driving?.id) hold('handbrake', b, e); else jump(); }
+    else if (b.dataset.a === 'brake') { if (app.driving?.id) hold('brake', b, e); }
     else if (b.dataset.a === 'chat') document.querySelector('#floatbtns .fb-chat .chat:not([disabled])')?.click();   // the chat window (ui/chat.js)
   });
 }

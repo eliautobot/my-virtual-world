@@ -1,0 +1,131 @@
+{
+ "v": 1,
+ "model": "pouch",
+ "rig": "mvw-find-v1",
+ "kind": "find",
+ "source": "Tripo Studio project 11a8d5d3 from 11_junk_treasure/Coin_Pouch.png; tools/animals/fish_animal.py",
+ "height": 0.1027,
+ "length": 0.1599,
+ "roughness": 0.85,
+ "metalness": 0.0,
+ "plane": "lateral",
+ "bones": [
+  "root"
+ ],
+ "lods": [
+  {
+   "verts": 5102,
+   "tris": 5996,
+   "pos": 0,
+   "nrm": 61224,
+   "uv": 122448,
+   "skin": 163264,
+   "weight": 183672,
+   "index": 204080,
+   "indexType": "u16",
+   "min": [
+    -0.07989999651908875,
+    -0.05139999836683273,
+    -0.06319999694824219
+   ],
+   "max": [
+    0.07999999821186066,
+    0.05130000039935112,
+    0.06300000101327896
+   ]
+  },
+  {
+   "verts": 2391,
+   "tris": 2070,
+   "pos": 240056,
+   "nrm": 268748,
+   "uv": 297440,
+   "skin": 316568,
+   "weight": 326132,
+   "index": 335696,
+   "indexType": "u16",
+   "min": [
+    -0.07959999889135361,
+    -0.05139999836683273,
+    -0.06319999694824219
+   ],
+   "max": [
+    0.07890000194311142,
+    0.051100000739097595,
+    0.06300000101327896
+   ]
+  },
+  {
+   "verts": 2155,
+   "tris": 1754,
+   "pos": 348116,
+   "nrm": 373976,
+   "uv": 399836,
+   "skin": 417076,
+   "weight": 425696,
+   "index": 434316,
+   "indexType": "u16",
+   "min": [
+    -0.07959999889135361,
+    -0.05139999836683273,
+    -0.06069999933242798
+   ],
+   "max": [
+    0.07890000194311142,
+    0.051100000739097595,
+    0.06210000067949295
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 444840,
+  "frames": 1,
+  "bones": 1
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 1,
+   "fps": 1
+  }
+ },
+ "textures": {
+  "color": "pouch-color.jpg",
+  "mask": "pouch-mask.png"
+ },
+ "card": "pouch-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

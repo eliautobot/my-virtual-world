@@ -378,7 +378,8 @@ const YOGA = (() => {
 export const CLIP_NAMES = [...ANIMS, 'walk_hold', 'idle_hold', 'sit_read', 'stand_work', 'swim_idle', 'swim', 'swim_under', 'walk_phone', 'phone_look', 'sit_drink',
   'eat_hands', 'eat_hand', 'eat_knife', 'eat_spoon', 'eat_lap', 'eat_stand', 'eat_stand_hands', 'prep',
   'helm', 'fish_idle', 'fish_cast', 'fish_reel', 'fish_fight', 'fish_net', 'fish_show',
-  'bar_idle'];   // (a player's clip goes to the server in 7 bits: 128 at most; bar_idle: a bartender with no order, chosen by render/agents.js)
+  'bar_idle',   // (a player's clip goes to the server in 7 bits: 128 at most; bar_idle: a bartender with no order, chosen by render/agents.js)
+  'fish_hold_line', 'fish_hold_gill', 'fish_hold_two'];   // (the catch held up by the line, by its gills, in both arms: 2026-11-13)
 export const CLIP = Object.fromEntries(CLIP_NAMES.map((n, i) => [n, i]));
 export const NCLIP = CLIP_NAMES.length;
 export const CLIP_DUR = new Float32Array(NCLIP);

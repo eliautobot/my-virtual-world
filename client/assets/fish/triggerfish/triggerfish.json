@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "triggerfish",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 2f17ac28 from 02_sea_reef/Gray_Triggerfish.png; tools/animals/fish_animal.py",
+ "height": 0.6507,
+ "length": 0.9992,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4419,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 53028,
+   "uv": 106056,
+   "skin": 141408,
+   "weight": 159084,
+   "index": 176760,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.3249000012874603,
+    -0.22139999270439148
+   ],
+   "max": [
+    0.4991999864578247,
+    0.32580000162124634,
+    0.2215999960899353
+   ]
+  },
+  {
+   "verts": 1688,
+   "tris": 2000,
+   "pos": 212760,
+   "nrm": 233016,
+   "uv": 253272,
+   "skin": 266776,
+   "weight": 273528,
+   "index": 280280,
+   "indexType": "u16",
+   "min": [
+    -0.4991999864578247,
+    -0.3244999945163727,
+    -0.22010000050067902
+   ],
+   "max": [
+    0.49900001287460327,
+    0.32580000162124634,
+    0.22059999406337738
+   ]
+  },
+  {
+   "verts": 787,
+   "tris": 700,
+   "pos": 292280,
+   "nrm": 301724,
+   "uv": 311168,
+   "skin": 317464,
+   "weight": 320612,
+   "index": 323760,
+   "indexType": "u16",
+   "min": [
+    -0.4991999864578247,
+    -0.3244999945163727,
+    -0.22010000050067902
+   ],
+   "max": [
+    0.49729999899864197,
+    0.31709998846054077,
+    0.21850000321865082
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 327960,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "triggerfish-color.jpg",
+  "mask": "triggerfish-mask.png"
+ },
+ "card": "triggerfish-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

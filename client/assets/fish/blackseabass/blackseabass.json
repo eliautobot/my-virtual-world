@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "blackseabass",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project d28db916 from 02_sea_reef/Black_Sea_Bass.png; tools/animals/fish_animal.py",
+ "height": 0.5606,
+ "length": 0.9972,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4239,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 50868,
+   "uv": 101736,
+   "skin": 135648,
+   "weight": 152604,
+   "index": 169560,
+   "indexType": "u16",
+   "min": [
+    -0.49799999594688416,
+    -0.2806999981403351,
+    -0.2029000073671341
+   ],
+   "max": [
+    0.4991999864578247,
+    0.2799000144004822,
+    0.2029000073671341
+   ]
+  },
+  {
+   "verts": 1724,
+   "tris": 2000,
+   "pos": 205560,
+   "nrm": 226248,
+   "uv": 246936,
+   "skin": 260728,
+   "weight": 267624,
+   "index": 274520,
+   "indexType": "u16",
+   "min": [
+    -0.49619999527931213,
+    -0.2806999981403351,
+    -0.2029000073671341
+   ],
+   "max": [
+    0.4991999864578247,
+    0.27720001339912415,
+    0.20280000567436218
+   ]
+  },
+  {
+   "verts": 805,
+   "tris": 700,
+   "pos": 286520,
+   "nrm": 296180,
+   "uv": 305840,
+   "skin": 312280,
+   "weight": 315500,
+   "index": 318720,
+   "indexType": "u16",
+   "min": [
+    -0.4918000102043152,
+    -0.2806999981403351,
+    -0.19599999487400055
+   ],
+   "max": [
+    0.48989999294281006,
+    0.2705000042915344,
+    0.19930000603199005
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 322920,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "blackseabass-color.jpg",
+  "mask": "blackseabass-mask.png"
+ },
+ "card": "blackseabass-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

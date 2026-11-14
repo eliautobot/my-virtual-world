@@ -1,0 +1,166 @@
+{
+ "v": 1,
+ "model": "blacktip",
+ "rig": "mvw-fish-v1",
+ "kind": "fish",
+ "source": "Tripo Studio project 60347d5c from 04_sea_sharks/Blacktip_Shark.png; tools/animals/fish_animal.py",
+ "height": 0.3552,
+ "length": 0.9996,
+ "roughness": 0.5,
+ "metalness": 0.05,
+ "plane": "lateral",
+ "bones": [
+  "root",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "head"
+ ],
+ "lods": [
+  {
+   "verts": 4541,
+   "tris": 6000,
+   "pos": 0,
+   "nrm": 54492,
+   "uv": 108984,
+   "skin": 145312,
+   "weight": 163476,
+   "index": 181640,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.17759999632835388,
+    -0.25040000677108765
+   ],
+   "max": [
+    0.49959999322891235,
+    0.17759999632835388,
+    0.2500999867916107
+   ]
+  },
+  {
+   "verts": 1715,
+   "tris": 2000,
+   "pos": 217640,
+   "nrm": 238220,
+   "uv": 258800,
+   "skin": 272520,
+   "weight": 279380,
+   "index": 286240,
+   "indexType": "u16",
+   "min": [
+    -0.5,
+    -0.17759999632835388,
+    -0.24940000474452972
+   ],
+   "max": [
+    0.49630001187324524,
+    0.1753000020980835,
+    0.2500999867916107
+   ]
+  },
+  {
+   "verts": 773,
+   "tris": 700,
+   "pos": 298240,
+   "nrm": 307516,
+   "uv": 316792,
+   "skin": 322976,
+   "weight": 326068,
+   "index": 329160,
+   "indexType": "u16",
+   "min": [
+    -0.4984000027179718,
+    -0.17759999632835388,
+    -0.24819999933242798
+   ],
+   "max": [
+    0.49160000681877136,
+    0.17499999701976776,
+    0.2493000030517578
+   ]
+  }
+ ],
+ "lodDist": [
+  6,
+  25
+ ],
+ "anim": {
+  "offset": 333360,
+  "frames": 100,
+  "bones": 6
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 60,
+   "fps": 24
+  },
+  "walk": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "run": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "swim": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  },
+  "fly": {
+   "start": 84,
+   "frames": 16,
+   "fps": 30,
+   "stride": 0.6
+  },
+  "trot": {
+   "start": 60,
+   "frames": 24,
+   "fps": 36,
+   "stride": 0.6
+  }
+ },
+ "textures": {
+  "color": "blacktip-color.jpg",
+  "mask": "blacktip-mask.png"
+ },
+ "card": "blacktip-card.png",
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}
