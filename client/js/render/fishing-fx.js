@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { catchModel, fishAsset } from './fish-models.js';
 import { waterMarks } from './water-marks.js';
 import { spray } from './spray.js';
+import { FishMotion } from './fish-motion.js';
 
 const LINE_PTS = 28, RINGS = 24;
 const _v = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _e = new THREE.Euler();
@@ -191,40 +192,28 @@ export class FishingFx {
       if (key && !this.packs.has(key)) {
         this.packs.set(key, null);
         fishAsset(key).then(A => { if (A) import('./fauna-skinned.js').then(m => {
-          const pack = m.skinnedPack(A, 1, this.scene, `catch-${key}`, m.coatsOf({}, A));
-          if (this.uw) new Set(pack.meshes.map(x => x.material)).forEach(x => this.uw(x));   // (seen through the water)
-          this.packs.set(key, { A, pack, was: -1 });
+          // (2026-11-14: drawn by its swim — render/fish-motion.js — not by the model's baked loops)
+          this.packs.set(key, { A, coat: m.coatsOf({}, A)[0] });
         }); });
       }
     }
     const show = mode === 'air' || mode === 'held';
-    // the model, if this one has one: posed by its clip (held: rest, flopping now and then; in the air: thrashing; in
-    // the water on the line — 2026-11-13, the owner: "have the fish actually be loaded so it's visible when caught, coming
-    // up the water ... struggling within the water itself" — swimming hard on its runs, thrashing as it shakes its head,
-    // a little below the surface, deeper as it dives, up to it as it tires and comes close)
+    // the model, if this one has one, swimming (render/fish-motion.js): on its runs, shaking its head, diving, a little
+    // below the surface, up to it as it tires and comes close; leaping; held up, still and flopping now and then
     const P = key ? this.packs.get(key) : null;
-    if (this.packOn && this.packOn !== P) { this.packOn.pack.begin(); this.packOn.pack.end(); this.packOn = null; }
+    if (this.motion && this.motion.key !== key) { this.motion.dispose(); this.motion = null; }
+    if (P && !this.motion) { this.motion = new FishMotion(P.A, what, P.coat, this.scene, this.uw); this.motion.key = key; }
     let under = false;
-    if (P) {
-      P.pack.begin();
+    if (this.motion) {
       if ((show || (mode === 'under' && !what.find)) && p) {
-        let y = p.y, pt = pitch, clip = mode === 'held' ? 0 : 2, rate = 1.2 + 0.5 / Math.max(0.25, len);
-        if (mode === 'under') {
-          under = true;
-          const m = act?.mode || 'run', depth = act?.depth ?? 0.4;
-          clip = m === 'shake' || m === 'jump' ? 2 : 6;
-          rate = (clip === 2 ? 1.5 : m === 'rest' ? 0.6 : m === 'toward' ? 1.6 : 1.25) * (0.8 + 0.4 / Math.max(0.3, len));
-          y -= depth; pt = m === 'dive' ? -0.35 : act?.up ? 0.2 : 0;
-        }
-        _q.setFromEuler(_e.set(-pt, yaw, roll, 'YXZ')).multiply(_turn);
-        const k = what.find ? 1 : len;
-        if (P.was !== clip) { P.was = clip; P.ph = Math.random(); }   // (each time it is shown, from somewhere in its clip)
-        P.pack.put(_m.compose(_v.set(p.x, y, p.z), _q, _s.set(k, k, k)), 0, P.ph, clip ? rate : 0, clip, 0, null, true);
-      }
-      P.pack.end(); this.packOn = P;
+        let y = p.y;
+        if (mode === 'under') { under = true; y -= act?.depth ?? 0.4; }
+        _v.set(p.x, y, p.z);
+        this.motion.update(mode, _v, yaw, pitch, roll, what.find ? 1 : len, act, performance.now() / 1000);
+      } else this.motion.hide();
     }
     if (this.fishObj) {
-      this.fishObj.visible = !!show && !!p && !P;
+      this.fishObj.visible = !!show && !!p && !this.motion;
       if (show && p) {
         this.fishObj.position.copy(p); this.fishObj.rotation.copy(_e.set(-pitch, yaw, roll, 'YXZ'));
         if (!what.find) this.fishObj.scale.setScalar(len); else this.fishObj.scale.setScalar(1);
@@ -258,6 +247,8 @@ export class FishingFx {
       B.push({ ring, age: 0, life: 1.0 });
     }
   }
+  /** The hooked fish's mouth now (where the line goes in), or null. */
+  mouth(out) { return this.motion ? this.motion.mouth(out) : null; }
   hideAll() { this.line(null); this.lure(null); this.aim(null); this.fish(null, null); }
   /** Once a frame: the far ripples spread and fade (the marks and the spray keep themselves). */
   update(dt) {

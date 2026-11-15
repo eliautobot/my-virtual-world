@@ -1888,6 +1888,102 @@ body.fishing #boathud .bh-row, body.fishing #boathud .bh-top { display: none; } 
 .fd-big img { width: 100%; aspect-ratio: 2 / 1; object-fit: contain; }
 .fd-facts { display: grid; gap: 3px; margin-top: 4px; } .fd-facts span:first-child { display: inline-block; min-width: 92px; color: var(--muted, #9aa); }
 @media (max-width: 760px) { #fishfinder { left: auto; right: 8px; bottom: auto; top: calc(var(--topbar-height, 44px) + 130px); width: 150px; } #fishfinder canvas { width: 150px; height: 72px; } #fishnav { top: calc(var(--topbar-height, 44px) + 8px); font-size: 12px; } }
+/* ------------------------------------------------------------------ the boat and the fishing game on a phone
+   (2026-11-14, the product owner: "way better layout on mobile for the fish game, right now it's a mess, too many
+   overlaps, and odd sizes for things"). A portrait phone is laid out in bands, nothing on top of anything else:
+   the top — the radar left (worldmap.js), Home/Look/Leave right; under Home/Look/Leave the course to a ground and the fish
+   finder; under the radar (and its 📻) the trip's card, small; the Trips button under the finder. The bottom — the
+   boat's gauges along the edge; over them the wheel (or the stick on deck) for the left thumb and the lever with the
+   boat's buttons for the right; at a fishing spot the cast/reel button for the right thumb, the fight's steering for
+   the left, its gauge across above them. Play mode's own touch buttons (E, jump, chat) give way to the boat's, and the
+   stick to the steering while fishing (walking would take you off the spot; 🛞 Wheel does that). The toasts come below
+   the top band. Landscape keeps the same corners with less height (below). */
+@media (max-width: 760px) and (pointer: coarse) {
+  body.boating #pbtns, body.boating.fishing #joy { display: none !important; }
+  body.boating #toasts { top: calc(var(--topbar-height, 44px) + 300px); max-width: calc(100vw - 24px); }
+  /* the top band */
+  #fishnav { top: calc(var(--topbar-height, 44px) + 62px); left: 132px; right: 8px; width: auto; margin: 0; font-size: 12px; padding: 4px 6px 4px 8px; gap: 6px; }
+  #fishnav .fn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #fishnav .btn { padding: 3px 7px; font-size: 12px; }
+  #fishfinder { left: auto; right: 8px; bottom: auto; top: calc(var(--topbar-height, 44px) + 104px); width: 148px; }
+  #fishfinder canvas { width: 148px; height: 58px; }
+  .fg-open { top: calc(var(--topbar-height, 44px) + 194px); bottom: auto; right: 8px; padding: 5px 10px; font-size: 12px; }
+  .fg-open kbd { display: none; }
+  #fishhud { top: calc(var(--topbar-height, 44px) + 182px); bottom: auto; left: 8px; right: auto; width: min(196px, calc(50vw - 16px)); padding: 6px 8px; gap: 2px; font-size: 11px; border-radius: 10px; }
+  #fishhud .fh-top { flex-wrap: wrap; gap: 4px; } #fishhud .fh-top b { font-size: 12px; flex: 1 1 100%; }
+  #fishhud .fh-top .btn { padding: 2px 6px; font-size: 11px; } #fishhud kbd { display: none; }
+  #fishhud .fh-bounties div, #fishhud .fh-cool { font-size: 10.5px; line-height: 1.25; }
+  /* the bottom band: the gauges along the edge */
+  #boathud { bottom: 6px; left: 8px; right: 8px; width: auto; }
+  .bh-row { padding: 5px 8px; gap: 4px; justify-content: space-between; width: 100%; box-sizing: border-box; }
+  .bh-g { min-width: 0; flex: 1; } .bh-g b { font-size: 17px; } .bh-g small { font-size: 9px; letter-spacing: .08em; }
+  .bh-lev { min-width: 0; flex: 1.4; } .bh-bar { width: 100%; }
+  .bh-top { font-size: 12px; } .bh-prompt { font-size: 12px; padding: 3px 10px; }
+  /* over them: the wheel (left thumb), the lever and the boat's buttons (right thumb) */
+  .bt-wheel { left: 10px; bottom: 96px; width: min(176px, 44vw); height: 64px; border-radius: 32px; }
+  .bt-wheel i { width: 52px; height: 52px; margin: -26px 0 0 -26px; }
+  .bt-wheel small { bottom: -16px; }
+  .bt-right { right: 8px; bottom: 96px; gap: 8px; }
+  .bt-lever { width: 58px; height: 176px; }
+  .bt-n { left: -14px; }
+  .bt-btns { gap: 6px; }
+  .bt-b { width: 58px; height: 40px; padding: 0; font-size: 12px; border-radius: 12px; }
+  .bt-act { width: 72px; height: 52px; font-size: 15px; }
+  #joy { left: 14px; bottom: 96px; width: 116px; height: 116px; }
+  /* at a fishing spot: the cast/reel button for the right thumb, the lure and Reel in over it; the boat's own buttons
+     (back to the wheel) move to the left, where the stick was */
+  #fishctl { right: 10px; bottom: 96px; gap: 6px; }
+  .fc-act { width: 96px; height: 96px; } .fc-act b { font-size: 17px; }
+  .fc-lure, .fc-in { padding: 4px 9px; font-size: 12px; }
+  body.boating.fishing .bt-right { right: auto; left: 10px; }
+  /* the fight: its gauge across above the controls, the steering for the left thumb */
+  #fishgauge { bottom: 272px; width: calc(100vw - 16px); padding: 6px 10px; }
+  .fg-row { grid-template-columns: 54px 1fr auto; }
+  #fishsteer { left: 10px; right: auto; margin: 0; bottom: 96px; width: 168px; }
+  #fishsteer button { width: 78px; height: 78px; font-size: 28px; } #fishsteer kbd { display: none; }
+  body.boating.fishing:has(#fishsteer:not(.hidden)) .bt-right { display: none; }
+  #fishprompt { top: 34%; font-size: 30px; }
+  #fishcard { top: calc(var(--topbar-height, 44px) + 128px); }
+  body:has(#fishcard:not(.hidden)) :is(#fishhud, #fishfinder, .fg-open, .radio-btn) { visibility: hidden; }   /* (the catch's card has the middle to itself) */
+}
+/* a short phone (an older or smaller one): the trip card keeps to its name, clock and catch (the bounties are on the chart) */
+@media (max-width: 760px) and (max-height: 760px) and (pointer: coarse) {
+  #fishhud .fh-bounties { display: none; }
+  body:has(#fishgauge:not(.hidden)) #fishhud { display: none; }   /* (the fight has the screen: the trip's card comes back after) */
+  .fc-bow { width: 76px; height: 76px; }
+}
+/* a phone on its side: the same corners, the bands thinner (412 px high or so) */
+@media (max-height: 500px) and (pointer: coarse) and (orientation: landscape) {
+  body.boating #pbtns, body.boating.fishing #joy { display: none !important; }
+  body.boating #toasts { top: calc(var(--topbar-height, 44px) + 8px); }
+  #fishnav { font-size: 12px; }
+  #fishfinder { left: auto; right: 8px; bottom: auto; top: calc(var(--topbar-height, 44px) + 58px); width: 150px; }
+  #fishfinder canvas { width: 150px; height: 54px; }
+  .fg-open { top: calc(var(--topbar-height, 44px) + 140px); bottom: auto; right: 8px; padding: 4px 10px; font-size: 12px; }
+  #fishhud { top: calc(var(--topbar-height, 44px) + 128px); bottom: auto; left: 8px; right: auto; width: 200px; padding: 5px 8px; gap: 2px; font-size: 11px; }
+  #fishhud .fh-bounties { display: none; }
+  #fishhud .fh-top b { font-size: 12px; } #fishhud .fh-top .btn { padding: 2px 6px; font-size: 11px; } #fishhud kbd { display: none; }
+  #boathud { bottom: 4px; } .bh-row { padding: 4px 8px; } .bh-g { min-width: 54px; } .bh-g b { font-size: 16px; } .bh-keys { display: none; }
+  .bt-wheel { left: calc(env(safe-area-inset-left, 0px) + 12px); bottom: 20px; width: 170px; height: 60px; }
+  .bt-wheel i { width: 50px; height: 50px; margin: -25px 0 0 -25px; }
+  .bt-right { right: calc(env(safe-area-inset-right, 0px) + 10px); bottom: 14px; }
+  .bt-lever { width: 54px; height: 150px; } .bt-b { width: 56px; height: 34px; font-size: 12px; padding: 0; } .bt-btns { gap: 4px; } .bt-act { width: 64px; height: 44px; }
+  #joy { left: 16px; bottom: 16px; width: 104px; height: 104px; }
+  #fishctl { right: calc(env(safe-area-inset-right, 0px) + 10px); bottom: 14px; gap: 5px; }
+  .fc-act { width: 86px; height: 86px; }
+  body.boating.fishing .bt-right { right: auto; left: calc(env(safe-area-inset-left, 0px) + 10px); }
+  #fishgauge { bottom: 70px; width: min(380px, calc(100vw - 420px)); padding: 5px 10px; }
+  #fishsteer { left: calc(env(safe-area-inset-left, 0px) + 10px); right: auto; margin: 0; bottom: 14px; width: 160px; }
+  #fishsteer button { width: 74px; height: 74px; font-size: 26px; }
+  body.boating.fishing:has(#fishsteer:not(.hidden)) .bt-right { display: none; }
+  body:has(#fishgauge:not(.hidden)) :is(#fishfinder, .fg-open) { display: none; }   /* (a fight on a phone on its side: the right edge is the reel's) */
+  #fishprompt { top: 24%; font-size: 28px; } #fishbanner { top: 10%; } #fishbanner b { font-size: 32px; }
+  #fishcard { top: calc(var(--topbar-height, 44px) + 54px); max-height: calc(100vh - var(--topbar-height, 44px) - 62px); overflow-y: auto; }
+  body:has(#fishcard:not(.hidden)) :is(#fishhud, #fishfinder, .fg-open, .radio-hud) { visibility: hidden; }
+  /* (the radar sits in the corner under the top bar here too: the radio's bar beside it, not over it) */
+  body.boating .radio-hud { left: calc(var(--dock-lb, 0px) + 132px); }
+  #fishnav { top: calc(var(--topbar-height, 44px) + 56px); left: auto; right: 170px; margin: 0; max-width: calc(100vw - 520px); }
+}
 /* ------------------------------------------------------------------ the inventory (ui/inventory.js, in the wallet) */
 .inv-who { flex-wrap: wrap; margin-bottom: 6px; }
 .inv-bar { display: grid; gap: 6px; }

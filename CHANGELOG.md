@@ -2,6 +2,24 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.7.2 (2026-11-14)
+
+- **Fish that swim like fish**: a hooked fish now swims with a real body wave from head to tail, the way its kind does -
+  tunas, marlin and mahi power from a stiff body and the tail, bass and snappers bend their back half, pike, gar and
+  catfish more of the body, sharks in long sweeps, rays ripple their wings and squid pulse. The tail beats faster the
+  harder it works and never jumps in its beat; the body curves and banks into turns and tips into dives.
+- **A real fight**: hooked fish weave, kick and lunge every second or two, shake their heads hard and never rest easy;
+  they face away from you and pull. Leaps arc forward over the water. Held up, a catch is still, then flops now and
+  then. The line goes into the fish's mouth (behind a marlin's bill, under a shark's snout), and the hammerhead's head
+  no longer bends.
+- **Fishing on a phone, laid out**: on a phone every control has its own place - the map and Home/Look/Leave on top,
+  the fish finder and the course under them, a smaller trip card, the gauges along the bottom, the wheel for the left
+  thumb and the throttle and the boat's buttons for the right; at a fishing spot the cast/reel button on the right and
+  the fight's steering on the left. Nothing overlaps any more, in portrait or landscape, and the tips speak touch, not
+  keys. On a portrait phone the fishing camera looks over the boat's rods instead of through them.
+
+To update a Docker install: `docker compose pull`, then `docker compose up -d`.
+
 ## v2.7.1 (2026-11-14)
 
 - **The world opens sooner**: it no longer waits for every animal model to download first. Each animal species now

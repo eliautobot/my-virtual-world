@@ -170,7 +170,7 @@ async function start(courseId) {
   E.hud.querySelector('.fh-name').textContent = `🎣 ${c.label}`;
   hudTrip(true); lureUi();
   const g = trip.plan.grounds.filter(x => !x.hidden).length;
-  app.toast(`${c.label}: ${g} fishing ground${g === 1 ? '' : 's'} to find before dusk${app.boating.fishing ? ' — cast away!' : ' — walk to a fishing spot (F) and cast'}`, 'good', 4500);
+  app.toast(`${c.label}: ${g} fishing ground${g === 1 ? '' : 's'} to find before dusk${app.boating.fishing ? ' — cast away!' : (matchMedia('(pointer: coarse)').matches ? ' — 🚶 Walk to a fishing spot and cast' : ' — walk to a fishing spot (F) and cast')}`, 'good', 4500);
   bus.emit('fish-trip', { on: true, course: c.id });
 }
 /** The trip's end: the server weighs the catch in (quiet: just end it, no card). */
@@ -464,8 +464,17 @@ function fightFrame(dt, now) {
   A.wy = wy;
   if (A.jump) {
     const u = (performance.now() - A.jump.t0) / 1000 / A.jump.dur;
-    if (u >= 1) { fx.splash(fxp, wy, fzp, len * 0.8); A.jump = null; if (len > 0.8) shake(260); }
-    else { _a.set(fxp, wy + A.jump.h * 4 * u * (1 - u), fzp); fx.fish(A.what, 'air', _a, yawF, 1.0 - 2 * u, len, Math.sin(u * 9) * 0.4); (A.jp ||= new THREE.Vector3()).copy(_a); A.jlen = len; }
+    if (u >= 1) { fx.splash(A.jump.x0 != null ? A.jump.x0 + A.jump.fx * A.jump.dist : fxp, wy, A.jump.z0 != null ? A.jump.z0 + A.jump.fz * A.jump.dist : fzp, len * 0.8); A.jump = null; if (len > 0.8) shake(260); }
+    else {
+      // (2026-11-14: a leap goes up and over in an arc along the way it swims — it had popped straight up and dropped
+      // back on the spot, nose up then nose down, rolling — clearing the water by its own length or so)
+      const J = A.jump;
+      if (J.x0 == null) { const fw = fx.motion?.s?.yaw ?? yawF, dist = Math.min(7, len * 1.3 + J.h * 0.9); J.fx = Math.sin(fw); J.fz = Math.cos(fw); J.dist = dist; J.x0 = fxp - J.fx * dist * 0.45; J.z0 = fzp - J.fz * dist * 0.45; J.yaw = fw; }
+      const y = wy - 0.15 * len + (J.h + 0.15 * len) * 4 * u * (1 - u), slope = (J.h + 0.15 * len) * 4 * (1 - 2 * u);
+      _a.set(J.x0 + J.fx * J.dist * u, y, J.z0 + J.fz * J.dist * u);
+      fx.fish(A.what, 'air', _a, J.yaw, Math.atan2(slope, J.dist) * 0.9, len, 0.12 * Math.sin(u * 5), { u });
+      (A.jp ||= new THREE.Vector3()).copy(_a); A.jlen = len;
+    }
   }
   // in the water: the fish itself (fishing-fx), a little under the surface — deeper on a dive, up to it as it tires and
   // comes close, so you see it come up the water (2026-11-13, the owner)
@@ -473,11 +482,11 @@ function fightFrame(dt, now) {
   const depthW = F.mode === 'dive' ? 0.55 + len * 0.2 : (0.14 + len * 0.1) * (1 - 0.5 * Math.max(tired, near));
   A.depth = A.depth == null ? depthW : A.depth + (depthW - A.depth) * Math.min(1, dt * 2.5);
   const nose = len * 0.45, mx = fxp + Math.sin(yawF) * nose, mz = fzp + Math.cos(yawF) * nose;
-  if (!A.jump) { fx.fish(A.what, 'under', _a.set(fxp, wy + 0.01, fzp), yawF, 0, len, 0, { mode: F.mode, depth: A.depth, up: near > 0.5 }); fx.stir(fxp, wy, fzp, len, F.mode, dt); }   // (and the water it stirs)
+  if (!A.jump) { fx.fish(A.what, 'under', _a.set(fxp, wy + 0.01, fzp), yawF, 0, len, 0, { mode: F.mode, depth: A.depth, up: near > 0.5, from: s }); fx.stir(fxp, wy, fzp, len, F.mode, dt); }   // (and the water it stirs)
   if (!A.cine && F.d < 9) shot('close', 0);   // (once it's close, the camera comes round to watch it fight in the water)
   const tip = rodTip();
   // (taut while it pulls; slack only when it isn't — and the line hums as the tension nears the drag)
-  if (tip) fx.line(tip, A.jump ? _b.copy(_a) : _b.set(mx, wy - A.depth * 0.8, mz), F.T < 0.12 * F.p.P ? 0.3 : 0, wy, Math.min(1, F.T / trip.L.drag));
+  if (tip) fx.line(tip, fx.mouth(_b) || (A.jump ? _b.copy(_a) : _b.set(mx, wy - A.depth * 0.8, mz)), F.T < 0.12 * F.p.P ? 0.3 : 0, wy, Math.min(1, F.T / trip.L.drag));
   app.boating.pose(F.mode === 'jump' ? CLIP.fish_fight : A.held || auto ? CLIP.fish_reel : CLIP.fish_fight);
   gauges();
 }

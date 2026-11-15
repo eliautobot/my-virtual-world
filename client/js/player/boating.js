@@ -131,7 +131,7 @@ function start(m) {
   if (B.top) { B.top.castShadow = true; B.mesh.add(B.top); }
   app.stage.scene.add(B.mesh);
   if (P?.active) {
-    P.onVehicleEnter?.({ keys: `${Sx.label}: W/S throttle lever (through neutral to reverse) · A/D wheel · Space neutral · Q anchor · E step off when stopped alongside` });
+    P.onVehicleEnter?.({ keys: matchMedia('(pointer: coarse)').matches ? `${Sx.label}: the lever (right) ahead or astern · the wheel (left) steers · ⚓ anchor · stop alongside a dock to step off` : `${Sx.label}: W/S throttle lever (through neutral to reverse) · A/D wheel · Space neutral · Q anchor · E step off when stopped alongside` });
     if (!app.agents.extra.includes(P.extra)) app.agents.extra.push(P.extra);   // (you're seen at the helm, not hidden as in a car)
     const narrow = innerWidth < 760;
     app.cam.goalDist = CAM[m.type].dist * (narrow ? 1.3 : 1); app.cam.goalPitch = CAM[m.type].pitch; app.stage.camera.fov = narrow ? 70 : 62;
@@ -334,9 +334,11 @@ function deckAct() {
   const what = deckTarget();
   if (what?.kind === 'stand') { if (W.hold) return; W.fish = -1; W.pose = null; W.poseph = null; bus.emit('boat-fish', { on: false }); }
   else if (what?.kind === 'fish') {
-    const sp = what.spot, narrow = innerWidth < 760;
+    const sp = what.spot, narrow = innerWidth < 760, tall = narrow && innerHeight > innerWidth;
     Object.assign(W, { x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw, fish: what.i, moving: false, pose: null, poseph: null, hold: false });
-    Object.assign(app.cam, { goalYaw: app.cam.yaw + angDiff(app.cam.yaw, B.s.heading + sp.yaw + Math.PI), goalDist: (B.type === 'skiff' ? 4.6 : 5.2) * (narrow ? 1.2 : 1), goalPitch: 0.3 });   // (behind you, looking out over the water)
+    // (behind you, looking out over the water; a portrait phone's narrow view from higher and a little to the side, over
+    // the canopy's rods rather than through them: 2026-11-14, the phone layout)
+    Object.assign(app.cam, { goalYaw: app.cam.yaw + angDiff(app.cam.yaw, B.s.heading + sp.yaw + Math.PI + (tall ? 0.5 : 0)), goalDist: (B.type === 'skiff' ? 4.6 : 5.2) * (tall ? 1.45 : narrow ? 1.2 : 1), goalPitch: tall ? 0.42 : 0.3 });
     bus.emit('boat-fish', { on: true, spot: what.i, name: sp.name });
   }
   else if (what?.kind === 'wheel') setWalk(false);
