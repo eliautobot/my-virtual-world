@@ -43,6 +43,7 @@ import { createBuilding, generateLevels, addLevel, validate, freshLevels, freshL
 import { normalizeFerry, nextFerryId, ferryWhy } from '../../shared/ferries.js';
 import { buildLevel, coreFor } from './layouts.js';
 import { makeCitizen, reassign, sanitizeName, sanitizeAppearance, freeBed, freeWork } from '../sim/population.js';
+import { isCustomChar } from '../../shared/appearance.js';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const r3 = v => Math.round(v * 1000) / 1000;
@@ -1013,6 +1014,8 @@ export class Editor {
     const i = o.i | 0, p = this.sim.people[i];
     if (!p) throw new Error('No such person');
     this.touch(st, `p:${i}`);
+    // (a character made in the builder only once this city has baked it: server/characters/ — never one it can't draw)
+    if (o.app && isCustomChar(o.app.char) && this.builtChar && !this.builtChar(o.app.char)) throw new Error('That character has not been made here');
     const was = p.name, look = JSON.stringify(p.app);
     if (o.name !== undefined) { const n = sanitizeName(o.name); if (n) { p.name = n; p.renamed = 1; } }
     if (o.app) p.app = sanitizeAppearance(o.app, p.app);
@@ -1087,6 +1090,7 @@ export class Editor {
   }
   personAdd(o, st) {
     if (this.sim.people.length >= 12000) throw new Error('Population limit reached');
+    if (o.app && isCustomChar(o.app.char) && this.builtChar && !this.builtChar(o.app.char)) throw new Error('That character has not been made here');
     // (counting those added earlier in the same batch: each its own id, name and looks)
     const p = makeCitizen([...this.sim.people, ...st.added], { name: o.name, app: o.app }, Date.now() + st.added.length);
     st.added.push(p);

@@ -90,3 +90,13 @@ test('the conversation: newest first within its bounds, images for the newest me
   // a message that is only a file that can't be read: said at once
   assert.throws(() => buildTurns([{ id: 9, role: 'user', text: '', files: [file('old.doc', 'x')] }]), e => e.code === 'unreadable' && /Save it as \.docx/.test(e.message));
 });
+
+test('words and then a tool call in one answer: the words are the answer, the call is held back and carried out (never shown)', async () => {
+  const { StreamSplit } = await import('../../server/mind/assistant.js');
+  const shown = [], s = new StreamSplit(t => shown.push(t));
+  for (const piece of ['I\'ll come find you', ' — on my way out now.\n{"use":[{"to', 'ol":"come_along"}]}']) s.feed(piece);
+  const r = s.end();
+  assert.equal(shown.join(''), 'I\'ll come find you — on my way out now.');
+  assert.equal(r.reply, 'I\'ll come find you — on my way out now.');
+  assert.equal(r.tail, '{"use":[{"tool":"come_along"}]}');
+});

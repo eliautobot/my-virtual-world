@@ -5,7 +5,8 @@
 // - 🔊 read aloud under every answer: the answer's parts from the voice service in turn, each fetched while the one before
 //   plays; Stop. When the browser is to read it, the browser's own voice reads the text the server made pronounceable.
 // - 🎧 voice mode: a conversation right in the chat (2026-10-08: no window of its own) — listening, the end of talking
-//   found from a second of quiet (or a tap on its status), thinking, then the answer spoken sentence by sentence while it
+//   found when they have finished — their patience, their own pauses learned and whether their words so far sound finished
+//   (voice-core.js TurnTaker, voice.js LiveEar; 2026-11-17) — or a tap on its status, thinking, then the answer spoken sentence by sentence while it
 //   is still being written; what is said shows in the chat as messages. 🎧 again ends it; 🎤 mutes and unmutes; its status
 //   beside them says what it is doing (tap: done talking, interrupt, talk). It never stops mid-conversation: when the
 //   plan's minutes run out or a service fails, the browser's own voice and recognition carry on.
@@ -16,10 +17,12 @@
 import { h, esc } from '../core/util.js';
 import { bus } from '../core/state.js';
 import { render } from './chat-md.js';
-import { Segmenter, takeUnits, Vad } from './voice-core.js';
-import { can, options, hear, speak, unlock, Player, SpeechQueue, Mic, BrowserEar, micWords } from './voice.js';
+import { Segmenter, takeUnits, PATIENCE_DEFAULT } from './voice-core.js';
+import { can, options, hear, speak, unlock, Player, SpeechQueue, Mic, BrowserEar, LiveEar, micWords } from './voice.js';
 
 const touchScreen = () => matchMedia('(pointer: coarse)').matches;
+/** Live voice's own log (localStorage 'mvw.voice.debug' = '1': the console). */
+const dbg = (...a) => { try { if (localStorage.getItem('mvw.voice.debug') === '1') console.debug('[voice] chat:', ...a); } catch { /* none */ } };
 /** The world's sounds turned down while the page listens (audio/ambience.js), and back after. */
 const duck = (who, on) => bus.emit('audio:duck', { who, on });
 const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -272,10 +275,9 @@ class Conversation {
   constructor(host, ui, onEnd) {
     Object.assign(this, { host, ui, onEnd });
     this.player = new Player(); this.queue = new SpeechQueue(this.player);
-    this.vad = new Vad({ silenceMs: 1000 });
-    this.mic = null; this.ear = null; this.turn = null; this.state = 'starting'; this.muted = false; this.on = false;
-    this.abort = new AbortController(); this.failures = 0; this.told = new Set(); this.lv = 0; this.quietMs = 0;
-    this.queue.onPlay = info => { if (this.turn && info.turn === this.turn.n) { this.set('speaking'); this.pump(); } };
+    this.ear = null; this.turn = null; this.state = 'starting'; this.muted = false; this.on = false;
+    this.abort = new AbortController(); this.failures = 0; this.told = new Set(); this.lv = 0;
+    this.queue.onPlay = info => { if (this.turn && info.turn === this.turn.n) { this.unwatch(); this.set('speaking'); this.pump(); } };
     this.queue.onIdle = () => this.maybeDone();
     this.queue.onError = () => this.maybeDone();
   }
@@ -315,17 +317,25 @@ class Conversation {
   /** A fallback said once a conversation (minutes used, a service down), not at every piece. */
   noteOnce(key, text) { if (this.told.has(key)) return; this.told.add(key); this.note(text); }
   /** What the browser's recognition hears so far, on its status. */
-  you(text, live = false) { if (this.on && live && text) { const sm = this.ui.pill.querySelector('small'); if (sm) sm.textContent = `· “${text.length > 48 ? `…${text.slice(-47)}` : text}”`; } }
+  you(text, live = false) { if (this.on && live && text) this.sub(`“${text.length > 48 ? `…${text.slice(-47)}` : text}”`); }
+  /** A few words after the status (made when the status has none). */
+  sub(text) {
+    const pill = this.ui.pill;
+    let sm = pill.querySelector('small');
+    if (!sm) { pill.append(' '); sm = pill.appendChild(document.createElement('small')); }
+    sm.textContent = `· ${text}`;
+  }
   caption() { /* (what it says is the answer in the chat) */ }
   src() {
     const m = this.m, o = m.o;
     const ear = m.listen === 'browser' ? 'the browser' : o?.listen?.service?.label || 'voice service';
     const mouth = m.speak === 'browser' ? 'the browser\'s voice' : m.speak === 'none' ? 'the chat only (this browser can\'t speak)' : `${o?.speak?.service?.label || 'voice service'}${o?.speak?.voice ? ` · ${o.speak.voice}` : ''}`;
-    this.ui.pill.title = `Talk: it answers when you pause (a tap sends at once) · hears with ${ear} · speaks with ${mouth}`;
+    const wait = this.ear ? Math.round(this.ear.waitMs / 100) / 10 : null;
+    this.ui.pill.title = `Talk: it answers when you pause${wait ? ` (about ${wait} s — longer when you stop mid-thought; Settings → Voice → Patience)` : ''}; a tap sends at once · hears with ${ear} · speaks with ${mouth}`;
   }
   /** How loud it is now, smoothed (the microphone while it listens, its voice while it speaks): the blue glow. */
   level() {
-    const raw = this.state === 'listening' || this.state === 'heard' ? (this.mic ? Math.min(1, this.mic.level() * 8) : this.ear ? 0.12 : 0) : this.state === 'speaking' ? Math.min(1, this.player.level() * 6) : 0;
+    const raw = this.state === 'listening' || this.state === 'heard' ? (this.ear ? Math.min(1, this.ear.level() * 8) : 0) : this.state === 'speaking' ? Math.min(1, this.player.level() * 6) : 0;
     this.lv += (raw - this.lv) * 0.35;
     return this.lv;
   }
@@ -370,74 +380,49 @@ class Conversation {
     const b = this.ui.mic;
     b.setAttribute('aria-pressed', String(on)); b.classList.toggle('muted', on);
     b.title = on ? 'Unmute the microphone (M)' : 'Mute the microphone (M)'; b.setAttribute('aria-label', b.title);
-    if (on && (this.state === 'listening' || this.state === 'heard')) { this.stopEars(true); this.set('muted'); }
-    else if (on) this.letMicGo();
+    if (on && (this.state === 'listening' || this.state === 'heard' || this.state === 'starting')) { this.stopEars(true); this.set('muted'); }
+    else if (on && this.state !== 'hearing') this.letMicGo();   // (being heard: what they said still goes, then it rests muted)
     else if (!on && (this.state === 'muted' || this.state === 'paused')) this.listen();
   }
   /** Stops listening; between turns a computer keeps the microphone open (the next turn starts at once), a phone lets it
    *  go (it plays sound quietly while one is open) — and muted or resting, every device lets it go (its light goes off). */
   stopEars(release = false) {
-    clearInterval(this.loop); this.loop = null;
-    this.mic?.cancel(); this.ear?.abort(); this.ear = null;
+    this.ear?.cancel();
     if (release || touchScreen()) this.letMicGo();
   }
-  letMicGo() { this.mic?.close(); this.mic = null; }
+  letMicGo() { this.ear?.close(); }
   pause(sub) { this.stopEars(true); this.set(this.muted ? 'muted' : 'paused', sub); }
 
-  /** Listens for one turn: the voice service (a recording, the end found from quiet) or the browser's recognition. */
+  /** Its ear for this conversation (voice.js LiveEar): the person's patience, whether the words of a pause are checked and
+   *  whether their pauses are learned (Settings → Voice), the longest turn the voice service hears. */
+  earFor() {
+    const p = this.m.o?.prefs?.listen || {};
+    const o = { source: this.m.listen, language: this.m.language, patience: p.patience || PATIENCE_DEFAULT, smart: p.smart !== false, learn: p.learn !== false,
+      maxSeconds: Number(this.m.o?.limits?.maxSeconds) || 300, onState: (st, info) => this.heard(st, info), onWords: w => this.you(w, true) };
+    if (this.ear) this.ear.set(o); else this.ear = new LiveEar(o);
+    return this.ear;
+  }
+  /** What the ear says while the person talks: on the status (and how near the end of their turn a pause is). */
+  heard(st, info = {}) {
+    if (!this.on || !['starting', 'listening', 'heard', 'hearing'].includes(this.state)) return;
+    const pill = this.ui.pill;
+    if (st === 'pause') { pill.style.setProperty('--wait', String(info.progress || 0)); pill.classList.toggle('waiting', (info.progress || 0) > 0); return; }
+    pill.style.removeProperty('--wait'); pill.classList.remove('waiting');
+    if (st === 'limit') { this.sub(`${info.left} s left in this turn`); return; }
+    if (st === 'heard' || st === 'listening' || st === 'hearing') { if (this.state !== st) this.set(st); }
+  }
+
+  /** Listens for one turn — until the person has finished (voice.js LiveEar) — then asks. */
   async listen() {
     if (!this.on) return;
-    if (this.muted) return this.set('muted');
-    this.stopEars();
+    if (this.muted) { this.letMicGo(); return this.set('muted'); }
     if (!this.m.listen) { this.note(NO_EARS); return this.set('paused', 'Type in the chat instead'); }
-    if (this.m.listen === 'browser') return this.listenBrowser();
-    this.set('listening');
-    const mic = this.mic || (this.mic = new Mic());
-    try { await mic.open(); }
-    catch (e) { if (this.mic === mic) this.mic = null; if (!this.on) return; this.note(micWords(e)); return this.pause(); }
-    // (the microphone may have been asked for while the conversation ended, was muted or moved on: let it go then)
-    if (this.mic !== mic) { mic.close(); return; }
-    if (!this.on || this.state !== 'listening') return;
-    this.mic.start(); this.vad.reset();
-    let last = performance.now(), since = last;
-    this.loop = setInterval(() => {
-      const now = performance.now(), dt = now - last; last = now;
-      const ev = this.vad.step(this.mic.level(), dt);
-      if (ev === 'speech') { this.quietMs = 0; this.set('heard'); }
-      else if (ev === 'end') this.utteranceDone(false);
-      else if (ev === 'noise') { this.vad.reset(); this.mic.start(); since = now; this.set('listening'); }
-      else if (this.vad.started && this.mic.elapsed > 60000) this.utteranceDone(false);   // (a turn of a minute at most)
-      else if (!this.vad.started && now - since > 8000) {
-        // nobody spoke: start the recording again (silence isn't sent to be heard), and after a while rest
-        this.quietMs += now - since; since = now;
-        if (this.quietMs > 40000) this.pause('Tap to talk');
-        else this.mic.start();
-      }
-    }, 50);
-  }
-  async listenBrowser() {
-    this.set('listening');
-    const ear = this.ear = new BrowserEar({ lang: this.m.language, onWords: w => { if (this.ear === ear) { this.you(w, true); if (w) this.set('heard'); } } });
-    let words = '';
-    try { words = await ear.start(); } catch (e) { if (this.ear === ear) { this.ear = null; this.note(e.message); this.pause(); } return; }
-    if (this.ear !== ear) return;
-    this.ear = null;
-    if (!words) { this.quietMs += 8000; if (this.quietMs > 40000) return this.pause('Tap to talk'); return this.listen(); }
-    this.quietMs = 0;
-    this.ask(words);
-  }
-  /** The turn ends (quiet after words, or a tap): hear the recording, then ask. */
-  async utteranceDone(tapped) {
-    if (this.ear) { this.ear.stop(); return; }   // (the browser's recognition answers in listenBrowser)
-    if (!this.mic?.recording) return;
-    clearInterval(this.loop); this.loop = null;
-    if (!tapped && !this.vad.started) return this.listen();
-    this.set('hearing');
-    const { blob, seconds } = await this.mic.stop();
-    if (touchScreen()) this.letMicGo();
-    if (!this.on) return;
-    let text = '';
-    try { text = String((await hear(blob, { seconds, language: this.m.language })).text || '').trim(); }
+    const ear = this.earFor();
+    // ("Listening" once it is: the microphone may take a moment to open, and words said before it are not kept)
+    this.set(ear.open || this.m.listen === 'browser' ? 'listening' : 'starting');
+    this.src();
+    let r;
+    try { r = await ear.turn(); }
     catch (e) {
       if (!this.on) return;
       if ((e.code === 'use_browser' || e.fallback === 'browser') && can.recognize()) {
@@ -446,18 +431,63 @@ class Conversation {
         this.note(`${e.message}. The browser listens now — say that again.`);
         return this.listen();
       }
-      this.note(e.message);
+      this.note(e && (e.status || e.code) ? e.message : micWords(e));
       return this.pause();
     }
-    if (!this.on || this.state !== 'hearing') return;
-    if (!text) return this.listen();   // (nothing heard)
-    this.ask(text);
+    this.ui.pill.style.removeProperty('--wait'); this.ui.pill.classList.remove('waiting');
+    if (!r || !this.on || this.ear !== ear) return;   // (stopped, muted, ended)
+    if (r.why === 'idle') return this.pause('Tap to talk');
+    if (!r.text) return this.listen();   // (nothing heard)
+    this.ask(r.text);
   }
+  /** A tap while it listens: the person is done — what they said goes now. */
+  utteranceDone() { this.ear?.send(); }
   async ask(text) {
     this.set('thinking');
     const T = this.newTurn(null);
-    try { const id = await this.host.say(text); if (T === this.turn && !T.run) T.run = id; }
-    catch (e) { if (T === this.turn) { this.turn = null; this.note(e.message); this.pause(); } }
+    this.watch(T);
+    // (one message after another: the one before — they went on talking while it was being sent — goes first, and its
+    //  answer is stopped before this one goes)
+    const before = this.saying;
+    const p = this.saying = (async () => {
+      if (before) await before.catch(() => { });
+      const id = await this.host.say(text);
+      if (T === this.turn && !T.run) T.run = id;
+      // (they went on talking before the answer had even begun: it stops now that it has)
+      else if (T.stopped) { const R = this.host.run(); if (R && R.id === id) this.host.stop(); }
+    })();
+    try { await p; }
+    catch (e) { dbg('sending failed', e && e.message); if (T === this.turn) { this.turn = null; this.note(e.message); this.pause(); } }
+    finally { if (this.saying === p) this.saying = null; }
+  }
+  /** While the answer is thought (nothing said yet), the ear stays on: someone who goes on talking had not finished — the
+   *  answer stops and what they say now is heard as the rest of their turn (voice.js LiveEar, watch). */
+  async watch(T) {
+    const ear = this.ear;
+    if (!ear || this.muted) return;
+    let r;
+    try { r = await ear.turn({ watch: true, onMore: () => this.more(T) }); } catch (e) { dbg('watching failed', e && e.message); return; }
+    dbg('watched', r && { more: r.more, why: r.why, text: String(r.text || '').slice(-60) });
+    if (!r || !r.more || !this.on || this.ear !== ear) return;   // (the answer began, or it was only a sound)
+    if (touchScreen()) this.letMicGo();
+    if (!r.text) return this.listen();
+    this.ask(r.text);
+  }
+  /** They went on talking while the answer was thought: it stops, and they are listened to. */
+  more(T) {
+    dbg('they went on talking', this.turn === T ? '— the answer stops' : '(after the answer)');
+    if (!this.on || this.turn !== T) return;
+    this.queue.stop(); this.abort.abort(); this.abort = new AbortController();
+    this.turn = null; T.stopped = true;
+    const R = this.host.run();
+    if (R && (!T.run || R.id === T.run)) this.host.stop();
+    this.set('heard');
+  }
+  /** The answer begins to be said: the ear stops watching (it would hear the answer); a phone lets the microphone go (it
+   *  plays sound quietly while one is open). */
+  unwatch() {
+    const W = this.ear?.T;
+    if (W?.watch && !W.talked) { if (touchScreen()) this.letMicGo(); else this.ear.cancel(); }
   }
   newTurn(runId) {
     this.queue.stop(); this.abort.abort(); this.abort = new AbortController();

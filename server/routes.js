@@ -164,6 +164,8 @@ export function createApi(d) {
       if (!info && idx >= 0 && d.people()[idx] && d.people()[idx].retired) return ok({ i: idx, retired: true });
       if (!info) return notFound('agent');
       if (info.presence && !tasks(P)) info.presence = stripTask(info.presence);
+      // (its work now — where it stands, its co-workers on shift: what anyone walking in could see, server/workplace/)
+      try { const w = d.workOf?.(idx); if (w) info.work = w; } catch { /* the city still starting */ }
       return ok(info);
     },
   });
@@ -223,7 +225,7 @@ export function createApi(d) {
   });
   router.add({
     method: 'POST', path: '/api/talk', cap: 'world.interact', handler: ({ P, body }) => {
-      const r = d.sim().talk(body.i | 0, +body.x || 0, +body.z || 0);
+      const r = d.sim().talk(body.i | 0, +body.x || 0, +body.z || 0, P.account?.id ?? null);
       if (r && r.ok) d.onTalk?.(P, body.i | 0);
       return r ? ok(r) : notFound('agent');
     },
@@ -935,7 +937,16 @@ export function createApi(d) {
     bpose: { cap: 'play.use', handle: (conn, m) => d.harbour?.pose(conn, m) },
     bexit: { cap: 'play.use', handle: conn => d.harbour?.exit(conn) },
     bleave: { cap: 'play.use', handle: conn => d.harbour?.leave(conn) },
+    // fishing together: aboard someone's boat as its crew (asked, or their friend), the skipper's answer, where one stands on deck
+    bjoin: { cap: 'play.use', handle: (conn, m) => d.harbour?.join(conn, m) },
+    banswer: { cap: 'play.use', handle: (conn, m) => d.harbour?.answer(conn, m) },
+    bdeck: { cap: 'play.use', handle: (conn, m) => d.harbour?.deck(conn, m) },
+    // a page that loaded (or lost track) asks where its player is: its boat again, or none (server/world/boats.js resync)
+    bresync: { cap: 'play.use', handle: conn => d.harbour?.resync(conn) },
     say: { cap: 'players.chat', handle: (conn, m) => d.players.say(conn, m) },
+    // a driver's car radio: the station it plays, or null (off) — an agent riding with them hears it (server/senses/car-radio.js)
+    radio_tune: { cap: 'players.move', handle: (conn, m) => d.radioTune?.(conn, m) },
+    see: { cap: 'world.view', handle: (conn, m) => d.seeReply?.(conn, m) },   // (an agent's eyes: the page's answer, server/senses/eye.js)
   });
   for (const [t, m] of Object.entries(ws)) if (!CAPS[m.cap]) throw new Error(`WebSocket message ${t}: unknown capability "${m.cap}"`);
   return { router, ws, me, health };

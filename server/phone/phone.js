@@ -900,7 +900,7 @@ export class Phone {
       const rows = this.q.between.all(this.w, line.id, catchup.peer, catchup.peer, catchup.since - 2000, catchup.until + 1000);
       if (!rows.length) { this.q.delCatchup.run(this.w, catchup.id); return this.deliver(line); }
       let out;
-      try { out = await this.chat.startRun(P, { agent: a.id, session: line.sessionId, input: this.catchupPrompt(a, line, catchup, rows, cm) }); }
+      try { out = await this.chat.startRun(P, { agent: a.id, session: line.sessionId, input: this.catchupPrompt(a, line, catchup, rows, cm), aware: false }); }
       catch (e) { if (e.status === 409) return; this.q.delCatchup.run(this.w, catchup.id); this.log?.warn?.(`[phone] could not catch ${a.name} up:`, e.message); return; }
       this.q.delCatchup.run(this.w, catchup.id);
       this.runs.set(out.runId, { lineId: line.id, peer: catchup.peer, kind: 'catchup', at: this.now() });
@@ -912,7 +912,7 @@ export class Phone {
     const input = texts.length ? this.textsPrompt(a, line, peer, group, cm) : this.callPrompt(a, line, group[0], cm);
     let out;
     try {
-      out = await this.chat.startRun(P, { agent: a.id, session: line.sessionId, input });
+      out = await this.chat.startRun(P, { agent: a.id, session: line.sessionId, input, aware: false });   // (its phone: not its senses — server/senses/)
     } catch (e) {
       if (e.status === 409) return;   // (it is answering in that chat: next time)
       for (const g of group) (texts.length ? this.q.msgAgent : null)?.run('failed', null, this.w, g.id);

@@ -28,6 +28,7 @@ import { EAT_CLIP, BOTH_R, BOTH_LIFT, HELD_SCALE, BITE_TIP, TOOL_Z, TOOL_LEN, to
 import { ROD_TILT, NET_TILT } from '/shared/held.js';
 import { lin } from './furniture.js';
 import { PHONES } from '/shared/stage.js';
+import { seatFix } from './seat-fix.js';
 import { BOOK, PHONE, BOOK_HANDS, PHONE_HAND, gripOn } from '/shared/held.js';
 import { LIGHT, ROOM_PARS, STREET_PARS } from './light.js';
 import { standIns } from './warm.js';
@@ -593,6 +594,10 @@ uniform mat4 uGrip[3];   // the right hand's grip, the left's, the head's frame 
 uniform vec3 uDesk;
 uniform vec3 uBones;   // right hand, left hand, chest (Spine2)
 uniform float uHead;   // the head's bone
+uniform ivec3 uSeatClips;   // (the clips seated on a seat, and the body's seat fix — render/seat-fix.js, as its body's)
+uniform vec4 uSeatFix;
+float prSeat;
+bool prSeatIn(int c) { int w = c >> 5, b = c & 31; int v = w == 0 ? uSeatClips.x : w == 1 ? uSeatClips.y : uSeatClips.z; return c < 96 && ((v >> b) & 1) == 1; }
 uniform sampler2D uTint;   // every item's colour (linear; a drink's, a held dish's), by the item number in the shape number's fraction
 ${APP_GLSL}
 ${SKIN_GLSL}
@@ -612,6 +617,8 @@ mat4 prBone(int b) {
 }
 void propCompute() {
   prHide = abs(aProp.x - iMisc.z) > 0.5 ? 1.0 : 0.0;
+  prSeat = 0.0;
+  if (uSeatFix.w > 0.5) { prSeat = prSeatIn(int(iAnim.x + 0.5)) ? 1.0 : 0.0; if (iMisc.x > 0.003) prSeat = mix(prSeat, prSeatIn(int(iAnim.z + 0.5)) ? 1.0 : 0.0, iMisc.x); }
   prOff = vec3(0.0);
   prDesk = 0.0;
   if (prHide > 0.5) { prM = mat4(1.0); }
@@ -641,7 +648,9 @@ const PLACE = /* glsl */`
     transformed += vec3(uDesk.x * k, ${DESK_TOP - ON}, clamp(uDesk.z * k, ${DESK_FWD[0]}, ${DESK_FWD[1]}));
   } else {
     transformed = (prM * vec4(transformed, 1.0)).xyz + prOff;
-    transformed.xz *= H * Bd; transformed.y *= H;
+    transformed.yz += prSeat * uSeatFix.xy;   // (in the hand of a body seated as render/seat-fix.js sits it)
+    transformed.xz *= H * Bd;
+    { float pv = prSeat * uSeatFix.z; transformed.y = (transformed.y - pv) * H + pv; }
   }
   transformed = chRot(transformed) + iPos.xyz;
   if (prHide > 0.5) transformed = vec3(0.0, -1000.0, 0.0);
@@ -677,6 +686,7 @@ export class CharProps {
       // (the head's frame: from the nights out's clips, venue-clips.json; without it what is worn shrinks to nothing)
       uGrip: { value: [m4(gr.R), m4(gr.L), gr.H ? m4(gr.H) : new THREE.Matrix4().makeScale(0, 0, 0)] }, uDesk: { value: new THREE.Vector3(...(gr.desk || [0, 0.755, 0.55])) },
       uBones: { value: new THREE.Vector3(bone('RightHand'), bone('LeftHand'), bone('Spine2')) }, uHead: { value: bone('Head') },
+      uSeatClips: this.shared.uSeatClips ?? { value: [0, 0, 0] }, uSeatFix: { value: seatFix(d.man) },
       uApp: this.shared.uApp, uIndoor: this.shared.uIndoor, uNight: this.shared.uNight, uTint: TINT_U, uRoom: this.shared.uRoom, uRoomMap: this.shared.uRoomMap, uRoomXf: this.shared.uRoomXf, uRoomBox: this.shared.uRoomBox, uLightMap: this.shared.uLightMap, uLightRect: this.shared.uLightRect, uLightMap2: this.shared.uLightMap2, uLightRect2: this.shared.uLightRect2,
     };
     this.desks[k] = U.uDesk.value;

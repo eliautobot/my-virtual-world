@@ -71,5 +71,7 @@ export function addFreeWillRoutes(router, fw, d) {
     services: d.connections.list().filter(c => isDecisionKind(d.registry.manifest(c.kind)))
       .map(c => ({ id: c.id, label: c.label, kind: c.kind, enabled: c.enabled, scope: c.scope, implemented: d.registry.implemented(c.kind), status: c.status })),
     defaultConnection: Number(fw.config().defaultConnection) || null,
+    // (Free Will in the moment: companions' moments and their owners' messages checked — server/free-will/moments.js)
+    ...(fw.moments ? { moments: fw.moments.view() } : {}),
   })) });
 }

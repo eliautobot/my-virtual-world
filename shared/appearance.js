@@ -17,6 +17,12 @@ export const ACCENT_COLORS = ['#f5f5f5', '#c0392b', '#2980b9', '#f1c40f', '#1abc
 export const LEGACY_CHARACTERS = Object.freeze(['m01','m02','m03','m04','m05','m06','m07','m08','m09','m10','m11','m12','f01','f02','f03','f04','f05','f06','f07','f08','f09','f10','f11','f12']);
 export const ADDED_CHARACTERS = Object.freeze(['m13','m14','m15','m16','m17','m18','m19','m20','m21','m22','f13','f14','f15','f16','f17','f18','f19','f20','f21','f22']);
 export const CHARACTERS = Object.freeze([...LEGACY_CHARACTERS, ...ADDED_CHARACTERS]);
+/** A character made in the builder (client/js/builder/, baked by tools/chars/custom-kind.mjs): c_ and 16 hex digits of
+ *  its content's hash, its files at /assets/chars/custom/<id>.json|.bin. Its sex is the look's body (0 man, 1 woman). */
+export const isCustomChar = c => typeof c === 'string' && /^c_[0-9a-f]{16}$/.test(c);
+export const isCharacter = c => CHARACTERS.includes(c) || isCustomChar(c);
+/** Whether a look is a woman's: a ready-made character by its name (f…), a built one by its body. */
+export const femaleLook = a => (a?.char && !isCustomChar(a.char) ? a.char[0] === 'f' : !!a?.body);
 /** Stable character for a look that has none: hash of its fixed fields, picked from the male or female list by body. */
 export function defaultChar(a) {
   const fem = a && a.body ? 1 : 0;
@@ -79,8 +85,8 @@ export function sanitizeAppearance(a, base) {
     acc: int('acc', ACCESSORIES.length, 0), facial: int('facial', FACIAL.length, 0), eyes: hex('eyes', EYE_COLORS[0]),
     height: num('height', 0.85, 1.12, 1), build: num('build', 0.85, 1.2, 1), body: int('body', 2, 0),
   };
-  out.char = typeof src.char === 'string' && CHARACTERS.includes(src.char) ? src.char : (fb ? fb.char : defaultChar(out));
-  out.body = out.char[0] === 'f' ? 1 : 0;
+  out.char = isCharacter(src.char) ? src.char : (fb ? fb.char : defaultChar(out));
+  out.body = isCustomChar(out.char) ? out.body : out.char[0] === 'f' ? 1 : 0;
   return out;
 }
 /** Pack into 32 bytes (8 RGBA texels). */
@@ -100,8 +106,8 @@ export function packAppearance(a, out = new Uint8Array(32), o = 0) {
 /** Compact array form for network: [skin,hair,hs,top,ts,bottom,bs,shoes,accent,acc,facial,eyes,height,build]. */
 export function appToArr(a) { return [a.skin, a.hair, a.hairStyle, a.top, a.topStyle, a.bottom, a.bottomStyle, a.shoes, a.accent, a.acc, a.facial, a.eyes, a.height, a.build, a.body ? 1 : 0, a.char || defaultChar(a)]; }
 export function arrToApp(r) {
-  return { skin: r[0], hair: r[1], hairStyle: r[2], top: r[3], topStyle: r[4], bottom: r[5], bottomStyle: r[6], shoes: r[7], accent: r[8], acc: r[9], facial: r[10], eyes: r[11], height: r[12], build: r[13], body: r[14] ? 1 : 0, char: CHARACTERS.includes(r[15]) ? r[15] : '' };
+  return { skin: r[0], hair: r[1], hairStyle: r[2], top: r[3], topStyle: r[4], bottom: r[5], bottomStyle: r[6], shoes: r[7], accent: r[8], acc: r[9], facial: r[10], eyes: r[11], height: r[12], build: r[13], body: r[14] ? 1 : 0, char: isCharacter(r[15]) ? r[15] : '' };
 }
 export function arrToAppFull(r) {
-  const a = arrToApp(r); if (!a.char) a.char = defaultChar(a); a.body = a.char[0] === 'f' ? 1 : 0; return a;
+  const a = arrToApp(r); if (!a.char) a.char = defaultChar(a); a.body = femaleLook(a) ? 1 : 0; return a;
 }

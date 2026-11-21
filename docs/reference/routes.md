@@ -1,8 +1,8 @@
 # HTTP routes
 
-Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand. Proprietary - see [LICENSE](../../LICENSE).
+Generated from the code by `tools/gen-reference-docs.mjs` — do not edit by hand. Proprietary — see [LICENSE](../../LICENSE).
 
-472 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
+495 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
 
 | Method | Path | Capability | Lowest role | Re-auth |
 |---|---|---|---|---|
@@ -127,7 +127,13 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | POST | `/api/auth/signin` | `auth.signin` | guest |  |
 | POST | `/api/auth/signin/2fa` | `auth.signin` | guest |  |
 | POST | `/api/auth/signout` | `account.session` | member |  |
+| GET | `/api/awareness` | `agents.mind` | member |  |
+| POST | `/api/awareness` | `agents.mind` | member |  |
+| GET | `/api/awareness/diary` | `agents.mind` | member |  |
+| GET | `/api/awareness/overview` | `freewill.admin` | admin |  |
 | GET | `/api/building` | `world.view` | guest |  |
+| POST | `/api/characters/bake` | `agents.profile` | member |  |
+| GET | `/api/characters/preset` | `agents.profile` | member |  |
 | GET | `/api/chat-references` | `chat.use` | member |  |
 | POST | `/api/chat-references/add` | `chat.use` | member |  |
 | POST | `/api/chat-references/remove` | `chat.use` | member |  |
@@ -152,6 +158,10 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | GET | `/api/clock` | `world.view` | guest |  |
 | POST | `/api/clock` | `world.clock` | admin |  |
 | POST | `/api/command` | `world.edit` | admin |  |
+| GET | `/api/companions` | `agents.profile` | member |  |
+| POST | `/api/companions` | `agents.profile` | member |  |
+| POST | `/api/companions/dismiss-all` | `agents.profile` | member |  |
+| POST | `/api/companions/turn` | `agents.profile` | member |  |
 | GET | `/api/connections` | `connections.use` | member |  |
 | POST | `/api/connections` | `connections.use` | member |  |
 | POST | `/api/connections/discover` | `connections.use` | member |  |
@@ -165,6 +175,7 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | GET | `/api/connector/grants` | `agents.connect` | member |  |
 | POST | `/api/connector/grants/revoke` | `agents.connect` | member |  |
 | GET | `/api/connector/request` | `public` | guest |  |
+| GET | `/api/crowd/tuning` | `world.view` | guest |  |
 | GET | `/api/economy/admin` | `economy.admin` | admin |  |
 | POST | `/api/economy/admin/bond` | `economy.admin` | admin | yes |
 | POST | `/api/economy/admin/correct` | `economy.admin` | admin | yes |
@@ -219,9 +230,11 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | GET | `/api/fishing/angler` | `play.use` | member |  |
 | POST | `/api/fishing/buy` | `play.use` | member |  |
 | GET | `/api/fishing/dex` | `play.use` | member |  |
+| POST | `/api/fishing/join` | `play.use` | member |  |
 | GET | `/api/fishing/market` | `play.use` | member |  |
 | POST | `/api/fishing/respec` | `play.use` | member |  |
 | POST | `/api/fishing/sell` | `play.use` | member |  |
+| POST | `/api/fishing/session/claim` | `play.use` | member |  |
 | POST | `/api/fishing/skill` | `play.use` | member |  |
 | POST | `/api/fishing/use` | `play.use` | member |  |
 | GET | `/api/free-will/agent` | `agents.freewill` | member |  |
@@ -235,6 +248,8 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | GET | `/api/guide` | `account.self` | member |  |
 | GET | `/api/health` | `public` | guest |  |
 | GET | `/api/history` | `property.hold` | member |  |
+| GET | `/api/interactions` | `agents.profile` | member |  |
+| POST | `/api/interactions` | `agents.profile` | member |  |
 | GET | `/api/inventory` | `economy.use` | member |  |
 | POST | `/api/inventory/discard` | `economy.use` | member |  |
 | POST | `/api/inventory/give` | `economy.use` | member |  |
@@ -243,6 +258,7 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | POST | `/api/inventory/trade/decline` | `economy.use` | member |  |
 | POST | `/api/inventory/trade/offer` | `economy.use` | member |  |
 | POST | `/api/inventory/trade/open` | `economy.use` | member |  |
+| POST | `/api/inventory/trade/propose` | `economy.use` | member |  |
 | GET | `/api/inventory/trades` | `economy.use` | member |  |
 | GET | `/api/invites` | `invites.manage` | admin |  |
 | POST | `/api/invites` | `invites.manage` | admin | yes |
@@ -372,8 +388,10 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | GET | `/api/play` | `world.view` | guest |  |
 | POST | `/api/play/abandon` | `play.use` | member |  |
 | POST | `/api/play/act` | `play.use` | member |  |
+| GET | `/api/play/current` | `play.use` | member |  |
 | POST | `/api/play/finish` | `play.use` | member |  |
 | GET | `/api/play/leaderboard` | `world.view` | guest |  |
+| POST | `/api/play/moment` | `play.use` | member |  |
 | GET | `/api/play/profile` | `play.use` | member |  |
 | POST | `/api/play/profile` | `account.self` | member |  |
 | POST | `/api/play/start` | `play.use` | member |  |
@@ -463,8 +481,11 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | POST | `/api/users` | `users.manage` | admin | yes |
 | POST | `/api/users/delete` | `users.manage` | admin | yes |
 | POST | `/api/users/update` | `users.manage` | admin | yes |
+| GET | `/api/versus` | `play.use` | member |  |
+| POST | `/api/versus/table` | `play.use` | member |  |
 | GET | `/api/voice/agent` | `chat.use` | member |  |
 | POST | `/api/voice/agent` | `chat.use` | member |  |
+| GET | `/api/voice/line` | `world.view` | guest |  |
 | GET | `/api/voice/options` | `chat.use` | member |  |
 | GET | `/api/voice/overview` | `freewill.admin` | admin |  |
 | GET | `/api/voice/prefs` | `account.self` | member |  |
@@ -474,6 +495,8 @@ Generated from the code by `tools/gen-reference-docs.mjs` - do not edit by hand.
 | GET | `/api/voice/voices` | `chat.use` | member |  |
 | GET | `/api/weather` | `world.view` | guest |  |
 | POST | `/api/weather` | `world.edit` | admin |  |
+| GET | `/api/work/person` | `world.view` | guest |  |
+| GET | `/api/work/place` | `world.view` | guest |  |
 | GET | `/api/world` | `world.view` | guest |  |
 | GET | `/api/world/backup` | `world.backup` | admin |  |
 | POST | `/api/world/reset-population` | `world.manage` | admin | yes |

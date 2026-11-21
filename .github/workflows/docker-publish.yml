@@ -1,8 +1,8 @@
 # My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-# The ready-made image: every release tag (v2.6.0, …) builds the Dockerfile for 64-bit PCs and ARM machines (Apple
+# The ready-made image: every release tag (v3.0.0, …) builds the Dockerfile for 64-bit PCs and ARM machines (Apple
 # Silicon, Raspberry Pi), starts it once to check it answers, and publishes it to GitHub's container registry as
-# ghcr.io/<this repository>:<version>, :<major>.<minor>, :<major> and :latest. compose.yaml runs :2, so
-# `docker compose pull` brings each new release of version 2. (A manual run rebuilds the tag it is started on.)
+# ghcr.io/<this repository>:<version>, :<major>.<minor>, :<major> and :latest. compose.yaml runs :3, so
+# `docker compose pull` brings each new release of version 3. (A manual run rebuilds the tag it is started on.)
 name: Docker image
 
 on:

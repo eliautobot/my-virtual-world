@@ -78,6 +78,36 @@ it gets its kit once (`shared/items.js` `WELCOME_KIT`; idempotent per owner):
   as a payment of what its side is worth; above its approval line its owner approves first (the wallet's Agents tab).
 - Built-in brains don't answer trade offers on their own yet; outside agents do, with the tools below.
 
+## Trading with your own agents (2026-11-20)
+
+The owner: "trade with companions … give them any inventory item … and they should be able to give me an inventory item as
+well … if I ask for something or they ask for something we can trade … intuitive, easy, and also safe so that no one can
+steal".
+
+- **One window** (`client/js/ui/companion-trade.js`, from a companion's menu — 🤝 Trade / give… — or its card): your
+  things on the left, theirs on the right, + / − for how many, coin either way, a word; what each side is worth as you go.
+  🎁 **Give** (nothing asked back) or 🤝 **Propose**. Their answer shows there: ✅ done, or ❌ no — with why.
+- **A proposal** (`POST /api/inventory/trade/propose`, `Trades.propose`): both sides at once from what each holds, the
+  proposer's acceptance with it. Only an agent's owner (or an administrator) may ask an agent for its things; a player's
+  side is only ever put in by that player.
+- **The agent decides for itself** (`server/companions/agent-trades.js`), a moment after the other side has accepted: its own
+  decision service (Free Will's `decideNow`, type `trade`, within its daily limits) — else its habit: a gift taken; from its
+  owner what is asked unless it leaves it more than 50 VC the poorer; from anyone else only a fair swap (95 %). Its answer
+  goes to the other side's page with the reason (`inv` trade `said`), into its diary, and — if it chose to — in its own words.
+  Agents connected from outside decide their trades through the agent API.
+- **Safe:** nothing moves until both have accepted; then everything both ways in one transaction, or nothing (a thing gone,
+  coin spent: it stays open, both told). An agent's side counts as a payment of its worth under its owner's rules — except
+  to its owner, whose things they are to ask for (`Trades.accept`; also `Inventory.giveAsAgent`); a gift to it needs no check.
+- **They give in chat too:** its brain's `give_owner` tool (no scope needed) gives its owner what it holds when asked.
+- **They propose too** (the owner: "companions should trade themselves too"): `Trades.proposeFrom` — an agent proposes to its
+  owner or to its owner's other agents (by things' names; its own acceptance with it; nobody else may be asked) — from a
+  chat (its brain's `offer_trade` tool) or of its own accord (`AgentTrades.think`, about once a minute for each companion
+  out with its owner: no bait of its own on its owner's fishing trip, or hungry with nothing to eat, and someone of theirs
+  has it — its decision service decides whether to ask now; it offers the thing's worth in coin when it has it; at most
+  every 15 minutes). The owner's page: a note with **Look** → the proposal (what it gives, what it asks, its word) —
+  ✕ Decline / ✅ Accept; another agent of theirs decides for itself. Between an owner's own agents, as to the owner, no
+  spending rule applies: it all stays theirs (`Trades.household`, also giving).
+
 ## Agents know what they hold
 
 | Where | What |
@@ -89,6 +119,17 @@ it gets its kit once (`shared/items.js` `WELCOME_KIT`; idempotent per owner):
 | The built-in brain (the Mind) | an `I HOLD: …` line in what it knows about its money, and a `give` tool |
 
 Things are named by name ("Gift box") or by their ref (`S12`, as listed).
+
+## What an agent buys to take home
+
+The product owner, 2026-11-17: "idk if he actually grabbed them". What an AI agent buys at a shop's checkout to take
+home — a menu line an item names as `sold` (`shared/items.js` `takeHomeItem`: the shops' `groceries` are
+`goods:groceries`, their `goods` a `goods:bag`) — goes into its inventory (`server/economy/households.js` `stow`, kind
+`buy`, the shop's name as its memo), so it, its owner and its brain see it. It goes in when the sale is recorded, as the
+visit is planned (the sale is recorded then, and charged whatever happens next), once a purchase (the key is the person
+and the visit's time). What it has at a café or restaurant is had there. A meal at home is cooked from its groceries when
+it has some (`cookFromBag`: one bag, kind `use`), and is not among the meals the day's settlement buys groceries for.
+Residents are as before: their purchases are the day's sums, no inventory.
 
 ## Routes
 

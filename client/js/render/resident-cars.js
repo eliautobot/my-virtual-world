@@ -8,6 +8,9 @@
 // through roads)"): a drive now comes with its timetable (shared/car-route.js: the quickest way along the roads, the
 // lights, the stop signs), the same one the server moves its driver by, so the resident is where its car is. Its car
 // waits at the kerb while they walk to it, takes them there, and stays a moment after they get out (while they are near).
+// 2026-11-16 (the product owner: "agents using cars to go places, they should appear as drivers inside the car"): the
+// driver is drawn at the wheel (render/car-occupants.js), placed by the same pose as its car here (each: one pass over the
+// drives, by the frame's time), so the two move as one.
 import * as THREE from 'three';
 import { ROAD_TOP } from './island-roads.js';
 import { S, bus } from '../core/state.js';
@@ -25,7 +28,8 @@ const KINDS = [
 const PAINT = [0xf2f1ee, 0x1b1d21, 0x9aa0a8, 0xb3202a, 0x1f4e8c, 0x2f6b4f, 0xc7a24a, 0xdedad0, 0x5b6068, 0x7a2e3b, 0x27465e, 0x3b3f45];
 const MAX = 64, FAR = 1500, BOARD = 18;   // s getting in at the start and parking at the end
 let app = null, kinds = [], drives = new Map(), group = null;
-const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _up = new THREE.Vector3(0, 1, 0), _w = new THREE.Matrix4(), _e = {}, _c = new THREE.Color();
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _up = new THREE.Vector3(0, 1, 0), _w = new THREE.Matrix4(), _e = {}, _c = new THREE.Color(), _a = {};
+const TURN_DT = 0.25;   // s ahead the way a driven car turns is looked at (its driver's hands on the wheel)
 
 export function init(a) {
   app = a;
@@ -45,7 +49,7 @@ export function init(a) {
   bus.on('msg:rcar', add);
   bus.on('msg:rcars', m => { for (const r of m.list || []) add(r); });
   bus.on('frame', update);
-  app.residentCars = { get drives() { return drives; }, shown: 0 };
+  app.residentCars = { get drives() { return drives; }, shown: 0, each, kinds: () => kinds };
 }
 const keyOf = r => `${r.i}:${r.tIn ?? r.t0}`;   // (one resident may have more than one drive planned: there and back)
 function add(r) {
@@ -75,40 +79,57 @@ function groundY(x, z) {
   if (near && near.dist <= R.half.get(near.id)) return R.surface(near.id, x, z) + ROAD_TOP - 0.04;
   return app.terrain ? app.terrain.heightAt(x, z) : 0;
 }
-function update() {
-  const t = S.simT, plans = app.net?.plans, cam = app.stage.camera.position;
-  const off = localStorage.getItem('mvw.traffic') === 'off', counts = kinds.map(() => 0);
-  if (!off && plans) for (const D of drives.values()) {
+/**
+ * Each resident's car drawn at sim time t (this frame's: S.simT), with its pose: fn(D, k, matrix, info) — k its kind
+ * (index into kinds), matrix the car's (Matrix4, reused: copy it to keep it), info { d (m along its way), turn (how
+ * the road bends under it now: radians a metre, + to the left), wheel (true: its resident at the wheel) }. The cars render/car-occupants.js puts
+ * drivers in are exactly those drawn, at exactly these poses.
+ */
+function each(t, fn) {
+  const plans = app.net?.plans, cam = app.stage.camera.position;
+  if (localStorage.getItem('mvw.traffic') === 'off' || !plans) return;
+  const counts = kinds.map(() => 0);
+  for (const D of drives.values()) {
     if (t > D.t1 + 5) { drives.delete(D.key); continue; }
     if (t < D.t0) continue;
     const p = plans[D.i]; if (!p) continue;
     evalDecoded(p, t, _e);
-    let d;
+    let d, turn = 0, wheel = false;
     if (D.timed) {
       // its timetable: at the wheel from getting in to getting out (else the plan changed: no car); before and after,
       // parked at the kerb while its resident is near it
       if (t > D.t1) continue;
-      const px = _e.x, pz = _e.z, wheel = (p.flags[_e.k] & F_HIDDEN) && p.veh?.[_e.k] === VEH_CAR;
+      const px = _e.x, pz = _e.z;
+      wheel = !!(p.flags[_e.k] & F_HIDDEN) && p.veh?.[_e.k] === VEH_CAR;
       carAt(D.timed, t, _e);
       if (t >= D.tIn && t <= D.tOut) { if (!wheel) continue; }
       else if (Math.hypot(px - _e.x, pz - _e.z) > 60) continue;   // (its resident on the way to it, or just gone from it)
       d = _e.s;
+      if (wheel) { carAt(D.timed, t + TURN_DT, _a); const ds = _a.s - d; if (ds > 0.05) turn = Math.atan2(Math.sin(_a.yaw - _e.yaw), Math.cos(_a.yaw - _e.yaw)) / ds; }
     } else {
       if (!(p.flags[_e.k] & F_HIDDEN) || p.veh?.[_e.k] !== VEH_CAR) continue;   // not (or no longer) at the wheel
+      wheel = true;
       const dur = D.t1 - D.t0, board = Math.min(BOARD, dur * 0.2), u = Math.max(0, Math.min(1, (t - D.t0 - board) / Math.max(1, dur - 2 * board)));
       d = (u - Math.sin(2 * Math.PI * u) / (2 * Math.PI)) * D.L;   // pulls away and slows to a stop
       at(D, d, _e);
     }
     if (Math.hypot(_e.x - cam.x, _e.z - cam.z) > FAR) continue;
-    const kk = kinds[D.k], idx = counts[D.k]; if (idx >= MAX) continue; counts[D.k]++;
+    if (counts[D.k] >= MAX) continue; counts[D.k]++;
     _q.setFromAxisAngle(_up, _e.yaw);
     _m.compose(_p.set(_e.x, groundY(_e.x, _e.z), _e.z), _q, _s);
-    for (const part of kk.parts) { part.mesh.setMatrixAt(idx, _m); if (part.tint) part.mesh.setColorAt(idx, _c.setHex(D.col)); }
-    const spin = wheelSpinAngle(d, kk.asset.wheel.radius);
-    for (let w = 0; w < 4; w++) kk.wheels.setMatrixAt(idx * 4 + w, composeVehicleWheelMatrix(_m, kk.asset.wheels[w].centre, spin, _w));
-    kk.beams.setMatrixAt(idx, _m);
-    D.at = { x: _e.x, y: _p.y, z: _e.z, d, t };   // (where it is now: its engine's sound, audio/vehicle-sound.js)
+    fn(D, D.k, _m, { d, turn, wheel });
   }
+}
+function update() {
+  const t = S.simT, counts = kinds.map(() => 0);
+  each(t, (D, k, m, { d }) => {
+    const kk = kinds[k], idx = counts[k]++;
+    for (const part of kk.parts) { part.mesh.setMatrixAt(idx, m); if (part.tint) part.mesh.setColorAt(idx, _c.setHex(D.col)); }
+    const spin = wheelSpinAngle(d, kk.asset.wheel.radius);
+    for (let w = 0; w < 4; w++) kk.wheels.setMatrixAt(idx * 4 + w, composeVehicleWheelMatrix(m, kk.asset.wheels[w].centre, spin, _w));
+    kk.beams.setMatrixAt(idx, m);
+    D.at = { x: m.elements[12], y: m.elements[13], z: m.elements[14], d, t };   // (where it is now: its engine's sound, audio/vehicle-sound.js)
+  });
   let shown = 0;
   kinds.forEach((kk, k) => {
     for (const part of kk.parts) { part.mesh.count = counts[k]; uploadUsed(part.mesh.instanceMatrix, counts[k]); uploadUsed(part.mesh.instanceColor, counts[k]); }

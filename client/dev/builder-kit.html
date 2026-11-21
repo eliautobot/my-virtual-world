@@ -1,0 +1,50 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Character builder — kits</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html, body { margin: 0; height: 100%; background: #d9ddd3; } #stage { position: absolute; inset: 0; }</style>
+<script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
+</head><body>
+<div id="stage"></div>
+<script type="module">
+// The builder (client/js/builder/) on a page of its own, for checks: window.__kit(preset) dresses the character as the
+// preset says and returns its kit (shared/char-kit.js) in base64, with its counts (tools/chars/builder-kits.mjs).
+import { openBuilder } from '/js/builder/builder.js';
+let B = null;
+window.__kit = async preset => {
+  // (a fresh builder per kit, opened on the preset as a saved look is; look: an original Tripo look worn on top of it)
+  B?.dispose(); B = null;
+  const host = document.getElementById('stage'); host.innerHTML = '';
+  B = await openBuilder(host, { preset: { format: 'mvw-character', version: 2, ...preset } });
+  if (preset.look) await B.applyLook(preset.look);
+  for (const [k, v] of Object.entries(preset.structure || {})) B.setStructure(k, v);
+  await B.loadWear();
+  await new Promise(r => setTimeout(r, 200));
+  const t0 = performance.now(), { bytes, stats } = B.exportKit(), ms = performance.now() - t0;
+  let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return { b64: btoa(s), stats, ms, preset: B.preset() };
+};
+window.__looks = g => B ? B.looks() : null;
+// (the crowd's parts library: tools/chars/crowd-pack.mjs) one builder kept open; each export a preset set in place, its
+// kit cut down to the parts asked for (roles), as base64. Heeled shoes leave the bare foot as it is (tripo-shoe-pose.js
+// setHeelFit): every resident wears the same body, and what a shoe covers is told by the skin the builder drops, by position.
+window.__open = async gender => {
+  (await import('/js/builder/tripo-shoe-pose.js')).setHeelFit(false);
+  if (!B) { const host = document.getElementById('stage'); host.innerHTML = ''; B = await openBuilder(host, { gender }); }
+  else await B.setGender(gender);
+  const styles = {}, pieces = {};
+  for (const k of Object.keys(B.catalog())) { styles[k] = B.styles(k); pieces[k] = styles[k].map(([i]) => B.piece(k, i)).map(p => (p ? { source: p.source, dress: !!p.dress, cut: p.cut || '' } : null)); }
+  return { styles, pieces, state: B.state };
+};
+window.__export = async (preset, roles = null) => {
+  await B.setPreset({ format: 'mvw-character', version: 2, ...preset });
+  await B.loadWear();
+  const { bytes } = B.exportKit();
+  let out = bytes;
+  if (roles) { const lib = await import('/shared/char-kit.js'), k = lib.decodeKit(bytes); out = lib.encodeKit({ ...k, parts: k.parts.filter(p => roles.includes(p.role)) }); }
+  let s = ''; for (let i = 0; i < out.length; i += 0x8000) s += String.fromCharCode.apply(null, out.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+window.__shot = view => { B.view(view || 'body'); return new Promise(r => setTimeout(() => r(B.snapshot()), 300)); };
+window.__ready = true;
+</script>
+</body></html>

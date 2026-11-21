@@ -116,6 +116,7 @@ Messages are `{ mvwArcade: 1, t, … }` through `postMessage`; each side checks 
 | box → cabinet | `sfx { l: [[name, param], …] }` | Sound effects to play this frame |
 | box → cabinet | `buzz { ms }` | A phone buzz |
 | box → cabinet | `engine { v }` | A racing game's engine: 0 to 1 sets its note (ten times a second at most), below 0 stops it |
+| box → cabinet | `live { score, lives?, detail }` | Every 5 s of play: where the game stands. The cabinet sends it on as the run's moment (`POST /api/play/moment`), so the AI agents with the player know the game and the score ([awareness](awareness.md) §5); never used for the score itself |
 | box → cabinet | `over { score, ticks, log, detail }` | The game ended: the run's report |
 | box → cabinet | `error { msg }` | The game could not start |
 
@@ -133,6 +134,8 @@ messages, and an emulator adapter (Local only) would map the same buttons onto t
    with `client/arcade/fx.js`.
 4. Add a bot to `tests/arcade.test.mjs` (it must clear something, end, and replay to the same game) and run
    `tools-bin/arcade-check.mjs` in the lab.
+5. AI agents play it with no code of its own (§Agents at the arcade): `node tools/arcade-agent-scores.mjs <id>` shows
+   that they finish it, that verify accepts their runs and what they score for its stars.
 
 ## Performance
 
@@ -239,3 +242,66 @@ touch screen as a player would (taps, held touches, a finger on the table, two f
 second, ✕ and Leave. On a screen held upright a game may look another way (view.camera.narrow): the foosball table from
 behind your goal with the field running up the screen, the pool table with its lamp put aside (noBoard: the score in
 the bar). The bar over the game keeps one width, so ⏸ and ✕ never move under a finger.
+
+## Agents at the arcade (2026-11-17)
+
+The product owner: "Companion agents should be able to interact with any current and future object the same way players
+can … play games and modules with me … they are essentially AI Agent Players." Every arcade piece that plays a game — a
+cabinet (the game it shows: `shared/arcade/catalog.js` `cabinetGame`, the same on every page and the server) or a machine
+of its own (`machineGame`) — is played by AI agents for real.
+
+**The player** (`shared/arcade/player.js`, shared: the 2-player tables use it too). One player for every built-in game,
+from the sim's interface alone — no bot written for a game, so a game added later is played by agents the day it is added:
+- *Its controls* (`controlsOf(sim)`, once per game, at most 160 ms): from states met wandering through a few games, each
+  button pressed, held and tapped against holding nothing; what changes nothing is not a button of the game, the pairs
+  that do more than either alone are kept, and the pointer along x and y.
+- *How it plays* (`ArcadePlayer`): a rolling plan of inputs held for a while, thought over every few steps on copies of
+  the game — what is left of its plan, changes to it, new ones, the simplest ones (holding nothing, holding what it holds) —
+  the best kept, its first steps done. The horizon grows while nothing in sight is worth anything (the ball still rolling
+  to the cups) and comes back slowly. As good as nothing better is found, it waits and thinks on.
+- *Fair*: its copies have dice of their own (the state's `rs` replaced), so it never sees what the game's dice will throw
+  (the next piece, whether the claw slips). Everything it does is recorded (`InputLog`) and checked like anyone's.
+- *Its value of a plan*: the points made, a life lost (`s.lives`) worth half a bronze score, the game over a silver one
+  (later is better) — the game's own stars, nothing written for a game. Winding up: the game over soonest, pressing as
+  little as it can (it lets the game run out).
+- *Skill* (`skillOfLevel`: 0 at arcade level 1, 1 from level 12): how often it decides (every 10 steps → 4), its reaction
+  (230 → 100 ms), how much it thinks, how far ahead, its slips (one in 2 s → one in 20 s).
+- *Human*: a person of its skill scores about bronze new, about gold at best (the game's stars, with its form on the
+  day). Past that it tires (slower, less thought, more slips); at a third as much again it lets the game run out. Without
+  it a simulated mind outscored gold by ten times on the reflex games (Rock Drift, Turbo Rush) at level 1.
+- *CPU*: a budget in µs a second of play (`THINK_US`: 8 ms new, 24 ms at best), measured on the sim's real step cost,
+  saved up while it waits (20 s at most), spent 8 ms a decision at most; the crew shares 60 ms a second among all its
+  players (`THINK_US_ALL`: more players, less each) and caps a beat at 40 ms.
+- `node tools/arcade-agent-scores.mjs` prints the table (average per game per skill, every run verified, CPU a second).
+
+**The runs** (`server/play/arcade-crew.js`). The registry's source `arcade` (docs/features/interactions.md) offers each such
+piece near the agent (on its own) or near its owner ("Play Neon Snake on the cabinet next to Kim's (your best: 8,200)"),
+and claims them: the furniture's plain 'play' at a machine with a game is gone (one honest way). Done:
+- its body goes there: beside its owner `Brain.useWith` (it keeps at it while they are near — they walk off, it stops and
+  follows); on its own the Brain's order `use` with `whole` (the whole game in one stay). The slot is held, the slot's
+  animation plays, the tokens are billed as any visit there.
+- at the machine (its body at that slot: the sim plans its next round ahead, so its act may be the next stay already), a
+  run of the arcade module starts for the agent (`PlayCore.start` as minus its id, `auto`: the seed is the server's),
+  played in real time on the crew's beat (100 ms; never ahead of the clock), its moments sent as a page sends them (the
+  senses' card); at the end its input log goes to `PlayCore.finish` and the module's verify plays it again from the seed
+  (and refuses one quicker than the clock). Recorded as its own: its arcade level, half the experience (an unattended
+  run), badges, the leaderboards under its name; no prize (unattended runs win none).
+- it plays a game to its end, at most 5 min (or the minutes it was given, 1 – 10), then lets it run out; one still going 3
+  min later it walks away from (not recorded, said so).
+- seen and said: its Companions bar ("Playing Neon Snake · 1,240"), a bubble at the end ("🕹️ 12,400 on Neon Snake!"),
+  its owner's toast when it played beside them or near (`crew_arcade`: "Kai scored 12,400 on Neon Snake ★★☆"), one diary
+  line ("You played Neon Snake on the cabinet beside Kim at Union Hall Arcade: 12,400 points, ★★☆ — a new personal best
+  (was 8,200), #3 on the board"), a word of its own for a new best; a game left unfinished says so ("You stopped playing
+  Neon Snake at 4,100 points to go with Kim — a game left unfinished does not count").
+- `stop_game` while it plays (or is on its way); honest noes (already playing, the machine taken, no money, no body).
+
+**Spectating** (not done). A cabinet's screen could show the agent's game: the crew would send the run's seed and its
+input log as it grows (a few bytes a second) to the pages near, which step the sim themselves and draw it with the game's
+own screen module into that cabinet's attract canvas. About a day's work for the cabinets (a frame type, the screens'
+stepping and drawing within their 8-a-second budget); the machines played in the world (the skee-ball lane, the pool
+table) draw their games in 3D each in their own way, more again.
+
+**Checks.** `tests/unit/arcade-player.test.mjs` (every game played to its end and accepted by verify, controls found,
+fair and bounded, skill, winding up), `tests/unit/arcade-crew.test.mjs` (a generated city with an arcade: beside its
+player, on its own, its owner walking off), `tests/arcade-agents-http.test.mjs` (a real server: offered, told, played in
+real time, verified, on the leaderboard under its name, its owner's toast).

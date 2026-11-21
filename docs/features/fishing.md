@@ -257,6 +257,120 @@ one before, in each water's own line.
 - **Badges:** First Catch, Fishdex 10 / 25 / 50 / all, Trophy Hunter, Big Game (over 100 kg), Legend Slayer, Catch &
   Release 25, Bounty Hunter, Storm Rider, Night Owl, Full Cooler, Record Breaker.
 
+## Companions aboard (2026-11-17)
+
+The owner: "I noticed that if I went fishing they don't come with me as companions." Companions are AI agent players:
+fishing is the first play module open to them, through the interaction registry (`server/interactions/registry.js`), so
+every later module follows the same pattern. `server/play/fishing-crew.js`, drawn by `client/js/render/boat-crew.js`.
+
+- **Getting on.** A companion following its owner gets on the boat its owner takes, as it gets into its owner's car:
+  - beside the boat (14 m) it steps straight aboard;
+  - on the dock's grounds (160 m, the boat still at its slip) it walks down the pier, the gangway and the float to the
+    slip first (the simulation's own walk: everyone sees it; its owner's page is told to wait a moment). If the boat
+    leaves before it gets there, it stays on the dock and its diary says so.
+  - Each takes a fishing spot of its own (the bow and the sides first). The boat's anglers are its places: four on the
+    Coastal Fisher, two on the Lake Skiff, the skipper one of them. A boat that is full: it stays ashore, told why.
+  - Aboard, its body is hidden in the simulation (as in a car: `a.ride`, carried along at its spot,
+    `server/sim/companion-moves.js` rideStep) and every page near draws it at its spot on the boat, riding the swell,
+    from the harbour's crew rows (`server/world/boats.js` tick: `crew: [[boat, body, spot, phase, seq]]`).
+- **Fishing.** While its owner is on a trip, it fishes too: when asked ("let's fish", "cast a line", "stop fishing":
+  `server/companions/intent.js`), when its Free Will picks the registry's `fish` (a moment's option:
+  `server/free-will/moments.js`), or, without Free Will, it simply joins in a few seconds after the trip begins.
+  - Its trip is a real run of this module, its own (the play core, as minus its id), going along on its owner's
+    (`PlayCore.start` `along`): the same grounds (its owner's seed), the same clock (hour, dusk, freshness), its own kit
+    (what it holds; else the dock lends the starter's rod and bait — `server/play/angler.js` tripKit).
+  - It casts from its spot out over the side it faces. The ground is the one its lure lands on (`groundAt`), the wait
+    the module's own pacing (`biteEvery`), the bite the server's roll (act `hook`), the fight the module's own
+    (`shared/fishing-fight.js`) played by a hand as good as its fishing level (`botInput`, skill 0.62 at level 1 up to
+    0.95; a beginner misses more strikes) in real time, the landing the server's check (act `land`).
+  - Never faster than a person: at least 15 s from one hook to the next (`MIN_CYCLE_MS`). In ten minutes on a reef with
+    the starter's kit: about eleven bites, nine or ten fish.
+  - The cooler full: it lets what it catches go (catch and release counts too).
+  - Under way (faster than 2.5 m/s) nobody casts: a line out is reeled in and the rod held ready until the boat slows (a
+    fish already on is still fought).
+- **Seen and said.** Its body casts, waits, reels, fights and nets (`fish_cast`, `fish_idle`, `fish_reel`, `fish_fight`,
+  `fish_net`, rod in hand). A catch shows in a bubble over its head, on its owner's page as the catch toast
+  ("Lara landed a 2.3 kg Red Snapper!", `crew_catch`), and in its diary (the play core's own lines for its run:
+  `server/senses/play-activities.js`). A notable one (a trophy, rare or better) it may remark on in its own words.
+- **Its own.** The trip ends with its owner's (or when it gets off). It is weighed in as any angler's: score, experience
+  (half, as any unattended run: `AUTO_XP`), its fishing level, badges, the Fishdex and world records (named by the
+  agent). The kept catch goes into its own inventory, the bait it used out of it. Getting off at the dock, it sells the
+  catch at the dock's store into its own wallet from the Fish market (`FishMarket.sell` with the store it is at). Its fun
+  need rises while it fishes (`shared/catalog.js` USES `fish`).
+- **Off.** Its owner leaves the boat: at a dock it walks back up the pier with them; on a shore it steps off beside them.
+  The rod is put away, the trip weighed in, and it follows again.
+
+**The registry source `fishing`** (`FishingCrew.source()`, added in `server/index.mjs` to the registry the server sets up: `server/interactions/index.js`):
+- `near(ctx)` (ctx: `{ rec, i, a, leader }`, made by `interactions.contextFor(rec)`: also where it is, its leader's seat and boat) offers:
+  - `board` — its leader on a boat within reach ("Get on Kim's Coastal Fisher 26 with them (2 of 3 places free)");
+  - `fish` — aboard, its leader on a trip ("Fish from the bow of Kim's boat with them (Harbour Morning)", effects
+    `{ fun }`);
+  - `stop` — fishing ("Put the rod away");
+  - `sell` — at a dock store holding fish ("Sell my catch at … (about 12.40 VC)").
+- `run(ctx, aff)` does it and says what happened (`text` for the page, `brain` for its chat), or why not: no trip
+  under way, the boat full, too far from the boat, not fishing, nothing to sell, no bait left, dusk.
+- A later module adds its own source the same way: an object `{ id, kinds, near, run }` passed to `interactions.add`.
+- **Checks:** `tests/unit/fishing-crew.test.mjs`.
+
+## One session, fishing together (2026-11-19)
+
+The owner: companions "get scored, i want to see them cast the line and see their line, and see their actually fish
+same as the player … the decision model should be the one 'fishing' and the brain model should be the one narrating …
+all companions in the boat are also accounted for … a multiplayer co-op so up to 4 players can fish together … an
+option to either (companions keep their catch or the whole fishing catch from everyone is transferred to the player) …
+only … when its 1 player and companions only".
+
+- **Seen as the player's own.** Each companion's fishing is drawn as a player's is (`client/js/render/crew-fishing.js`,
+  one `FishingFx` each): the lure's arc, the line and bobber, the fight played again on the server's seed over its time
+  (its runs, leaps, the bent rod), the net, the catch held up by its weight. The harbour's crew rows carry it
+  (`FishingCrew.detail`: the cast's length, the lure's kind; the fish, its seed, the fight's length and outcome, the hand).
+- **Its decision model fishes** (`server/play/fishing-tactics.js`). Its plan for the water — the lure (of those it has
+  that suit the water, each with how soon this ground's fish come to it now), the cast (close, middle, far: the ground
+  each lands on), the hand (easy, steady, hard: `botInput` push — hard is quicker with more lines snapped), which fish it
+  keeps (all, or the small ones let go) — is chosen by its own decision service (Free Will's `decideNow`, within that
+  agent's daily limits; its why-log: a `fishing` choice) at the moments a person would think it over: the first cast,
+  three casts with nothing, a big one lost, a new ground under the boat, every four minutes. Between them every cast
+  follows the plan; the rod is held ready while it thinks (at most 4.5 s). No decision service (Free Will off, a limit, no
+  answer): its habit — the soonest-biting lure where each cast lands, a middle cast, steady, all kept. Its diary says
+  how it fishes ("Fishing: Soft Plastic, a far cast, playing them hard, letting the small ones go"), so its brain can say.
+- **Its brain narrates.** When its decision chose to say something about a new plan, its brain says it in its own words
+  (`companions.remark`: at most once a minute, quiet while its owner is in a conversation); notable catches too.
+- **One session.** A fishing trip on a boat is one session: its skipper's run is the root; everyone aboard is in it from
+  its start (each companion's run along its owner's, each crew member's along the skipper's) and fishes a moment after it
+  begins. The scoreboard under the trip (`fish_crew`, every two seconds while it changes): you, the other players (👤),
+  each companion (its lure, 💭 while it decides). The skipper's end (or stepping off) ends everyone's trip at once — the
+  crew of players' weighed in and stowed by the server (`fish_end` to their pages: "Kim ended the trip") — and every
+  result card shows everyone's: stars, fish, best, worth, experience.
+- **Whose catch.** Everyone's catch goes into their own inventory (agents have their own, `Inventory` `agent` subjects).
+  One player with their companions only: their result card offers *They keep their catch* (they sell it at the dock
+  store) or *Take everyone's catch* (every fish and find from the trip moves from each of their own companions to them,
+  once: `POST /api/fishing/session/claim`). With other players aboard the choice is not offered.
+- **Fishing together (co-op).** Up to four players on one boat (`server/world/boats.js`): walk up to a boat that's out
+  and stopped and press E ("Come aboard Kim's Coastal Fisher 26"); the skipper's friends come straight aboard, anyone else
+  waits for the skipper's *Let them aboard* (40 s). The deck's room is the boat's anglers, shared by players and
+  companions. The crew walk the deck and fish from its spots; the boat is the skipper's to drive (drawn on the crew's
+  pages from the harbour's poses, smoothed; every page draws the players aboard on its deck: the harbour's `aboard` rows).
+  E away from a spot steps off when the boat is stopped alongside; Esc leaves (the harbour launch: back on the dock by
+  the slip). When the skipper steps off or leaves, the crew goes ashore with them. The crew is kept across a restart
+  with the boat. The skipper's trip is the crew's: their pages join it (`fish_join` → `POST /api/fishing/join`: a run of
+  their own along on it — the same grounds and clock, their own kit and score).
+- **A reload, a page closed, a restart (2026-11-20).** The page is told its boat on connecting, before the boat's module
+  loads: core/net.js keeps it (`held`), the module takes it once the page is ready (Play mode, back at the helm or aboard)
+  and asks again (`bresync`). A page closed past the reload grace (players.js remove): the boat waits out there for its
+  skipper — its crew of players and companions aboard — for `RESUME_MS`, the player saved beside the slip meanwhile (never
+  in the sea); back in time: at the helm again (`resume`); not: the boat home, everyone kept beside the slip
+  (`players.placeSaved`). An "aboard" no boat backs is let go before any refusal (`harbour.heal`: never "Leave the vehicle
+  first" while swimming). The fishing trip under way is the server's (`GET /api/play/current`: its catch so far, the bait
+  left, the grounds found — never its secret) and kept across a restart (`play.snapshotRuns` → store `play-runs`, every
+  5 s while it changes and at shutdown); the companions take up their own runs along it again (`beginTrip`).
+- **Bait of their own.** At a dock store a companion may buy bait and lures with its own money within its owner's rules
+  (the registry's `buy`; `Angler.buyForAgent`, scope `buy`, approvals above the owner's line); "buy some bait" — at a store
+  now, else at the next one it is at. Its diary says its tackle at a trip's start (`Angler.kitWords`: the dock's lent
+  starter kit, or its own), its options while fishing the bait it has left.
+- **Checks:** `tests/unit/fishing-crew.test.mjs` (tactics, the session, two players, bait), `tests/unit/boat-coop.test.mjs`
+  (also the boat waiting, healing), `tests/boat-restart-http.test.mjs` (a restart, a reload, a page closed, the trip across a restart),
+  `tests/fishing.test.mjs` (the hand).
+
 ## Performance
 
 - **Server:** start and finish, plus one tiny request per hook and per landing. Everything is held in memory with

@@ -1,0 +1,62 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Characters — every clip, side by side</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; background: #c9cfd6; font: 12px system-ui, sans-serif; overflow: hidden; }
+  #view { position: absolute; inset: 0; }
+  #label { position: absolute; left: 8px; top: 6px; color: #1d2228; font-weight: 600; }
+</style>
+<script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
+</head><body>
+<div id="view"></div><div id="label"></div>
+<script type="module">
+// Two or more character models (?kinds=c_…,m05) drawn by the city's own character renderer (render/characters.js), side
+// by side in the same clip and phase, for checking a built character (client/js/builder/, tools/chars/custom-kind.mjs)
+// against a ready-made one in every clip: window.__show(clipName, phase, prop) draws one frame (tools/chars/clip-sheet.mjs).
+import * as THREE from 'three';
+import { Characters } from '/js/render/characters.js';
+import { TRIPO_CLIPS, T } from '/js/render/charClips.js';
+import { sanitizeAppearance } from '/shared/appearance.js';
+const q = new URLSearchParams(location.search), kinds = (q.get('kinds') || 'm05').split(',');
+const R = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+R.setPixelRatio(1); R.outputColorSpace = THREE.SRGBColorSpace; R.toneMapping = THREE.ACESFilmicToneMapping;
+document.getElementById('view').appendChild(R.domElement);
+const W = +(q.get('w') || 360 * kinds.length), H = +(q.get('h') || 420);
+R.setSize(W, H);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xc9cfd6);
+scene.add(new THREE.HemisphereLight(0xeaf2ff, 0x5a5f6a, 1.6));
+const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(2.2, 3.5, 3); scene.add(key);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xaeb5bd }));
+scene.add(floor);
+const view = q.get('view') || 'front';
+const cam = new THREE.PerspectiveCamera(24, W / H, 0.1, 60);
+const span = kinds.length * 1.1;
+const C = new Characters({ capacity: 16, lods: [+(q.get('lod') || 0)], shadows: false, warmAll: false });
+scene.add(C.group);
+if (q.has('lid')) C.lidForce.value = +q.get('lid');   // (?lid=1: eyes closed, as in a blink or asleep; 0 open)
+kinds.forEach((k, i) => C.setAppearance(i, sanitizeAppearance({ char: k, body: k[0] === 'f' || q.get('fem') === '1' ? 1 : 0, height: 1, build: 1 })));
+await Promise.all(kinds.map(k => C.ensureKind(k)));
+window.__ready = true;
+let state = { clip: 'idle', phase: 0, yaw: 0 };
+function draw() {
+  const yaw = view === 'side' ? Math.PI / 2 : view === 'back' ? Math.PI : view === 'three' ? 0.6 : 0;
+  // (?frame=bust: the heads and shoulders)
+  const fr = q.get('frame'), bust = fr === 'bust', face = fr === 'face';
+  const dist = face ? Math.max(0.7, span * 0.42) : bust ? Math.max(1.6, span * 0.9) : Math.max(5.2, span * 2.3);
+  cam.aspect = W / H; cam.updateProjectionMatrix();
+  cam.position.set(0, face ? 1.58 : bust ? 1.5 : 1.0, dist); cam.lookAt(0, face ? 1.56 : bust ? 1.45 : 0.88, 0);
+  C.begin();
+  kinds.forEach((k, i) => {
+    const x = (i - (kinds.length - 1) / 2) * 1.1, c = T[state.clip] ?? 0;
+    C.pushT(0, x, 0, 0, yaw, c, state.phase, c, 0, 0, i, state.prop || 0, 0);
+  });
+  C.end();
+  R.render(scene, cam);
+  document.getElementById('label').textContent = `${state.clip} @ ${state.phase.toFixed(2)} — ${kinds.join(' · ')}`;
+}
+window.__show = (clip, phase = 0, prop = 0) => { state = { clip, phase, prop }; draw(); return R.domElement.toDataURL('image/jpeg', 0.85); };
+window.__clips = TRIPO_CLIPS;
+window.__info = () => kinds.map((k, i) => { const kd = C.kinds[C.kindOf[i]]; return { kind: k, loaded: !!kd, lods: kd?.d.lods.map(g => g.attributes.position.count), clips: kd?.d.man.clips.length }; });
+draw();
+</script>
+</body></html>

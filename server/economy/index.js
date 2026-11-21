@@ -46,7 +46,7 @@ export function createEconomy(d) {
   p.trades = new Trades(econ, p.inventory);   // (./trades.js: two sides, both accept, one transaction)
   const runAgentAction = agentActions(econ);
 
-  addEconomyRoutes(d.router, econ, { perms: d.perms, reauthMs: d.reauthMs, agentOfSlot: d.agentOfSlot, runAgentAction, whereIs: d.whereIs, isAt });
+  addEconomyRoutes(d.router, econ, { perms: d.perms, reauthMs: d.reauthMs, agentOfSlot: d.agentOfSlot, runAgentAction, whereIs: d.whereIs, isAt, bought: d.bought });
   addInventoryRoutes(d.router, econ, p.inventory, { perms: d.perms, agentOfSlot: d.agentOfSlot, runAgentAction, trades: p.trades,
     agentsOf: accountId => (d.agents?.enabled?.() || []).filter(a => econ.agentOwner(a.id) === Number(accountId)) });
 
@@ -144,6 +144,13 @@ export function agentActions(econ) {
           const worth = t ? t.me.vc + t.me.items.reduce((a, l) => a + (l.worth || 0), 0) : 0;
           return { status: 'approval_required', ...p.agents.ask(agentId, 'tradeAccept', { trade: payload.trade }, worth, `Accept a trade with ${t?.them.who.name || 'someone'}`) };
         }
+        throw e;
+      }
+    }
+    if (action === 'tradePropose') {   // proposing a trade of its own (./trades.js proposeFrom): to its owner or their other agents
+      const to = payload.to === 'owner' ? { kind: 'account', id: econ.agentOwner(agentId) } : payload.to;
+      try { return { status: 'done', trade: p.trades.proposeFrom(agentId, { ...payload, to }, approved) }; } catch (e) {
+        if (e instanceof LedgerError && e.code === 'approval_required') return { status: 'approval_required', ...p.agents.ask(agentId, 'tradePropose', payload, 0, `Propose a trade to ${typeof to === 'object' ? econ.nameOf(to) : String(to).slice(0, 40)}`) };
         throw e;
       }
     }

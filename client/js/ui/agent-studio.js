@@ -2,9 +2,10 @@
 // The Agent Studio (2026-10-07: "the full agent suite … everything regarding that agent in one place, fun to use
 // and interactive"). One window per agent for its owner (or an account it is shared with to manage): the agent itself
 // on a stage — its own 3D character, turning, whose head, heart, hands and feet open its Brain, Personality, Money and
-// Free Will — beside every part of it as a tab of its own colour: Overview, Brain, Voice, Work, Visitors, Phone, Free Will,
-// Personality, Plans, Memories, People, Places, Money, Activity and Settings. The tabs live in studio-mind.js, studio-life.js,
-// studio-world.js, studio-work.js, studio-visitors.js, studio-phone.js and voice-settings.js; this file holds the window, the stage and the Overview. The server decides who may see and change
+// Free Will — beside every part of it as a tab of its own colour: Overview, Brain, Voice, Awareness, Work, Visitors, Phone,
+// Free Will, Personality, Plans, Memories, People, Places, Money, Activity and Settings. The tabs live in studio-mind.js,
+// studio-life.js, studio-world.js, studio-work.js, studio-visitors.js, studio-phone.js, studio-awareness.js and
+// voice-settings.js; this file holds the window, the stage and the Overview. The server decides who may see and change
 // what (every part answers 404 to anyone else); this only asks and shows what it answers.
 import { S, bus, select } from '../core/state.js';
 import { auth } from '../core/auth.js';
@@ -22,12 +23,14 @@ import { problemsHtml } from './mind.js';
 import { characterTab, plansTab, memoriesTab, peopleTab, activityTab, radarSvg, standout } from './studio-life.js';
 import { placeTab, moneyTab, settingsTab, homeOf, floorPlanSvg } from './studio-world.js';
 import { lookTab, leaveLook } from './studio-look.js';
+import { warmBuilder } from './studio-build.js';
 import { agentVoiceSection, previewLevel } from './voice-settings.js';
 import { workTab, loadWork } from './studio-work.js';
 import { visitorsTab, loadTalks, loadBlocks, PUBLIC_WORDS } from './studio-visitors.js';
 import { phoneTab, leavePhone } from './studio-phone.js';
 import { pcTab, leavePc } from './studio-pc.js';
 import { experienceTab } from './studio-experience.js';
+import { awarenessTab } from './studio-awareness.js';
 
 let app = null, cur = null, marker = null;
 
@@ -37,6 +40,8 @@ export const TABS = [
   { id: 'overview', label: 'Overview', icon: icon('agent'), color: '#38bdf8', pose: ['idle'], run: overviewTab },
   { id: 'brain', label: 'Brain', icon: '🧠', color: '#a78bfa', zone: 'head', pose: ['idle_hold', 'book'], run: brainTab },
   { id: 'voice', label: 'Voice', icon: '🔊', color: '#a3e635', zone: 'throat', pose: ['talk'], run: voiceTab, need: 'chat.use' },
+  // (how much its brain is told about its surroundings, what it would be told now, its diary: docs/features/awareness.md §2)
+  { id: 'awareness', label: 'Awareness', icon: '👁', color: '#e879f9', pose: ['idle'], run: awarenessTab, need: 'agents.mind' },
   { id: 'work', label: 'Work', icon: '💼', color: '#818cf8', pose: ['idle', 'briefcase'], run: workTab, need: 'agents.profile' },
   { id: 'experience', label: 'Experience', icon: '🏆', color: '#fb923c', pose: ['idle'], run: experienceTab, need: 'agents.profile' },   // (every game of the world: its levels, ranks, badges, 2026-10-28)
   { id: 'visitors', label: 'Visitors', icon: '🛎️', color: '#f59e0b', pose: ['talk'], run: visitorsTab, need: 'agents.profile' },
@@ -149,6 +154,7 @@ export async function open(id, want = 'overview', { swap = false } = {}) {
     get owner() { return !!C.rec()?.mine; },
     app, content,
   };
+  warmBuilder();   // (the Customize tab's builder, loading while the other tabs are looked at)
   // ---- data: each part read once and kept until something changes it (C.drop)
   const LOAD = {
     life: () => getJSON(`/api/agent-life/profile?agent=${id}`),
@@ -298,6 +304,7 @@ export function close() {
   if (!cur) return;
   const C = cur; cur = null;
   C.token++;
+  try { tabOf(C.tab)?.leave?.(C); } catch (e) { console.error('[studio] leave', e); }   // (the Customize tab's builder frees its stage)
   if (C.picker) document.removeEventListener('pointerdown', C.pickAway, true);
   for (const t of C.timers) clearInterval(t);
   C.phone?.destroy();   // (its phone stops following its frames)

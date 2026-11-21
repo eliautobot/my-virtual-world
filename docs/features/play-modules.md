@@ -14,7 +14,7 @@ modules are for fun and reputation.
 |---|---|---|
 | Registry | `shared/play.js` | `registerPlay(def)`: courses (levels), score kind, `prepare`, `verify`, `xp`, badges. It also holds the level curves, ranks, badge tiers and platform badges. |
 | Core | `server/play/play.js` | Runs (start → finish), experience, module and player levels, best results, places, badges, profiles. The same for every module. |
-| Routes | `server/play/routes.js` | `GET /api/play`, `/api/play/leaderboard`, `/api/play/top`, `GET/POST /api/play/profile`, `POST /api/play/start`, `/act`, `/finish`, `/abandon` (capability `play.use`). |
+| Routes | `server/play/routes.js` | `GET /api/play`, `/api/play/leaderboard`, `/api/play/top`, `GET/POST /api/play/profile`, `POST /api/play/start`, `/act`, `/moment`, `/finish`, `/abandon` (capability `play.use`). |
 | Profile | `client/js/ui/profile.js` | The player's page: rank, level, XP, pinned badges, bio, badges, modules, recent runs, leaderboards. Opened from the account menu, the online list and friends; `app.profile.open(id)` and `app.profile.board(module, course)` open it from anywhere. |
 | Data | schema 47 | `play_progress`, `play_best`, `play_runs`, `play_badges`, `player_profiles` |
 
@@ -104,7 +104,9 @@ resize, turn, rename) and `imod.del` ops (`server/world/edit.js imodOp`).
   `rec.data.kitchen`: the café's coffee kitchen for now), each in the first row of its liking with room. A Café floor
   gets one laid with it (`server/world/layouts.js cafeKitchen`), a record like a placed one. The page plays the
   floor's kitchen record's pieces (`client/js/play/order-up.js kitchenHere`); a floor laid before kitchens were
-  modules still plays its own Order Up pieces.
+  modules still plays its own Order Up pieces. AI agents cook there too: on a kitchen shift (`server/play/kitchen-shifts.js`),
+  and by their own choice — a Rush of their own, or alongside their owner's with the same orders on their clock
+  ([interactions](interactions.md) "Order Up and the work modules": `server/play/kitchen-play.js`).
 
 The arcade ([arcade](arcade.md)) came first, before this layer: its cabinets are furniture, and each of its games is a
 course with verified scores.
@@ -160,6 +162,18 @@ Modules must not slow the world for anyone, including people who aren't playing.
    gives `init(course, data, ctx)` → its state, kept with the run on the server and never sent, and `act(name, body,
    { course, data, state, secret, serverMs })` for its moves (`POST /api/play/act { run, act, body }`; answer
    `{ error, status }` to refuse). `secret` seeds its own dice. `verify()` gets the state too.
+5. A module whose page knows how a run is going that the server doesn't (Order Up's Rush, the arcade's score, the
+   airport's rings) gives `moment(live, { course, data, prev, serverMs })` → the checked, trimmed object to keep, or
+   `null` to refuse. The page sends `POST /api/play/moment { run, live }` now and then (`client/js/play/moments.js`: at
+   most every 5 s, within 2 s after something notable, the same again only every 30 s); the core keeps the latest on
+   the run (`run.live`, `run.liveAt`), only from the run's own account, at most 1,500 characters, a burst of 3 then one
+   every 2 s per account (429 `too_fast`; 404 `no_run`, 400 `no_moments` / `bad_moment`). Moments are words for the
+   agents with the player ([awareness](awareness.md) §5: `server/senses/play-activities.js`), never a score. The helpers
+   `liveInt`, `liveNum`, `liveText` and `liveOf` in `shared/play.js` check the values. A module with `act` (fishing)
+   needs none: the server knows the run from its moves.
+6. The core tells listeners what happens in runs (`play.on(fn)`: `act`, `moment`, `finish` events) and finds the run an
+   account is in (`play.runOf(account)`). The agents' senses use both; a module's words for them (its card, what is
+   worth noticing) go in `WORDS` in `server/senses/play-activities.js`.
 
 ## The airport (first module)
 

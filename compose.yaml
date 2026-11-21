@@ -10,7 +10,7 @@
 
 services:
   app:
-    image: ${MVW_IMAGE:-ghcr.io/eliautobot/my-virtual-world:2}
+    image: ${MVW_IMAGE:-ghcr.io/eliautobot/my-virtual-world:3}
     build: .
     init: true
     restart: unless-stopped

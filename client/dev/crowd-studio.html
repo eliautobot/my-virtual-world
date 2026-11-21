@@ -1,0 +1,115 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Crowd Studio — clothes, fit and posture</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; font: 13px/1.35 system-ui, sans-serif; background: #1d2228; color: #e8ecef; overflow: hidden; }
+  #view { position: absolute; left: 0; top: 0; right: 360px; bottom: 0; }
+  #histBar { position: sticky; top: -10px; z-index: 5; background: #262c33; padding: 6px 0; margin: 0 0 4px; }
+  #panel { position: absolute; right: 0; top: 0; width: 360px; bottom: 0; overflow-y: auto; background: #262c33; border-left: 1px solid #39424c; padding: 10px 12px 40px; box-sizing: border-box; }
+  h1 { font-size: 15px; margin: 2px 0 6px; } h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #9fb0bf; margin: 16px 0 6px; } h3 { font-size: 12px; color: #d6e2ec; margin: 12px 0 4px; } #boneSel { width: 100%; }
+  details { margin: 4px 0; } summary { cursor: pointer; color: #cfd8e0; padding: 2px 0; }
+  select, button, input[type=number] { font: inherit; color: #e8ecef; background: #323a43; border: 1px solid #46515d; border-radius: 5px; padding: 4px 7px; }
+  select { max-width: 100%; } button { cursor: pointer; } button:hover { background: #3c4651; } button.on { background: #2f6fb3; border-color: #3d84cf; }
+  button.primary { background: #2e8b57; border-color: #3aa76a; font-weight: 600; } button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 6px; align-items: center; margin: 5px 0; flex-wrap: wrap; }
+  .grid2 { display: grid; grid-template-columns: 70px 1fr; gap: 5px 8px; align-items: center; }
+  .sl { margin: 4px 0 8px; } .sl .lab { display: flex; justify-content: space-between; color: #b9c6d2; font-size: 12px; }
+  .sl .lab b { color: #e8ecef; font-weight: 600; } .sl input[type=range] { width: 100%; margin: 2px 0 0; }
+  .ends { display: flex; justify-content: space-between; color: #7d8d9b; font-size: 11px; margin-top: -2px; }
+  .fit { border: 1px solid #39424c; border-radius: 6px; padding: 6px 8px; margin: 6px 0; } .fit .name { font-weight: 600; }
+  .wear { display: grid; grid-template-columns: 1fr; gap: 1px; max-height: 260px; overflow-y: auto; padding: 2px 0; }
+  .wear label { display: flex; gap: 6px; align-items: center; padding: 1px 0; } .wear label.off span { color: #8a96a1; text-decoration: line-through; }
+  .note { color: #9fb0bf; font-size: 12px; } #status { min-height: 18px; margin-top: 6px; } .ok { color: #7fd89a; } .err { color: #ff8f8f; } .warn { color: #ffd27f; }
+  #help { position: absolute; left: 10px; bottom: 10px; background: rgba(20,24,28,.75); padding: 6px 9px; border-radius: 6px; color: #b9c6d2; font-size: 12px; pointer-events: none; }
+  #dirty { display: none; color: #ffd27f; font-weight: 600; } #dirty.show { display: inline; }
+  #loading { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); color: #cfd8e0; background: rgba(20,24,28,.8); padding: 10px 14px; border-radius: 8px; }
+  @media (max-width: 760px) {
+    #view { right: 0; bottom: 48%; } #panel { top: 52%; width: 100%; border-left: 0; border-top: 1px solid #39424c; }
+    #help { display: none; }
+  }
+</style>
+<script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
+</head><body>
+<div id="view"></div>
+<div id="loading">Loading the crowd's parts…</div>
+<div id="help">Drag to turn around · right-drag to move · wheel to zoom</div>
+<div id="panel">
+  <h1>Crowd Studio <span id="dirty">· not saved</span></h1>
+  <div class="row" id="histBar"><button id="undo" disabled title="Ctrl+Z">↶ Undo</button><button id="redo" disabled title="Ctrl+Y, Ctrl+Shift+Z or Ctrl+R">↷ Redo</button><span class="note">Ctrl+Z · Ctrl+Y / Ctrl+R</span></div>
+  <div class="note">What the city's residents wear and how they stand. Changes show here at once; <b>Save</b> puts them in the city (everyone sees them after a reload).</div>
+
+  <h2>Body</h2>
+  <div class="row"><button id="sexM">Man</button><button id="sexF">Woman</button>
+    <label><input type="checkbox" id="lineup"> Show 4 random residents too</label></div>
+
+  <h2>Outfit</h2>
+  <div class="grid2" id="outfit"></div>
+  <div class="row"><button id="randLook">Random outfit</button><button id="randCol">Random colours</button></div>
+
+  <h2>Animation</h2>
+  <div class="row"><select id="clip"></select><button id="play">Pause</button></div>
+  <div class="sl"><div class="lab"><span>Speed</span><b id="speedV">1×</b></div><input type="range" id="speed" min="0.1" max="2" step="0.05" value="1"></div>
+  <div class="sl"><div class="lab"><span>Moment in the clip</span><b id="phaseV">0%</b></div><input type="range" id="phase" min="0" max="1" step="0.001" value="0"></div>
+
+  <h2>View</h2>
+  <div class="row"><button data-v="front">Front</button><button data-v="three">¾</button><button data-v="side">Side</button><button data-v="back">Back</button></div>
+  <div class="row"><button data-f="body">Whole body</button><button data-f="chest">Chest</button><button data-f="neck">Neck</button><button data-f="face">Face</button><button data-f="feet">Feet</button></div>
+  <div class="row"><span class="note">Detail:</span><button data-l="0" class="on">Near</button><button data-l="1">Middle</button><button data-l="2">Far</button></div>
+
+  <h2>Bake detail</h2>
+  <div class="note">The resident as the editor makes it, every triangle, standing beside the crowd's. Slide down to see the detail the bake gives up. (The editor's model stands in its rest pose; pause the clip to compare.)</div>
+  <div class="row"><button id="orig">Show the editor's original</button><label><input type="checkbox" id="wire"> Wireframe</label></div>
+  <div id="detailBox" style="display:none">
+    <div class="sl"><div class="lab"><span>Detail kept</span><b id="detailV">100%</b></div><input type="range" id="detail" min="0" max="1" step="0.001" value="1"><div class="ends"><span>very low</span><span>original (no bake)</span></div></div>
+    <div class="row"><button data-d="orig">Original</button><button data-d="c">Like close-up</button><button data-d="0">Like crowd near</button><button data-d="1">Like middle</button><button data-d="2">Like far</button></div>
+    <div class="note" id="detailInfo"></div>
+  </div>
+  <details id="bakeBox"><summary>The crowd's bake: the detail each level keeps</summary>
+    <div class="note">Set the slider above, then use it for a level. <b>Close-up</b> is only for the few residents nearest the camera (Settings → Display → Character detail), so it can be detailed; <b>Near</b> is everyone within 26–38 m, so keep it light. Saved with the rest; <b>Rebuild</b> bakes the crowd's parts again with them (about 8 minutes on the server) — the city uses them from its next load. A level is kept within four times its standard size.</div>
+    <div id="bakeLevels"></div>
+    <div class="row"><button class="primary" id="rebake">Rebuild the crowd with these</button><button id="bakeStandard">Back to the standard bake</button></div>
+    <div class="note" id="bakeStatus"></div>
+  </details>
+
+  <h2>Fit of what is worn</h2>
+  <div class="note">Push a garment out where skin or another garment shows through it (negative pulls it in).</div>
+  <div id="fits"></div>
+  <details><summary>Every garment of a kind (this body)</summary><div id="pushAll"></div></details>
+  <div class="sl" id="tuckBox"><div class="lab"><span>Skin under clothes pulled in</span><b id="tuckV"></b></div><input type="range" id="tuck" min="0" max="0.04" step="0.0005"><div class="ends"><span>none</span><span>4 cm</span></div></div>
+  <label title="Skin wholly under the clothes worn is not drawn at all, as the editor drops it; only its edge is pulled in. Off: all of it drawn and pulled in (the old way)."><input type="checkbox" id="hideCov"> Don't draw skin under clothes</label>
+
+  <h2>Wardrobe</h2>
+  <div class="note">Untick what the crowd should never wear (this body).</div>
+  <div id="wardrobe"></div>
+
+  <h2>Posture — <span id="rigBody"></span></h2>
+  <div class="note">Turns these joints for this body: the crowd's, and characters built in the Agent Studio. "Every animation" is the body's own posture; "Only this animation" adds more for the clip playing (a hunched sit straightened), on top.</div>
+  <div class="row"><button id="scopeAll" class="on">Every animation</button><button id="scopeClip">Only this animation</button></div>
+  <label title="Your posture, each animation's own and the idles also for the ready-made characters — players' and residents' with the classic look — a man's for the male ones, a woman's for the female. (This studio shows the builder's bodies.)"><input type="checkbox" id="readyMade"> Also for the ready-made characters (players)</label>
+  <div class="note" id="scopeNote"></div>
+  <div class="row"><button id="hold">Hold to compare with no changes</button><button id="rigReset">Reset these</button></div>
+  <div id="rig"></div>
+  <h3>Skeleton — any bone</h3>
+  <div class="note">Show the bones over the resident, click a joint (or pick it from the list) and turn it: drag the rings on the joint (red, green, blue: one way each; the outer ring: as you look) or use the sliders. It follows the choice above: every animation of this body, or only the one playing. Yellow joints are turned here; the picked one is orange.</div>
+  <div class="row"><label><input type="checkbox" id="skelShow"> Show skeleton</label><label><input type="checkbox" id="skelRings" checked> Turn with the mouse (rings on the joint)</label><label><input type="checkbox" id="skelMirror" checked> Mirror left / right</label></div>
+  <div class="row"><button id="gripTurn" class="on">Turn (rings)</button><button id="gripMove">Move (arrows)</button></div>
+  <div class="note" id="gripNote"></div>
+  <div class="row"><select id="boneSel"></select></div>
+  <div id="boneSliders"></div>
+  <div class="row"><button id="boneReset">Reset this bone</button><button id="bonesReset">Reset every bone here</button></div>
+  <div class="note" id="boneList"></div>
+  <div id="clipList"></div>
+
+  <h2>Face</h2>
+  <div class="note">How the crowd's faces move. Preview an expression, or pick "Their own" to watch them move by themselves (talking happens in the chatting, phone and greeting animations; smiles in the friendly ones).</div>
+  <div class="row"><button data-x="auto" class="on">Their own</button><button data-x="left">Look left</button><button data-x="right">Look right</button><button data-x="up">Look up</button></div>
+  <div class="row"><button data-x="brow">Raise brows</button><button data-x="smile">Smile</button><button data-x="talk">Talk</button><button data-x="smiletalk">Smile + talk</button></div>
+  <div id="face"></div>
+
+  <h2>Save</h2>
+  <div class="row"><button class="primary" id="save">Save to the city</button><button id="revert">Undo unsaved changes</button></div>
+  <div id="status" class="note"></div>
+  <div class="note" id="savedBy"></div>
+</div>
+<script type="module" src="/dev/crowd-studio.js"></script>
+</body></html>

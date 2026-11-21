@@ -18,7 +18,7 @@ test('the library joins the catalog after MVW pieces, which keep their order and
   assert.ok(TYPE_LIST.slice(first + lib).every(t => CATALOG[t].goods), 'then only the goods (tests/goods-catalog.test.mjs)');
   assert.equal(TYPE_LIST[0], 'desk');
   assert.equal(TYPE_LIST[first - 1], 'reception', 'the last MVW type stays last of MVW\'s');
-  assert.equal(USE_LIST[0], 'work'); assert.equal(USE_LIST.at(-1), 'gogo', 'no use added or moved');
+  assert.equal(USE_LIST[0], 'work'); assert.equal(USE_LIST.at(-3), 'gogo', 'no use moved'); assert.deepEqual(USE_LIST.slice(-2), ['fish', 'fly'], 'fishing and flying (2026-11-17) the last ones added');
   assert.ok(!EDIT_TYPES.some(t => t.startsWith('a:')), 'the Furnish panel lists the library apart');
   for (const x of ABO_LIB) {
     const d = CATALOG[x.t];

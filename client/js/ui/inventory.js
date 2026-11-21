@@ -32,7 +32,11 @@ export function init(a) {
     if (m.ev === 'got') app.toast?.(`${m.icon || '📦'} ${m.agent ? `${m.agent} got` : 'You got'} ${m.qty > 1 ? `${m.qty} × ` : ''}${m.name}${m.from ? ` from ${m.from}` : ''} — ${where()}`, 'good', 4200);   // (a toast is text)
     else if (m.ev === 'trade') {
       const said = { opened: 'wants to trade', changed: 'changed their side of a trade', accepted: 'accepted the trade — your turn', declined: 'declined the trade', done: 'and you traded — it all swapped' }[m.what];
-      if (said) app.toast?.(`🤝 ${m.from || 'Someone'} ${said}${m.agent ? ` (with ${m.agent})` : ''} — ${where()} › Trades`, m.what === 'declined' ? '' : 'good', 4200);
+      // (an agent's answer, with why — its own trade window says it when that is open: ui/companion-trade.js)
+      if (m.what === 'said' && m.text && !document.querySelector('.ct-win')) app.toast?.(`🤝 ${m.text}`, '', 5000);
+      // (one of your agents proposes a trade to you — or to another of yours, which decides for itself)
+      if (m.what === 'proposed') { app.toast?.(m.agent ? `🤝 ${m.from || 'An agent'} proposes a trade to ${m.agent}` : `🤝 ${m.from || 'Someone'} proposes a trade`, 'good', m.agent ? 4500 : 15000, '', '', m.agent ? null : { label: 'Look', run: () => app.companionTrade?.review(m.trade) }); }
+      if (said && !(document.querySelector('.ct-win') && (m.what === 'done' || m.what === 'declined'))) app.toast?.(`🤝 ${m.from || 'Someone'} ${said}${m.agent ? ` (with ${m.agent})` : ''} — ${where()} › Trades`, m.what === 'declined' ? '' : 'good', 4200);
     } else return;
     st.data = null; st.trades = null;
     // the window is open: show it now (unless something is being typed)

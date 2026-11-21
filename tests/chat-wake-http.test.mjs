@@ -2,8 +2,8 @@
 // An owner's message to an agent whose brain is the server's own (docs/features/CHAT.md §13.3), on a real server: at
 // 3 AM in the city its body is asleep; the message wakes it — the run makes it work (presence: the agent named by its own
 // key, though every agent on the brain shares the platform id "mind"), so its body gets up to work on it — and its
-// answer knows it was woken, what it really did today, and that nothing else about its moment is to be made up; at Work
-// the same facts, and no office or desk.
+// answer knows it was woken and where it is (its senses' note with the message: docs/features/awareness.md), and that
+// nothing else about its moment is to be made up; at Work the same facts, and no office or desk.
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { after, before, test } from 'node:test';
@@ -21,7 +21,10 @@ before(async () => {
     req.on('end', () => {
       if (req.url.endsWith('/models')) { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ data: [{ id: 'fake' }] })); return; }
       const j = JSON.parse(b || '{}');
-      systems.push(j.messages.find(m => m.role === 'system')?.content || '');
+      // (its instructions, and the note its senses put with the newest message: what changes from one message to the next —
+      //  the time, where it is, how the message found it: docs/features/awareness.md)
+      const last = j.messages.filter(m => m.role === 'user').at(-1)?.content;
+      systems.push(`${j.messages.find(m => m.role === 'system')?.content || ''}\n\nNEWEST MESSAGE:\n${typeof last === 'string' ? last : ''}`);
       const c = 'Hello.';
       if (!j.stream) { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ model: 'fake', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ reply: c }) } }], usage: { prompt_tokens: 5, completion_tokens: 2 } })); return; }
       res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -58,9 +61,9 @@ test('asleep at 3 AM, its owner\'s message wakes it: its body gets up to work on
   assert.equal((await owner.post('/api/chat-sessions/prefs', { agent: A.id, session: sess.id, mode: 'life' })).status, 200);
   const sys = await ask(sess.id, 'are you up?');
   assert.match(sys, /«[^»]+»'s message just woke you up: you were asleep/, 'it knows it was woken');
-  assert.match(sys, /\nNOW: \w+ \d{1,2}:\d{2} AM, [^\n]*\./);
-  assert.doesNotMatch(sys, /\nNOW: [^\n]*sleeping/, 'not "sleeping" while it answers');
-  assert.match(sys, /Only what is written here is true about you right now\. Never make up details/);
+  assert.match(sys, /NEWEST MESSAGE:\n\[My Virtual World — [^\n]*message just woke you up[^\n]*\n\w+ \d{1,2}:\d{2} AM — [^\n]+/, 'with the message: woken, the time and where it is');
+  assert.doesNotMatch(sys, /AM — [^\n]*sleeping/, 'not "sleeping" while it answers');
+  assert.match(sys, /Never make up details your senses don't give you/);
   // its body: working on it (the task reflex, now that the run is seen as its own)
   const woke = await waitFor(async () => { const a = (await info()).act; return a && /^task/.test(a.use) ? a : null; }, 30000);
   assert.ok(woke, `its body got up to work on it (${JSON.stringify((await info()).act)})`);
@@ -68,7 +71,8 @@ test('asleep at 3 AM, its owner\'s message wakes it: its body gets up to work on
   const w = (await owner.post('/api/chat-sessions/create', { agent: A.id })).json.session;
   const back = await waitFor(async () => (await info()).act?.use === 'sleep', 60000);   // (back to bed after the task)
   const ws = await ask(w.id, 'what are you doing?');
-  assert.match(ws, /ABOUT YOU RIGHT NOW \(facts; nothing more is true\): you also live as a resident of a small virtual city, where your body is /);
+  assert.match(ws, /NOW and ABOUT YOU RIGHT NOW: the note that comes with «[^»]+»'s newest message/);
+  assert.match(ws, /NEWEST MESSAGE:\n\[My Virtual World — NOW: [^\n]+ — the real date and time\.\nYour body in the city: /, 'the facts with the message');
   assert.match(ws, /Don't make up an office, a desk, colleagues or a commute/);
   if (back) assert.match(ws, /message just woke you up/, 'asleep again: woken again');
   assert.doesNotMatch(ws, /YOUR LIFE IN THE CITY|TODAY SO FAR/, 'nothing else of its life at work');

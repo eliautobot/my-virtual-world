@@ -7,11 +7,13 @@
 // stand in the way of your shots. A goal 100; from your goalie or your defence (a LONG SHOT) 100 more; within three
 // seconds of the serve (a QUICK GOAL) 50 more; stopping a shot of the computer's with your goalie or defence (a BLOCK) 10; winning 500, without
 // letting one in 300 more. A ball left still out of everyone's way is served again.
+// Someone else on the blue rods (an AI agent: server/play/versus.js): its hand is the run's (init's o.k: core.js handOf)
+// and its own score is kept as yours is, by the same rules (other(): its side of the game, for its own record).
 // Controls: the pointer (the mouse over the table, a finger on it) slides your men there, a click or a tap kicks; or
 // ▲ ▼ slide them (▲ away from you) and A kicks. The sim (rules only; the game in the world is
 // client/js/play/machines/foos-frenzy.js): deterministic, see shared/arcade/core.js; metres in the table's frame (x
 // across the rods, + toward you; z along the field, red attacking +z), speeds in metres a step (1/60 s).
-import { BTN, baseState, roll } from '../core.js';
+import { BTN, baseState, roll, handOf } from '../core.js';
 import { FOOS, foosMen } from '../machines.js';
 
 const { hw: HW, hl: HL, goal: GW, ballR: BR, manW: MW, manD: MD } = FOOS;
@@ -19,6 +21,8 @@ export const GOALS = 5, CLOCK = 180 * 60, NS = 4, KICK = 16, REACH = 0.07;
 const VMAX = 0.08, KICKV = 0.06, FRICTION = 0.991, WALL_E = 0.6, MAN_E = 0.3, PTRV = 0.03, KEYV = 0.012, PAUSE = 90, DEAD = 240;
 export const CPU = { v: 0.0095, kick: 18, look: 7, lead: 0.3, err: 0.005 };   // (the computer's rods: top slide a step, its chance in 100 a step to kick a ball at its feet, how often it looks again)
 export const RODS = FOOS.rods.map((z, i) => ({ z, red: FOOS.red[i], dir: FOOS.red[i] ? 1 : -1, ...foosMen(i) }));
+// (the blue goalie and defence: its two rods nearest its own goal, at +z — a long shot of theirs, a block of theirs)
+const BLUE_BACK = new Set(RODS.map((R, i) => i).filter(i => !RODS[i].red).sort((a, b) => RODS[b].z - RODS[a].z).slice(0, 2));
 /** Whether rod i's feet are down (stopping the ball) kt steps into its kick (-1: not kicking), and kicking it. */
 export const footDown = kt => kt < 0 || kt < 3 || kt >= 12;
 const kicking = kt => kt >= 0 && kt < 3;
@@ -27,9 +31,9 @@ export const toPx = (x, z) => [Math.round(((z + HL) / (2 * HL)) * 255), Math.rou
 const fromPy = py => (py / 255) * 2 * HW - HW;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
-export function init(seed) {
+export function init(seed, o = null) {
   const s = {
-    ...baseState(seed),
+    ...baseState(seed), hand: handOf(o), cs: 0, cblocks: 0, clongs: 0, cquicks: 0,   // (the other side's hand, its score and its own counts)
     bx: 0, bz: 0, vx: 0, vz: 0,
     sl: RODS.map(() => 0), sv: RODS.map(() => 0), kt: RODS.map(() => -1), tg: RODS.map(() => 0),
     tx: 0, prev: 0, me: 0, cpu: 0, score: 0, clock: CLOCK, ph: 'goal', pt: PAUSE - 30, scorer: 0, last: -1, served: 0, still: 0,
@@ -59,12 +63,18 @@ function goal(s, who) {
     if (s.last === 0 || s.last === 1) { pts += 100; s.longs++; tags.push('LONG SHOT'); }
     if (s.t - s.served < 180) { pts += 50; s.quicks++; tags.push('QUICK GOAL'); }
     s.score += pts; s.ev.push({ k: 'goal', who, pts, tags, x: s.bx, me: s.me, cpu: s.cpu });
-  } else { s.cpu++; s.ev.push({ k: 'goal', who, pts: 0, tags: [], x: s.bx, me: s.me, cpu: s.cpu }); }
+  } else {
+    s.cpu++; let pts = 100;   // (the other side's goal: its score by the same rules, the screen as before)
+    if (BLUE_BACK.has(s.last)) { pts += 100; s.clongs++; }
+    if (s.t - s.served < 180) { pts += 50; s.cquicks++; }
+    s.cs += pts; s.ev.push({ k: 'goal', who, pts: 0, tags: [], x: s.bx, me: s.me, cpu: s.cpu });
+  }
   s.vx = 0; s.vz = 0;
 }
 function end(s) {
   s.over = true; s.win = s.me > s.cpu;
   if (s.win) s.score += 500 + (s.cpu === 0 ? 300 : 0);
+  if (s.cpu > s.me) s.cs += 500 + (s.me === 0 ? 300 : 0);
   s.ev.push({ k: 'over', win: s.win, me: s.me, cpu: s.cpu, shutout: s.win && s.cpu === 0 });
 }
 
@@ -97,6 +107,7 @@ function men(s, i, f) {
       s.vx -= (1 + MAN_E) * vn * nx; s.vz -= (1 + MAN_E) * vn * nz;
       if (fast && R.red && i <= 1 && s.last >= 0 && !RODS[s.last].red && nz > 0) { s.blocks++; s.score += 10; s.ev.push({ k: 'block', x: s.bx, z: s.bz }); }
       else if (-vn > 0.006) s.ev.push({ k: 'bump', x: s.bx, z: s.bz, v: -vn });
+      if (fast && BLUE_BACK.has(i) && s.last >= 0 && RODS[s.last].red && nz < 0) { s.cblocks++; s.cs += 10; }   // (the other side's block)
     }
     return;
   }
@@ -112,13 +123,17 @@ export function step(s, inp) {
   else if (inp.pd) s.tx = clamp(fromPy(inp.py), -HW, HW);
   if (pressed & BTN.A) for (let i = 0; i < RODS.length; i++) if (RODS[i].red && s.kt[i] < 0) { s.kt[i] = 0; if (i === 3) s.ev.push({ k: 'swing' }); }
   // the computer: each blue rod to where the ball will be at it, and a kick when it's at its feet
-  const lv = Math.min(4, s.me), vmax = CPU.v + 0.002 * lv;
+  const lv = Math.min(4, s.me), H = s.hand;
+  let vmax = CPU.v + 0.002 * lv, kick = CPU.kick + 5 * lv;
+  if (H) { vmax *= H.sp; kick *= H.sp; }
   if (--s.look <= 0) {
     s.look = CPU.look - (lv >> 1) + roll(s, 3);
     for (let i = 0; i < RODS.length; i++) {
       if (RODS[i].red) continue;
       const dz = RODS[i].z - s.bz, t = s.vz !== 0 && dz / s.vz > 0 ? Math.min(40, dz / s.vz) : 0;
-      s.tg[i] = slideFor(i, clamp(s.bx + s.vx * t * CPU.lead, -HW, HW) + (roll(s, 9) - 4) * CPU.err);
+      let e = (roll(s, 9) - 4) * CPU.err;
+      if (H) e *= H.err;
+      s.tg[i] = slideFor(i, clamp(s.bx + s.vx * t * CPU.lead, -HW, HW) + e);
     }
   }
   for (let i = 0; i < RODS.length; i++) {
@@ -127,7 +142,7 @@ export function step(s, inp) {
     s.sv[i] = d; s.sl[i] += d;
     if (s.kt[i] >= 0 && ++s.kt[i] >= KICK) s.kt[i] = -1;
     if (!R.red && s.kt[i] < 0 && s.ph === 'play' && Math.abs(s.bz - R.z) < REACH && s.vz > -0.03) {
-      for (const m of menOf(s, i)) if (Math.abs(s.bx - m) < MW + BR + 0.004 && roll(s, 100) < CPU.kick + 5 * lv) { s.kt[i] = 0; break; }
+      for (const m of menOf(s, i)) if (Math.abs(s.bx - m) < MW + BR + 0.004 && roll(s, 100) < kick) { s.kt[i] = 0; break; }
     }
   }
   if (s.ph === 'goal') {
@@ -163,3 +178,6 @@ export function twistOf(s, i) {
 export const over = s => s.over;
 export const score = s => s.score;
 export const detail = s => ({ me: s.me, cpu: s.cpu, win: s.win, blocks: s.blocks, longs: s.longs, quicks: s.quicks });
+/** The other side's game (the blue rods' player: an AI agent's run of its own, server/play/versus.js): its score by the
+ *  same rules, and its counts — me its goals, them yours. */
+export const other = s => ({ score: s.cs, detail: { me: s.cpu, them: s.me, win: s.cpu > s.me, draw: s.cpu === s.me, blocks: s.cblocks, longs: s.clongs, quicks: s.cquicks } });

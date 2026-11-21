@@ -44,6 +44,7 @@ import { COURSES, courseParams } from '/shared/orderup/module.js';
 import { fmtVc } from '/shared/play.js';
 import { CLIP, CLIP_DUR, CLIP_STRIDE } from '../render/anim.js';
 import { PLAYER_APP } from '../render/agents.js';
+import { moments } from './moments.js';
 
 const STEP = 0.05, SPEED = 3.1, R = 0.27, PLAYS = new Set(['ou_fridge', 'ou_pantry', 'ou_prep', 'ou_grinder', 'ou_espresso', 'ou_steamer', 'ou_oven', 'ou_press', 'ou_blender', 'ou_plating', 'ou_pass', 'ou_dishes', 'ou_sink', 'ou_bin', 'ou_kettle', 'ou_toaster', 'ou_juicer', 'ou_griddle', 'ou_grill', 'ou_fryer', 'ou_soda', 'ou_taps', 'ou_wine', 'ou_cocktail', 'ou_pizza_oven', 'ou_stove', 'ou_wok', 'ou_popcorn', 'ou_tandoor', 'ou_rice', 'ou_bamboo', 'ou_freezer']);
 // where a station's item sits, in the station's own frame (x, y, z)
@@ -237,6 +238,16 @@ class Practice {
     this.st = d.stations.map(x => by.get(x.id)); this.byId = new Map(this.st.map(s => [s.id, s]));
     this.S = newRush(d.stations, { seed: d.seed, dur: C.dur, ...(d.kitchen ? { kitchen: d.kitchen } : {}), ...(d.menu ? { menu: d.menu } : {}), course: courseParams(C), ...(d.skills ? { skills: { you: d.skills } } : {}) });   // (with the skills the server has: it plays it again with them)
     this.run = { id: r.run, course: C, log: [], f: null }; this.n = 0;
+    (this.moments ||= moments()).start(r.run);
+  }
+  /** Where the Rush stands, for the AI agents with you (./moments.js): now and then, and at once after a dish is served,
+   *  an order walks out or something burns. Only words for them: the server scores the Rush from its own replay. */
+  sayMoment(now) {
+    const S = this.S;
+    if (!this.run || !this.moments || !S) return;
+    this.moments.say({ t: Math.round(S.t), served: S.served.length, lost: S.lost, burns: S.burns || 0, waiting: S.tickets.length,
+      late: S.tickets.filter(k => k.until - S.t < 20).length, orders: S.tickets.map(k => k.item || k.dish), points: S.points,
+      money: Math.round(S.money * 100) / 100, tips: Math.round(S.tips * 100) / 100, stars: starsOf(S), ...(S.over ? { over: true } : {}) }, { now });
   }
   setCoach(on) { this.coach = !!on; localStorage.setItem('ou.coach', on ? 'on' : 'off'); this.root.classList.toggle('coach', this.coach); this.root.querySelector('.ou-coachbtn')?.classList.toggle('on', this.coach); }
   /** The camera over the kitchen, the pass at the bottom, the whole kitchen in view on any screen. */
@@ -428,7 +439,9 @@ class Practice {
   }
   events() {
     const fx = app.kitchenFx;
+    let notable = false;
     for (const ev of this.S.ev.splice(0)) {
+      if (ev.k === 'served' || ev.k === 'lost' || ev.k === 'burnt') notable = true;
       const s = ev.s != null ? this.byId.get(ev.s) : null, p = s ? this.topOf(s, 0.15) : null;
       const snd = { cooked: 'ou-ding', burnt: 'ou-burnt', ground: 'ou-grind-done', washed: 'ou-rack', ticket: 'ou-ticket', lost: 'ou-lost', nobody: 'ou-bad', over: 'ou-end' }[ev.k];
       if (snd) this.sfx(snd, ev.k === 'ticket' || ev.k === 'lost' || ev.k === 'over' || ev.k === 'nobody' ? null : p, { gain: ev.k === 'nobody' ? 0.6 : 1 });
@@ -449,6 +462,7 @@ class Practice {
       if (ev.k === 'lost') this.banner(`A ${this.S.K.dishes[ev.dish].name} order walked out`, 1600);
       if (ev.k === 'nobody') this.banner(`Nobody ordered a ${this.S.K.dishes[ev.dish].name}`, 1300);
     }
+    this.sayMoment(notable);
   }
   /** The start bell, the last ten seconds, warnings as a station goes over, the chef's steps. */
   cues(now) {
@@ -613,6 +627,7 @@ class Practice {
   async report() {
     const S = this.S, run = this.run, stars = starsOf(S), by = {};
     this.run = null;
+    this.moments?.stop();
     for (const x of S.served) by[x.grade] = (by[x.grade] || 0) + 1;
     const grades = ['Supreme', 'Great', 'Good', 'Medium', 'Bad', 'Poor'].filter(g => by[g]).map(g => `<span class="g-${g.toLowerCase()}">${g} ×${by[g]}</span>`).join('');
     this.E.menu.classList.remove('hidden');
@@ -637,6 +652,7 @@ class Practice {
   }
   close() {
     if (this.run && !this.S.over) post('/api/play/abandon', { run: this.run.id }).catch(() => {});   // (left in the middle: nothing recorded)
+    this.moments?.stop();
     this.picker = null;
     for (const l of this.loops.values()) l.h?.stop?.(0.3); this.loops.clear();
     removeEventListener('keydown', this.onKey, true); removeEventListener('keyup', this.onKeyUp, true); removeEventListener('resize', this.onResize);

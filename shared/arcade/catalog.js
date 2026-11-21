@@ -11,7 +11,10 @@
 // plays it — Play at that piece opens the game itself, no library; `cabinet: false` keeps it off the cabinets' library
 // (a machine's own game: the skee-ball lane, the hoops). The play module makes every built-in game a course, so each
 // has its leaderboard, stars and verified scores. `cpu: true`: a two-sided table played against the computer, so the
-// player holds all of it (nobody else is sent to its other end: server/sim/agents.js playerOn).
+// player holds all of it (nobody else is sent to its other end: server/sim/agents.js playerOn) — or against an AI agent
+// at the other end (server/play/versus.js: the computer's side played with the agent's hand); `you`: the way to the
+// player's end in the piece's frame ([x, z]: where its camera is; the other one plays from the far end), `count`: what
+// a side's tally counts in words ('goals', 'balls').
 // Each game says how it is played: `controls.layout` is the on-screen controller a phone shows (client/js/play/arcade-pad.js):
 //   'dpad'  a cross (four ways) with A and B      'lr'  ◀ ▶ with A (B when named)
 // and the names of its buttons; `gestures` (optional) what touches on the game's screen itself do.
@@ -158,7 +161,7 @@ export const GAMES = Object.freeze([
     difficulty: 3, stars: [300, 900, 2000],
   },
   {
-    id: 'puck-rush', kind: 'builtin', title: 'Puck Rush', icon: '🏓', like: 'air hockey', machine: 'air_hockey', cabinet: false, cpu: true,
+    id: 'puck-rush', kind: 'builtin', title: 'Puck Rush', icon: '🏓', like: 'air hockey', machine: 'air_hockey', cabinet: false, cpu: true, you: [0, 1], count: 'goals',
     blurb: 'Air hockey against the computer: first to seven, or the most in two minutes. A goal 100; a slap shot or a bank shot 50 more; a save 20; a win 500, a shutout 300 more. The computer gets quicker with every goal you score.',
     color: '#ef4444', accent: '#22d3ee',
     controls: { layout: 'tap' },
@@ -167,7 +170,7 @@ export const GAMES = Object.freeze([
     difficulty: 3, stars: [500, 1400, 2200],
   },
   {
-    id: 'foos-frenzy', kind: 'builtin', title: 'Foos Frenzy', icon: '⚽', like: 'foosball', machine: 'foosball', cabinet: false, cpu: true,
+    id: 'foos-frenzy', kind: 'builtin', title: 'Foos Frenzy', icon: '⚽', like: 'foosball', machine: 'foosball', cabinet: false, cpu: true, you: [1, 0], count: 'goals',
     blurb: 'Foosball against the computer: first to five, or the most in three minutes. Your red men follow where you point and kick together; their feet lift as they follow through, so your shots pass over your own men. A goal 100, a long shot 100 more, a quick goal 50 more, a block 10; a win 500, a shutout 300 more.',
     color: '#16a34a', accent: '#f87171',
     controls: { layout: 'tap' },
@@ -185,7 +188,7 @@ export const GAMES = Object.freeze([
     difficulty: 3, stars: [5000, 15000, 30000],
   },
   {
-    id: 'pool-shark', kind: 'builtin', title: 'Pool Shark', icon: '🎱', like: 'eight-ball pool', machine: 'pool_table', cabinet: false, cpu: true,
+    id: 'pool-shark', kind: 'builtin', title: 'Pool Shark', icon: '🎱', like: 'eight-ball pool', machine: 'pool_table', cabinet: false, cpu: true, you: [0, 1], count: 'balls',
     blurb: 'Eight-ball against the computer. You break; the first ball potted makes the groups. Pot yours to shoot again, clear them, then pot the 8 to win. A ball 100, more for a run; a win 1000 and 100 for each of the computer\'s left. Twenty seconds a shot.',
     color: '#0f8a5f', accent: '#facc15',
     controls: { layout: 'tap' },
@@ -214,5 +217,12 @@ export const GAMES = Object.freeze([
 ].map(g => Object.freeze({ aspect: [3, 4], cabinet: true, ...g })));
 
 export const gameOf = id => GAMES.find(g => g.id === id) || null;
+/** The cabinets' library: the built-in games played on a cabinet (a machine's own game is played at it). */
+export const LIBRARY = Object.freeze(GAMES.filter(g => g.kind === 'builtin' && g.cabinet));
+const hashId = s => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
+/** The game a cabinet shows and offers first (piece id on floor f of building b; g: its own choice, the item's `g`): its
+ *  own choice when it has one, else one of the library by its place — the same on every page and on the server (the game
+ *  an AI agent plays there). */
+export const cabinetGame = (b, f, id, g = null) => gameOf(g)?.id || LIBRARY[hashId(`${b}.${f}.${id}`) % LIBRARY.length].id;
 /** The game played at an arcade piece of type t (its machine), or null: a cabinet plays the library instead. */
 export const machineGame = t => (t && GAMES.find(g => g.machine === t)) || null;   // (no type, no machine: the library's games have none)

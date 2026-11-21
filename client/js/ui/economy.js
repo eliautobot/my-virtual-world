@@ -331,7 +331,9 @@ const bizIcon = k => ({ cafe: '☕', restaurant: '🍽️', shop: '🛍️', gym
 async function buyAt(biz, items) {
   try {
     const r = await post('/api/economy/buy', { business: biz.id, items, idem: key() });
-    app.toast?.(`🧾 ${r.items.map(i => `${i.n > 1 ? `${i.n} × ` : ''}${i.label}`).join(', ')} — ${vc(r.total)}`, 'good', 3200);
+    // (food bought sitting at a table there is served in front of the player; bought standing, when they sit down there)
+    const served = r.served === 'served' ? ' · 🍽️ served at your table' : r.served === 'waiting' ? ' · sit at a table here and it is served' : '';
+    app.toast?.(`🧾 ${r.items.map(i => `${i.n > 1 ? `${i.n} × ` : ''}${i.label}`).join(', ')} — ${vc(r.total)}${served}`, 'good', 4200);
     refresh();
     return r;
   } catch (x) {

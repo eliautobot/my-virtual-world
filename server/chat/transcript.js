@@ -20,6 +20,7 @@ export class Transcripts {
     this.db = dbs.db; this.w = dbs.worldId; this.now = now; this.log = log; this.appends = 0;
     this.q = {
       read: this.db.prepare('SELECT * FROM (SELECT * FROM chat_messages WHERE world_id = ? AND account_id = ? AND agent_id = ? AND session_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id'),
+      outings: this.db.prepare("SELECT agent_id, ts, meta_json FROM chat_messages WHERE world_id = ? AND account_id = ? AND agent_id IN (?, ?) AND status = 'outing' ORDER BY ts, id LIMIT 4000"),
       ins: this.db.prepare('INSERT INTO chat_messages (world_id, account_id, agent_id, session_id, role, text, run_id, status, meta_json, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
       one: this.db.prepare('SELECT * FROM chat_messages WHERE world_id = ? AND account_id = ? AND session_id = ? AND id = ?'),
       upd: this.db.prepare('UPDATE chat_messages SET text = ?, status = ?, meta_json = ? WHERE id = ?'),
@@ -42,6 +43,14 @@ export class Transcripts {
     if (r.status) e.status = r.status;
     if (r.meta_json) { try { e.meta = JSON.parse(r.meta_json); } catch { /* unreadable: left out */ } }
     return e;
+  }
+  /** The outing lines (server/companions/outings.js) in account's chats with two agents, oldest first: [{ agent, at, kind
+   *  ('start' | 'end') }]. */
+  outingLines(accountId, a, b) {
+    return this.q.outings.all(this.w, id(accountId), id(a), id(b)).map(r => {
+      let k = null; try { k = JSON.parse(r.meta_json || '{}').outing || null; } catch { k = null; }
+      return { agent: r.agent_id, at: r.ts, kind: k };
+    }).filter(x => x.kind === 'start' || x.kind === 'end');
   }
   read(accountId, agentId, sessionId, limit = MAX_ENTRIES) {
     return this.q.read.all(this.w, id(accountId), id(agentId), id(sessionId), Math.max(1, Math.min(MAX_ENTRIES, limit))).map(r => this.view(r));
@@ -118,7 +127,14 @@ function safeDir(p) { try { return fs.statSync(p).isDirectory() ? fs.readdirSync
 export function mergeHistory(provider, mirror) {
   const key = m => `${m.role}\u0000${m.text}`;
   const out = (provider || []).filter(m => m && typeof m.text === 'string').map(m => ({ role: m.role === 'user' || m.role === 'assistant' ? m.role : 'system', text: m.text.slice(0, TEXT_MAX), ts: m.ts ?? null, source: 'provider' }));
-  const seen = new Set(out.map(key));
-  for (const m of mirror || []) if (!seen.has(key(m))) { out.push({ ...m, source: 'mirror' }); seen.add(key(m)); }
+  // (counted: a message the provider has once stands for one of the mirror's — the same words said twice, "Sure.", are
+  //  two messages, and an agent whose history is the mirror alone keeps both)
+  const have = new Map();
+  for (const m of out) have.set(key(m), (have.get(key(m)) || 0) + 1);
+  for (const m of mirror || []) {
+    const n = have.get(key(m)) || 0;
+    if (n) { have.set(key(m), n - 1); continue; }
+    out.push({ ...m, source: 'mirror' });
+  }
   return out;
 }

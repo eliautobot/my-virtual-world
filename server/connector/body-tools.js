@@ -68,11 +68,11 @@ export const BODY_TOOLS = [
   },
   {
     name: 'act', title: 'Do something',
-    description: 'Your body\'s actions. action: "do" (activity: park, cafe, gym, shop, jog, dance, home or work; minutes), "go" (place: a name from look, or home / work; minutes), "meet" (name; minutes), "stop" (end your order), "say" (text out loud, to: a name near you), "plan" (text; kind: must or want), "plan_done" (id; dropped: true if you dropped it), "remember" (text; long: true to keep it).',
+    description: 'Your body\'s actions. action: "do" (activity: park, cafe, gym, shop, jog, dance, home or work; minutes), "go" (place: a name from look, or home / work; minutes), "meet" (name; minutes), "things_to_do" (what you can do right where you are: sit down, use something near — a bench, a cabinet, the piano —, a meal, shopping, the gym; each with an id), "use" (thing: an id from things_to_do — your body does it for real; minutes), "stop" (end your order), "come_along" (go with your owner as their companion — walk with them, ride in their car; place: where you go together, optional), "wait" (wait here, or at place, for your owner), "go_with" (name: another of your owner\'s agents — join their group), "let_go" (stop being a companion: back to your own day), "say" (text out loud, to: a name near you), "plan" (text; kind: must or want), "plan_done" (id; dropped: true if you dropped it), "remember" (text; long: true to keep it).',
     inputSchema: obj({
-      action: { type: 'string', enum: ['do', 'go', 'meet', 'stop', 'say', 'plan', 'plan_done', 'remember'] },
-      activity: s('For do', 20), place: s('For go', 80), name: s('For meet', 60), text: s('For say, plan, remember', 240), to: s('For say: who', 60),
-      minutes: int('How long, in world minutes', 1, 480), kind: { type: 'string', enum: ['must', 'want'] }, id: int('For plan_done: the plan id', 1, 1e9),
+      action: { type: 'string', enum: ['do', 'go', 'meet', 'things_to_do', 'use', 'stop', 'say', 'plan', 'plan_done', 'remember', 'come_along', 'wait', 'go_with', 'let_go'] },
+      activity: s('For do', 20), place: s('For go, come_along, wait', 80), name: s('For meet, go_with', 60), text: s('For say, plan, remember', 240), to: s('For say: who', 60),
+      minutes: int('How long, in world minutes', 1, 480), kind: { type: 'string', enum: ['must', 'want'] }, id: int('For plan_done: the plan id', 1, 1e9), thing: s('For use: an id from things_to_do', 160),
       dropped: { type: 'boolean' }, long: { type: 'boolean' },
     }, ['action']), annotations: WRITE,
     run: (c, a) => c.world.act(c.slot, a),

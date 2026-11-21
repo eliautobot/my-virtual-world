@@ -34,7 +34,7 @@ export async function radioTab(d, body, { only = null } = {}) {
       <div class="row" style="justify-content:space-between;gap:8px"><b style="color:${esc(st.color)}">${esc(st.freq)} ${esc(st.band)} · ${esc(st.name)}</b>
         ${only ? '' : `<span class="row" style="gap:6px"><button class="btn small rad-edit" data-id="${esc(st.id)}">Edit</button><button class="btn small rad-del" data-id="${esc(st.id)}" title="Take it off the air">Remove</button></span>`}</div>
       <div class="hint">${esc(st.line || '')}${st.talk ? ' · talk radio' : ''}${st.studio ? ' · 🎙️ broadcast from its studio' : ''} · talk every ${talkOf(st).every} song${talkOf(st).every > 1 ? 's' : ''}, ${talkOf(st).length}${talkOf(st).max != null ? `, at most ${talkOf(st).max} a day` : ''}</div>
-      <div class="hint">Plays ${esc(plays(st))} · Hosts: ${st.hostNames?.length ? esc(st.hostNames.map(h => h.name).join(', ')) : st.dj ? 'none' : 'none (music and idents only)'}${st.dj ? ` · DJ: ${esc(st.dj.name)}` : ''} · Ads ${st.ads?.on === false ? 'off' : `every ${st.ads?.every || 2} breaks`}</div>
+      <div class="hint">Plays ${esc(plays(st))} · Hosts: ${st.hostNames?.length ? esc(st.hostNames.map(h => h.name).join(', ')) : st.dj ? 'none' : 'none (music and idents only)'}${st.dj ? ` · DJ: ${esc(st.dj.name)}` : ''}${st.away?.length ? ` · Not in: ${esc(st.away.map(x => `${x.name} (${x.text})`).join(', '))}` : ''} · Ads ${st.ads?.on === false ? 'off' : `every ${st.ads?.every || 2} breaks`}</div>
       ${st.hostNames?.length || st.dj ? `<div class="hint">${V.today?.[st.id] || 0} breaks today${L ? ` · last ${when(L.at)}: ${L.ok ? `on air (${esc(L.voice)})` : esc(WHY[L.error] || L.error)}` : ''}</div>` : ''}
       ${editing && editing.id === st.id ? form(editing) : ''}</div>`;
   };

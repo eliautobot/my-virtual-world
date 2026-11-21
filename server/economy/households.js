@@ -18,6 +18,7 @@ import { landValue } from '../../shared/land-value.js';
 import { makeGrid } from '../../shared/city.js';
 import { hashStr } from '../../shared/rng.js';
 import { isServiceDesk } from '../../shared/catalog.js';
+import { takeHomeItem } from '../../shared/items.js';
 import { LedgerError, vc } from './ledger.js';
 import { subj, subjKey } from './economy.js';
 import { bp, incomeTax, bracketOf } from './policy.js';
@@ -123,13 +124,14 @@ export class Households {
    * an outside AI told to go back again and again: not while paused, not without the 'buy' scope, and not past its daily cap
    * with what it spent in the last 24 hours (payments and venue purchases together). Records the purchase it allows.
    */
-  agentMayBuy(p, total) {
+  agentMayBuy(p, total, record = true) {
     const s = this.e.personSubject(p), A = this.e.parts.agents;
     if (!s || s.kind !== 'agent' || !A) return true;
     const L = A.limitsOf(s.id), now = this.e.now();
     if (L.paused || !L.scopes.includes('buy')) return false;
     const list = (this.agentVenue.get(s.id) || []).filter(x => x.at > now - 86400000);
     if (L.spent24h + list.reduce((n, x) => n + x.amount, 0) + total > L.dailyCap) { this.agentVenue.set(s.id, list); return false; }
+    if (!record) return true;   // (asked ahead: quote)
     list.push({ at: now, amount: total }); this.agentVenue.set(s.id, list);
     if (this.agentVenue.size > 20000) this.agentVenue.delete(this.agentVenue.keys().next().value);
     return true;
@@ -187,9 +189,11 @@ export class Households {
       else if (p.job && act.b === p.job.b) R.h = round2(R.h + hrs);
       if (act.use !== 'work' || act.b < 0) return;   // remote work at a café: a coffee as well (below)
     }
-    if (act.b < 0) return;
+    // (a companion only being with its leader there — beside them, sitting with them, at the cabinet next to theirs —
+    //  buys nothing: what it orders or pays to play is an act of its own kind, server/sim/companion-moves.js)
+    if (!(act.b >= 0) || act.kind === 'follow') return;
     const W = this.e.d.world(), B = W.buildings[act.b], L = B && W.levels[B.lv?.[act.f]];
-    if (p.home && act.kind === 'meal' && act.b === p.home.b && act.f === p.home.f) { this._res(day, p.id).hm++; return; }
+    if (p.home && act.kind === 'meal' && act.b === p.home.b && act.f === p.home.f) { if (!this.cookFromBag(p, t)) this._res(day, p.id).hm++; return; }
     const venue = L?.venue;
     if (!VENUES.has(venue)) return;
     const items = this.basket(p.id, t, venue, act);
@@ -218,6 +222,60 @@ export class Households {
     this.e.parts.stats?.noteSale?.(biz, total, act);
     // a real customer: their order waits for whoever works there (./jobs.js)
     this.e.parts.jobs?.ticket?.(biz, { kind: 'resident', id: p.id, name: p.name }, lines, `visit:${p.id}:${Math.round(t)}`);
+    this.stow(p, lines, t, biz);
+  }
+  /**
+   * What an AI agent bought to take home (a shop's groceries, a shopping bag: shared/items.js takeHomeItem) goes into its
+   * inventory (./inventory.js), where it, its owner and its chat brain see it (2026-11-17, the product owner: "idk if he
+   * actually grabbed them"). It goes in when the sale is recorded, as the visit is planned — the sale itself is recorded
+   * then and the day's settlement charges it whatever happens next, so what it paid for is in its bag from then on (put in
+   * only once its body got there, a visit cut short would be paid for and missing). Once a purchase: the key is the person
+   * and the visit's time, so the same visit planned again (a replay, a restart) never adds it twice. Residents' purchases
+   * stay sums of the day, as ever: no inventory for the city's hundreds of residents.
+   */
+  stow(p, lines, t, biz) {
+    const s = this.e.personSubject(p), inv = this.e.parts.inventory;
+    if (s?.kind !== 'agent' || !inv) return;
+    const n = new Map();
+    for (const id of lines) { const item = takeHomeItem(id); if (item) n.set(item, (n.get(item) || 0) + 1); }
+    for (const [item, qty] of n) {
+      try { inv.add(s, item, qty, null, { kind: 'buy', actor: `agent:${s.id}`, memo: biz.name, ref: `business:${biz.id}`, idem: `visit-in:${p.id}:${Math.round(t * 100)}:${item}` }); }
+      catch (e) { this.e.log.warn?.(`[economy] ${p.name}'s ${item} could not go into its inventory:`, e.message); }   // (a full inventory: bought, not carried)
+    }
+  }
+  /**
+   * A meal at home of an AI agent with groceries in its bag (a shop's groceries line, bought there: stow) is cooked from
+   * them: one bag used (its inventory says so), and the meal is not among those the day's settlement buys groceries for —
+   * they are paid for already. → true when it cooked from its bag. Residents and agents with none: the settlement's
+   * groceries, as ever.
+   */
+  cookFromBag(p, t) {
+    const s = this.e.personSubject(p), inv = this.e.parts.inventory, item = takeHomeItem('groceries');
+    if (s?.kind !== 'agent' || !inv || !item) return false;
+    const stack = inv.list(s).find(x => x.item === item && x.qty - x.held > 0);
+    if (!stack) return false;
+    try { inv.take(s, stack.id, 1, { kind: 'use', actor: `agent:${s.id}`, memo: 'Cooked a meal at home', idem: `cook:${p.id}:${Math.round(t * 100)}` }); return true; }
+    catch (e) { this.e.log.warn?.(`[economy] ${p.name} could not cook from its groceries:`, e.message); return false; }
+  }
+  /**
+   * What resident a would pay for activity act at its venue now, by the same rules as onAct (its basket, the business's
+   * prices, its money, an agent's owner's limits) — asked before it orders (a companion joining its leader's meal:
+   * server/sim/companion-moves.js sitWith). → { total, items, ok, why: null | 'free' (nothing to pay here) | 'money' |
+   * 'limits' }. Records nothing.
+   */
+  quote(a, act) {
+    const p = a?.p, W = this.e.d.world(), B = p && act ? W.buildings[act.b] : null, L = B && W.levels[B.lv?.[act.f]];
+    const free = { total: 0, items: [], ok: true, why: 'free' };
+    if (!L || !VENUES.has(L.venue)) return free;
+    const bz = this.e.parts.businesses, biz = bz?.at(act.b, act.f);
+    if (!biz) return free;
+    let total = 0;
+    const items = [];
+    for (const id of this.basket(p.id, act.holdStart ?? 0, L.venue, act)) { const price = bz.priceOf(biz, id); if (price) { total += price; items.push(id); } }
+    if (!total) return free;
+    if (this.available(p) < total) return { total, items, ok: false, why: 'money' };
+    if (!this.agentMayBuy(p, total, false)) return { total, items, ok: false, why: 'limits' };
+    return { total, items, ok: true, why: null };
   }
   /** The ids a café or restaurant at (b, f) sells (the simulation orders from it: server/sim/agents.js order()), or null. */
   menuAt(b, f) {
@@ -247,7 +305,8 @@ export class Households {
       if (r01(pid, t, 's') < 0.2) out.push('dessert');
       return out;
     }
-    if (venue === 'shop') return u === 'buy' ? [r01(pid, t, 'g') < 0.45 ? 'groceries' : 'goods'] : [];
+    // (an errand of its plans came for something: that, what the shop sells of it — server/sim/agents.js shopVisit)
+    if (venue === 'shop') return u !== 'buy' ? [] : Array.isArray(act.buy) && act.buy.length ? act.buy : [r01(pid, t, 'g') < 0.45 ? 'groceries' : 'goods'];
     if (venue === 'gym') return act.kind === 'gym' ? ['session'] : [];
     return [];
   }

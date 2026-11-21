@@ -4,7 +4,8 @@
 // for the server's replay, its screen drawn every display frame. Messages are { mvwArcade: 1, t, … }:
 //   cabinet → box   init { seed, best, practice }   in { v: input value }   pause   resume
 //   box → cabinet   ready { id }   sfx { l: [[name, param], …] }   buzz { ms }   over { score, ticks, log, detail }
-//                   error { msg }
+//                   live { score, lives?, detail } (every LIVE_S seconds of play: where the game stands, for the agents
+//                   with the player — docs/features/awareness.md §5)   error { msg }
 // The box never reaches the page, the account or the network (a sandboxed frame with its own origin; the server's CSP).
 import { InputLog, inputBits, TICK_HZ } from '/shared/arcade/core.js';
 import { gameOf } from '/shared/arcade/catalog.js';
@@ -13,7 +14,8 @@ const id = new URLSearchParams(location.hash.slice(1)).get('g') || '';
 const meta = gameOf(id);
 const cv = document.getElementById('screen');
 const send = m => parent.postMessage({ mvwArcade: 1, ...m }, '*');
-const DT = 1 / TICK_HZ;
+const DT = 1 / TICK_HZ, LIVE_S = 5;
+const livesOf = st => (Number.isFinite(st?.lives) ? st.lives : null);
 let mod = null, view = null, sim = null, s = null, log = null, input = 0, running = false, paused = false, acc = 0, last = performance.now(), eng = '-', engM = null, engAt = 0;
 
 function layout() {
@@ -57,6 +59,7 @@ function frame(now) {
       sim.step(s, inputBits(input));
       for (const ev of s.ev) { view.event(ev); const f = view.sfx(ev); if (f) { if (Array.isArray(f[0])) sfx.push(...f); else sfx.push(f); } buzz = Math.max(buzz, view.buzz?.(ev) || 0); }
       acc -= DT; n++;
+      if (log.ticks % (TICK_HZ * LIVE_S) === 0 && !sim.over(s)) send({ t: 'live', score: sim.score(s), lives: livesOf(s), detail: sim.detail ? sim.detail(s) : null });
       if (sim.over(s)) {
         running = false;
         send({ t: 'over', score: sim.score(s), ticks: log.ticks, log: log.encode(), detail: sim.detail ? sim.detail(s) : null });

@@ -1,8 +1,9 @@
 // My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Talking with an AI agent in the city (docs/features/CHAT.md §14; 2026-10-08) — Play mode's E face to face, or Talk
 // on the selection card from the map:
-// - its owner's own agent: the chat window opens on it (no limits, every tool); in Play mode it stops and turns to
-//   them, and each answer also shows in its speech bubble, to them alone;
+// - its owner's own agent, or a companion of theirs they may chat with: the chat window opens on the chat they have with
+//   it now — the same one the companions' voice talks in (ui/chat.js current: one conversation); in Play mode it stops
+//   and turns to them, and each answer also shows in its speech bubble, to them alone — once, however many ways show it;
 // - someone else's agent: this bar — a short message (with 🎤 to say it), sent; the answer shows only in the agent's
 //   speech bubble, only on this page. The conversation's limits are the admin's and the server's (server/agent-talk/):
 //   the bar shows what is left — the time before it is cleared, messages, characters — and what the server refused;
@@ -20,10 +21,12 @@ import { can, options as voiceOptions, hear, Mic, BrowserEar, micWords, unlock }
 
 const WALK_OFF = 8, BUBBLE_MAX = 4000;
 let app = null, T = null;   // T: the open bar { rec, i, st, el, run, timer, ears }
+const VOICED = new Set();   // runs the companions' voice speaks itself (ui/companion-voice.js): their bubbles say nothing
+const BUBBLED = new Map();  // agent id → the run its bubble shows now (one answer, one bubble)
 
 export function init(a) {
   app = a;
-  app.talk = { to, close, bubble, get open() { return !!T; } };
+  app.talk = { to, close, bubble, voiced, get open() { return !!T; } };
   bus.on('msg:chat', onFrame);
   bus.on('auth', () => { if (T && !auth.account) close(); });
   bus.on('mode', m => { if (T && T.play && m !== 'play') close(); });
@@ -48,12 +51,25 @@ export function plain(md) {
 /** Seconds of real time a bubble stays, by its length (time to read it) — as world time for the labels (S.simT). */
 const forSecs = text => Math.min(120, 6 + String(text).length / 14) * (app?.net?.clock?.rate || 1);
 
-/** An answer of agent `agentId` in its bubble, on this page only (its owner's chat window, or a talk). */
-export function bubble(agentId, text) {
+/** A run the companions' voice says aloud itself: a bubble for it is a bubble only. */
+export function voiced(runId) {
+  if (!runId) return;
+  VOICED.add(runId);
+  if (VOICED.size > 64) VOICED.delete(VOICED.values().next().value);
+}
+/** An answer of agent `agentId` in its bubble, on this page only (its owner's chat window, the companions' voice, or a
+ *  talk). o.run: its run — one answer shown by the chat window and the companions' voice together is one bubble, said
+ *  once; o.spoken: something else says it aloud already. */
+export function bubble(agentId, text, o = {}) {
   const rec = (S.agentList || []).find(a => a.id === agentId), i = rec?.i ?? -1;
   if (i < 0 || !text) return;
+  if (o.run && BUBBLED.get(agentId) === o.run) return S.says.get(i)?.text || plain(text);
+  if (o.run) BUBBLED.set(agentId, o.run);
   const t = plain(text);
   if (t) S.says.set(i, { text: t, until: S.simT + forSecs(t) });
+  // (and in its voice, when its body is near enough to be heard — unless the chat window's voice mode or the companions'
+  // voice reads it already)
+  if (t && !o.spoken && !(o.run && VOICED.has(o.run))) app?.voices?.own(rec, i, t);
   return t;
 }
 
@@ -64,15 +80,20 @@ export async function to(i, at = null) {
   if (!p) return;
   const rec = p.v ? recOf(i) : null;
   if (!rec || !auth.account) return greet(i, at, p.v && !auth.account ? 'Sign in to talk with agents.' : null);
+  // (a companion of theirs they may chat with — theirs to manage, if not their own —: the same conversation the companions'
+  // voice has with it, in the chat window — not a visitor's talk)
+  if (rec.level && (app.companions?.list?.() || []).some(c => c.agent === rec.id)) return ownChat(rec, at);
   let st;
   try { st = await getJSON(`/api/agent-talk?agent=${rec.id}`); } catch (e) { return app.toast?.(e.message, 'bad'); }
-  if (st.mode === 'own') {
-    app.chat?.open(rec.id);
-    if (at) post('/api/agent-talk/face', { agent: rec.id, x: at.x, z: at.z }).catch(() => {});
-    return;
-  }
+  if (st.mode === 'own') return ownChat(rec, at);
   if (st.mode === 'greet') return greet(i, at, st.why === 'greets_only' ? null : st.message);
   open(rec, i, st, at);
+}
+/** The chat window on the chat the person has with agent rec now (ui/chat.js open: the window that shows it, else its
+ *  current chat — one conversation); in Play mode it turns to them. */
+function ownChat(rec, at) {
+  app.chat?.open(rec.id);
+  if (at) post('/api/agent-talk/face', { agent: rec.id, x: at.x, z: at.z }).catch(() => {});
 }
 /** A resident's way: out loud in the world (Play mode, face to face), or one line from the map. */
 async function greet(i, at, note) {

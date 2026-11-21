@@ -60,3 +60,83 @@ export function classifyAct(sim, a, act) {
     default: return null;
   }
 }
+
+// ------------------------------------------------------------------------------------------- plans and what was done
+/**
+ * The words a plan uses for the kinds of activity above (2026-11-17, the product owner: Sam's "Groceries at Store 21 after
+ * work" was marked done with no shopping in his day). A plan that uses them, or names a place of the world, is done when
+ * a line of its log says so (planCheck, didPlan) — so only what the log records wherever it happens is here (drinks are
+ * also had at a club or a lounge bar, which it doesn't record: a plan for drinks is taken at its word). out: the word
+ * names the kind of place (a restaurant, a café), so the same kind of activity at home is not it.
+ */
+const PLAN_WORDS = Object.freeze([
+  { kinds: ['shop'], words: ['shop', 'shops', 'shopping', 'store', 'groceries', 'grocery', 'supermarket'] },
+  { kinds: ['meal'], words: ['breakfast', 'brunch', 'lunch', 'dinner', 'supper', 'meal', 'eat'] },
+  { kinds: ['meal', 'bar'], words: ['restaurant'], out: true },
+  { kinds: ['cafe', 'meal'], words: ['café', 'cafe'], out: true },
+  { kinds: ['cafe', 'meal'], words: ['coffee'] },
+  { kinds: ['gym'], words: ['gym'] },
+  { kinds: ['gym', 'jog'], words: ['workout', 'work out', 'exercise'] },
+  { kinds: ['jog'], words: ['jog', 'jogging'] },
+  { kinds: ['walk', 'park'], words: ['walk', 'stroll'] },
+  { kinds: ['park', 'walk', 'jog'], words: ['park'] },
+  { kinds: ['nap'], words: ['nap'] },
+]);
+const low = s => String(s ?? '').normalize('NFC').toLowerCase();
+const wordChar = ch => !!ch && /[\p{L}\p{N}]/u.test(ch);
+/** Where needle (lower case) stands in hay as whole words, or -1. */
+function wordAt(hay, needle) {
+  for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + 1)) if (!wordChar(hay[i - 1]) && !wordChar(hay[i + needle.length])) return i;
+  return -1;
+}
+/** The world's places a plan can name, longest first, for planCheck: those whose visits the activity log records
+ *  (PUBLIC_VENUES, by the names it gives them) — a night out at a club isn't in it, so a plan for one is taken at its word. */
+export function placeNames(sim) {
+  const W = sim.world, seen = new Map();
+  (W.buildings || []).forEach((B, b) => {
+    if (!B || B.gone) return;
+    if (B.type === 'park' && B.name) seen.set(low(B.name), B.name);
+    for (let f = 0; f < (B.floors || 0); f++) {
+      if (!PUBLIC_VENUES.has(W.levels[B.lv?.[f]]?.venue)) continue;
+      const n = sim.brain.placeName(b, f);
+      if (n) seen.set(low(n), n);
+    }
+  });
+  return [...seen].map(([l, name]) => ({ name, low: l })).sort((a, b) => b.low.length - a.low.length);
+}
+/**
+ * What a plan asks its body to do: { places: [names of the world's places it names], groups: [the kinds of activity it
+ * names: PLAN_WORDS entries] }, or null when it names neither ("Text Pema about sushi": nothing in its activity log can
+ * say whether that happened). What it is about (after "about") is talked about, not done. "At home" is its home, as its
+ * log says ("Breakfast at home": place 'Home'). names: placeNames().
+ */
+export function planCheck(text, names = []) {
+  let rest = ` ${low(text)} `;
+  const ab = wordAt(rest, 'about');
+  if (ab >= 0) rest = rest.slice(0, ab);
+  const places = [];
+  for (const n of [...names, { name: 'Home', low: 'at home' }]) {
+    const i = n.low ? wordAt(rest, n.low) : -1;
+    if (i < 0) continue;
+    places.push(n.name);
+    rest = `${rest.slice(0, i)}${' '.repeat(n.low.length)}${rest.slice(i + n.low.length)}`;   // ("Store 21" is a place, not a word for shopping)
+  }
+  const groups = PLAN_WORDS.filter(g => g.words.some(w => wordAt(rest, w) >= 0));
+  return places.length || groups.length ? { places, groups } : null;
+}
+/** Whether two names are one place ("Sakura Sushi" and its "Sakura Sushi Dining Room" too). */
+export const samePlace = (a, b) => { const x = low(a), y = low(b); return !!x && !!y && (x === y || x.startsWith(`${y} `) || y.startsWith(`${x} `)); };
+/** The line each kind of free time writes in the log (classifyAct: a café visit is 'cafe', a stroll a 'walk'), so an
+ *  option can be matched to a plan before it is done (server/free-will/options.js withPlans). */
+export const LOGGED_AS = Object.freeze({ cafe: 'cafe', park: 'park', shop: 'shop', gym: 'gym', jog: 'jog', wander: 'walk', bar: 'bar', lounge: 'lounge', chat: 'chat', visit: 'visit', home: 'home' });
+const fits = (g, line) => g.kinds.includes(line.kind) && !(g.out && (!line.place || line.place === 'Home'));
+/**
+ * Whether the lines of an activity log ([{ kind, place }]) show a plan done (check: planCheck's): a line at each place it
+ * names, and for each kind of activity it names a line of that kind at one of them ("Groceries at Store 21": shopping at
+ * Store 21 — not shopping elsewhere and passing by), anywhere when it names no place.
+ */
+export function didPlan(check, lines) {
+  if (!check) return false;
+  const at = l => !check.places.length || check.places.some(p => samePlace(l.place, p));
+  return check.places.every(p => lines.some(l => samePlace(l.place, p))) && check.groups.every(g => lines.some(l => fits(g, l) && at(l)));
+}

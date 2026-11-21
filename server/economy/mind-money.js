@@ -85,6 +85,9 @@ export function createMindMoney(econ, runAgentAction) {
     pay(agentId, to, amount, memo, idem) { return runAgentAction('pay', { to, amount, memo, idem }, agentId, false); },
     /** Gives something from its inventory (a stack ref or a thing's name), worth as much as a payment of its value. */
     give(agentId, to, item, qty, memo, idem) { return runAgentAction('give', { item, qty, to, memo, idem }, agentId, false); },
+    /** Proposes a trade of its own (to: 'owner' or { kind, id } — its owner or their other agents): what it gives and what it
+     *  would like, by name; nothing moves until they accept. */
+    offerTrade(agentId, payload) { return runAgentAction('tradePropose', payload, agentId, false); },
     /** Asks its owner for money (a payment request the owner answers in their wallet) — allowed when it may pay at all. */
     askOwner(agentId, amount, memo) {
       const owner = econ.agentOwner(agentId);

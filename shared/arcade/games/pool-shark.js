@@ -6,12 +6,14 @@
 // win; the 8 down early loses (on the break it is spotted again). A ball of yours potted 100, each further pot in a run
 // 50 more; a win 1000 and 100 for every ball of the computer's still on the table. Twenty seconds a shot (three let run
 // out in a row: the game is the computer's).
+// Someone else at the other end (an AI agent: server/play/versus.js): its hand is the run's (init's o.k: core.js handOf)
+// and its own score is kept as yours is, by the same rules (other(): its side of the game, for its own record).
 // Controls: the pointer (the mouse over the table, a finger on it) aims the cue from the cue ball (the way to it, sent as
 // an angle fine enough for a thin cut); hold A (the mouse
 // button, a finger, Z) to draw the cue back, the power rising and falling, let go to strike; ◀ ▶ turn the aim finely,
 // ▲ ▼ more. The sim (rules only; the game in the world is client/js/play/machines/pool-shark.js): deterministic, see
 // shared/arcade/core.js; metres on the cloth (x across, z toward you), speeds in metres a step (1/60 s).
-import { BTN, baseState, roll, shuffle, SIN, COS, FX } from '../core.js';
+import { BTN, baseState, roll, shuffle, SIN, COS, FX, handOf } from '../core.js';
 import { POOL, poolRack } from '../machines.js';
 
 const { hw: HW, hl: HL, ballR: R } = POOL, D2 = 4 * R * R, NS = 8;
@@ -49,8 +51,8 @@ export const CUSHIONS = (() => {
   return g;
 })();
 
-export function init(seed) {
-  const s = { ...baseState(seed), balls: [], turn: 1, ph: 'aim', pt: 0, ax: 0, az: -1, chg: -1, pw: 0, prev: 0, clock: CLOCK,
+export function init(seed, o = null) {
+  const s = { ...baseState(seed), hand: handOf(o), cs: 0, crun: 0, cbest: 0, cwin: false, balls: [], turn: 1, ph: 'aim', pt: 0, ax: 0, az: -1, chg: -1, pw: 0, prev: 0, clock: CLOCK,
     group: 0, shot: null, shots: 0, run: 0, score: 0, potted: [0, 0], fouls: 0, best: 0, over: false, win: false, plan: null, walk: 0 };
   // the rack: the 1 at the apex, the 8 in the middle, a solid and a stripe at the back corners, the rest by the dice
   const spots = poolRack(), order = new Array(15).fill(0);
@@ -154,8 +156,9 @@ function resolve(s) {
     if (sh.break) { spotEight(s); s.ev.push({ k: 'spot8' }); }
     else {
       const won = !foul && sh.cleared;
-      s.over = true; s.win = won === (who === 1);
+      s.over = true; s.win = won === (who === 1); s.cwin = !s.win;
       if (s.win) { s.score += 1000 + 100 * left(s, 3 - s.group || 2); }
+      else s.cs += 1000 + (s.group ? 100 * left(s, s.group) : 0);   // (the other side's win: 100 for each of yours left)
       s.ev.push({ k: 'eight', who, won, foul });
       s.ev.push({ k: 'over', win: s.win });
       return;
@@ -170,11 +173,14 @@ function resolve(s) {
   if (who === 1) {
     s.potted[0] += mine.length;
     if (mine.length && !foul) { s.run++; const pts = mine.length * 100 + (s.run > 1 ? 50 * (s.run - 1) : 0); s.score += pts; s.best = Math.max(s.best, s.run); s.ev.push({ k: 'points', pts, run: s.run }); }
-  } else s.potted[1] += mine.length;
+  } else {
+    s.potted[1] += mine.length;
+    if (mine.length && !foul) { s.crun++; s.cs += mine.length * 100 + (s.crun > 1 ? 50 * (s.crun - 1) : 0); s.cbest = Math.max(s.cbest, s.crun); }   // (the other side's, as yours)
+  }
   if (sh.scratch) spotCue(s);
   const again = !foul && mine.length > 0;
   if (foul) { if (who === 1) s.fouls++; s.ev.push({ k: 'foul', who, why: sh.scratch ? 'scratch' : sh.first < 0 ? 'miss' : 'wrong' }); }
-  if (!again) { s.turn = -who; s.run = 0; s.ev.push({ k: 'turn', to: s.turn }); }
+  if (!again) { s.turn = -who; s.run = 0; s.crun = 0; s.ev.push({ k: 'turn', to: s.turn }); }
   s.shot = null;
   if (s.shots >= MAX_SHOTS) { s.over = true; s.win = false; s.ev.push({ k: 'over', win: false, out: true }); return; }
   s.ph = s.turn === 1 ? 'aim' : 'cpu'; s.pt = 0; s.clock = CLOCK; s.chg = -1; s.plan = null;
@@ -214,7 +220,9 @@ function planCpu(s) {
     best = { vx, vz, d: d + 0.6 };
   }
   // off a little (the computer is only as good as its hand)
-  const e = (roll(s, 41) - 20) * CPU.err, vx = best.vx - e * best.vz, vz = best.vz + e * best.vx, l = Math.sqrt(vx * vx + vz * vz);
+  let e = (roll(s, 41) - 20) * CPU.err;
+  if (s.hand) e *= s.hand.err;
+  const vx = best.vx - e * best.vz, vz = best.vz + e * best.vx, l = Math.sqrt(vx * vx + vz * vz);
   s.plan = { ax: vx / l, az: vz / l, pw: clamp((Math.sqrt(best.d) * 0.034 + 0.004 - VMIN) / (VMAX - VMIN), 0.12, 0.85), t: CPU.think + roll(s, 30) };
   if (s.shots === 0) s.plan.pw = 0.95;
 }
@@ -237,7 +245,7 @@ export function step(s, inp) {
     else if (s.chg >= 0 && released & BTN.A) { if (s.chg > 2) strike(s, Math.max(0.04, s.pw)); else s.chg = -1; }
     if (s.ph === 'aim' && --s.clock <= 0) {
       // (three turns let run out in a row: the player walked away, the game is the computer's)
-      if (++s.walk >= WALKOUT) { s.over = true; s.win = false; s.ev.push({ k: 'over', win: false, walked: true }); return; }
+      if (++s.walk >= WALKOUT) { s.over = true; s.win = false; s.cwin = true; s.ev.push({ k: 'over', win: false, walked: true }); return; }
       s.ev.push({ k: 'time' }); s.turn = -1; s.run = 0; s.ph = 'cpu'; s.pt = 0; s.chg = -1; s.clock = CLOCK; s.shots++; s.ev.push({ k: 'turn', to: -1 }); planCpu(s); }
     return;
   }
@@ -263,3 +271,6 @@ export function step(s, inp) {
 export const over = s => s.over;
 export const score = s => s.score;
 export const detail = s => ({ win: s.win, potted: s.potted[0], best: s.best, fouls: s.fouls, shots: s.shots });
+/** The other side's game (the one at the far end: an AI agent's run of its own, server/play/versus.js): its score by the
+ *  same rules, and its counts — me the balls of its group it potted, them yours. Out of shots: nobody's. */
+export const other = s => ({ score: s.cs, detail: { me: s.potted[1], them: s.potted[0], win: s.cwin, draw: s.over && !s.win && !s.cwin, best: s.cbest, shots: s.shots } });

@@ -85,6 +85,11 @@ export const SETTINGS = Object.freeze([
   // How many people live in the city (2026-10-20, server/sim/housing.js): its homes decide — the residents fill this share
   // of the beds in its apartment buildings, settling towards it a little at a time by the world's clock.
   {
+    path: 'characters.bakesPerDay', scope: 'install', tier: 2, type: 'number', default: 20, min: 0, max: 500, step: 1, cap: 'world.edit',
+    label: 'New characters one person may build a day (Agent Studio → Customize → Build your own)', saved: 'Characters a day saved',
+    help: 'Each new character is about 10 seconds of the server\'s work and about 20 MB of its disk, kept for good. 0: no limit. Administrators are not limited; a character already built (the same look) is never counted.',
+  },
+  {
     path: 'world.homesFilled', scope: 'install', tier: 2, type: 'number', default: 30, min: 0, max: 100, step: 1, cap: 'world.edit',
     label: 'Homes filled (%): the share of the city\'s beds its residents fill', saved: 'Homes filled saved',
     help: 'Only homes bring residents; offices, shops and restaurants bring jobs. New homes fill up over a world day or two; when homes go, or the share is lowered, people move away the same way.',
@@ -141,6 +146,13 @@ export const SETTINGS = Object.freeze([
   {
     path: 'freeWill.agentDailyDecisions', scope: 'install', tier: 2, type: 'enum', values: ['300', '600', '1200', '2400', '4800'], default: '1200', cap: 'freewill.admin',
     label: 'Free Will: most decisions per day for one agent', help: 'With Free Will an agent decides its free time, meals, mornings, way to work, rest and tasks: about 150 to 300 decisions a real day (the world runs 16 times faster).',
+  },
+  {
+    // (Free Will in the moment, server/free-will/moments.js: a companion acts on what happens round it and checks its
+    //  owner's words before it answers)
+    path: 'freeWill.moments', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'freewill.admin',
+    label: 'Free Will: companions act on what happens around them (look, go and see, speak up) and check what their owner says before answering',
+    help: 'Each moment is one decision within the same daily limits. Only agents with Free Will on, while they are their owner\'s companion.',
   },
   {
     path: 'freeWill.keepDays', scope: 'install', tier: 2, type: 'days', default: 7, cap: 'freewill.admin', min: 1, max: 90,
@@ -322,6 +334,54 @@ export const SETTINGS = Object.freeze([
     path: 'connector.perMinute', scope: 'install', tier: 2, type: 'number', min: 10, max: 1000, step: 10, default: 120, cap: 'freewill.admin',
     label: 'AI apps (Grok, ChatGPT…): most requests one connected app makes in a minute',
   },
+  // Companions (2026-11-14; server/companions/, docs/features/companions.md): an agent goes with its owner, waits, goes
+  // somewhere or meets up with others because its owner (or a manager) said so — never because a stranger did.
+  {
+    path: 'companions.enabled', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'freewill.admin',
+    label: 'Companions: owners may take their agents along, send them places and set meet-ups', help: 'Off: no new companion orders (those under way end at their next step).',
+  },
+  {
+    path: 'companions.maxPerPlayer', scope: 'install', tier: 2, type: 'number', min: 1, max: 6, step: 1, default: 3, cap: 'freewill.admin',
+    label: 'Companions: most agents following one player',
+  },
+  {
+    path: 'companions.waitMinutes', scope: 'install', tier: 2, type: 'number', min: 1, max: 120, step: 1, default: 10, cap: 'freewill.admin',
+    label: 'Companions: how long they wait for someone who left the world (real minutes)', help: 'Then they go back to their day and their owner is told.',
+  },
+  {
+    path: 'companions.understand', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'freewill.admin',
+    label: 'Companions: an agent\'s decision service reads its owner\'s messages for requests in the city', help: 'Plain commands ("follow me", "wait here") work either way; this lets less plain ones be understood too. Each one is a decision service request.',
+  },
+  {
+    path: 'companions.agentInvites', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'freewill.admin',
+    label: 'Companions: agents may ask each other along (meeting, they go somewhere together by their own choice)', help: 'Each agent\'s own brain asks and answers; nobody is ordered. Needs public speech (a moderation service).',
+  },
+  // Agents' awareness (2026-11-16; server/senses/, docs/features/awareness.md): how much an agent's brain is told about
+  // its surroundings in its chats — each owner chooses per agent in its Studio; this is the default and the master switch.
+  {
+    path: 'awareness.enabled', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'freewill.admin',
+    label: 'Awareness: agents\' brains may be told what is around them (where they are, who is near, what is going on)', help: 'Off: no agent is told about its surroundings in its chats, whatever its owner chose.',
+  },
+  {
+    path: 'awareness.defaultMode', scope: 'install', tier: 2, type: 'enum', values: ['off', 'ask', 'together', 'always'], default: 'together', cap: 'freewill.admin',
+    label: 'Awareness: for agents whose owner hasn\'t chosen (off / only when it asks / when its owner is with it / always)', help: 'When its owner is with it: the full picture while together, one short line apart.',
+  },
+  {
+    path: 'work.lateMinutes', scope: 'install', tier: 2, type: 'number', min: 1, max: 120, step: 1, default: 5, cap: 'freewill.admin',
+    label: 'Work: minutes into a shift before someone not there yet is late (world minutes)', help: 'Their co-workers know who is late, who is away and why; the radio puts only those in the studio on the air.',
+  },
+  {
+    path: 'work.remarks', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'freewill.admin',
+    label: 'Work: agents may say a word when a co-worker is late, leaves or gets back', help: 'In their own words, within their speech limits. They remember it either way.',
+  },
+  {
+    path: 'voice.cityLines', scope: 'install', tier: 2, type: 'boolean', default: true, cap: 'freewill.admin',
+    label: 'Agents speak their lines in the city out loud, each in its own voice', help: 'People near them hear it (the Voices volume). Uses each agent\'s voice service, counted as its owner\'s.',
+  },
+  {
+    path: 'voice.cityAudience', scope: 'install', tier: 2, type: 'enum', values: ['public', 'owner'], default: 'public', cap: 'freewill.admin',
+    label: 'Who hears an agent\'s voice in the city, unless its owner chose: everyone near (public) or only its owner (owner)', help: 'Each owner may choose for each agent in its Studio (Voice). The speech bubble is shown either way.',
+  },
   // Agents and friends (2026-10-10; server/agent-social/): friendships between agents grow with time
   // together, fade with time apart, drop with bad experiences and can be ended; friends may reach each other from a
   // distance (where is, a message, an invitation) only when they count each other as friends, their owners are friends
@@ -490,6 +550,8 @@ export const SETTINGS = Object.freeze([
   { path: 'display.weatherFx', scope: 'account', tier: 0, type: 'enum', values: ['off', 'on'], default: 'on', label: 'Rain and lightning' },
   { path: 'display.traffic', scope: 'account', tier: 0, type: 'enum', values: ['off', 'light', 'normal'], default: 'normal', label: 'Traffic' },
   { path: 'display.vehicleDetail', scope: 'account', tier: 0, type: 'enum', values: ['simple', 'normal'], default: 'normal', label: 'Vehicle detail' },
+  // (the crowd's close-up level for the residents nearest the camera: by the graphics quality — High, Medium — or always, or never)
+  { path: 'display.charDetail', scope: 'account', tier: 0, type: 'enum', values: ['auto', 'standard', 'close'], default: 'auto', label: 'Character detail' },
   { path: 'display.promoAircraft', scope: 'account', tier: 0, type: 'enum', values: ['off', 'on'], default: 'on', label: 'Promotional aircraft' },
   // Online status (WP1.10, C118): Online, or Appear offline (hidden from the online list, join/leave lines and friends'
   // notices; the character stays visible to people near it; admins see the real status).

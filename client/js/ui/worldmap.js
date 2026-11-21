@@ -352,7 +352,8 @@ function pick(t, center) {
     ${d !== null ? `<div class="wc-d">${fmtDist(d)} away · ${fmtTime(d / WALK)} on foot · ${fmtTime(d / DRIVE)} by car</div>` : ''}
     <div class="wc-b">${isWp ? '<button type="button" class="btn small wc-clear">✕ Remove waypoint</button>' : center ? '<button type="button" class="btn small primary wc-wp">📍 Set waypoint here</button>' : ''}
     ${playing && auth.account ? '<button type="button" class="btn small wc-tr" title="Travel there now (once every 10 s)">🚀 Travel here</button>' : ''}
-    ${!playing ? '<button type="button" class="btn small wc-look">🔭 Look here</button>' : ''}</div>`;
+    ${!playing ? '<button type="button" class="btn small wc-look">🔭 Look here</button>' : ''}
+    ${auth.account && app.companions ? '<button type="button" class="btn small wc-cp" title="Send your agents here, or set a meet-up here">👥 Send my agents here</button>' : ''}</div>`;
   E.card.classList.remove('hidden');
   E.wrap.classList.add('card-open');
   E.card.querySelector('.wc-x').onclick = () => { E.card.classList.add('hidden'); E.wrap.classList.remove('card-open'); M.sel = null; M.dirty = true; };
@@ -360,6 +361,7 @@ function pick(t, center) {
   E.card.querySelector('.wc-clear')?.addEventListener('click', () => { clearWaypoint(); pick(t, false); });
   E.card.querySelector('.wc-tr')?.addEventListener('click', () => { const d = t.door || t; app.net.send({ t: 'ptravel', x: d.x, z: d.z }); setOpen(false); });
   E.card.querySelector('.wc-look')?.addEventListener('click', () => { setOpen(false); app.stopFollow?.(); cam.flyTo(t.x, 0, t.z, 60); });
+  E.card.querySelector('.wc-cp')?.addEventListener('click', () => { const d = t.door || t; setOpen(false); app.companions?.sendHere({ x: d.x, z: d.z, name: t.name }); });
 }
 const fold = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();   // café = cafe
 function search() {

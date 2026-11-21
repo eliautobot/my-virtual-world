@@ -36,7 +36,11 @@ export function init(a) {
   window.addEventListener('keydown', e => { if (F.active && !typing(e)) F.keys.add(e.code); });
   window.addEventListener('keyup', e => F.keys.delete(e.code));
   window.addEventListener('blur', () => F.keys.clear());
-  bus.on('msg:fstate', onState);
+  bus.on('msg:fstate', m => { app.net.take?.('fstate'); onState(m); });
+  // (its aircraft, back in the cockpit after a reload: told before this module loaded — kept by core/net.js — taken once
+  //  the page is ready, in Play mode as they were)
+  { const ready = () => { const held = app.net.take?.('fstate'); if (held) { if (S.mode !== 'play') app.setMode?.('play'); onState(held); } };
+    if (app.ready) ready(); else { const off = bus.on('ready', () => { off(); ready(); }); } }
   // a pose the server refused (too far for the time): back where it last agreed — still flying (stopped dead in the air it fell)
   bus.on('msg:fcorr', m => { if (F.active && m.pose) { F.s.p = { x: m.pose.x, y: m.pose.y, z: m.pose.z }; F.prev?.p.set(m.pose.x, m.pose.y, m.pose.z); } });
   bus.on('msg:pmoved', m => { if (m.flight === 'out' && F.active) end(m); });

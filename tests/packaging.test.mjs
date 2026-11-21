@@ -34,17 +34,33 @@ test('the image: node:24-slim, the user node, volumes for the data and the key, 
   assert.deepEqual(cfg.localPeers, ['192.0.2.1']);
 });
 
-test('the image carries only the tools owners need, and they import nothing it lacks', () => {
+test('the image carries only the tools owners need and the server runs, and they import nothing it lacks', () => {
   const df = read('Dockerfile');
   const tools = [...df.matchAll(/^COPY (tools\/\S+) /gm)].map(m => m[1]);
-  assert.deepEqual(tools, ['tools/admin.mjs', 'tools/deploy/dbcopy.mjs']);
+  assert.deepEqual(tools, ['tools/admin.mjs', 'tools/deploy/dbcopy.mjs', 'tools/chars']);
   for (const dir of ['server', 'shared', 'client']) assert.match(df, new RegExp(`^COPY ${dir} \\./${dir}$`, 'm'));
-  for (const tool of tools) {
+  // every tool the server starts in a child process is in the image (the character builder's bake failed on an image
+  // without tools/chars, 2026-11-20) — but the crowd's bake, which needs a browser the image has not (it says so)
+  const inImage = f => tools.some(t => f === t || f.startsWith(t + '/'));
+  const spawned = new Set();
+  for (const f of fs.readdirSync(path.join(ROOT, 'server'), { recursive: true })) {
+    if (!String(f).endsWith('.js') && !String(f).endsWith('.mjs')) continue;
+    for (const m of read(path.join('server', String(f))).matchAll(/path\.join\((?:root|ROOT|this\.root), '(tools\/[^']+)'\)/g)) spawned.add(m[1]);
+  }
+  assert.ok(spawned.has('tools/chars/custom-kind.mjs'), 'the character bake found');
+  for (const f of spawned) if (f !== 'tools/chars/crowd-pack.mjs') assert.ok(inImage(f), `the server runs ${f}, which the image does not carry`);
+  // and what they import: the server, shared or the image's own tools (the bake's, followed from custom-kind.mjs)
+  const files = [...tools.filter(t => t.endsWith('.mjs')), 'tools/chars/custom-kind.mjs'], seen = new Set();
+  while (files.length) {
+    const tool = files.pop(); if (seen.has(tool)) continue; seen.add(tool);
     for (const m of read(tool).matchAll(/\bfrom '(\.{1,2}\/[^']+)'|\bimport\('(\.{1,2}\/[^']+)'\)/g)) {
       const target = path.relative(ROOT, path.resolve(path.dirname(path.join(ROOT, tool)), m[1] || m[2]));
-      assert.match(target, /^(server|shared)\//, `${tool} imports ${target}, which the image does not carry`);
+      assert.ok(/^(server|shared)\//.test(target) || inImage(target), `${tool} imports ${target}, which the image does not carry`);
+      if (target.startsWith('tools/')) files.push(target);
     }
+    for (const m of read(tool).matchAll(/path\.join\(HERE, '([^']+\.mjs)'\)/g)) files.push(path.join(path.dirname(tool), m[1]));
   }
+  assert.ok(seen.has('tools/chars/extra-clips.mjs') && seen.has('tools/chars/rig.mjs'), 'the bake\'s own tools followed');
 });
 
 test('.dockerignore keeps private and runtime files out of the build context', () => {

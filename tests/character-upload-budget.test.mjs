@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { ADDED_CHARACTERS, defaultChar } from '../shared/appearance.js';
 import { TEXTURED } from '../client/assets/chars/index.js';
+import { addKindHelpers } from './helpers/char-kinds.mjs';
 
 const code = fs.readFileSync(new URL('../client/js/render/characters.js', import.meta.url), 'utf8');
 function fixture(renderer, { clock = null, cost = 0 } = {}) {
@@ -19,12 +20,12 @@ function fixture(renderer, { clock = null, cost = 0 } = {}) {
     // (the things characters hold: render/char-props.js, not under test here)
     CharProps: class { begin() {} end() {} push() {} initKind() {} setShadows() {} count() { return 0; } }, shapeFor: () => 0,
   };
-  vm.createContext(ctx);
+  addKindHelpers(code, ctx);
   vm.runInContext(code.slice(code.indexOf('export class Characters')).replace('export class Characters', 'class Characters').replace('export { TRIPO_CLIPS };', '') + '\nglobalThis.C=Characters;', ctx);
   ctx.C.prototype.loadRig = function () {};
   ctx.C.prototype.grow = function (n) { this.cap = n; this.kindOf = new Uint8Array(n); this.appData = new Uint8Array(n * 32); this.appTex = { needsUpdate: false }; };
   ctx.C.prototype.initKind = function (k, d) { this.kinds[k] = { d }; frames.push({ k, uploadedBefore: uploads.filter(t => t.k === d.k).length }); };
-  const c = new ctx.C({ capacity: 64, lods: [0], shadows: false, renderer: renderer && { initTexture: t => { uploads.push(t); if (clock) clock.t += cost; } } });
+  const c = new ctx.C({ capacity: 64, lods: [0], shadows: false, crowd: false, renderer: renderer && { initTexture: t => { uploads.push(t); if (clock) clock.t += cost; } } });
   return { c, kinds, uploads, frames };
 }
 const tick = () => new Promise(r => setTimeout(r, 0));

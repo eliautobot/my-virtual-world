@@ -8,9 +8,14 @@
 // Landed and stopped, the pilot gets out (fexit) beside it; an aircraft left away from its stand waits there a few
 // minutes for anyone to fly it, then the ground crew returns it. A crash (fcrash) returns it at once and puts the pilot
 // beside its stand. A pilot who leaves: the aircraft lands where it is if it is on the ground, else goes home.
+// AI agents fly too (2026-11-17, server/play/flight-crew.js): an agent at the controls is its pilot as minus its id (never
+// an account's), its autopilot's poses given here by the server (takeFor, drive, landFor) and shared as anyone's; the
+// companions riding along have the aircraft's passenger seats (seats: shared/aircraft-specs.js SEATS, the pilot's not
+// among them), kept as the cars' are (./car-seats.js).
 import { aircraftStands } from '../../shared/world-modules.js';
-import { AIRCRAFT, maxRunSpeed } from '../../shared/aircraft-specs.js';
+import { AIRCRAFT, maxRunSpeed, passengerSeats } from '../../shared/aircraft-specs.js';
 import { PF_DRIVING, PF_USING, PF_OBSERVING } from '../../shared/playerproto.js';
+import { CarSeats } from './car-seats.js';
 
 const BOARD_RANGE = 9;          // m from the aircraft's centre (a wing tip away)
 const NEAR = 4000;              // m: aircraft this far from a viewer are sent with their poses
@@ -26,6 +31,8 @@ export class Fleet {
     this.all = new Map();       // stand id → aircraft
     this.byPilot = new Map();   // account id → aircraft
     this.ver = 0; this.sentVer = -1; this.lastFull = 0;
+    // its passengers: who rides in which seat (1 … its class's passenger seats), kept for the flight
+    this.seats = new CarSeats({ places: id => { const a = this.all.get(id); return a ? passengerSeats(a.type) : 0; } });
     this.sync();
   }
   /** The stands changed (an airport placed, moved or removed): new aircraft on new stands, gone ones gone. */
@@ -40,7 +47,7 @@ export class Fleet {
       n.pose = this.standPose(n);
       this.all.set(s.id, n);
     }
-    for (const [id, a] of this.all) if (!seen.has(id)) { if (a.pilot != null) this.release(a, null, 'The airport closed'); this.all.delete(id); }
+    for (const [id, a] of this.all) if (!seen.has(id)) { if (a.pilot != null) this.release(a, null, 'The airport closed'); this.seats.clear(id); this.all.delete(id); }
     this.ver++;
   }
   standPose(a) { return { x: a.home.x, y: a.home.y + AIRCRAFT[a.type].gearH, z: a.home.z, q: yawQ(a.home.yaw), v: 0, g: 1 }; }
@@ -188,6 +195,43 @@ export class Fleet {
     }
   }
   send(ws, obj) { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+
+  // ---------------------------------------------------------------- an AI agent at the controls (server/play/flight-crew.js)
+  /** A free aircraft taken by agent `agentId` (its autopilot flies it here, on the server): → the aircraft, or null (gone,
+   *  or someone is flying it). It stays where it is until the agent's poses move it. */
+  takeFor(id, agentId, name = '') {
+    const a = this.all.get(String(id || ''));
+    if (!a || a.pilot != null || !(agentId > 0)) return null;
+    const at = this.place(a);
+    a.pilot = -agentId; a.pilotName = String(name || '').slice(0, 40); a.mode = 'flying'; a.at = this.now(); a.ts = null; a.returnAt = 0; a.agent = true;
+    a.pose = { ...at };
+    this.byPilot.set(-agentId, a);
+    this.ver++;
+    return a;
+  }
+  /** The aircraft agent `agentId` flies now, or null. */
+  ofAgent(agentId) { const a = this.byPilot.get(-agentId); return a && a.pilot === -agentId ? a : null; }
+  /** Its autopilot's pose ({ x, y, z, q, v, g, th }: the flight model's own, so never faster than it flies). */
+  drive(a, pose) {
+    if (!a || !a.agent || a.pilot == null || !pose) return false;
+    a.pose = pose; a.at = this.now();
+    this.ver++;
+    return true;
+  }
+  /** The agent's flight is over: landed and stopped — back on its stand when it stopped near it, else parked there for
+   *  anyone a while; crashed or given up in the air — the ground crew takes it home. → where the pilot gets out
+   *  ({ x, y, z }: beside it, or beside its stand). */
+  landFor(a, { crashed = false } = {}) {
+    if (!a || !a.agent) return null;
+    const pose = a.pose, S = AIRCRAFT[a.type], landed = !crashed && pose?.g && pose.v <= 3 && pose.y - S.gearH - this.groundAt(pose.x, pose.z) <= 1.2;
+    const point = landed ? this.exitPoint(a, pose) : this.besideStand(a);
+    this.byPilot.delete(a.pilot);
+    a.pilot = null; a.pilotName = ''; a.agent = false;
+    if (landed && Math.hypot(pose.x - a.home.x, pose.z - a.home.z) >= HOME_RANGE) { a.mode = 'parked'; a.returnAt = this.now() + PARK_MS; }
+    else this.home(a);
+    this.ver++;
+    return point;
+  }
   /** What a newly connected page needs (its own flight, if it flies: after a reload it lands back in the cockpit). */
   stateFor(accountId) { const a = this.byPilot.get(accountId); return a ? { t: 'fstate', ok: true, id: a.id, type: a.type, pose: a.pose, home: a.home, module: a.module, resumed: true } : null; }
 }

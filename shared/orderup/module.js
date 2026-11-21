@@ -12,7 +12,7 @@
 //          Good or better counts)
 //   stars  the Rush's own (rules.js starsOf: the share of every order served well, and busy enough), course.stars being
 //          those shares in percent, for people
-import { registerPlay } from '../play.js';
+import { registerPlay, liveInt, liveNum, liveOf } from '../play.js';
 import { newRush, interact, work, step, starsOf } from './rules.js';
 import { FOOD_BY_ID } from '../food.js';
 
@@ -80,6 +80,22 @@ export function verifyRush(course, report, ctx) {
   return { ok: true, score: S.score, stars: starsOf(S), ms: Math.round(S.dur * 1000), detail };
 }
 
+/**
+ * Where a Rush stands, as the kitchen's page says (POST /api/play/moment; an agent with its cook knows how it is going):
+ * { t (seconds into it), served, lost (walked out), burns, waiting (tickets open), late (of those, about to walk out),
+ * orders (the open tickets' menu items, ids), points, money, tips, stars (as it goes) }. Only known menu items are kept,
+ * by their names; the time never runs ahead of the server's clock.
+ */
+export function rushMoment(live, ctx) {
+  const c = COURSES.find(x => x.id === ctx.course?.id) || COURSES[0];
+  const t = liveNum(live.t, 0, Math.min(c.dur, (ctx.serverMs ?? 0) / 1000 + SLACK_S));
+  if (t == null) return null;
+  const orders = (Array.isArray(live.orders) ? live.orders : []).slice(0, 4).map(id => FOOD_BY_ID[String(id)]?.name).filter(Boolean);
+  return liveOf({ t, dur: c.dur, served: liveInt(live.served, 0, 999), lost: liveInt(live.lost, 0, 999), burns: liveInt(live.burns, 0, 999),
+    waiting: liveInt(live.waiting, 0, 20), late: liveInt(live.late, 0, 20), orders, points: liveInt(live.points, 0, 1e7),
+    money: liveNum(live.money, 0, 1e6), tips: liveNum(live.tips, 0, 1e6), stars: liveInt(live.stars, 0, 3), over: live.over === true ? true : null });
+}
+
 /** How many dishes there are to cook in the world (the Cookbook's whole: every item a place may sell). */
 export const COOKBOOK_ALL = Object.values(FOOD_BY_ID).filter(f => f.cat !== 'home').length;
 /** The cuisines with a badge for every dish of them served (their item ids). */
@@ -100,6 +116,7 @@ export const ORDER_UP = registerPlay({
   courses: COURSES.map(c => ({ id: c.id, label: c.label, difficulty: c.difficulty, stars: c.stars, blurb: c.blurb, ...(c.after ? { after: c.after } : {}) })),
   prepare: (course, ctx) => (ctx.kitchen ? { seed: ctx.seed, stations: ctx.kitchen.stations, kitchen: ctx.kitchen.kitchen, menu: ctx.kitchen.menu, b: ctx.kitchen.b, f: ctx.kitchen.f, skills: ctx.skills || {} } : null),
   verify: (course, report, ctx) => verifyRush(COURSES.find(c => c.id === course.id), report, ctx),
+  moment: rushMoment,
   badges: [
     { id: 'ou_first', label: 'First service', icon: '🛎️', desc: 'Finish your first Rush', tier: 'bronze', when: s => runs(s, 1) },
     { id: 'ou_supreme', label: 'Supreme!', icon: '✨', desc: 'Serve a Supreme dish', tier: 'bronze', when: (s, run) => grades(run, 'Supreme') >= 1 },

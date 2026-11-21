@@ -80,6 +80,11 @@ function badge(b, module = null) {
  *                          buy with Virtual Coin and place in their own buildings (Buildings section)
  *   price                  an interior module's price in hundredths of a VC (expensive on purpose: owning modules is
  *                          progression of its own); world modules have none
+ *   moment(live, ctx)      optional: where a run stands, as its page reports it (POST /api/play/moment: Order Up's Rush,
+ *                          the arcade's score, the airport's rings) → the checked, trimmed object the server keeps with
+ *                          the run (run.live), or null to refuse it. ctx = { course, data, prev (the last one kept),
+ *                          serverMs }. Only for words (an agent with its player knows what they are doing together:
+ *                          docs/features/awareness.md §5) — never for a score: verify() still decides that
  */
 export function registerPlay(def) {
   if (!def || !ID.test(def.id || '')) throw new Error('a play module needs an id (lowercase letters, digits, _)');
@@ -97,6 +102,7 @@ export function registerPlay(def) {
     seen.add(c.id);
   }
   if (typeof def.verify !== 'function') throw new Error(`${def.id}: verify(course, report, ctx) is required`);
+  if (def.moment != null && typeof def.moment !== 'function') throw new Error(`${def.id}: moment(live, ctx) is a function`);
   if (!['world', 'interior'].includes(def.placement || 'interior')) throw new Error(`${def.id}: placement is world or interior`);
   if ((def.placement || 'interior') === 'interior' && !(Number.isSafeInteger(def.price) && def.price > 0)) throw new Error(`${def.id}: an interior module has a price (hundredths of a VC)`);
   if (MODULES.has(def.id)) for (const b of MODULES.get(def.id).badges) BADGES.delete(b.id);   // re-registering (tests)
@@ -113,6 +119,16 @@ function defaultXp(result, course) {
   const base = 10 * course.difficulty * Math.max(1, result.stars);
   return Math.round(result.newBest ? base : base / 3);
 }
+
+// ------------------------------------------------------------------------------------------- moments, checked
+/** A whole number from a page's moment, kept within lo..hi (null: not a number). */
+export const liveInt = (v, lo = 0, hi = 1e9) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : null; };
+/** A number from a page's moment, kept within lo..hi with two decimals (null: not a number). */
+export const liveNum = (v, lo = 0, hi = 1e9) => { const n = Number(v); return Number.isFinite(n) ? Math.round(Math.max(lo, Math.min(hi, n)) * 100) / 100 : null; };
+/** A short text from a page's moment: one line, no markup, at most n characters ('' when none). */
+export const liveText = (v, n = 40) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f<>«»]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n) : '');
+/** An object without its null and empty values (what a moment keeps). */
+export const liveOf = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && !v.length)));
 
 export const playOf = id => MODULES.get(id) || null;
 export const plays = () => [...MODULES.values()];

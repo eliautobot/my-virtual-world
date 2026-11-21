@@ -56,3 +56,11 @@ body.mp-playing #ui, body.mp-playing #labels { visibility: hidden !important; po
 .mp-board li.none { justify-content: center; color: #94a3b8; }
 .mp-btns { display: flex; gap: 8px; justify-content: center; }
 @media (max-width: 560px) { .mp-title { display: none; } .mp-top { gap: 8px; padding-left: 12px; } }
+/* the other player at a table for two: an AI agent of yours (client/js/play/machine-play.js foe; server/play/versus.js) */
+.mp-foe { flex: none; padding: 4px 10px; border-radius: 999px; background: #1e3a5f; color: #bfdbfe; font: 700 13px/1 system-ui, sans-serif; max-width: 34%; overflow: hidden; text-overflow: ellipsis; }
+.mp-vs-wait p { margin: 4px 0 6px; color: #e9d5ff; font-size: 15px; }
+.mp-vs { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 12px; background: rgba(30, 58, 95, .55); }
+.mp-vs-who { font: 800 13px system-ui, sans-serif; color: #bfdbfe; }
+.mp-vs q { font: 600 15px/1.3 system-ui, sans-serif; color: #f8fafc; quotes: '“' '”'; }
+.mp-vs small { color: #93c5fd; font-size: 12px; }
+@media (max-width: 560px) { .mp-foe { max-width: 30%; padding: 4px 8px; } }

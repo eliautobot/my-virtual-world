@@ -77,3 +77,24 @@ test('what is underfoot on a module\'s grounds: its car park and paving concrete
   assert.equal(groundAt({ worldModules: [a] }, 0, 0), 'concrete', 'the runway');
   assert.ok(laysOwnGround('radio') && laysOwnGround('airport') && !laysOwnGround('marina'));
 });
+
+test('underfoot on a dock (2026-11-20: the steps on the pier and its grounds sounded of the natural ground): its decks wood with the feet on them, the promenade and the car park concrete, the plaza\'s pavers tile, a lake dock\'s gravel, the boat ramp concrete, its lawn the ground\'s own', async () => {
+  const { groundAt } = await import('../shared/world-modules.js');
+  const { toWorldAt } = await import('../shared/airport-layout.js');
+  const { dockDecks, deckTop } = await import('../shared/dock-layout.js');
+  for (const kind of ['marina', 'lakedock']) {
+    const m = { kind, id: 'wm5', x: 300, z: 120, rot: 0.9, y: 2, wy: 0 }, w = { worldModules: [m] };
+    const at = (s, f, y = null) => { const p = toWorldAt(m, s, f); return groundAt(w, p.x, p.z, y); };
+    for (const d of dockDecks(m)) {
+      const t = deckTop(d, d.x, d.z);
+      assert.equal(groundAt(w, d.x, d.z, t), 'wood', `${kind}: on its ${d.kind}`);
+      assert.notEqual(groundAt(w, d.x, d.z, t - 3), 'wood', `${kind}: under its ${d.kind} (the water, swimming) no deck`);
+    }
+    assert.equal(at(2, 10), 'concrete', `${kind}: the promenade`);
+    assert.equal(at(kind === 'marina' ? 60 : 30, 0), 'concrete', `${kind}: the car park`);
+    assert.equal(at(kind === 'marina' ? 20 : 14, kind === 'marina' ? 30 : 15), 'tile', `${kind}: the plaza\'s pavers`);
+    if (kind === 'lakedock') assert.equal(at(15, -26), 'gravel', 'the lake dock\'s gravel');
+    assert.equal(at(kind === 'marina' ? 4 : 2, kind === 'marina' ? -50 : -26), kind === 'marina' ? 'concrete' : 'concrete', `${kind}: the boat ramp`);
+    assert.equal(at(500, 0), null, `${kind}: far away`);
+  }
+});

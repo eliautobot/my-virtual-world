@@ -256,7 +256,10 @@ export class LinkChat {
     this.runs.set(runId, r);
     const list = this.turns.get(key) || [];
     list.push(runId); this.turns.set(key, list);
-    let text = String(p.input || '');
+    // (the note about the agent's body in the city — server/senses/ — before the person's words; never with a slash command
+    //  or a skill's expanded instructions, which Hermes reads as they are)
+    const words = String(p.input || ''), note = typeof p.note === 'string' && !/^\s*[/[]/.test(words) ? p.note.slice(0, 4000) : '';
+    let text = note ? `${note}\n\n${words}` : words;
     try {
       text = await this.files(sid, profile, p.attachments || [], text);
       // (Hermes Desktop's Enter while a turn runs: redirect it — the turn stops at a safe point and goes on with these
@@ -334,11 +337,12 @@ export class LinkChat {
     this.prefs.set(key, { model: model || last.model || null, effort: effort || last.effort || null });
   }
   /** The person's files, as Hermes takes them from a remote client: pictures queued for the turn (image.attach_bytes),
-   *  any other file staged into the session's workspace (file.attach), its @file: reference added to the message. */
+   *  any other file staged into the session's workspace (file.attach), its @file: reference added to the message. A file
+   *  is on disk (path) or comes with the message (data, base64: its eyes' picture — server/senses/eye.js). */
   async files(sid, profile, list, text) {
     const refs = [];
     for (const f of list.slice(0, 10)) {
-      const buf = await fs.readFile(f.path);
+      const buf = typeof f.data === 'string' ? Buffer.from(f.data, 'base64') : await fs.readFile(f.path);
       if (IMAGE.test(f.mime || '')) {
         const r = await this.link.request('image.attach_bytes', { session_id: sid, profile, content_base64: buf.toString('base64'), filename: f.name, ext: path.extname(f.name || '').replace('.', '') || undefined }, { timeoutMs: 60000 });
         if (r && r.attached === false) throw fail('attachment_refused', `Hermes did not take ${f.name}${r.message ? `: ${r.message}` : ''}`);

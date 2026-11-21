@@ -392,6 +392,9 @@ export function checkWorldModule(world, m, env, { ignoreId = null, lotsUnder = n
 
 /** The ground's kinds of surface a module lays (its own words) as what is underfoot: a paved one, gravel; grass is the
  *  ground's own (null). */
+/** A dock's land, underfoot (shared/dock-layout.js plan surfaces: the promenade's and the sidewalks' walk, the car park's
+ *  asphalt, the plaza's pavers, a lake dock's gravel; the boat ramp). */
+const DOCK_UNDERFOOT = { walk: 'concrete', asphalt: 'concrete', pavers: 'tile', gravel: 'gravel', ramp: 'concrete' };
 const UNDERFOOT = { runway: 'concrete', taxiway: 'concrete', apron: 'concrete', parking: 'concrete', road: 'concrete', asphalt: 'concrete', paving: 'concrete', gravel: 'gravel', grass: null };
 /** Each kind's surfaces in its frame, [s0, f0, s1, f1, surface] in drawing order (later over earlier). */
 const GROUNDS = {
@@ -401,10 +404,29 @@ const GROUNDS = {
 /**
  * What is underfoot at (x, z) on a world module's grounds (2026-10-28, the product owner: "the parking lot surfaces and
  * concrete don't get recognized when the player walks over them"): 'concrete' (paving, a car park, a runway), 'gravel',
- * or null (not on a module's surfaces: the ground's own, its biome). For footsteps (client/js/audio/footsteps.js).
+ * 'tile' (a dock's pavers), 'wood' (a dock's decks, feet at y on one), or null (not on a module's surfaces: the ground's
+ * own, its biome). For footsteps (client/js/audio/footsteps.js).
  */
-export function groundAt(world, x, z) {
+export function groundAt(world, x, z, y = null) {
   for (const m of world?.worldModules || []) {
+    // a marina's or a lake dock's (2026-11-20, the product owner: on the pier and the dock's grounds the steps sounded of
+    // "the natural ground, not the actual materials … the pier, parking lot, sand area, sidewalks"): its decks wood (feet at
+    // y on one — a pier, the float, a finger, the gangway, the courtesy dock), its paving by kind, the boat ramp concrete;
+    // its lawn the ground's own
+    const K = DOCKS[m.kind];
+    if (K && Number.isFinite(m.y)) {
+      if (y != null) for (const d of dockDecks(m)) { const t = deckTop(d, x, z, 0.05); if (t !== null && Math.abs(t - y) < 0.6) return 'wood'; }
+      const p = toFrame(m, x, z), L = K.land;
+      if (!L || p.s < L.s0 - 0.5 || p.s > L.s1 + 0.5 || p.f < L.f0 - 0.5 || p.f > L.f1 + 0.5) {
+        if (K.ramp && p.f >= K.ramp.f0 && p.f <= K.ramp.f1 && p.s <= K.ramp.top && p.s > -40) return 'concrete';   // (the ramp down into the water)
+        continue;
+      }
+      let got = null;
+      for (const [s0, f0, s1, f1, kind] of K.plan?.surfaces || []) if (p.s >= s0 && p.s <= s1 && p.f >= f0 && p.f <= f1) got = kind;
+      if (!got && K.ramp && p.f >= K.ramp.f0 && p.f <= K.ramp.f1 && p.s <= K.ramp.top) got = 'ramp';
+      if (got) return DOCK_UNDERFOOT[got] ?? null;
+      continue;
+    }
     const G = GROUNDS[m.kind]; if (!G) continue;
     const pad = WORLD_KINDS[m.kind]?.pad, p = toFrame(m, x, z);
     if (pad && (Math.abs(p.s - (pad.sc || 0)) > pad.hs + 1 || Math.abs(p.f) > pad.hf + 1)) continue;

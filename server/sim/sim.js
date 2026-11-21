@@ -193,11 +193,12 @@ export class Sim {
     this.emit({ t: 'person', i, person: this.publicPerson(a.p, i) });
     return this.publicPerson(a.p, i);
   }
-  talk(i, x, z) {
+  /** A player (account withPlayer, when known) walks up to resident i at (x, z) and talks: it turns to them a moment. */
+  talk(i, x, z, withPlayer = null) {
     const a = this.agents[i]; if (!a) return null;
     const prev = a.act ? { ...a.act } : null;
     const secs = this.brain.wm(4);
-    const ok = this.brain.talkTo(a, x, z, secs);
+    const ok = this.brain.talkTo(a, x, z, secs, '', null, null, withPlayer);
     const text = dialogLine(this, a, a.rng, prev, a.p.vip ? this.presence.info(a.p.agentId) : null);
     this.emit({ t: 'say', i, text, until: this.now() + Math.min(14, Math.max(7, secs * 0.6)) });
     return { ok, text };
@@ -205,10 +206,10 @@ export class Sim {
   /** An AI agent stopping to talk with someone in person (a talk in the city, server/agent-talk/): it turns to (x, z) and
    *  stays `secs` — no line of its own and nothing shown to others (what it says is its answer, seen only by whom it talks
    *  with); while it talks it is not called away to work on a message (index.mjs: presence). False when it can't (asleep). */
-  hold(i, x, z, secs = this.brain.wm(10), label = '', withIdx = null, withName = null) {
+  hold(i, x, z, secs = this.brain.wm(10), label = '', withIdx = null, withName = null, withPlayer = null) {
     const a = this.agents[i]; if (!a) return false;
     const marked = this.brain.bookmark(a);   // (after the talk it goes back to what it was doing: Brain.resumeActivity)
-    const ok = this.brain.talkTo(a, x, z, secs, label, withIdx, withName);   // (withName: a player who walked up to it, by name)
+    const ok = this.brain.talkTo(a, x, z, secs, label, withIdx, withName, withPlayer);   // (withName, withPlayer: a player who walked up to it, by name and account)
     if (ok) a.talkUntil = this.now() + secs;
     else if (marked) a.resume = null;
     return ok;

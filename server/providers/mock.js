@@ -5,6 +5,8 @@
 //   "slow:300:<words>" → the same, its progress (the agent's task) saying <words>
 //   "tool"   → the run uses a tool          "approve"  → the run asks for approval, then ends when it is answered
 //   "hang"   → the run request is never answered (for uncertainty tests)
+//   "files?" → the answer lists the files the run came with (on disk, or with the message)
+//   "note?"  → the answer is the note about its body the run came with (server/senses/), or "none"
 const manifest = {
   id: 'mock', label: 'Mock provider', test: true, transport: 'network', connectionKind: 'remote',
   official: 'None: this is the test double the suite uses',
@@ -49,8 +51,11 @@ export default {
   async stop(p, ctx) { stopped.add(p.runId); return { ok: true }; },
   async approve(p) { const r = waiting.get(p.approvalId); if (r) { waiting.delete(p.approvalId); r(p.approved === true); } return { ok: !!r }; },
   async run(p, ctx) {
+    // (the note about the agent's body in the city — server/senses/ — comes apart, as p.note: kept with what it was sent)
     const text = String(p.input || '');
-    submitted.push({ runId: p.runId, input: text });
+    // (and its files as it got them: on disk, or with the message — an agent's eyes' picture, server/senses/eye.js)
+    const files = (p.attachments || []).map(f => ({ name: f.name, mime: f.mime, size: f.size, inline: typeof f.data === 'string', bytes: typeof f.data === 'string' ? Buffer.from(f.data, 'base64').length : null, path: typeof f.path === 'string' }));
+    submitted.push({ runId: p.runId, input: text, ...(p.note ? { note: p.note } : {}), ...(files.length ? { files } : {}) });
     if (text === 'hang') return new Promise(() => {});
     const runId = p.runId || `r${++seq}`;
     const b = base(p);
@@ -75,6 +80,10 @@ export default {
         }
         if (stopped.has(runId)) { stopped.delete(runId); ctx.emit({ type: 'run.end', ...b, runId, status: 'stopped' }); return; }
         if (text === 'fail') { ctx.emit({ type: 'run.end', ...b, runId, status: 'error', error: 'The mock failed on purpose' }); return; }
+        // "note?": the note about its body it got (server/senses/), or that there was none
+        if (text === 'note?') { ctx.emit({ type: 'run.end', ...b, runId, status: 'ok', text: `Mock note: ${p.note || 'none'}` }); return; }
+        // "files?": the files it got, as it got them
+        if (text === 'files?') { ctx.emit({ type: 'run.end', ...b, runId, status: 'ok', text: `Mock files: ${files.map(f => `${f.name} (${f.mime}, ${f.inline ? `${f.bytes} bytes, with the message` : `${f.size} bytes, on disk`})`).join('; ') || 'no files'}` }); return; }
         ctx.emit({ type: 'run.end', ...b, runId, status: 'ok', text: `Mock reply to: ${text.slice(0, 200)}` });
       } catch (e) { ctx.emit({ type: 'run.end', ...b, runId, status: 'error', error: e.message }); }
     })();

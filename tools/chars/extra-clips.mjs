@@ -54,6 +54,7 @@ import { BOTH_R, BOTH_LIFT, BITE_TIP, toolTip, toolDir, TABLE_TOP, DISH_AHEAD, W
 import { steer, claw, punch, foos, whack, flippers, hockey } from '../../shared/arcade-motion.js';
 import { MIC, BASS, BASS_SHAPE, bassPt, bassDir, stringZ, PHONES } from '../../shared/stage.js';
 import { BOOK_HANDS, PHONE_HAND, thingFrame, pointOf, dirOf, ROD_TILT, NET_TILT } from '../../shared/held.js';
+import { CAR_LEGS, CAR_DRIVE, carSteerOfFrame } from '../../shared/car-seat.js';
 
 // a book or a phone held (shared/held.js): the middle of the thing from the shoulders' middle (offsets for an arm of 0.46 m,
 // as L.at), its face turned to the eyes; a hand's hold on it: its palm on the thing's back at the hand's place there
@@ -767,7 +768,36 @@ export const VENUE = [
       return { head: 0.05, lean: 0.05, Right: hand('Right', -st), Left: hand('Left', Math.PI - st) };
     },
   },
+  // In a car (2026-11-16, the product owner: "the driver should be visible, and other companions aswell. so they are
+  // visible on the seat"): a car's seat is low with the floor close under it, so the legs go forward into the footwell
+  // (shared/car-seat.js CAR_LEGS), not down as on a chair. render/car-occupants.js seats them and fits them in.
+  { // a passenger: the hands resting on the thighs, the head now and then turned a little, a nod
+    name: 'car_ride', base: 'sit_idle', still: 1, frames: 32, dur: 8,
+    pose(u, L) {
+      return { legs: carLegs(), head: 0.03 + 0.03 * Math.sin(TAU * 2 * u + 1), tilt: 0.05 * Math.sin(TAU * u), Left: onThigh(L, 'Left'), Right: onThigh(L, 'Right') };
+    },
+  },
+  { // the driver: both hands on the wheel at ten to two (CAR_DRIVE.wheel from the hip joint, its rim upright before them),
+    // leaning toward it a little; each frame the wheel turned a step further, full left to full right (carSteerPhase)
+    name: 'car_drive', base: 'sit_idle', still: 1, frames: CAR_DRIVE.frames, dur: 1,
+    pose(u, L) {
+      const st = carSteerOfFrame(Math.round(u * CAR_DRIVE.frames)), C = add(L.Hips, CAR_DRIVE.wheel), R = CAR_DRIVE.rim;
+      const rim = th => [C[0] - R * Math.cos(th), C[1] + R * Math.sin(th), C[2]];
+      const hand = (side, th) => { const P = rim(th), palm = nrm(sub(C, P)), a0 = V(0, 0.3, 1), along = nrm(sub(a0, scale(palm, dot(a0, palm)))); return { at: L.wristFor(side, along, palm, [0, 0, 0.015], P), along, palm, grip: 0.9, pole: side === 'Right' ? V(-0.8, -1, -0.35) : V(0.8, -1, -0.35) }; };
+      return { legs: carLegs(), lean: CAR_DRIVE.lean, head: -0.06, Right: hand('Right', 0.45 - st), Left: hand('Left', Math.PI - 0.45 - st) };
+    },
+  },
 ];
+/** The legs in a car seat (shared/car-seat.js): its left leg, the right mirrored. */
+function carLegs() {
+  const t = V(...CAR_LEGS.thigh), s = V(...CAR_LEGS.shin), f = V(...CAR_LEGS.foot);
+  return { LeftUpLeg: t, LeftLeg: s, LeftFoot: f, RightUpLeg: mir(t), RightLeg: mir(s), RightFoot: mir(f) };
+}
+/** A hand resting on its thigh, palm down, the fingers along it toward the knee. */
+function onThigh(L, side) {
+  const k = side === 'Left' ? 1 : -1;
+  return { p: [0, 0, 0], target: add(lerpPt(L[side + 'UpLeg'], L[side + 'Leg'], 0.6), [0, 0.075, 0]), along: V(-k * 0.12, -0.12, 0.98), palm: V(0, -1, 0.1), grip: 0.35, pole: V(k * 0.7, -1, -0.4) };
+}
 /** Eating with both hands (a burger, a sandwich): its middle held at rest(L), up to the mouth for a bite, held up
  *  chewing, down again. */
 function bothHands(rest) {
@@ -1019,8 +1049,8 @@ function leanDirs(R, X, lean) {
 /** One frame of a hold, from the base frame F0: { F (the skinning), h (where the hold sent the hands) }. */
 function holdFrame(R, F0, hold, u, desk) {
   let X0 = jointsOf(R, F0), L = landmarks(R, X0, desk, F0), h = hold.pose(u, L);
-  if (h.lean) {   // leaning in toward the table: the spine first, then the arms reach (and the mouth is) from there
-    F0 = poseFrom(R, F0, { d: leanDirs(R, X0, h.lean) });
+  if (h.lean || h.legs) {   // leaning in toward the table (the spine), the legs in a car's footwell: first, then the arms reach (and the mouth is) from there
+    F0 = poseFrom(R, F0, { d: { ...(h.lean ? leanDirs(R, X0, h.lean) : {}), ...(h.legs || {}) } });
     X0 = jointsOf(R, F0); L = landmarks(R, X0, desk, F0); h = hold.pose(u, L);
   }
   const d = {}, hands = {}, palm = {};
@@ -1089,6 +1119,42 @@ function deskOf(R) {
   return null;
 }
 
+// ------------------------------------------------------------------ seated: how the body sits (render/car-occupants.js)
+/**
+ * Where a seated body is, from its own mesh as posed in frame F (root space, a body of height 1, x its left, y up, z
+ * ahead): what rests on the seat (contact: the lowest of its seat, under and behind the hips), its top (the hair's), its
+ * back (the furthest back of its trunk low down and at the shoulders, each with its height: what meets the backrest), the
+ * hip joint, the soles' height and the toes' reach, the knees', and its half width at the shoulders. For the browser to
+ * put people into seats: render/car-occupants.js.
+ */
+const MESH = {};
+function seatedOf(R, F) {
+  const m = MESH[R.kind] ||= (() => {
+    const lod = R.man.lods[0], bin = fs.readFileSync(path.join(DIR, R.kind + '.bin'));
+    const arr = (T, a) => new T(bin.buffer.slice(bin.byteOffset + a.off, bin.byteOffset + a.off + a.len));
+    return { P: arr(Float32Array, lod.pos), J: arr(Uint8Array, lod.j), W: arr(Uint8Array, lod.w), n: lod.verts };
+  })();
+  const X = jointsOf(R, F), hip = X[R.idx.Hips], N = R.N, r = v => +v.toFixed(4);
+  const part = n => (/^(Hips|Spine|Spine1|Spine2)$/.test(n) ? 'trunk' : /UpLeg$/.test(n) ? 'thigh' : /Leg$/.test(n) ? 'shin' : /(Foot|Toe)/.test(n) ? 'foot' : /(Arm|Hand|Shoulder)/.test(n) ? 'arm' : 'head');
+  let contact = 9, top = -9, sole = 9, toe = -9, half = 0;
+  const knee = X[R.idx.LeftLeg].slice(1);   // (the knee joint: [y, z])
+  const pts = [];
+  for (let v = 0; v < m.n; v++) {
+    const p = [m.P[v * 3], m.P[v * 3 + 1], m.P[v * 3 + 2]], q = [0, 0, 0];
+    let dom = 0, dw = -1;
+    for (let k = 0; k < 4; k++) { const w = m.W[v * 4 + k] / 255; if (!w) continue; const b = m.J[v * 4 + k], a = app(F[b], p); q[0] += a[0] * w; q[1] += a[1] * w; q[2] += a[2] * w; if (w > dw) { dw = w; dom = b; } }
+    const kind = part(N[dom]);
+    top = Math.max(top, q[1]);
+    if ((kind === 'trunk' || kind === 'thigh') && q[2] < hip[2] + 0.1) contact = Math.min(contact, q[1]);
+    if (kind === 'foot') { sole = Math.min(sole, q[1]); toe = Math.max(toe, q[2]); }
+    if (kind === 'trunk') pts.push(q);
+    if (kind !== 'arm') half = Math.max(half, Math.abs(q[0]));
+  }
+  const backIn = (y0, y1) => { let b = [0, 9]; for (const q of pts) if (q[1] >= y0 && q[1] < y1 && q[2] < b[1]) b = [q[1], q[2]]; return b; };
+  const lo = backIn(contact, contact + 0.3), hi = backIn(contact + 0.3, contact + 0.7);
+  return { contact: r(contact), top: r(top), backLo: lo.map(r), backHi: hi.map(r), hip: [r(hip[1]), r(hip[2])], sole: r(sole), toe: r(toe), knee: knee.map(r), half: r(half) };
+}
+
 // ------------------------------------------------------------------ per character
 function bake(kind) {
   const R = loadRig(DIR, kind);
@@ -1118,12 +1184,20 @@ function bake(kind) {
       }
       made[clip.name] = clip.frames;
     }
+    // how the body sits in each seated clip (render/car-occupants.js fits people into car seats by it): the passenger's
+    // and the driver's in a car (the wheel straight), the bus seats' (a chair's), the bus driver's (the racing cabinet's)
+    const seated = {}, frameAt = (name, k = 0) => { let off = 0; for (const c of VENUE) { if (c.name === name) return frames.slice((off + k) * NB, (off + k + 1) * NB); off += c.frames; } return null; };
+    for (const [name, k] of [['car_ride', 0], ['car_drive', (CAR_DRIVE.frames - 1) / 2], ['act_drive', 0]]) seated[name] = seatedOf(R, frameAt(name, k));
+    seated.sit_idle = seatedOf(R, frameOf(R, R.clip('sit_idle').off));
+    const hipOf = name => seated[name].hip;
+    seated.car_drive.wheel = [0, +(hipOf('car_drive')[0] + CAR_DRIVE.wheel[1]).toFixed(4), +(hipOf('car_drive')[1] + CAR_DRIVE.wheel[2]).toFixed(4), CAR_DRIVE.rim];
+    seated.act_drive.wheel = [0, 0.82, 0.4, 0.15];   // (the racing cabinet's, as act_drive holds it)
     if (o.verify) { console.log(kind, 'worst reach miss (m)', JSON.stringify(Object.fromEntries(Object.entries(miss).filter(([, v]) => v > 0.005).map(([k, v]) => [k, +v.toFixed(3)])))); return { kind, rms: R.rms }; }
     const hf = headFrame(R), head = [0, 1, 2].flatMap(r => [hf.x[r], hf.y[r], hf.z[r], hf.o[r]]).map(v => +v.toFixed(5));
     const out = new Uint16Array(frames.length * 12);
     frames.forEach((m, i) => { for (let q = 0; q < 12; q++) out[i * 12 + q] = f2h(m[q]); });
     fs.writeFileSync(path.join(DIR, kind + '.venue.bin'), Buffer.from(out.buffer));
-    return { kind, rms: R.rms, frames: frames.length / NB, venue: made, head };
+    return { kind, rms: R.rms, frames: frames.length / NB, venue: made, head, seated };
   }
   // swimming: from the first idle frame
   const idle = R.clip('idle') || man.clips[0];
@@ -1225,9 +1299,9 @@ function bake(kind) {
   return { kind, rms: R.rms, frames: frames.length / NB, mended, holds, grips: gripsOf(R) };
 }
 
-let kinds = kindsIn(DIR);
-if (o.only) kinds = o.only.split(',');
-const done = {}, results = {}, grips = {}, heads = {};
+// (--only: a folder of its own may have no characters' list — a builder character baked alone, tools/chars/custom-kind.mjs)
+const kinds = o.only ? o.only.split(',') : kindsIn(DIR);
+const done = {}, results = {}, grips = {}, heads = {}, seated = {};
 let worst = 0;
 for (const k of kinds) {
   const r = bake(k);
@@ -1236,6 +1310,7 @@ for (const k of kinds) {
   worst = Math.max(worst, r.rms);
   if (r.frames) { done[k] = r.frames; grips[k] = r.grips; }
   if (r.head) heads[k] = r.head;
+  if (r.seated) seated[k] = r.seated;
   console.log(`${k}: joints rms ${(r.rms * 1000).toFixed(2)} mm${r.frames ? `, ${r.frames} frames written` : ''}`);
 }
 if (o.check || o.verify) process.exit(0);
@@ -1244,8 +1319,8 @@ if (o.set === 'venue') {
   let off = 0;
   const clips = VENUE.map(c => { const e = { name: c.name, off, len: c.frames, dur: c.dur, stride: 0, hold: c.base }; off += c.frames; return e; });
   fs.writeFileSync(vp, JSON.stringify({
-    about: 'Nights out clips (tools/chars/extra-clips.mjs --set venue): <kind>.venue.bin frames follow the bake\'s own and its extra clips; off is from its first frame. heads: each character\'s head frame (bind space, 3x4 rows: x its left, y up, z ahead, scaled to a head shared/stage.js PHONES.ref high; origin at its ears\' height) for what is worn on the head (render/char-props.js).',
-    clips, kinds: { ...prev.kinds, ...done }, heads: { ...prev.heads, ...heads },
+    about: 'Nights out clips (tools/chars/extra-clips.mjs --set venue): <kind>.venue.bin frames follow the bake\'s own and its extra clips; off is from its first frame. seated: how each character sits in the seated clips (root space, a body of height 1: contact the lowest of its seat, top the top of its hair, backLo/backHi the furthest back of its trunk [y, z] low down and at the shoulders, hip the hip joint [y, z], sole, toe, knee [y, z], half its half width, wheel [x, y, z, rim] what the hands hold) for render/car-occupants.js. heads: each character\'s head frame (bind space, 3x4 rows: x its left, y up, z ahead, scaled to a head shared/stage.js PHONES.ref high; origin at its ears\' height) for what is worn on the head (render/char-props.js).',
+    clips, kinds: { ...prev.kinds, ...done }, heads: { ...prev.heads, ...heads }, seated: { ...prev.seated, ...seated },
   }, null, 1) + '\n');
   console.log(`venue-clips.json: ${clips.map(c => c.name).join(', ')} for ${Object.keys({ ...prev.kinds, ...done }).length} characters`);
   process.exit(0);

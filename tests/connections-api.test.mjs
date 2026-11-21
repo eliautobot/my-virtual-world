@@ -19,7 +19,7 @@ const me = async c => (await c.get('/api/auth/me')).json.account.id;
 
 test('the kinds that work are listed (none still to come, no work package named), and the helper is running (I8.1)', async () => {
   const r = (await ann.get('/api/providers')).json;
-  assert.deepEqual(r.kinds.map(k => k.id).filter(k => k !== 'mock' && k !== 'decisions-mock'), ['openclaw', 'hermes', 'models', 'openai-decisions', 'voice', 'twilio', 'browser', 'search', 'agentapi']);
+  assert.deepEqual(r.kinds.map(k => k.id).filter(k => k !== 'mock' && k !== 'decisions-mock'), ['openclaw', 'hermes', 'models', 'openai-decisions', 'typesafe-decisions', 'voice', 'twilio', 'browser', 'search', 'agentapi']);
   // (agents' phones, docs/features/phone.md: a member adds their own Twilio account; its token is a secret field)
   const tw = r.kinds.find(k => k.id === 'twilio');
   assert.deepEqual([tw.implemented, tw.byok, tw.fields.map(f => `${f.key}:${f.type}`).join(',')], [true, true, 'accountSid:text,apiKeySid:text,authToken:secret']);
@@ -29,6 +29,8 @@ test('the kinds that work are listed (none still to come, no work package named)
   assert.equal(oc.hub, true);
   assert.deepEqual(oc.fields.map(f => f.key), ['url', 'auth', 'token', 'password', 'access']);
   assert.equal(r.kinds.find(k => k.id === 'openai-decisions').implemented, true, 'the decision service for Free Will is built in');
+  const ts = r.kinds.find(k => k.id === 'typesafe-decisions');
+  assert.deepEqual([ts.implemented, ts.byok, ts.fields.map(f => `${f.key}:${f.type}`).join(',')], [true, true, 'model:text,priceInPerMTok:number,apiKey:secret'], 'and TypeSafe (Jev)');
   const voice = r.kinds.find(k => k.id === 'voice');
   assert.equal(voice.implemented, true, 'voice services are built in (docs/features/CHAT.md §9)');
   assert.deepEqual(Object.keys(voice.providers), ['openai', 'openrouter', 'groq', 'elevenlabs', 'google', 'deepgram', 'xai', 'qwen', 'custom']);

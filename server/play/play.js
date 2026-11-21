@@ -18,6 +18,9 @@ const RUN_TTL_MS = 2 * 3600e3;    // a run not finished within two hours is forg
 const START_GAP_MS = 1500;        // one start every 1.5 s per account
 const BIO_MAX = 280, SHOWCASE_MAX = 3, BOARD_MAX = 50;
 const AUTO_XP = 0.5;              // an unattended run (an agent's shift: server/play/kitchen-shifts.js) earns half the experience
+// moments (POST /api/play/moment): a page says where its run stands, as often as a burst of MOMENT_BURST then one every
+// MOMENT_EVERY_MS per account, each at most MOMENT_MAX characters of JSON once its module has checked it
+const MOMENT_BURST = 3, MOMENT_EVERY_MS = 2000, MOMENT_MAX = 1500;
 // (a player is an account, its id; an agent plays as minus its id, 2026-10-28: the same tables, boards and profile, named
 // from the agents' table)
 const WHO = (t, col) => `LEFT JOIN accounts a ON ${col} > 0 AND a.id = ${col} AND a.status = 'active'
@@ -34,8 +37,10 @@ export class PlayCore {
    */
   constructor({ dbs, now = () => Date.now(), log = null, contextFor = () => ({}), prizes = null, whereIs = () => null }) {
     this.db = dbs.db; this.w = dbs.worldId; this.now = now; this.log = log; this.contextFor = contextFor; this.prizes = prizes; this.whereIs = whereIs;
-    this.runs = new Map();          // run id → { id, account, module, course, at, data }
+    this.runs = new Map();          // run id → { id, account, module, course, at, data, state?, auto, live?, liveAt? }
     this.lastStart = new Map();     // account id → time of its last start
+    this.momentBucket = new Map();  // account id → { tokens, at }: moments it may still send now
+    this.listeners = new Set();     // fn({ type: 'act' | 'moment' | 'finish', account, run, … }): what happens in runs (server/senses/play-activities.js)
     const db = this.db;
     this.q = {
       prog: db.prepare('SELECT module, xp, runs FROM play_progress WHERE world_id = ? AND account_id = ?'),
@@ -169,29 +174,121 @@ export class PlayCore {
     return this.profile(accountId, accountId);
   }
 
+  // ---------------------------------------------------------------- what happens in runs
+  /**
+   * Listens to what happens in runs: { type: 'act', account, run, name, body, result } (a module's move that was taken),
+   * { type: 'moment', account, run, live, prev } (a page said where its run stands), { type: 'finish', account, run,
+   * result, report } (a run that counted, with what its page reported: the other side of a two-sided game is played
+   * again from it — server/play/versus.js). A listener that throws is left out of that one. Returns a function that stops it.
+   */
+  on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+  emit(ev) { for (const fn of this.listeners) { try { fn(ev); } catch (e) { this.log?.warn?.('[play] a listener failed:', e.message); } } }
+  /** The run an account (a player, or an agent as −its id) is in now, or null. */
+  // ---------------------------------------------------------------- across a reload, across a restart
+  /** The runs under way, to keep across a restart of the server (store 'play-runs'): plain copies, newest first. */
+  snapshotRuns() {
+    const t = this.now(), out = [];
+    for (const r of this.runs.values()) {
+      if (t - r.at > RUN_TTL_MS) continue;
+      try { out.push(JSON.parse(JSON.stringify({ ...r, live: undefined, liveAt: undefined }))); } catch { /* a run that can't be kept */ }
+    }
+    return out.sort((a, b) => b.at - a.at).slice(0, 2000);
+  }
+  /** After a restart: the runs that were under way back (2026-11-20, the product owner: a fishing trip lost when the server restarted
+   *  — the trip, its catch so far, the companions' along on it), unless their time is up or their module changed. */
+  restoreRuns(list) {
+    const t = this.now();
+    let n = 0;
+    for (const r of Array.isArray(list) ? list : []) {
+      const m = r && playOf(r.module);
+      if (!m || typeof r.id !== 'string' || !Number.isFinite(r.at) || t - r.at > RUN_TTL_MS || r.version !== m.version || this.runs.has(r.id)) continue;
+      this.runs.set(r.id, r); n++;
+    }
+    if (n) this.log?.info?.(`[play] after the restart: ${n} run(s) back under way`);
+    return n;
+  }
+  /**
+   * The run account has under way of module moduleId, for its page to take up again (a reload): what start() answered and
+   * how long it has run, and the module's own view of where it stands (m.resume: the fishing trip's catch so far) — never
+   * its secret. → null when there is none.
+   */
+  current(account, moduleId) {
+    const r = this.runOf(account.id);
+    if (!r || (moduleId && r.module !== moduleId)) return null;
+    const m = playOf(r.module), c = courseOf(m, r.course), best = this.progress(account.id).modules[m.id]?.best?.[r.course] || null;
+    let view = null; try { view = m.resume ? m.resume(r.state, r.data) : null; } catch { view = null; }
+    return { run: r.id, module: r.module, course: r.course, data: r.data, limit: c?.limit || null, stars: c?.stars, best, elapsed: this.now() - r.at, ...(r.along ? { along: r.along } : {}), state: view };
+  }
+  runOf(accountId) {
+    const t = this.now();
+    let out = null;
+    for (const r of this.runs.values()) if (r.account === accountId && t - r.at <= RUN_TTL_MS && (!out || r.at > out.at)) out = r;
+    return out;
+  }
+  /**
+   * Where a run stands, as its page says (a module with moment(): Order Up's Rush, the arcade's score, the airport's
+   * rings): the module checks and trims `live` (ctx = { course, data, prev (the last moment), serverMs }) and the run
+   * keeps the latest — only the run's own account may say it, a few a second at most. → { ok: true }.
+   */
+  moment(account, runId, live) {
+    const run = this.runs.get(runId);
+    if (!run || run.account !== account.id) fail(404, 'no_run', 'That run has ended');
+    const m = playOf(run.module);
+    if (typeof m?.moment !== 'function') fail(400, 'no_moments', 'This module has no moments');
+    const t = this.now(), b = this.momentBucket.get(account.id) || { tokens: MOMENT_BURST, at: t };
+    b.tokens = Math.min(MOMENT_BURST, b.tokens + (t - b.at) / MOMENT_EVERY_MS); b.at = t;
+    this.momentBucket.set(account.id, b);
+    if (b.tokens < 1) fail(429, 'too_fast', 'Too many moments');
+    b.tokens -= 1;
+    if (this.momentBucket.size > 5000) this.momentBucket.delete(this.momentBucket.keys().next().value);
+    let x = null;
+    try { x = live && typeof live === 'object' && !Array.isArray(live) ? m.moment(live, { course: courseOf(m, run.course), data: run.data, prev: run.live || null, serverMs: t - run.at }) : null; }
+    catch (e) { this.log?.warn?.('[play] a moment failed', m.id, e.message); x = null; }
+    if (!x || typeof x !== 'object' || x.error) fail(400, 'bad_moment', x?.error || 'That moment is not one');
+    if (JSON.stringify(x).length > MOMENT_MAX) fail(413, 'too_big', 'That moment is too big');
+    const prev = run.live || null;
+    run.live = x; run.liveAt = t;
+    this.emit({ type: 'moment', account: account.id, run, live: x, prev });
+    return { ok: true };
+  }
+
   // ---------------------------------------------------------------- playing
-  /** Starts a run of a course. where: the module's own idea of where (the airport's building). */
-  start(account, moduleId, courseId, where = null, o = {}) {   // (o.auto: an unattended run, an agent's shift)
+  /**
+   * Starts a run of a course. where: the module's own idea of where (the airport's building). o.auto: an unattended run
+   * (an agent's shift, a companion fishing). o.along: the id of another account's run of the same course this one goes
+   * along on (a companion fishing on its owner's trip: server/play/fishing-crew.js) — the course is open to it there, and
+   * the run keeps that run's clock (its start), so the trip's hour, dusk and freshness are the same for both. o.side: a
+   * run of another account's just played against this one at a two-sided table (an AI agent at the other end:
+   * server/play/versus.js) — this run is the other side of that game: its data (side −1: the module scores that side),
+   * its clock; the course is open to it there.
+   */
+  start(account, moduleId, courseId, where = null, o = {}) {
     const m = playOf(moduleId); if (!m) fail(404, 'not_found', 'No such module');
     const c = courseOf(m, courseId); if (!c) fail(404, 'not_found', 'No such course');
     const t = this.now();
     if (t - (this.lastStart.get(account.id) || 0) < START_GAP_MS) fail(429, 'too_fast', 'Wait a moment before starting again');
     const best = this.progress(account.id).modules[m.id].best;
-    if (!unlocked(m, best).includes(c.id)) fail(403, 'locked', `Finish ${courseOf(m, c.after)?.label || 'the course before'} first`);
+    const along = o.along != null ? this.runs.get(o.along) : null;
+    if (o.along != null && (!along || along.account === account.id || along.module !== m.id || along.course !== c.id || t - along.at > RUN_TTL_MS)) fail(409, 'no_run', 'That run has ended');
+    const side = o.side || null;
+    if (side && (side.account === account.id || side.module !== m.id || side.course !== c.id || !side.data)) fail(409, 'no_run', 'That game is not this one');
+    if (!along && !side && !unlocked(m, best).includes(c.id)) fail(403, 'locked', `Finish ${courseOf(m, c.after)?.label || 'the course before'} first`);
     let data = null;
-    if (m.prepare) {
+    if (side) data = { ...side.data, side: -1 };
+    else if (m.prepare) {
       data = m.prepare(c, this.contextFor(m.id, where, account) || {});
       if (!data) fail(409, 'not_here', `Start this at ${m.venue ? `an ${m.venue}` : 'its place'}`);
     }
     this.gc(t);
     for (const [id, r] of this.runs) if (r.account === account.id) this.runs.delete(id);   // one run at a time
-    const run = { id: crypto.randomBytes(12).toString('hex'), account: account.id, module: m.id, course: c.id, version: m.version, at: t, data, auto: !!o.auto };
+    const run = { id: crypto.randomBytes(12).toString('hex'), account: account.id, module: m.id, course: c.id, version: m.version, at: along ? along.at : side ? side.at : t, data, auto: !!o.auto, best: best[c.id]?.score ?? null, ...(along ? { along: along.id } : {}) };
     // a module that plays out over a while keeps its own state with the run (never sent to the browser), with a secret
     // for its own dice (the fishing module: what bites)
     if (m.init) { run.secret = crypto.randomBytes(16).toString('hex'); run.state = m.init(c, data, this.contextFor(m.id, where, account) || {}); }
     this.runs.set(run.id, run);
     this.lastStart.set(account.id, t);
-    return { run: run.id, module: m.id, course: c.id, data, limit: c.limit || null, stars: c.stars, best: best[c.id] || null };
+    // (elapsed: how long its clock has run already — a run along another's starts part-way through: the page's own clock set by it)
+    return { run: run.id, module: m.id, course: c.id, data, limit: c.limit || null, stars: c.stars, best: best[c.id] || null, elapsed: t - run.at, ...(along ? { along: along.id } : {}) };
   }
   /**
    * A move inside a run, for a module that answers them (m.act: the fishing module's hook, land, keep, release). The
@@ -205,6 +302,8 @@ export class PlayCore {
     let pos = null; try { pos = this.whereIs(account) || null; } catch { pos = null; }
     const t = this.now(), r = m.act(String(name || '').slice(0, 24), body && typeof body === 'object' ? body : {}, { course: courseOf(m, run.course), data: run.data, state: run.state, secret: run.secret, serverMs: t - run.at, pos });
     if (r?.error) fail(r.status || 400, 'refused', r.error);
+    run.actAt = t;
+    this.emit({ type: 'act', account: account.id, run, name: String(name || '').slice(0, 24), body: body && typeof body === 'object' ? body : {}, result: r });
     return r;
   }
   /** Gives up a run (nothing is recorded). */
@@ -239,7 +338,7 @@ export class PlayCore {
     const runCtx = { ...res, stars, newBest, place: mine?.place ?? null, module: m.id, course: c.id };
     const badges = this.award(account.id, after, m.id, runCtx);
     const vc = run.auto || account.id < 0 ? { amount: 0, parts: [], paid: 0, why: 'An agent\'s shift: paid by its post' } : this.payPrize(account, run, m, c, { stars, newBest, prevStars: prevBest?.stars || 0, place: mine?.place ?? null, prevPlace: prevBest?.place ?? null }, runRow);
-    return {
+    const out = {
       ok: true, score: res.score, ms: res.ms ?? null, stars, newBest, prevBest, best: mine || null, xp, place: mine?.place ?? null, row: Number(runRow) || null, detail: res.detail || null,
       game: { id: m.id, name: m.name || m.id, course: c.id, courseName: c.name || c.id },   // (what was played: MVW Radio's news, server/radio/)
       module: { level: after.modules[m.id].level, was: before.modules[m.id].level, progress: after.modules[m.id].progress },
@@ -247,6 +346,8 @@ export class PlayCore {
       badges: badges.map(id => publicBadge(badgeOf(id))), vc,
       unlocked: after.modules[m.id].unlocked.filter(id => !before.modules[m.id].unlocked.includes(id)),
     };
+    this.emit({ type: 'finish', account: account.id, run, result: out, report });
+    return out;
   }
   /**
    * Pays a run's prize from the economy's Game prizes (once per run: the run's id is the payment's key), within the daily
@@ -296,6 +397,7 @@ export class PlayCore {
     this.topCache = null;
     for (const tb of ['play_progress', 'play_best', 'play_runs', 'play_badges', 'player_profiles']) this.db.prepare(`DELETE FROM ${tb} WHERE world_id = ? AND account_id = ?`).run(this.w, id);
     for (const [k, r] of this.runs) if (r.account === id) this.runs.delete(k);
+    this.momentBucket.delete(id);
   }
   /** Every badge there is (the profile shows the ones still to earn, greyed). */
   catalog() { return allBadges().map(publicBadge); }

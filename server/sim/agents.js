@@ -16,6 +16,8 @@ import { SUBWAY_SPEED } from './nav.js';
 import { pickOrder, courses as serveCourses, homeMeal as homeDish, onStove, deskLunch, picnic as picnicFood, guessCuisine, menuIds, FOOD_BY_ID } from '../../shared/food.js';
 import { NIGHTLIFE_OPEN, DRINKS, roleAt, ROLE_TITLE, ROLE_USE } from '../../shared/nightlife.js';
 import { shiftClock, worksOn } from '../../shared/shifts.js';
+import { COMPANION_MOVES, COMPANION_KINDS } from './companion-moves.js';
+import { DECOR_SEATS } from './decor-seats.js';
 
 const U = USE_ID;
 const NEEDS = ['hunger', 'energy', 'social', 'fun', 'hygiene'];
@@ -96,7 +98,7 @@ const PLAYER_HOLD = 30, PLAYER_NEAR = 0.45;
 const planMark = P => ({ n: P.segs.length, t: P.t, x: P.x, y: P.y, z: P.z, yaw: P.yaw, ctx: P.ctx, seat: P.seat, tele: P.tele, dest: P.meta.dest });
 function planBack(P, m) { P.segs.length = m.n; P.t = m.t; P.x = m.x; P.y = m.y; P.z = m.z; P.yaw = m.yaw; P.ctx = m.ctx; P.seat = m.seat; P.tele = m.tele; P.meta.dest = m.dest; }
 export class Brain {
-  constructor(sim) { this.sim = sim; this.res = new Map(); this.at = new Map(); this.joinable = new Map(); this.held = new Map(); }
+  constructor(sim) { this.sim = sim; this.res = new Map(); this.at = new Map(); this.joinable = new Map(); this.held = new Map(); this.guests = new Map(); }
   get W() { return this.sim.world; }
   get index() { return this.sim.index; }
   get router() { return this.sim.router; }
@@ -151,29 +153,41 @@ export class Brain {
     const t0 = win ? win[0] : this.sim.now(), t1 = win ? win[1] : t0 + 1;
     return l.some(r => r[0] !== who && r[2] > t0 && r[1] < t1);
   }
-  taken(b, f, id, k, who, win = null) { return this.heldBy(this.key(b, f, id, k), who, win) || this.playerOn(b, f, id, k, win); }
+  taken(b, f, id, k, who, win = null) { return this.heldBy(this.key(b, f, id, k), who, win) || this.playerOn(b, f, id, k, win, who); }
   /** Where slot k of item id on floor f of building b is in the world: { x, z }, or null. */
   slotAt(b, f, id, k) { const B = this.W.buildings[b], s = this.index.entry(b, f, id)?.slots[k]; return B && s ? toWorld(B, s.lx, s.lz) : null; }
-  /** A player at that slot now, for a stay starting within PLAYER_HOLD world minutes (win: by default now). */
-  playerOn(b, f, id, k, win = null) {
-    if (this.pieceHeld(b, f, id)) return true;   // (a machine a player's game holds: all of it, whenever)
+  /** A player at that slot now, for a stay starting within PLAYER_HOLD world minutes (win: by default now). who: the body
+   *  asking — a guest of the piece (pieceGuest: the one its player plays against) is let in at its other end. */
+  playerOn(b, f, id, k, win = null, who = null) {
+    const guest = this.guests.size > 0 && this.isGuest(b, f, id, who);
+    if (!guest && this.pieceHeld(b, f, id)) return true;   // (a machine a player's game holds: all of it, whenever)
     const ps = playerSpots(); if (!ps.length) return false;
     const now = this.sim.now(); if (win && win[0] > now + this.wm(PLAYER_HOLD)) return false;
-    const ctx = ctxOf(b, f); let at = null;
+    // (a park's bench: players walk a park at street level, CTX_OUT; residents on its grounds' own floor)
+    const ctx = ctxOf(b, f), park = this.W.buildings[b]?.type === 'park', here = p => p.ctx === ctx || (park && p.ctx === CTX_OUT);
+    let at = null;
     for (const p of ps) {
-      if (p.ctx !== ctx) continue;
+      if (!here(p)) continue;
       at = at || this.slotAt(b, f, id, k);
       if (at && Math.hypot(p.x - at.x, p.z - at.z) < PLAYER_NEAR) return true;
     }
     // a table played against the computer (air hockey, foosball): a player at either end holds all of it
     const e = at !== null ? this.index.entry(b, f, id) : null;
-    if (e && e.slots.length > 1 && machineGame(e.it?.t)?.cpu) {
+    if (e && !guest && e.slots.length > 1 && machineGame(e.it?.t)?.cpu) {
       for (let j = 0; j < e.slots.length; j++) {
         const o = j === k ? null : this.slotAt(b, f, id, j);
-        if (o && ps.some(p => p.ctx === ctx && Math.hypot(p.x - o.x, p.z - o.z) < PLAYER_NEAR)) return true;
+        if (o && ps.some(p => here(p) && Math.hypot(p.x - o.x, p.z - o.z) < PLAYER_NEAR)) return true;
       }
     }
     return false;
+  }
+  /** A player using something at (x, z) — outdoors (ctx < 0: open land, a dock) or on floor ctx — for a stay starting
+   *  within PLAYER_HOLD world minutes (win: by default now). (A decoration's seat: ./decor-seats.js.) */
+  playerAt(x, z, ctx, win = null) {
+    const ps = playerSpots(); if (!ps.length) return false;
+    if (win && win[0] > this.sim.now() + this.wm(PLAYER_HOLD)) return false;
+    const out = ctx < 0;
+    return ps.some(p => (out ? p.ctx < 0 : p.ctx === ctx) && Math.hypot(p.x - x, p.z - z) < PLAYER_NEAR);
   }
   // Machines held by a player's game (2026-10-26, the product owner: "While playing arcade games like the pool, agents come
   // up to the table and play ... make sure this doesn't happen"): a machine game holds its whole piece while it is open,
@@ -190,13 +204,26 @@ export class Brain {
     if (u < Date.now()) { this.held.delete(k); return false; }
     return true;
   }
+  // Guests of a piece (2026-11-17, the product owner: "I want to play with my AI agents"): the AI agent its player plays
+  // against at a two-sided table (server/play/versus.js) takes the other end of it while the player's game holds the whole
+  // piece — held for it, as any slot, and never sent away by the player's hold. Nobody is a guest otherwise: the city's
+  // routines are unchanged.
+  /** Body i is (on: true) or is no longer a guest of piece id on floor f of building b. */
+  pieceGuest(b, f, id, i, on = true) {
+    const k = b + ':' + f + ':' + id;
+    let g = this.guests.get(k);
+    if (on) { if (!g) this.guests.set(k, g = new Set()); g.add(i); return true; }
+    if (g) { g.delete(i); if (!g.size) this.guests.delete(k); }
+    return false;
+  }
+  isGuest(b, f, id, i) { return i != null && i >= 0 && !!this.guests.get(b + ':' + f + ':' + id)?.has(i); }
   /** Everyone at piece id or bound for it (any of its spots, now or later) goes elsewhere: their plans are cut here. */
   clearPiece(b, f, id) {
     const e = this.index.entry(b, f, id); if (!e) return 0;
     const now = this.sim.now(), done = new Set();
     e.slots.forEach((s, k) => {
       for (const r of [...(this.res.get(this.key(b, f, id, k)) || [])]) {
-        const a = r[2] > now && !done.has(r[0]) ? this.sim.agents[r[0]] : null;
+        const a = r[2] > now && !done.has(r[0]) && !this.isGuest(b, f, id, r[0]) ? this.sim.agents[r[0]] : null;
         if (a?.plan) { done.add(r[0]); this.interruptSoon(a); }
       }
     });
@@ -204,11 +231,14 @@ export class Brain {
   }
   /** A player sat down or started playing at (x, z) on floor ctx: whoever was to be in that slot soon goes elsewhere. */
   playerTook(x, z, ctx) {
-    if (!(ctx >= 0)) return 0;
+    // (a decoration's seat outdoors — a bench on open land, a dock's picnic table: ./decor-seats.js)
+    const nd = ctx === CTX_OUT ? this.decorTook(x, z, PLAYER_NEAR, this.wm(PLAYER_HOLD)) : 0;
+    if (ctx === CTX_OUT) { const park = this.parkAt(x, z); if (park) ctx = ctxOf(park.idx, 0); }   // (a park's bench, from its open ground)
+    if (!(ctx >= 0)) return nd;
     const b = ctxB(ctx), f = ctxF(ctx), B = this.W.buildings[b], L = B && !B.gone ? this.W.levels[B.lv[f]] : null;
-    if (!L) return 0;
+    if (!L) return nd;
     const now = this.sim.now(), soon = now + this.wm(PLAYER_HOLD);
-    let n = 0;
+    let n = nd;
     for (const it of L.items || []) {
       const e = this.index.entry(b, f, it.id); if (!e) continue;
       // (a table played against the computer is all the player's: those bound for its other end go elsewhere too)
@@ -217,20 +247,37 @@ export class Brain {
         const w = toWorld(B, s.lx, s.lz);
         if (!whole && Math.hypot(w.x - x, w.z - z) > PLAYER_NEAR) return;
         for (const r of [...(this.res.get(this.key(b, f, it.id, k)) || [])]) {
-          const a = r[2] > now && r[1] < soon ? this.sim.agents[r[0]] : null;
+          const a = r[2] > now && r[1] < soon && !this.isGuest(b, f, it.id, r[0]) ? this.sim.agents[r[0]] : null;
           if (a?.plan) { this.interruptSoon(a); n++; }
         }
       });
     }
     return n;
   }
+  /**
+   * Players still sitting keep their seats (2026-11-17: a resident sat on Kim's chair at Pho Real — its stay there was
+   * planned before he sat down, for later than the hold's window): asked again every few seconds by the server, each
+   * seated player's seat is taken again (playerTook) — whoever is bound for it within the window now goes elsewhere.
+   * → how many were sent elsewhere.
+   */
+  keepPlayerSeats() {
+    let n = 0;
+    for (const p of playerSpots()) n += this.playerTook(p.x, p.z, p.ctx);
+    return n;
+  }
   /** Hold a slot for resident a over win ([from, until]; by default from now on) if nobody else has it then. */
   reserve(a, b, f, id, k, win = null) {
-    const key = this.key(b, f, id, k), now = this.sim.now(), w = win || [now, Infinity];
+    const w = win || [this.sim.now(), Infinity];
+    return this.reserveKey(a, this.key(b, f, id, k), w, () => this.playerOn(b, f, id, k, w, a.i));   // (a.i: a guest of the piece is let in: pieceGuest)
+  }
+  /** Hold slot `key` for a over w if nobody else has it then and no player is on it (playerOn() — a piece's slot, a
+   *  decoration's: ./decor-seats.js). */
+  reserveKey(a, key, w, playerOn) {
+    const now = this.sim.now();
     let l = this.res.get(key);
     if (l) { l = l.filter(r => r[2] > now); if (l.some(r => r[0] !== a.i && r[2] > w[0] && r[1] < w[1])) return false; }
     else l = [];
-    if (this.playerOn(b, f, id, k, w)) return false;
+    if (playerOn()) return false;
     l.push([a.i, w[0], Infinity]);
     this.res.set(key, l);
     if (!a.resv) a.resv = [];
@@ -287,8 +334,12 @@ export class Brain {
     if (info.order) act.order = info.order;   // what they ordered or made (shared/food.js ids): the bill, the activity's words
     if (Number.isInteger(info.talkWith)) act.talkWith = info.talkWith;   // whom it talks with (an AI's meet or say --to): its life's log
     if (info.withName) act.withName = info.withName;   // a player who walked up to it, by name (server/agent-talk/): its life's log
+    if (Number.isInteger(info.withPlayer)) act.withPlayer = info.withPlayer;   // …and by account: its owner talking with it is still with it
+    if (info.buy) act.buy = info.buy;   // what it came to buy (an errand of its plans: shopVisit): the shop's bill (server/economy/households.js basket)
+    if (info.dec !== undefined) act.dec = info.dec;   // a decoration's seat outdoors (./decor-seats.js: its slot is act.k)
     this.setAct(a, act);
     if (act.id >= 0 && act.k >= 0) this.holdFor(a, this.key(act.b, act.f, act.id, act.k), Math.min(act.travelEnd, act.holdStart), act.holdEnd);   // (its seat: held from its arrival until it gets up)
+    else if (act.dec !== undefined && act.k >= 0) this.holdFor(a, this.decorKey(act.dec, act.k), Math.min(act.travelEnd, act.holdStart), act.holdEnd);
     if (this.sim.onAct) this.sim.onAct(a, act);   // the economy: purchases at venues, hours at work (server/economy/households.js)
     for (const fn of this.sim.actObservers) fn(a, act);   // observers only (an agent's activity log and memories: server/agent-life/)
     return act;
@@ -444,7 +495,7 @@ export class Brain {
       hs = this.slotHold(a, P, st, d, o);
       // the stay as planned, to the second: someone else in that seat then (the way there took longer or shorter than
       // reckoned) → back, and another seat; none of a few: not this stop
-      if (this.heldBy(key, a.i, [st.arrive, hs.holdEnd]) || this.playerOn(b, f, e[0], e[1], [st.arrive, hs.holdEnd])) {
+      if (this.heldBy(key, a.i, [st.arrive, hs.holdEnd]) || this.playerOn(b, f, e[0], e[1], [st.arrive, hs.holdEnd], a.i)) {
         planBack(P, snap); this.unreserve(a, key);
         list = list.filter(x => x !== e); st = null;
         continue;
@@ -453,7 +504,7 @@ export class Brain {
     }
     if (!st) return null;
     const useName = o.use || st.s.use;
-    this.act(a, o.kind || 'visit', useName, P, { ...this.slotInfo(st), ...hs, place: o.place || this.placeName(b, f), ...(this.food && o.order ? { order: o.order } : {}) });
+    this.act(a, o.kind || 'visit', useName, P, { ...this.slotInfo(st), ...hs, place: o.place || this.placeName(b, f), ...(this.food && o.order ? { order: o.order } : {}), ...(o.buy ? { buy: o.buy } : {}) });
     return { st, hs };
   }
 
@@ -542,12 +593,26 @@ export class Brain {
       if (this.resumeValid(a, P, P.t, n) && this.resumeActivity(a, P, h, day)) return;
       a.resume = null;
     }
-    // its outside AI's order comes first — after a post, a task in hand and a body in trouble
-    if (this.orderNow(a, P) && !a.p.post && !(a.p.vip && this.sim.presence.isWorking(a.p.agentId)) && n.hunger >= 0.2 && n.energy >= 0.22) {
+    // its outside AI's order comes first — after a post, a task in hand and a body in trouble; a companion's (it goes with
+    // someone, or waits for them: server/companions/) before a post and a task too — it answers its messages on the go.
+    // One a person gave it (with them, waiting beside or for them, riding along) holds whatever its own day says: its
+    // shift, its hunger, its tiredness are raised by Free Will's moments (server/free-will/moments.js) and it goes when
+    // it is let go (2026-11-17: tired, it was passed over here at every round's end — the shift came first, and it walked
+    // off to work while server/companions/ kept calling it back, a choice point every few seconds)
+    const o0 = this.orderNow(a, P), comp = !!o0 && this.isCompanion(a), held = comp && this.heldByPerson(o0);
+    const fit = n.hunger >= 0.2 && n.energy >= 0.22;
+    if (o0 && (held || ((comp || (!a.p.post && !(a.p.vip && this.sim.presence.isWorking(a.p.agentId)))) && fit))) {
       if (this.doOrder(a, P, h, day)) return;
       // it can't any more (closed, full, no money, they went somewhere private): the routine goes on, and its AI is told
-      a.orderEnded = { kind: a.order.kind, who: a.order.who, why: a.order.ended || 'not_possible', at: P.t };
+      a.orderEnded = { kind: a.order.kind, who: a.order.who, why: a.order.ended || 'not_possible', at: P.t, by: a.order.by ?? null, lead: a.order.leadName || null };
       this.setOrder(a, null);
+      a.ride = null;
+    } else if (o0 && comp && !fit && COMPANION_KINDS.has(o0.kind)) {
+      // agents off together by their own choice, one of them too hungry or tired to go on: that one's part ends here (else
+      // its routine takes it off and server/companions/ calls it back, round after round)
+      a.orderEnded = { kind: o0.kind, who: o0.who ?? null, why: 'needs', at: P.t, by: o0.by ?? null, lead: o0.leadName || null };
+      this.setOrder(a, null);
+      a.ride = null;
     }
     for (const r of REFLEXES) {
       if (!r.when(this, a, P, h, day, n)) continue;
@@ -602,6 +667,8 @@ export class Brain {
    * ends it goes back to what it was doing (choose → resumeActivity), or to bed.
    */
   workChanged(a, working) {
+    // a companion answers on the go (its phone): it stays with whoever it is with, or where it waits
+    if (this.isCompanion(a) && this.liveOrder(a, this.sim.now())) { a.msgHere = true; return; }
     if (working) {
       if (this.atScreen(a)) { a.msgHere = true; return; }
       a.msgHere = false;
@@ -1134,7 +1201,7 @@ export class Brain {
     if (fw && fw.isActive(a.i)) {
       const pick = fw.take(a, P, h, day, 'leisure', live);
       if (pick) {
-        const ok = this.doLeisure(a, P, pick.kind, h, pick.venue);
+        const ok = this.doLeisure(a, P, pick.kind, h, pick.venue, pick.option);
         fw.done(a, pick, ok);
         if (ok) return;
         const k = live.findIndex(o => o[0] === pick.kind);
@@ -1167,14 +1234,14 @@ export class Brain {
     return !!this.useAt(a, P, v.b, v.f, ['relax', 'eat'], [30, 60], { place: `Visiting a flat in ${B.name}`, kind: 'visit', use: 'chat', pick: () => list[Math.floor(a.rng.next() * list.length)] });
   }
   /** Does one kind of free-time activity. venue (an index.venues entry) is a place already chosen (Free Will); without
-   *  it the resident picks one as usual. */
-  doLeisure(a, P, name, h, venue = null) {
+   *  it the resident picks one as usual. option: Free Will's option (its errand: option.buy, what a plan came to buy). */
+  doLeisure(a, P, name, h, venue = null, option = null) {
     switch (name) {
       case 'visit': return this.visitFlat(a, P);
       case 'home': return this.homeRelax(a, P, h);
       case 'cafe': return this.cafeVisit(a, P, h, venue);
       case 'park': return this.parkVisit(a, P, h, venue);
-      case 'shop': return this.shopVisit(a, P, venue);
+      case 'shop': return this.shopVisit(a, P, venue, option?.buy);
       case 'gym': return this.gymVisit(a, P, venue);
       case 'jog': return this.jog(a, P);
       case 'wander': return this.wander(a, P);
@@ -1228,14 +1295,17 @@ export class Brain {
     this.join(a, this.regionKey(ctx, 0, 0));
     return true;
   }
-  shopVisit(a, P, venue = null) {
+  /** Browses a shop and, mostly, buys something at the checkout. buy: what an errand of its plans came for (the shop's
+   *  lines, e.g. ['groceries']: Free Will, server/free-will/options.js withPlans) — then it always goes to the checkout
+   *  and that is what it pays for. */
+  shopVisit(a, P, venue = null, buy = null) {
     const v = venue || this.pickVenue(a, P, 'shop'); if (!v) return false;
     let ok = null;
     const n = a.rng.int(1, 3);
     for (let q = 0; q < n; q++) { const r = this.useAt(a, P, v.b, v.f, 'browse', [4, 12], { kind: 'shop' }); if (!r) break; ok = r; }
     if (!ok) return false;
-    const start = ok.hs.holdStart;
-    if (a.rng.chance(0.75) && this.useAt(a, P, v.b, v.f, 'buy', [1, 3], { kind: 'shop' })) { a.carry = PROP.bag; a.carryUntil = P.t + this.wm(90); }
+    const start = ok.hs.holdStart, errand = Array.isArray(buy) && buy.length > 0;
+    if ((errand || a.rng.chance(0.75)) && this.useAt(a, P, v.b, v.f, 'buy', [1, 3], { kind: 'shop', ...(errand ? { buy } : {}) })) { a.carry = PROP.bag; a.carryUntil = P.t + this.wm(90); }
     if (a.act) a.act.holdStart = Math.min(a.act.holdStart, start);
     return true;
   }
@@ -1490,8 +1560,9 @@ export class Brain {
   }
   /** Player walks up and talks: stop, face them, talk for a while. Returns true if the agent can talk now. */
   /** Turns to (px, pz) and talks a while; label: what it is doing, said from its side ("Talking with Nova"; default the
-   *  greeting's own, as a player who walked up to it sees it). */
-  talkTo(a, px, pz, secs = 22, label = '', withIdx = null, withName = null) {
+   *  greeting's own, as a player who walked up to it sees it). withPlayer: the account of the player it talks with, when
+   *  known (its owner in person: still with them as their companion — server/companions/ view). */
+  talkTo(a, px, pz, secs = 22, label = '', withIdx = null, withName = null, withPlayer = null) {
     const now = this.sim.now();
     if (a.act && (a.act.use === 'sleep' || a.act.use === 'shower') && a.act.holdEnd > now) return false;
     const P = this.cut(a, now + 0.1);
@@ -1504,7 +1575,7 @@ export class Brain {
       P.hold(1.2, A.wave, U.greet, 0, yaw);
       P.hold(secs, A.talk, U.greet, 0, yaw);
     }
-    this.act(a, 'talk', 'greet', P, { ctx: P.ctx, holdStart: hs, holdEnd: P.t, ...(label ? { label } : {}), ...(Number.isInteger(withIdx) ? { talkWith: withIdx } : {}), ...(withName ? { withName: String(withName).slice(0, 40) } : {}), place: P.ctx >= 0 ? this.placeName(ctxB(P.ctx), ctxF(P.ctx)) : '' });
+    this.act(a, 'talk', 'greet', P, { ctx: P.ctx, holdStart: hs, holdEnd: P.t, ...(label ? { label } : {}), ...(Number.isInteger(withIdx) ? { talkWith: withIdx } : {}), ...(withName ? { withName: String(withName).slice(0, 40) } : {}), ...(Number.isInteger(withPlayer) ? { withPlayer } : {}), place: P.ctx >= 0 ? this.placeName(ctxB(P.ctx), ctxF(P.ctx)) : '' });
     a.busyUntil = P.t;
     this.sim.commit(a, P);
     return true;
@@ -1538,6 +1609,24 @@ export class Brain {
         const e = evalPlan(t.plan, this.sim.now()), me = evalPlan(a.plan, this.sim.now());
         return this.reachable(e.ctx, me.ctx) ? null : 'private';
       }
+      // a companion's (server/companions/ checked who may give it): someone to go with, or a spot to wait at
+      case 'follow': return o.lead && this.leadAt(a, o, this.sim.now()) ? null : 'nobody';
+      case 'hold': return o.spot && Number.isFinite(o.spot.x) && Number.isFinite(o.spot.z) ? null : 'nowhere';
+      // a piece of furniture to use (the interaction registry, server/interactions/: an arcade cabinet, a bench, the
+      // piano): it is there, it has that use, and a paid one (an arcade's, a gym's) is one it can afford
+      case 'use': {
+        // (a decoration's: a bench on open land, a dock's picnic table — ./decor-seats.js; it costs nothing)
+        if (o.decor) return this.decorEntry(o.decor)?.slots.some(s => s.use === o.use && this.decorAct(s)) ? null : 'nowhere';
+        const v = venue, e = v ? this.index.entry(v.b, v.f, o.piece) : null;
+        if (!e || !e.slots.some(s => s.use === o.use)) return 'nowhere';
+        const vk = this.W.levels[this.W.buildings[v.b]?.lv?.[v.f]]?.venue;
+        return vk && econ && !econ.canSpend(a, vk) ? 'no_money' : null;
+      }
+      case 'meal': {
+        const k = venue ? this.W.levels[this.W.buildings[venue.b]?.lv?.[venue.f]]?.venue : null;
+        if (k !== 'cafe' && k !== 'restaurant') return 'nowhere';
+        return econ && !econ.canSpend(a, k, true) ? 'no_money' : null;
+      }
       case 'park': case 'cafe': case 'gym': case 'shop': case 'restaurant': case 'arcade': case 'lounge_bar': case 'club': {
         if (econ && !econ.canSpend(a, kind, kind === 'restaurant')) return 'no_money';
         if (venue) return null;
@@ -1556,8 +1645,9 @@ export class Brain {
     const o = a.order;
     if (!o) return null;
     if (t >= o.until) {
-      a.orderEnded = { kind: o.kind, who: o.who, why: o.kind === 'meet' && !o.reached ? 'not_found' : 'done', at: o.until };
+      a.orderEnded = { kind: o.kind, who: o.who, why: o.kind === 'meet' && !o.reached ? 'not_found' : 'done', at: o.until, by: o.by ?? null, lead: o.leadName || null };
       this.setOrder(a, null);
+      a.ride = null;
       // a meet over while it is still walking over to them: that walk stops now (planning: the next plan replaces it)
       if (!planning && o.kind === 'meet' && a.act?.kind === 'meet' && a.plan) this.interruptSoon(a);
       return null;
@@ -1572,6 +1662,11 @@ export class Brain {
       const who = o.who !== null && o.who !== undefined ? this.sim.people[o.who]?.id ?? null : null;
       a.p.order = { kind: o.kind, venue: o.venue ? { b: o.venue.b, f: o.venue.f, x: o.venue.x, z: o.venue.z } : null, who, stay: o.stay ?? null,
         until: worldSeconds(this.clock, o.until), reached: o.reached ? worldSeconds(this.clock, o.reached) : 0, at: worldSeconds(this.clock, o.at) };
+      // a companion's: whom it goes with (a player's account, or a resident by their id), where it waits, its place in the
+      // group, its meet-up, what it is out to do, who gave it (server/companions/)
+      if (o.lead) a.p.order.lead = o.lead.kind === 'player' ? { kind: 'player', id: o.lead.id } : { kind: 'person', id: this.sim.people[o.lead.i]?.id ?? null };
+      if (o.spot) a.p.order.spot = { x: o.spot.x, z: o.spot.z, ctx: o.spot.ctx, place: o.spot.place || '' };
+      for (const k of ['slot', 'group', 'goal', 'by', 'byName', 'via', 'piece', 'use', 'decor', 'whole']) if (o[k] !== undefined && o[k] !== null) a.p.order[k] = o[k];
     } else delete a.p.order;
     this.sim.savePerson?.(a.i);
   }
@@ -1582,11 +1677,19 @@ export class Brain {
     let who = null;
     if (s.who !== null && s.who !== undefined) { who = this.sim.people.findIndex(p => p && p.id === s.who); if (who < 0) { delete a.p.order; a.orderEnded = { kind: s.kind, who: null, why: 'nobody', at: this.sim.now() }; return; } }
     a.order = { kind: s.kind, venue: s.venue || null, who, stay: s.stay ?? undefined, until: back(s.until), reached: s.reached ? back(s.reached) : 0, at: back(s.at ?? s.until) };
+    if (s.lead) {
+      if (s.lead.kind === 'player') a.order.lead = { kind: 'player', id: s.lead.id };
+      else { const j = this.sim.people.findIndex(p => p && p.id === s.lead.id); if (j < 0) { a.order = null; delete a.p.order; a.orderEnded = { kind: s.kind, who: null, why: 'leader_gone', at: this.sim.now() }; return; } a.order.lead = { kind: 'person', i: j }; }
+    }
+    if (s.spot) a.order.spot = { ...s.spot };
+    for (const k of ['slot', 'group', 'goal', 'by', 'byName', 'via', 'piece', 'use', 'decor', 'whole']) if (s[k] !== undefined) a.order[k] = s[k];
   }
   /** One round of the order (true: it is doing it). */
   doOrder(a, P, h, day) {
     const o = a.order;
     switch (o.kind) {
+      case 'follow': return this.followStep(a, P, o);
+      case 'hold': return this.holdStep(a, P, o);
       case 'work': return a.p.job.kind !== 'free' && (this.work(a, P, h, day, false), true);
       case 'home': return this.homeRelax(a, P, h);
       case 'jog': return this.jog(a, P);
@@ -1597,6 +1700,18 @@ export class Brain {
         return !!(v && this.useAt(a, P, v.b, v.f, 'dance', [15, 30]));
       }
       case 'restaurant': { const v = o.venue || this.pickVenue(a, P, 'restaurant', { essential: true }); return !!(v && this.mealAt(a, P, 'restaurant', v)); }
+      case 'use': return this.useOrder(a, P, o);
+      // a meal at a named café or restaurant (the interaction registry's: an AI agent told, or deciding, to go and eat
+      // there) — the routine's own meal there, its bookkeeping too (Free Will's mealDo)
+      case 'meal': {
+        const v = o.venue, k = v ? this.W.levels[this.W.buildings[v.b]?.lv?.[v.f]]?.venue : null;
+        if (k !== 'cafe' && k !== 'restaurant') return false;
+        if (o.ate) { o.ended = 'done'; return false; }   // (one meal: then the order is over)
+        if (h >= 17) a.dinnerDay = day; else if (h >= 11 && h < 15) a.lunchDay = day;
+        const ok = this.freeSlots(v.b, v.f, 'eat', a.i).length > 0 && this.mealAt(a, P, k, v);
+        if (ok) o.ate = true;
+        return ok;
+      }
       case 'meet': {
         // with someone: walk up to where they are now, then stay with them a little; they may have moved on by the next
         // round, and it follows — unless they went somewhere private (the order ends: it doesn't follow people home)
@@ -1618,26 +1733,51 @@ export class Brain {
       default: return this.doLeisure(a, P, o.kind, h, o.venue);
     }
   }
+  /**
+   * A round of an order to use a piece of furniture (kind 'use': o.venue { b, f }, o.piece, o.use — the interaction
+   * registry's, server/interactions/): one of its slots with that use, for the slot's own time (what is left of the
+   * order at most), as a resident's visit there (the act's kind: the venue's, so the economy bills what one pays for
+   * there — an arcade's tokens, a gym's session — once a visit). o.whole: the whole order in one stay (an arcade game an
+   * agent plays there: server/play/arcade-crew.js, which ends the order when its game is over). False: the piece is gone
+   * or every slot of it is taken (the order ends: not possible).
+   */
+  useOrder(a, P, o) {
+    if (o.decor) return this.decorUse(a, P, o);   // (a decoration's slot outdoors: ./decor-seats.js)
+    const v = o.venue, e = v ? this.index.entry(v.b, v.f, o.piece) : null;
+    if (!e) return false;
+    const s = e.slots.find(x => x.use === o.use), lv = this.W.levels[this.W.buildings[v.b]?.lv?.[v.f]];
+    const left = Math.max(1, (o.until - P.t) * this.clock.dayScale / 60);
+    const dur = o.whole ? [left, left] : Array.isArray(s?.dur) ? [Math.min(s.dur[0], left), Math.min(s.dur[1], left)] : [Math.min(10, left), Math.min(25, left)];
+    return !!this.useAt(a, P, v.b, v.f, [o.use], dur, { kind: lv?.venue || 'visit', pick: list => list.find(x => x[0] === o.piece) || null });
+  }
   /** Gives the order now: { kind, venue, who, minutes }. Returns { ok, why }; when it can't start, nothing is cut. */
-  order(a, { kind, venue = null, who = null, minutes = 60, maxMinutes = 8 * 60, searchMinutes = MEET_SEARCH_MIN }) {
+  order(a, { kind, venue = null, who = null, minutes = 60, maxMinutes = 8 * 60, searchMinutes = MEET_SEARCH_MIN, lead = null, spot = null, slot = 0, group = null, goal = null, by = null, byName = null, via = null, piece = null, use = null, decor = null, whole = false }) {
     const now = this.sim.now(), e = evalPlan(a.plan, now);
-    const why = this.orderBlocked(a, kind, venue, e.x, e.z, { who });
+    const why = this.orderBlocked(a, kind, venue, e.x, e.z, { who, lead, spot, piece, use, decor });
     if (why) return { ok: false, why };
-    const before = a.order, span = this.wm(clamp(minutes, 5, Math.max(5, maxMinutes)));
+    const before = a.order, beforeRide = a.ride, span = this.wm(clamp(minutes, 5, Math.max(5, maxMinutes)));
     // a meet: `minutes` together once it has reached them; on the way it gives up after searchMinutes (the admin's)
     a.order = kind === 'meet' ? { kind, who, stay: span, until: now + this.wm(clamp(searchMinutes, 5, 24 * 60)), reached: 0, at: now } : { kind, venue, who, until: now + span, at: now };
+    if (kind === 'use') Object.assign(a.order, { piece, use, ...(whole ? { whole: true } : {}) }, decor ? { decor: String(decor) } : {});   // (which piece — or decoration —, and what it does there; whole: in one stay)
+    // a companion's (server/companions/): with whom, where, its place in the group, who gave it
+    if (COMPANION_KINDS.has(kind)) Object.assign(a.order, { lead: lead || null, spot: spot || null, slot: slot | 0, group: group || null, goal: goal || null, reached: 0 });
+    if (by !== null) Object.assign(a.order, { by, ...(byName ? { byName } : {}) });
+    if (via) a.order.via = via;   // (who gave it: a person's button, chat, brain — or 'agent': the agents' own choice)
+    if (group && !COMPANION_KINDS.has(kind)) a.order.group = group;   // (going somewhere with others: server/companions/ together)
+    if (kind !== 'follow') a.ride = null;   // (sent somewhere else: out of the car first — server/companions/ lets it out)
     const P = this.cut(a, now + 0.1);
     const h = this.hour(P.t), day = this.day(P.t);
-    let ok = false;
+    let ok = false, ended = null;
     try { ok = !!this.doOrder(a, P, h, day); } catch (err) { this.sim.noteError(err); }
+    if (!ok) ended = a.order?.ended || null;
     if (ok) {
       // (its time counts from when it gets there: the walk doesn't use it up)
       if (kind !== 'meet' && a.act && a.act.travelEnd > now) a.order.until = a.act.travelEnd + span;
       a.orderEnded = null;
       this.setOrder(a, a.order);
-    } else { a.order = before && before.until > now ? before : null; this.lookAround(a, P, this.wm(2)); }
+    } else { a.order = before && before.until > now ? before : null; a.ride = a.order ? beforeRide : null; this.lookAround(a, P, this.wm(2)); }
     this.sim.commit(a, P);
-    return ok ? { ok: true } : { ok: false, why: 'not_possible' };
+    return ok ? { ok: true } : { ok: false, why: ended || 'not_possible' };
   }
   /** On plan P: walks over to (x, z) — outdoors, or on floor ctx of a building — and waits there a little, facing it.
    *  False when there is no way there. */
@@ -1841,3 +1981,7 @@ export class Brain {
     this.sim.commit(a, P);
   }
 }
+// companions (server/sim/companion-moves.js): following someone, waiting somewhere, riding in a leader's car
+Object.assign(Brain.prototype, COMPANION_MOVES);
+// the decorations' seats outdoors (server/sim/decor-seats.js): a bench on open land, a dock's picnic table
+Object.assign(Brain.prototype, DECOR_SEATS);

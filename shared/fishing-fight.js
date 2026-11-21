@@ -210,9 +210,14 @@ export function minFightSeconds(sp, kg, L, d0) {
   return 0.8 * Math.max(stam, reel);
 }
 
-/** A good player: reels unless the tension is near the drag, holds the rod against every run, bows to jumps, lands. */
-export function botInput(F, skill = 1) {
-  const near = F.T > F.L.drag * (0.86 - 0.1 * (1 - skill)), bow = !!(F.jump && !F.jump.bowed && F.jump.t > 0.15 + 0.7 * (1 - skill));
+/** A good player: reels unless the tension is near the drag, holds the rod against every run, bows to jumps, lands.
+ *  push (-1 easy … 1 hard: a companion's way of playing a fish, server/play/fishing-tactics.js): how close to the drag it
+ *  lets the line come — harder is quicker, with more lines snapped. */
+export function botInput(F, skill = 1, push = 0) {
+  // (a hard hand reels on into the drag, easing off only once the line has strained a while — the less skilled, the later;
+  //  an easy one stops well short of it)
+  const edge = 0.86 - 0.1 * (1 - skill) + (push > 0 ? 0.2 : 0.1) * push;
+  const near = F.T > F.L.drag * edge || (push > 0 && F.strain > STRAIN_S * (0.45 + 0.5 * (1 - skill)) * push), bow = !!(F.jump && !F.jump.bowed && F.jump.t > 0.15 + 0.7 * (1 - skill));
   // (and the signatures: cranks a fish heading for the rocks, eases off a toothy one's head-shakes, pumps a planted one)
   let reel = !bow && !(F.jump && !F.jump.bowed && skill > 0.5) && (!near || F.mode === 'toward');
   if (F.mode === 'rocks') reel = true;

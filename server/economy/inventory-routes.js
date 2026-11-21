@@ -43,6 +43,8 @@ export function addInventoryRoutes(router, econ, inv, d) {
   router.add({ method: 'POST', path: '/api/inventory/trade/open', cap: 'economy.use', handler: run(({ P, body }) => { const b = body || {}; return T.open(me(P), { to: b.to, as: int(b.as), memo: b.memo }); }) });
   router.add({ method: 'POST', path: '/api/inventory/trade/offer', cap: 'economy.use', handler: run(({ P, body }) => { const b = body || {}; return T.offer(me(P), { trade: String(b.trade || ''), items: b.items, vc: int(b.vc) ?? 0, as: int(b.as) }); }) });
   router.add({ method: 'POST', path: '/api/inventory/trade/accept', cap: 'economy.use', handler: run(({ P, body }) => { const b = body || {}; return T.accept(me(P), { trade: String(b.trade || ''), as: int(b.as) }); }) });
+  // (to one of their own agents, both sides at once: it decides — server/companions/agent-trades.js)
+  router.add({ method: 'POST', path: '/api/inventory/trade/propose', cap: 'economy.use', handler: run(({ P, body }) => { const b = body || {}; return T.propose(me(P), { to: b.to, give: b.give || [], vc: int(b.vc) ?? 0, want: b.want || [], wantVc: int(b.wantVc) ?? 0, memo: b.memo }); }) });
   router.add({ method: 'POST', path: '/api/inventory/trade/decline', cap: 'economy.use', handler: run(({ P, body }) => { const b = body || {}; return T.decline(me(P), { trade: String(b.trade || ''), as: int(b.as) }); }) });
 
   // an agent's own (the agent API)

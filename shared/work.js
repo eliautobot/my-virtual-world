@@ -209,13 +209,14 @@ registerModule({ id: 'server', version: 1, label: 'Server', icon: '🍽️', uni
       step(r, 'meter', 'Carry it steady', { fill: [1400, 2000], lo: 0.55, hi: 0.8, band: 0.12, hint: 'Hold to walk, let go at the table' }),
     ] };
   } });
-// the shop's till: scan in order, bag or no bag
-registerModule({ id: 'cashier', version: 1, label: 'Cashier', icon: '🛒', unit: 'customer', units: 'customers', venues: ['shop'], stage: 10, game: 'till',
+// the shop's till: scan in order, bag or no bag (version 2, 2026-11-17: what the customer says is the answer — it was
+// drawn apart from it, so "I brought my own" was a bag half the time: an agent playing it from the panel found it)
+registerModule({ id: 'cashier', version: 2, label: 'Cashier', icon: '🛒', unit: 'customer', units: 'customers', venues: ['shop'], stage: 10, game: 'till',
   makeOrder(r, { customer: who, item }) {
-    const basket = r.shuffle([...GROCERIES]).slice(0, 4), order = r.shuffle([0, 1, 2, 3]);
+    const basket = r.shuffle([...GROCERIES]).slice(0, 4), order = r.shuffle([0, 1, 2, 3]), bag = r.chance(0.6);
     return { title: `${who}'s basket`, item: item || 'groceries', expectMs: 10000, steps: [
       step(r, 'sequence', 'Scan the items', { items: basket, order, hint: 'Scan them in the order shown' }),
-      step(r, 'choice', 'Bag or no bag?', { options: ['Bag', 'No bag'], correct: r.chance(0.6) ? 'Bag' : 'No bag', memo: `${who}: “${r.chance(0.5) ? 'A bag, please' : 'I brought my own'}.”`, hint: 'What did they say?' }),
+      step(r, 'choice', 'Bag or no bag?', { options: ['Bag', 'No bag'], correct: bag ? 'Bag' : 'No bag', memo: `${who}: “${bag ? (r.chance(0.5) ? 'A bag, please' : 'Could I get a bag?') : (r.chance(0.5) ? 'No bag, thanks' : 'I brought my own')}.”`, hint: 'What did they say?' }),
     ] };
   } });
 // the gym's coach: plan the circuit, count the rep

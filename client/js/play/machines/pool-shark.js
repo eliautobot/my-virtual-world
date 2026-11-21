@@ -86,10 +86,10 @@ export function create({ THREE, group, play, app }) {
       else if (ev.k === 'points') play.float(`+${ev.pts}${ev.run > 1 ? ` · RUN ×${ev.run}` : ''}`, [0, T + 0.35, 0.2], { color: '#fde047', size: 26 });
       else if (ev.k === 'groups') play.float(`You are ${NAME[ev.group]}`, [0, T + 0.4, 0], { color: '#ffffff', size: 28, life: 1.8 });
       else if (ev.k === 'foul') play.float(ev.why === 'scratch' ? 'FOUL: SCRATCH' : ev.why === 'miss' ? 'FOUL: NO BALL HIT' : 'FOUL: WRONG BALL FIRST', [0, T + 0.35, 0.3], { color: '#fca5a5', size: 24, life: 1.5 });
-      else if (ev.k === 'turn') play.float(ev.to === 1 ? 'Your shot' : "The computer's shot", [0, T + 0.3, 0.6], { color: ev.to === 1 ? '#4ade80' : '#93c5fd', size: 24, life: 1.2 });
+      else if (ev.k === 'turn') play.float(ev.to === 1 ? 'Your shot' : play.foe?.agent ? `${play.foe.Name}'s shot` : "The computer's shot", [0, T + 0.3, 0.6], { color: ev.to === 1 ? '#4ade80' : '#93c5fd', size: 24, life: 1.2 });
       else if (ev.k === 'spot8') play.float('The 8 on the break: spotted again', [0, T + 0.3, -0.6], { color: '#e2e8f0', size: 22 });
       else if (ev.k === 'time') play.float('Time!', [0, T + 0.35, 0.6], { color: '#fca5a5', size: 26 });
-      else if (ev.k === 'over') play.float(ev.walked ? 'You walked away' : ev.win ? 'YOU WIN!' : ev.out ? 'Out of shots' : 'THE COMPUTER WINS', [0, T + 0.45, 0], { color: ev.win ? '#fde047' : '#e2e8f0', size: 36, life: 2 });
+      else if (ev.k === 'over') play.float(ev.walked ? 'You walked away' : ev.win ? 'YOU WIN!' : ev.out ? 'Out of shots' : `${(play.foe?.agent ? play.foe.short : 'THE COMPUTER')} WINS`, [0, T + 0.45, 0], { color: ev.win ? '#fde047' : '#e2e8f0', size: 36, life: 2 });
     },
     sfx(ev) {
       if (ev.k === 'click') return ['click', Math.min(1, ev.v / 0.05)];
@@ -133,10 +133,10 @@ export function create({ THREE, group, play, app }) {
     hud(s) {
       const g = s.group, clock = Math.ceil(s.clock / 60);
       return {
-        info: `${g ? `You: ${NAME[g]} ${7 - left(s, g)}/7 · CPU ${7 - left(s, 3 - g)}/7` : 'Open table'}${s.ph === 'aim' ? ` · ⏱ ${clock}s` : ''}`,
+        info: `${g ? `You: ${NAME[g]} ${7 - left(s, g)}/7 · ${play.foe?.agent ? play.foe.name : 'CPU'} ${7 - left(s, 3 - g)}/7` : 'Open table'}${s.ph === 'aim' ? ` · ⏱ ${clock}s` : ''}`,
         meter: s.ph === 'aim' && s.chg >= 0 ? s.pw : null,
-        hint: s.ph === 'aim' && s.shots === 0 ? 'Point to aim the cue · hold the mouse button (or Z) and let go to strike · ◀ ▶ fine aim' : s.ph === 'cpu' ? 'The computer is lining up its shot…' : s.ph === 'aim' && clock <= 5 && s.clock < CLOCK ? 'Hurry: take your shot' : '',
-        board: [String(s.score), s.over ? (s.win ? 'YOU WIN' : 'CPU WINS') : s.turn === 1 ? 'YOUR SHOT' : 'CPU SHOT'],
+        hint: s.ph === 'aim' && s.shots === 0 ? 'Point to aim the cue · hold the mouse button (or Z) and let go to strike · ◀ ▶ fine aim' : s.ph === 'cpu' ? `${play.foe?.agent ? play.foe.Name : 'The computer'} is lining up ${play.foe?.agent ? 'a' : 'its'} shot…` : s.ph === 'aim' && clock <= 5 && s.clock < CLOCK ? 'Hurry: take your shot' : '',
+        board: [String(s.score), s.over ? (s.win ? 'YOU WIN' : `${play.foe?.short || 'CPU'} WINS`) : s.turn === 1 ? 'YOUR SHOT' : `${play.foe?.short || 'CPU'} SHOT`],
       };
     },
     dispose() {},

@@ -15,7 +15,7 @@
 //   look()   the time, where it is (or where it is heading and when it arrives), what it does, its needs, money, its order
 //            (and how the last one ended), Free Will, who is around, what it heard, named places nearby, its plans, its life
 //   act()    one action: do (an activity, for a while), go (a named place), meet (be with someone: walk up to them and stay,
-//            for a while), stop (end the order), say (out loud, checked like any agent's speech; to someone near: it turns
+//            for a while), things_to_do / use (what it can do right where it is, and doing one: server/interactions/), stop (end the order), say (out loud, checked like any agent's speech; to someone near: it turns
 //            to them), plan / plan_done, remember
 //   inbox    (through the Agent API's mailbox, server/agent-api.js extra) the lines said near it since, as they are said —
 //            a stranger's only when its owner lets it hear strangers, a few a day — and its friends' messages, invitations
@@ -32,6 +32,7 @@ import { worldTimeFrom } from './agent-social/social.js';
 import { aiName } from './mind/speech.js';
 import { NO_INVENTING } from './mind/prompt.js';
 import { needWords } from './free-will/prompt.js';
+import { companionLine } from './companions/brain-tools.js';
 
 const normName = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
@@ -51,6 +52,7 @@ const WHY_TEXT = Object.freeze({
   no_job: 'you have no job', no_home: 'you have no home', nowhere: 'there is no such place in the city',
   done: 'its time was up', nobody: 'they are not in the city right now', not_found: 'you looked for a long while and didn\'t reach them', private: 'they are somewhere private (a home or an office): you only meet people outdoors, in public places or where you are',
   not_possible: 'not possible right now (full or closed): you carry on with what you were doing', no_body: 'you have no body in the city right now',
+  needs: 'you were too hungry or too tired to go on',
 });
 export const WORLD_LIMITS = Object.freeze({
   doGapMs: 10000,        // between two orders (do, go, meet, stop)
@@ -316,10 +318,12 @@ export class AgentWorld {
     return {
       name: slot.name,   // (2026-10-13: which agent this is — an app with several connectors checks it is the right one)
       time: `${c.weekday} ${formatClock(h)}`, partOfDay: part,
-      where: heading ? `on the way to ${here}` : here,
+      where: (() => { try { const w = this.senses && this.senses.modeOf(b.a.id) !== 'off' ? this.senses.whereWords(b.a) : null; return w ? `${w}${heading ? `, on the way to ${here}` : ''}` : null; } catch { return null; } })() || (heading ? `on the way to ${here}` : here),
       doing: day.doing,
       ...(day.moment ? { moment: day.moment } : {}),
       feels: needWords(me.needs).join(', '),
+      // (with its owner, or out on an order of theirs: server/companions/)
+      ...(() => { const l = this.companions ? companionLine(this.companions, b.a) : null; return l ? { companion: l } : {}; })(),
       ...(() => { try { const t = (this.econOf()?.trades?.(b.a.id) || []).filter(x => x.status === 'open'); return t.length ? { trades: `${t.length} open (with ${t.map(x => x.them.who.name).join(', ')}): the "trades" tool shows them` } : {}; } catch { return {}; } })(),
       ...(() => { const h = this.holdsOf(b.a.id, 6); return h ? { holds: h.kinds ? `${h.items.map(x => `${x.qty > 1 ? `${x.qty} × ` : ''}${x.name}`).join(', ')}${h.more ? ` and ${h.more} more kinds` : ''} (worth ${h.worthVC} VC in all; the "inventory" tool lists it)` : 'nothing yet' } : {}; })(),
       rule: `These are the facts about you right now. "doing" is your day: answer what you are doing from it; a message is only a moment you take from it. ${NO_INVENTING} Never make up the time, the part of the day, where you are or what you are doing: use these.`,
@@ -414,6 +418,21 @@ export class AgentWorld {
     };
     const social = this.socialOf(), inv = social ? social.invitesOf(a.id) : [];
     if (inv.length) out.invites = inv;
+    // its senses (server/senses/, docs/features/awareness.md): exactly where it is (the seat of a car, the floor, the
+    // street corner), what is in hand, who it is with, what it lived and heard lately — the same for every brain
+    if (this.senses) {
+      try {
+        const S = this.senses, w = S.whereWords(a);
+        if (w) out.me.where = heading ? `${w}, on the way to ${here}` : w;
+        const owner = S.ownerOf(a), tog = owner != null ? S.together(a, owner) : { yes: false };
+        if (tog.yes) out.withYourOwner = tog.how;
+        const cards = S.activities.cards({ env: S.env(), i, account: -Number(a.id), who: 'you', self: true, now });
+        if (tog.yes) cards.push(...S.activities.cards({ env: S.env(), i: -1, account: owner, who: S.nameOf(owner), self: false, now }));
+        if (cards.length) out.activity = cards.map(c => `${c.title}${c.lines.length ? `: ${c.lines.join('; ')}` : ''}`);
+        const lately = S.diary.read(a.id, { limit: brief ? 4 : 10 }).filter(l => l.kind !== 'heard').map(l => `${l.clock} ${l.text}`);
+        if (lately.length) out.lately = lately;
+      } catch (e) { this.log?.warn?.('[agent-world] senses:', e.message); }
+    }
     if (brief) return out;
     if (social) out.friends = social.friendsOf(a.id, { max: 10 }).map(({ agent, ...f }) => f);
     const ctx = life.contextFor(a.id) || {};
@@ -458,7 +477,7 @@ export class AgentWorld {
   }
 
   // ------------------------------------------------------------------------------------------------ hands
-  /** One action: { action: 'do'|'go'|'meet'|'stop'|'say'|'plan'|'plan_done'|'remember', … }. */
+  /** One action: { action: 'do'|'go'|'meet'|'things_to_do'|'use'|'stop'|'say'|'plan'|'plan_done'|'remember', … }. */
   async act(slot, body) {
     const b = body && typeof body === 'object' ? body : {};
     this.rate(slot);
@@ -519,6 +538,24 @@ export class AgentWorld {
         // places or where it is; somewhere private (a home, an office) the order ends and its AI is told
         return result(sim.order(i, { kind: 'meet', who: who.j, minutes: minutes(L.meetMinutes), searchMinutes: L.meetSearchMinutes, maxMinutes: hi }), { meeting: who.name, distanceM: who.distanceM });
       }
+      // what it can do right where its body is (server/interactions/: the furniture near it — a bench, a cabinet, the
+      // piano —, a meal, shopping, the gym …; out with its owner, sitting down with them, using what is near them) and
+      // doing one by its id: its body goes and does it, for real, what it costs from its own money
+      case 'things_to_do': {
+        const list = this.interactions ? this.interactions.nearFor(a, { limit: 15 }) : [];
+        return { things: list.map(x => ({ id: x.id, kind: x.kind, label: x.label, ...(x.cost ? { costVc: x.cost / 100 } : {}), ...(x.effects?.words ? { does: x.effects.words } : {}), ...(x.withLeader ? { withYourOwner: true } : {}) })) };
+      }
+      case 'use': {
+        const id = clean(b.thing ?? b.id, 160);
+        if (!id) throw new AgentApiError(400, 'no_thing', 'Give thing: the id of one of things_to_do');
+        if (!this.interactions) return { ok: false, why: 'nothing can be done in the world here' };
+        gap('order', L.doGapMs);
+        let r = this.interactions.doFor(a, id, { via: 'agent', ...(b.minutes ? { minutes: minutes(def) } : {}) });
+        if (r && typeof r.then === 'function') r = await r;
+        if (!r?.ok) return { ok: false, why: r?.brain || r?.text || 'it could not be done' };
+        mark('order');
+        return { ok: true, did: r.brain || r.text };
+      }
       case 'stop': {
         gap('order', L.doGapMs);
         mark('order');
@@ -557,7 +594,7 @@ export class AgentWorld {
       }
       case 'plan_done': {
         write();
-        const plans = life.setIntention(a.id, Number(b.id), b.dropped ? 'dropped' : 'done');
+        const plans = life.setIntention(a.id, Number(b.id), b.dropped ? 'dropped' : 'done', { check: true });   // (one its body does: done when its day shows it, else 409 not_done)
         return { ok: true, plans: plans.filter(p => p.status === 'open').map(p => ({ id: p.id, kind: p.kind, text: p.text })) };
       }
       case 'remember': {
@@ -566,6 +603,17 @@ export class AgentWorld {
         return { ok: true };
       }
       // ---- focused questions (2026-10-12): a small answer about one thing, instead of the whole look
+      // as a companion (server/companions/): with its owner, waiting, with another of its owner's agents, or back to its day
+      // — the commands its owner's own buttons give, as its owner
+      case 'come_along': case 'wait': case 'go_with': case 'let_go': {
+        const C = this.companions, P = C?.principalFor?.(a.ownerId);
+        if (!C || !P) return { ok: false, why: 'companions are not available in this world' };
+        gap('order', L.doGapMs);
+        const body = b.action === 'come_along' ? { action: 'follow', target: 'me', place: b.place ? clean(b.place, 80) : null }
+          : b.action === 'wait' ? { action: 'stay', place: b.place ? clean(b.place, 80) : 'here' }
+          : b.action === 'go_with' ? { action: 'follow', target: clean(b.name, 60) } : { action: 'dismiss' };
+        try { const r = C.command(P, { agent: a.id, ...body }, 'agent'); mark('order'); return { ok: true, done: r.text }; } catch (e) { return { ok: false, why: e.message }; }
+      }
       case 'about': return this.about(a, sim, life, b.name);
       case 'plans': {
         const S = this.socialOf(), order = sim.orderOf(i);

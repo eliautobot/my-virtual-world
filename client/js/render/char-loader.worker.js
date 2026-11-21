@@ -25,8 +25,23 @@ self.onmessage = async e => {
         man.clips = [...man.clips, ...x.clips.map(c => ({ ...c, off: a.frames + c.off }))];
         a = man.anim = { ...a, h, frames: a.frames + x.ef }; data = merged; applied.push(x.set);
       });
+      // the crowd's tuning turned into its animation here too, off the main thread (2026-11-20: ~0.1 s a model there):
+      // the idles planted, the body's posture, the clips' own turns — a character built in the Agent Studio by its body,
+      // a ready-made one by its own (kind f… / m…) when the tuning says so (readyMade); not in the Crowd Studio (keeps
+      // its source to turn again: render/characters.js)
+      let rigged = false;
+      const T = e.data.tuning;
+      if (T && man.names) {
+        const sex = man.custom ? (man.custom.gender === 'female' ? 'f' : 'm') : T.readyMade ? (/^f/.test(kind) ? 'f' : 'm') : null;
+        if (sex) {
+          const { applyRig, plantClips, withClipFix } = await import('/shared/crowd-tuning.js');
+          const d16 = data || new Uint16Array(bin, a.data.off, a.data.len / 2);
+          const an = { data: d16, frames: a.frames, bones: man.bones, names: man.names, clips: man.clips || [] };
+          plantClips(an); applyRig(an, T.rig?.[sex], withClipFix(sex, T.clips?.[sex])); rigged = true;
+        }
+      }
       const anim = data ? data.buffer : null;
-      self.postMessage({ id, man, bin, anim, applied }, anim ? [bin, anim] : [bin]);
+      self.postMessage({ id, man, bin, anim, applied, rigged }, anim ? [bin, anim] : [bin]);
     } else if (op === 'map') {
       const blob = await fetch(url).then(ok).then(r => r.blob());
       const bitmap = await createImageBitmap(blob, size < 2048 ? { ...MAP_OPTS, resizeWidth: size, resizeHeight: size, resizeQuality: 'high' } : MAP_OPTS);

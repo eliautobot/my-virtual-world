@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { openDb, SCHEMA_VERSION } from '../server/db.js';
+import { openDb } from '../server/db.js';
 import { SETTINGS } from '../server/settings.js';
 import { SOUND_DEFAULTS } from '../shared/sound-defaults.js';
 import { tempDir } from './helpers/server.mjs';
@@ -26,7 +26,7 @@ test('stored volumes still at the first defaults move to the new ones once; chos
     // an account that tuned some: its own levels, the rest left where they were
     for (const [k, v] of Object.entries({ master: 70, effects: 20, vehicles: 45, radio: 70, world: 45 })) put(2, `sound.${k}`, String(v));
     put(2, 'display.labels', 'false');
-    s.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION - 1}`);
+    s.db.exec('PRAGMA user_version = 56');   // (just before v57, the sound's new defaults)
     s.close();
     s = openDb(dir);   // v57 runs over them
     const of = acc => Object.fromEntries(s.db.prepare("SELECT key, value FROM account_settings WHERE account_id = ? AND key LIKE 'sound.%'").all(acc).map(r => [r.key.slice(6), Number(JSON.parse(r.value))]));

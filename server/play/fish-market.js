@@ -14,6 +14,10 @@ export class FishError extends Error { constructor(status, code, msg) { super(ms
 const fail = (status, code, msg) => { throw new FishError(status, code, msg); };
 /** What the store buys: the fishing game's catch. */
 export const SELLABLE = it => /^(fish|find):/.test(it);
+/** Who an angler is in the economy: a player's account, or an AI agent (it fishes as minus its id: server/play/play.js) —
+ *  its own inventory and wallet (2026-11-17: companions fishing with their owner, server/play/fishing-crew.js). */
+export const anglerOf = id => (Number(id) < 0 ? subj('agent', -Number(id)) : subj('account', id));
+const actorOf = id => (Number(id) < 0 ? `agent:${-Number(id)}` : `account:${id}`);
 
 export class FishMarket {
   /** o: { dbs, economy() → the economy (or null), world() → the world, players, now?, log? } */
@@ -35,8 +39,9 @@ export class FishMarket {
     if (!r || !inv) return null;
     let d = null; try { d = JSON.parse(r.detail || '{}'); } catch { d = null; }
     if (!d) return null;
-    const who = subj('account', account.id), label = TRIP_BY_ID[r.course]?.label || r.course;
+    const who = anglerOf(account.id), label = TRIP_BY_ID[r.course]?.label || r.course;
     let stowed = 0, full = false;
+    const stacks = [];   // (the pieces it made: a session's catch moved on to its owner, server/play/fishing-crew.js claim)
     (d.items || []).forEach((it, k) => {
       if (!Array.isArray(it)) return;
       const [what, cm, kg, vc, size] = it, isFish = !!itemOf(`fish:${what}`);
@@ -44,16 +49,16 @@ export class FishMarket {
         const res = isFish
           ? inv.add(who, `fish:${what}`, 1, { cm, kg, size: size || '', vc: Math.round(vc * 100), trip: r.course, at: r.at }, { kind: 'catch', memo: label, ref: `play_run:${r.id}`, idem: `fish-stow:${r.id}:${k}` })
           : itemOf(`find:${what}`) ? inv.add(who, `find:${what}`, 1, null, { kind: 'catch', memo: label, ref: `play_run:${r.id}`, idem: `fish-stow:${r.id}:${k}` }) : null;
-        if (res && !res.dup) stowed++;
+        if (res && !res.dup) { stowed++; stacks.push(...(res.stacks || [])); }
       } catch (e) { if (e.code === 'full') full = true; else throw e; }
     });
     let bounty = 0;
     const E = this.econ, T = this.terms(account.id);
     if (E && T.on && d.bonusSale > 0) {
       bounty = Math.round(d.bonusSale * 100 * T.pct / 100);
-      E.ledger.transfer(E.faucet('fishMarket').id, E.walletFor(subj('account', account.id)).id, bounty, { kind: 'fish_sale', actor: 'system:fishing', memo: `Fish market — bounties on ${label}`, idem: `fish-bounty:${r.id}`, ref: `play_run:${r.id}` });
+      E.ledger.transfer(E.faucet('fishMarket').id, E.walletFor(anglerOf(account.id)).id, bounty, { kind: 'fish_sale', actor: 'system:fishing', memo: `Fish market — bounties on ${label}`, idem: `fish-bounty:${r.id}`, ref: `play_run:${r.id}` });
     }
-    return { stowed, full, bounty };
+    return { stowed, full, bounty, stacks };
   }
   /** The dock store the player is at (inside it, or within a few metres of it), or null. */
   storeAt(accountId) {
@@ -66,30 +71,32 @@ export class FishMarket {
   terms(accountId) {
     const E = this.econ, P = E?.enabled?.() && !E.paused?.() ? E.policy().fishMarket : null;
     if (!P || !P.on) return { on: false, pct: 0, dailyCap: 0, left: 0 };
-    return { on: true, pct: P.pct, dailyCap: P.dailyCap, left: Math.max(0, P.dailyCap - this.q.sold.get(this.w, `account:${accountId}`, this.now() - DAY).v) };
+    return { on: true, pct: P.pct, dailyCap: P.dailyCap, left: Math.max(0, P.dailyCap - this.q.sold.get(this.w, actorOf(accountId), this.now() - DAY).v) };
   }
-  /** What the counter shows: what of yours the store buys and for how much, the terms, whether you're at a store. */
-  view(account) {
-    const b = this.storeAt(account.id), inv = this.inv, T = this.terms(account.id);
-    const items = inv ? inv.list(subj('account', account.id)).filter(s => SELLABLE(s.item) && !s.held).map(s => ({ stack: s.id, item: s.item, qty: s.qty, attrs: s.attrs, price: Math.round(itemValue(itemOf(s.item), s.attrs) * T.pct / 100) })) : [];
+  /** What the counter shows: what of yours the store buys and for how much, the terms, whether you're at a store (at: the
+   *  store an agent's body is at — server/play/fishing-crew.js —, a player's is where its player stands). */
+  view(account, at = null) {
+    const b = at || this.storeAt(account.id), inv = this.inv, T = this.terms(account.id);
+    const items = inv ? inv.list(anglerOf(account.id)).filter(s => SELLABLE(s.item) && !s.held).map(s => ({ stack: s.id, item: s.item, qty: s.qty, attrs: s.attrs, price: Math.round(itemValue(itemOf(s.item), s.attrs) * T.pct / 100) })) : [];
     return { atStore: b ? { name: b.name || 'Dock Store' } : null, items, terms: T };
   }
-  /** Sells the fish and finds (all, or `stacks`) at the store the angler is in: → { sold: [{ stack, paid }], paid, capped }. */
-  sell(account, stacks = null) {
-    const b = this.storeAt(account.id);
+  /** Sells the fish and finds (all, or `stacks`) at the store the angler is in (at: the store an agent's body is at, checked
+   *  by server/play/fishing-crew.js): → { sold: [{ stack, paid }], paid, capped }. */
+  sell(account, stacks = null, at = null) {
+    const b = at && at.tackle && !at.gone ? at : this.storeAt(account.id);
     if (!b) fail(409, 'not_here', 'Walk into a dock store to sell your catch');
     const E = this.econ, inv = this.inv, T = this.terms(account.id);
     if (!E || !inv || !T.on) fail(409, 'closed', 'The fish market is closed');
-    const want = this.view(account).items.filter(s => !stacks || stacks.includes(s.stack));
+    const want = this.view(account, b).items.filter(s => !stacks || stacks.includes(s.stack));
     if (!want.length) fail(404, 'nothing', 'Nothing to sell — go fishing first');
     let left = T.left, paid = 0, capped = false;
-    const sold = [], who = subj('account', account.id), wallet = E.walletFor(who).id;
+    const sold = [], who = anglerOf(account.id), wallet = E.walletFor(who).id;
     for (const s of want) {
       const price = s.price * s.qty;
       if (price > left) { capped = true; continue; }
       E.dbs.tx(() => {   // the fish out of the inventory and the coin in, together
         const idem = `fish-sale:${s.stack}:${s.qty}:${s.attrs?.at ?? ''}:${this.now()}`;
-        inv.take(who, s.stack, s.qty, { kind: 'sell', actor: `account:${account.id}`, memo: b.name || 'Dock Store', ref: `store:${b.id ?? ''}`, idem });
+        inv.take(who, s.stack, s.qty, { kind: 'sell', actor: actorOf(account.id), memo: b.name || 'Dock Store', ref: `store:${b.id ?? ''}`, idem });
         if (price > 0) E.ledger.transfer(E.faucet('fishMarket').id, wallet, price, { kind: 'fish_sale', actor: 'system:fishing', memo: `Fish market — ${itemOf(s.item)?.name || 'catch'} at ${b.name || 'the Dock Store'}`, idem });
       });
       // (the log line's worth is what was paid: the daily cap counts it)

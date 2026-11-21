@@ -20,14 +20,16 @@ const waitFor = async (fn, ms = 10000) => { const t0 = Date.now(); for (;;) { co
 /** The fake brain, its owner's chat: coffee → the menu → buy the first item; anything else → "Echo: …". */
 function answer(j) {
   const sys = j.messages.find(m => m.role === 'system')?.content || '';
-  const users = j.messages.filter(m => m.role === 'user').map(m => m.content), k = users.findLastIndex(u => !/^RESULTS:/.test(u)), msg = users[k], rounds = users.length - 1 - k;
+  const users = j.messages.filter(m => m.role === 'user').map(m => m.content), k = users.findLastIndex(u => !/^RESULTS:/.test(u)), msg = users[k];
   if (/coffee/.test(msg)) {
-    const where = /(?:café|restaurant) «([^»]+)»/.exec(sys)?.[1];
-    if (rounds === 0) return JSON.stringify({ use: [{ tool: 'menu', place: where }] });
-    if (rounds === 1) return JSON.stringify({ use: [{ tool: 'buy', place: where, items: [{ item: 'I1', n: 1 }] }] });
+    // (the places near it: in its senses' note, or from looking around — server/senses/)
+    const where = /(?:café|restaurant) «([^»]+)»/.exec([sys, ...users.slice(k)].join('\n'))?.[1], got = users.slice(k + 1).join('\n');
+    if (!where) return JSON.stringify({ use: [{ tool: 'look' }] });
+    if (!/- menu/.test(got)) return JSON.stringify({ use: [{ tool: 'menu', place: where }] });
+    if (!/- buy/.test(got)) return JSON.stringify({ use: [{ tool: 'buy', place: where, items: [{ item: 'I1', n: 1 }] }] });
     return /waiting: my owner must agree/.test(users.at(-1)) ? 'I asked you first — it\'s above your limit.' : 'Bought it.';
   }
-  return `Echo: ${msg}`;
+  return `Echo: ${msg.replace(/^\[My Virtual World — [\s\S]*?\]\n\n/, '')}`;
 }
 /** A browser: its keys, and how it decrypts what the push service hands it. */
 const ecdh = crypto.createECDH('prime256v1'); ecdh.generateKeys();

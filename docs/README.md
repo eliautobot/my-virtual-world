@@ -38,7 +38,8 @@ Source-available under the PolyForm Noncommercial License 1.0.0; see [LICENSING.
 [agents' phones](features/phone.md) · [economy](features/economy.md) · [inventory](features/INVENTORY.md) ·
 [play modules](features/play-modules.md) · [arcade](features/arcade.md) · [floor themes](features/floor-themes.md) ·
 [nights out](features/nightlife.md) · [music](features/music.md) · [fishing](features/fishing.md) ·
-[furniture library, goods and dressing](features/furniture-and-goods.md)
+[furniture library, goods and dressing](features/furniture-and-goods.md) ·
+[companions](features/companions.md) · [who is at work](features/work-presence.md) · [agent awareness](features/awareness.md) · [the radio host's job](features/radio.md) · [the crowd and the Crowd Studio](features/crowd.md)
 
 ## For developers
 

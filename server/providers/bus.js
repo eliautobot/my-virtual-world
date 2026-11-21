@@ -11,7 +11,7 @@ const SHORT_MAX = 200;
 // A trailing '!' = required. s short string, t text, T a whole answer, n number, b boolean, e:a|b|c one of, l a short
 // list of short strings (the choices an approval offers); Q an agent's questions, A their answers, P a plan's steps, K a
 // background task, W a browser tab a step left (its id, address and title), S the provider's session keys (each rebuilt
-// field by field, below).
+// field by field, below); V what an agent knew with a message (its senses: aware()).
 const COMMON = { kind: 's!', connectionId: 's!', agentKey: 's', sessionKey: 's' };
 export const EVENT_SPEC = Object.freeze({
   'provider.connected': {},
@@ -37,7 +37,7 @@ export const EVENT_SPEC = Object.freeze({
   'run.delta': { runId: 's!', text: 't', thinking: 't', replace: 'b' },
   // … and what it took, where the adapter knows (model, effort, tokens, cost in millionths of a US$, ms, the reasoning
   // shown) and a short title for a new chat
-  'run.end': { runId: 's!', status: 'e:ok|error|stopped|interrupted!', error: 't', text: 'T', model: 's', effort: 's', tokensIn: 'n', tokensOut: 'n', cost: 'n', ms: 'n', thinking: 'T', title: 's', media: 'M', steered: 'b' },
+  'run.end': { runId: 's!', status: 'e:ok|error|stopped|interrupted!', error: 't', text: 'T', model: 's', effort: 's', tokensIn: 'n', tokensOut: 'n', tokensCached: 'n', aware: 'V', cost: 'n', ms: 'n', thinking: 'T', title: 's', media: 'M', steered: 'b' },
   // one step (a tool call), following the Agent Client Protocol's tool calls: its title and kind (the icon), its input (a
   // command, a path), its output as it comes (update text: a piece; replace: the whole so far), how it ended (exit code,
   // time, the folder it ran in). (The event's own kind is the provider's: a step's is toolKind, an approval's approvalKind.)
@@ -104,6 +104,7 @@ function coerce(name, spec, v) {
     if (!Array.isArray(v)) throw new BusError(`${name} must be a list of steps`);
     return v.slice(0, 50).filter(x => x && typeof x.step === 'string').map(x => ({ step: x.step.slice(0, 300), status: ['pending', 'in_progress', 'completed'].includes(x.status) ? x.status : 'pending' }));
   }
+  if (t === 'V') return aware(name, v);
   if (t === 'l') {
     if (!Array.isArray(v) || v.length > 8 || !v.every(x => typeof x === 'string' && x && x.length <= 40)) throw new BusError(`${name} must be a short list of short strings`);
     return v.slice();
@@ -113,6 +114,16 @@ function coerce(name, spec, v) {
 
 /** An agent's questions, rebuilt field by field (OpenClaw's question shape — Hermes' clarify asks up to five: an id, a short header, the question, up to
  *  four options with a description each, and whether several may be chosen, a free answer given, or it is a secret). */
+/** What a built-in brain knew with a message (server/senses/, docs/features/awareness.md §3): its mode, together or
+ *  apart, what went with the message and what it looked up — each part rebuilt and bounded. */
+const TOLD = ['full', 'line', 'pointer', 'none'], AWARE_MODES = ['off', 'ask', 'together', 'always'];
+function aware(name, v) {
+  if (!v || typeof v !== 'object' || !TOLD.includes(v.told) || !AWARE_MODES.includes(v.mode)) throw new BusError(`${name} must be what an agent knew`);
+  return { mode: v.mode, together: typeof v.together === 'string' && v.together ? v.together.slice(0, SHORT_MAX) : null, told: v.told,
+    text: typeof v.text === 'string' ? v.text.slice(0, 1800) : '', tokens: Number.isFinite(v.tokens) ? Math.max(0, Math.round(v.tokens)) : 0,
+    looked: (Array.isArray(v.looked) ? v.looked : []).slice(0, 4).filter(x => x && typeof x.tool === 'string').map(x => ({ tool: x.tool.slice(0, 20), text: String(x.text ?? '').slice(0, 900) })) };
+}
+
 function questions(name, v) {
   if (!Array.isArray(v) || !v.length || v.length > 5) throw new BusError(`${name} must be one to five questions`);
   return v.map(q => {

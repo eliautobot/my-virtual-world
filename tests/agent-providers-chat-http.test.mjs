@@ -757,7 +757,7 @@ test('a message sent while the agent works: OpenClaw takes it into the running t
   await follow(owner, a.json.runId);
   const h = (await owner.get(`/api/providers/history?agent=${agent}&session=${chat.id}`)).json.messages;
   assert.ok(h.some(m => m.role === 'user' && m.text === 'And one more thing'), 'the message is in the conversation');
-  assert.ok(h.some(m => m.role === 'assistant' && /Steered in: And one more thing/.test(m.text)), 'answered in the running turn');
+  assert.ok(h.some(m => m.role === 'assistant' && /Steered in: (\[My Virtual World — [\s\S]*?\]\n\n)?And one more thing/.test(m.text)), 'answered in the running turn (its senses\' note before the words)');
   assert.equal(h.some(m => m.role === 'system' && /without sending an answer/.test(m.text)), false);
   // Ctrl+Enter: after this answer — the gateway runs it next, with an answer of its own
   const c = await owner.post('/api/providers/runs', { agent, session: chat.id, input: 'Again, slowly [[slow:700]]' });

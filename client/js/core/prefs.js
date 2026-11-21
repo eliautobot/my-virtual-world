@@ -60,6 +60,7 @@ const PREFS = {
   traffic: { path: 'display.traffic', get: () => local.get('mvw.traffic') || 'normal', apply: v => { local.set('mvw.traffic', v && v !== 'normal' ? v : null); bus.emit('display', 'traffic'); } },
   promoAircraft: { path: 'display.promoAircraft', get: () => local.get('mvw.promoAircraft') || 'on', apply: v => { local.set('mvw.promoAircraft', v && v !== 'on' ? v : null); bus.emit('display', 'promoAircraft'); } },
   vehicleDetail: { path: 'display.vehicleDetail', get: () => local.get('mvw.vehicleDetail') || 'normal', apply: v => { local.set('mvw.vehicleDetail', v && v !== 'normal' ? v : null); bus.emit('display', 'vehicleDetail'); } },
+  charDetail: { path: 'display.charDetail', get: () => local.get('mvw.charDetail') || 'auto', apply: v => { local.set('mvw.charDetail', v && v !== 'auto' ? v : null); bus.emit('display', 'charDetail'); } },
 };
 let syncedFor = null, syncing = null;
 const homeKey = () => (auth.account ? `mw.home.${auth.account.id}` : 'mw.home');

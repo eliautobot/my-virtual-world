@@ -10,6 +10,8 @@
 //                                                               minutes, default 60) or eat|sleep (once)
 //   node mvw.mjs go "Founders Park" [--for 90]                  a named place (look lists places nearby), or home / work
 //   node mvw.mjs meet Nova [--for 20]                           walk up to someone and stay with them (default 20 world min)
+//   node mvw.mjs things                                         what you can do right where you are (each with an id)
+//   node mvw.mjs use <id> [--for 20]                            do one of them, for real (your body goes and does it)
 //   node mvw.mjs stop                                           end your order: Free Will and the routine decide again
 //   node mvw.mjs say "Morning!" [--to Nova]                     one line out loud (checked before anyone sees it)
 //   node mvw.mjs plan "Try the new café on 3rd" [--must]        a plan for today (Free Will follows your plans)
@@ -103,6 +105,8 @@ try {
     case 'do': out(await agent.call('POST', '/api/agent-api/act', { action: 'do', activity: need(pos[0], 'an activity'), ...(vals['--for'] ? { minutes: Number(vals['--for']) } : {}) })); break;
     case 'go': out(await agent.call('POST', '/api/agent-api/act', { action: 'go', place: need(pos.join(' '), 'a place'), ...(vals['--for'] ? { minutes: Number(vals['--for']) } : {}) })); break;
     case 'meet': out(await agent.call('POST', '/api/agent-api/act', { action: 'meet', name: need(pos.join(' '), 'a name'), ...(vals['--for'] ? { minutes: Number(vals['--for']) } : {}) })); break;
+    case 'things': out(await agent.call('POST', '/api/agent-api/act', { action: 'things_to_do' })); break;
+    case 'use': out(await agent.call('POST', '/api/agent-api/act', { action: 'use', thing: need(pos[0], 'an id from things'), ...(vals['--for'] ? { minutes: Number(vals['--for']) } : {}) })); break;
     case 'stop': out(await agent.call('POST', '/api/agent-api/act', { action: 'stop' })); break;
     case 'say': out(await agent.call('POST', '/api/agent-api/act', { action: 'say', text: need(pos.join(' '), 'what to say'), ...(vals['--to'] ? { to: vals['--to'] } : {}) })); break;
     case 'plan': out(await agent.call('POST', '/api/agent-api/act', { action: 'plan', text: need(pos.join(' '), 'the plan'), kind: flags.has('--must') ? 'must' : 'want' })); break;

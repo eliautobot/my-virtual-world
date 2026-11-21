@@ -631,11 +631,14 @@ export class AgentSocial {
    * know always (unless blocked); strangers social.strangerLinesPerDay lines a day each — for a connected agent only when
    * its owner lets it hear strangers at all. count: false only asks.
    */
-  hears(listenerId, speakerId, { connectedListener = this.connected(listenerId), count = true } = {}) {
+  hears(listenerId, speakerId, { connectedListener = this.connected(listenerId), count = true, together = false } = {}) {
     if (listenerId === speakerId) return false;
     const L = this.limits(), o = this.ownerOf(this.agents.get(listenerId) || {}), f = this.feeling(listenerId, speakerId);
     if (f.blocked || (this.talk && this.talk.blocksAgent(o, speakerId))) return false;
     if (!f.ended && f.affinity >= L.knownAt) return true;
+    // (spending time together — the same group, the same meet-up, off together by their own choice: server/companions/
+    // vouches for it — they talk as people out together do, not as strangers passing in the street)
+    if (together) return true;
     if (connectedListener && !this.settingsOf(listenerId).hearStrangers) return false;
     const k = `${listenerId}:${speakerId}:${utcDay(this.now())}`, n = this.strangers.get(k) || 0;
     if (n >= L.strangerLines) return false;

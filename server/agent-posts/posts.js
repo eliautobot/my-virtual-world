@@ -253,7 +253,9 @@ export class Posts {
       if ((!service && !desk && !cook) || !this.mayPost(actor, b, f, it.id)) continue;
       const e = sim.index.entry(b, f, it.id); if (!e) continue;
       const at = this.servingAt(b, f, it.id), seats = this.seatsAt(b, f, it.id), slots = [], use = service ? 'staff' : cook ? 'cook' : 'work';
-      const who = h => { const a = h.agent, mine = !!(a && this.agents.isOwner(P, a)); return { name: h.name, post: h.post, agent: a ? { ...(mine ? { id: a.id } : {}), name: a.name, emoji: a.emoji || '', mine } : null }; };
+      // (and whether they are there now, or late, away and why: server/workplace/presence.js — what anyone walking in sees)
+      const W8 = this.presence?.(), now = h => { const s = W8?.status?.(h.j); return s && s.onShift ? { state: s.state, text: s.text } : null; };
+      const who = h => { const a = h.agent, mine = !!(a && this.agents.isOwner(P, a)); const n = now(h); return { name: h.name, post: h.post, agent: a ? { ...(mine ? { id: a.id } : {}), name: a.name, emoji: a.emoji || '', mine } : null, ...(n ? { now: n } : {}) }; };
       e.slots.forEach((s, k) => {
         if (s.use !== use) return;
         const h = at.get(k);

@@ -182,7 +182,7 @@ test('a message while it works with Enter, as Hermes Desktop sends it: Hermes\' 
   // (nothing running: a "redirect" is an ordinary message)
   const idle = await owner.post('/api/providers/runs', { agent, session: chat.id, input: 'now this', queue: 'redirect' });
   assert.equal(idle.status, 200, idle.text);
-  assert.match((await end(idle.json.runId)).text, /Stub answer to: now this/);
+  assert.match((await end(idle.json.runId)).text, /Stub answer to: (\[My Virtual World — [\s\S]*?\]\n\n)?now this/, 'an ordinary message (its body\'s note before the words: server/senses/)');
 });
 
 test('the socket lost mid-answer: what was missed while it was down is fetched again from Hermes, in order, once — the answer whole', async () => {

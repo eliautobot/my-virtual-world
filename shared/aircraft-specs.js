@@ -19,5 +19,20 @@ export const AIRCRAFT = Object.freeze({
     rollRate: 1.4, pitchRate: 1.2, yawRate: 1.1, accel: 6, maxTilt: 0.42, length: 11.5, span: 10.0, gearH: 1.43, crashVy: 5 }),
 });
 export const AIRCRAFT_IDS = Object.freeze(Object.keys(AIRCRAFT));
+/**
+ * Who sits where in each (2026-11-17: companions fly with their owner — server/play/flight-crew.js): the seats in the
+ * model's own frame (render/aircraft-models.js: nose +z, up +y, left wing +x; metres from its origin), the pilot's first,
+ * each with the words for it. The propeller plane is a tandem two-seater (the passenger behind the pilot), the small jet
+ * two up front and a cabin of four, the helicopter a pilot on the right and three. The models paint their windows on
+ * (no see-through glass), so the people inside are not drawn: their places are where their bodies ride.
+ */
+export const SEATS = Object.freeze({
+  prop: Object.freeze([{ x: 0, y: 0.05, z: 0.45, words: 'the pilot\'s seat' }, { x: 0, y: 0.05, z: -0.35, words: 'the back seat' }].map(Object.freeze)),
+  jet: Object.freeze([{ x: 0.35, y: 0, z: 3.6, words: 'the pilot\'s seat' }, { x: -0.35, y: 0, z: 3.6, words: 'the co-pilot\'s seat' },
+    { x: 0.36, y: -0.05, z: 1.6, words: 'a cabin seat' }, { x: -0.36, y: -0.05, z: 1.6, words: 'a cabin seat' }, { x: 0.36, y: -0.05, z: 0.4, words: 'a cabin seat at the back' }, { x: -0.36, y: -0.05, z: 0.4, words: 'a cabin seat at the back' }].map(Object.freeze)),
+  heli: Object.freeze([{ x: -0.4, y: -0.15, z: 1.2, words: 'the pilot\'s seat' }, { x: 0.4, y: -0.15, z: 1.2, words: 'the front seat' }, { x: -0.4, y: -0.15, z: 0.05, words: 'a back seat' }, { x: 0.4, y: -0.15, z: 0.05, words: 'a back seat' }].map(Object.freeze)),
+});
+/** Passenger places in an aircraft of a class (every seat but the pilot's). */
+export const passengerSeats = id => Math.max(0, (SEATS[id]?.length || 1) - 1);
 /** The fastest any aircraft may go between two path samples, with slack for a dive (the run check). */
 export const maxRunSpeed = id => (AIRCRAFT[id]?.max || 140) * 1.35 + 8;

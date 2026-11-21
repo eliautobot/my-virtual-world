@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { rigBatchForKind } from '../shared/rigProfiles.js';
+import { addKindHelpers } from './helpers/char-kinds.mjs';
 
 function fixture() {
   class Material { constructor(options) { Object.assign(this, options); } }
@@ -14,8 +15,8 @@ function fixture() {
     // (render/light.js)
     LIGHT: { on: true },
   };
-  vm.createContext(context);
   const source = fs.readFileSync(new URL('../client/js/render/characters.js', import.meta.url), 'utf8');
+  addKindHelpers(source, context);
   vm.runInContext(source.slice(source.indexOf('export class Characters'))
     .replace('export class Characters', 'class Characters').replace('export { TRIPO_CLIPS };', '')
     + '\nglobalThis.C = Characters;', context);

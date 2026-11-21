@@ -8,6 +8,7 @@ import { createTrafficVehicleModelDefinition } from './vehicles-classic/traffic-
 import { buildClassicSedan, disposeClassicSedanGeometry } from './vehicles-classic/classic-sedan-renderer.mjs';
 import { buildRealisticFleetVehicle, disposeFleetVehicleGeometry } from './vehicles-classic/fleet-vehicle-renderer.mjs';
 import { tagVehicleLenses, createVehicleBeamGeometry } from './vehicle-effects.js';
+import { findVehicleSeats } from './vehicle-seats.js';
 
 export const VEHICLE_MODEL_MAP = Object.freeze({ sedan: 'sedan', compact: 'car', suv: 'suv', van: 'van', taxi: 'taxi', bus: 'bus' });
 export const VEHICLE_ASSET_BUDGET = Object.freeze({ materials: 4, triangles: 30000 });
@@ -38,7 +39,7 @@ export function createVehicleAsset(kind) {
   const buckets = new Map(), sourceMaterials = new Set(), wheels = [];
   const lampBounds = { front: [new THREE.Box3(), new THREE.Box3()], rear: [new THREE.Box3(), new THREE.Box3()] };
   const lampCounts = { front: 0, rear: 0 };
-  let wheel = null;
+  let wheel = null, cabin = null;
   const fixedPaint = group.userData.fleetDimensions?.paint != null;
   group.traverse(mesh => {
     if (!mesh.isMesh) return;
@@ -58,6 +59,7 @@ export function createVehicleAsset(kind) {
       } else geometry.dispose();
       wheels.push({ centre, radius: wheel.radius }); return;
     }
+    if (/Interior$/.test(mesh.name)) cabin = geometry.clone();   // (its seats are read off it below: render/vehicle-seats.js)
     const counts = tagVehicleLenses(geometry, sourceType, mesh.name);
     lampCounts.front += counts.front; lampCounts.rear += counts.rear;
     const p = geometry.attributes.position, flags = geometry.attributes.aVehicleLamp;
@@ -93,6 +95,18 @@ export function createVehicleAsset(kind) {
   if (parts.length + 1 > VEHICLE_ASSET_BUDGET.materials || triangles > VEHICLE_ASSET_BUDGET.triangles) throw new Error('Imported vehicle exceeds render budget');
   const beamLength = Math.min(12, Math.max(7, kind.L * 1.8)), beam = createVehicleBeamGeometry(lamps.front, beamLength);
   const asset = { sourceType, parts, wheel, wheels, lamps, lampCounts, beam, beamLength, scale, triangles, radius: Math.hypot(kind.L, kind.W, kind.H) / 2, provenance: 'My Virtual World Classic' };
+  // Its seats, in this same frame (the cabin as built here, the rays against the opaque parts), worked out the first time
+  // anyone asks: the people in it are drawn there (render/car-occupants.js).
+  let seats = null;
+  Object.defineProperty(asset, 'seats', { enumerable: true, get() {
+    if (seats) return seats;
+    const solid = new THREE.Group(), mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    for (const p of parts) if (!p.material.transparent) solid.add(new THREE.Mesh(p.geometry, mat));
+    solid.updateMatrixWorld(true);
+    seats = cabin ? Object.freeze(findVehicleSeats(cabin, solid).map(s => Object.freeze(s))) : Object.freeze([]);
+    mat.dispose(); cabin?.dispose(); cabin = null;
+    return seats;
+  } });
   cache.set(key, asset); return asset;
 }
 

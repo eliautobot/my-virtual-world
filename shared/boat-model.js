@@ -184,7 +184,8 @@ function drag(S, u, k) {
  * raise it) }. env: { plane(x, z, heading) → { h (the water's surface under the hull), sf (its slope rising to the
  * bow), ss (rising to starboard) }, level (the calm water's height), depth(x, z) (water over the bed; 0 on land),
  * solid?(x, z) → true where the hull hits a dock, wind?: { x, z } (m/s), limit?(x, z) → true past the world's edge }.
- * Returns events: 'aground', 'bump', 'slam', 'plane' (got on the plane), 'anchor-down', 'anchor-up'.
+ * Returns events: 'aground', 'bump', 'pinned' (the lever pushing it against a dock it can't go through), 'slam', 'plane'
+ * (got on the plane), 'anchor-down', 'anchor-up'.
  */
 export function stepBoat(s, input = {}, env, dt) {
   const S = s.S, ev = [], k = s.speedK;
@@ -246,10 +247,14 @@ export function stepBoat(s, input = {}, env, dt) {
   s.x += vx * dt; s.z += vz * dt;
   s.bumped = Math.max(0, s.bumped - dt); s.aground = Math.max(0, s.aground - dt);
   if (env.limit?.(s.x, s.z)) { s.x = ox; s.z = oz; s.u *= -0.2; s.v = 0; }
-  // the docks are solid: moving or swinging into one, it's put back (a bump); already caught in one (swung in by a turn,
-  // carried by the surf), it may only work its way out — and is eased out, away from where it's caught (2026-10-15: a
-  // bow swung into a pier held the boat there for good, the throttle full)
-  if (env.solid) {
+  // the docks are solid. With their shapes (env.rects: the decks and walls near, as rectangles), the hull meets them as a
+  // hull meets a dock: pushed back out of it, it keeps the way it had along it — it slides along a finger, its bow
+  // fends off a pier and swings away with the wheel — and only the way into it is lost (2026-11-20, the product owner:
+  // "the boat gets stuck a lot and won't move" coming out of the slip: a turn begun between the fingers put its side on
+  // one, and every move that left it touching was refused — forward, the wheel, astern). Without shapes (a test's
+  // stand-in dock): put back where it was, as before.
+  if (env.rects?.length) dockContact(s, ox, oz, oh, env.rects, ev);
+  else if (env.solid) {
     const caught = (x, z, h) => hullPoints({ S, x, z, heading: h }).filter(p => env.solid(p[0], p[1]));
     const now = caught(s.x, s.z, s.heading).length;
     if (now) {
@@ -257,6 +262,7 @@ export function stepBoat(s, input = {}, env, dt) {
       if (!before || now >= before) {
         s.x = ox; s.z = oz; s.heading = oh;
         if (!s.bumped && Math.hypot(s.u, s.v) > 0.6) ev.push('bump');
+        else if (Math.abs(s.lever) > 0.15) ev.push('pinned');   // (pushing against it, too slow to bump: held there — the helm is told)
         s.u *= -0.25; s.v *= -0.25; s.rr *= -0.3; s.bumped = 0.6;
         s.dx = s.dz = 0;   // (the drift stops against it: the surf's shove held a boat on the quay, 2026-10-15)
         const P = caught(s.x, s.z, s.heading);
@@ -346,6 +352,127 @@ export function stepBoat(s, input = {}, env, dt) {
 export function hullPoints(s) {
   const S = s.S, fx = Math.sin(s.heading), fz = Math.cos(s.heading), rx = -Math.cos(s.heading), rz = Math.sin(s.heading), hl = S.L / 2, hb = S.B / 2;
   return [[hl, 0], [hl * 0.55, hb * 0.9], [hl * 0.55, -hb * 0.9], [-hl, hb], [-hl, -hb], [0, hb], [0, -hb]].map(([a, b]) => [s.x + fx * a + rx * b, s.z + fz * a + rz * b]);
+}
+// ------------------------------------------------------------------------------------------------ the docks against the hull
+// A dock's deck or wall as a rectangle: { x, z (its middle), hw, hd (half its width and depth), c, n (the cos and sin of
+// its turn) } — a point is in it when |dx·c − dz·n| ≤ hw and |dx·n + dz·c| ≤ hd (client player/boating.js nearSolids).
+const HULL_RING = [0, 1, 5, 3, 4, 6, 2];   // hullPoints in order round the hull (a convex outline)
+const SUB_M = 0.12;                        // m: a move longer than this is made in pieces (a thin wall is not jumped)
+const rectLocal = (r, x, z) => { const dx = x - r.x, dz = z - r.z; return [dx * r.c - dz * r.n, dx * r.n + dz * r.c]; };
+const rectDir = (r, lx, lz) => [lx * r.c + lz * r.n, -lx * r.n + lz * r.c];
+/** Point (x, z) inside the convex outline poly ([[x, z]] in order): { d (how far in), nx, nz (the nearest side's outward
+ *  normal) } — or null. */
+function inOutline(poly, x, z) {
+  let area = 0;
+  for (let i = 0; i < poly.length; i++) { const a = poly[i], b = poly[(i + 1) % poly.length]; area += a[0] * b[1] - b[0] * a[1]; }
+  const sg = area > 0 ? 1 : -1;
+  let best = null;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length], ex = b[0] - a[0], ez = b[1] - a[1], l = Math.hypot(ex, ez) || 1;
+    const nx = sg * ez / l, nz = -sg * ex / l, d = (a[0] - x) * nx + (a[1] - z) * nz;   // (d > 0: inside of this side)
+    if (d <= 0) return null;
+    if (!best || d < best.d) best = { d, nx, nz };
+  }
+  return best;
+}
+/** Where the hull of s is in the docks rects: [{ nx, nz (the way out, for the hull), d (how deep), px, pz (where) }]. */
+export function dockContacts(s, rects) {
+  const S = s.S, P = hullPoints(s), reach = S.L / 2 + 0.5, out = [];
+  let poly = null;
+  for (const r of rects) {
+    if (Math.abs(r.x - s.x) > reach + r.hw + r.hd || Math.abs(r.z - s.z) > reach + r.hw + r.hd) continue;
+    for (const p of P) {   // a point of the hull in the dock: out across the dock's nearest side
+      const [lx, lz] = rectLocal(r, p[0], p[1]), px = r.hw - Math.abs(lx), pz = r.hd - Math.abs(lz);
+      if (px <= 0 || pz <= 0) continue;
+      const [nx, nz] = px < pz ? rectDir(r, lx < 0 ? -1 : 1, 0) : rectDir(r, 0, lz < 0 ? -1 : 1);
+      out.push({ nx, nz, d: Math.min(px, pz), px: p[0], pz: p[1] });
+    }
+    for (const [cx, cz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {   // a corner of the dock in the hull: the hull away from it
+      const [wx, wz] = rectDir(r, cx * r.hw, cz * r.hd);
+      poly ||= HULL_RING.map(i => P[i]);
+      const e = inOutline(poly, r.x + wx, r.z + wz);
+      if (e) out.push({ nx: -e.nx, nz: -e.nz, d: e.d, px: r.x + wx, pz: r.z + wz });
+    }
+  }
+  return out;
+}
+/** How a point (px, pz) of the hull moves out along (nx, nz) as the boat's heading grows (m a radian). */
+function swingOf(s, c) {
+  const fx = Math.sin(s.heading), fz = Math.cos(s.heading), rx = -Math.cos(s.heading), rz = Math.sin(s.heading);
+  const ox = c.px - s.x, oz = c.pz - s.z, a = ox * fx + oz * fz, b = ox * rx + oz * rz;   // (along it, across it)
+  // (d/dheading of the forward way is −across, of the across way is forward)
+  return (-a * rx + b * fx) * c.nx + (-a * rz + b * fz) * c.nz;
+}
+/** Pushes the hull of s out of the docks (the deepest first, a few times) — a point near its ends partly by turning it
+ *  away, as a dock fends a bow or a stern off: → true when clear of them. hit: the contacts, kept. */
+function pushOut(s, rects, hit, turn = true) {
+  for (let k = 0; k < 8; k++) {
+    const C = dockContacts(s, rects);
+    if (!C.length) return true;
+    let c = C[0];
+    for (const x of C) if (x.d > c.d) c = x;
+    let d = c.d + 0.005;
+    const g = turn ? swingOf(s, c) : 0;
+    if (Math.abs(g) > 1) { const dh = Math.max(-0.02, Math.min(0.02, 0.5 * d / g)); s.heading += dh; d -= dh * g; }
+    if (d > 0) { s.x += c.nx * d; s.z += c.nz * d; }
+    hit.push(c);
+  }
+  return !dockContacts(s, rects).length;
+}
+/**
+ * The step's move (from ox, oz, oh to where it is now) against the docks: made in pieces, each pushed back out of any dock
+ * it went into — a turn that can't be made between them (wedged across a slip) is not made; a piece that still can't get
+ * out is not taken. Then the way into the docks is lost, the way along them kept (a little rubbed off), the swing checked.
+ */
+function dockContact(s, ox, oz, oh, rects, ev) {
+  const mx = s.x - ox, mz = s.z - oz;
+  let dh = s.heading - oh; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+  const n = Math.max(1, Math.min(16, Math.ceil(Math.max(Math.hypot(mx, mz), Math.abs(dh) * s.S.L / 2) / SUB_M)));
+  const hit = [];
+  let turned = true;
+  s.x = ox; s.z = oz; s.heading = oh;
+  if (dockContacts(s, rects).length) pushOut(s, rects, hit);   // (already in one — put there by a restart, a turn last step: out first)
+  for (let k = 0; k < n; k++) {
+    const px = s.x, pz = s.z, ph = s.heading;
+    s.x += mx / n; s.z += mz / n; s.heading += dh / n;
+    if (pushOut(s, rects, hit)) continue;
+    s.x = px + mx / n; s.z = pz + mz / n; s.heading = ph; turned = false;   // (the turn can't be made here: along only)
+    if (pushOut(s, rects, hit, false)) continue;
+    // wedged across a narrow place (its sides on both fingers of a slip): the docks turn it back into line — the least
+    // turn either way that lets it go on, else stay
+    let freed = false;
+    for (let j = 1; j <= 12 && !freed; j++) for (const sg of [1, -1]) {
+      s.x = px + mx / n; s.z = pz + mz / n; s.heading = ph + sg * j * 0.015;
+      if (pushOut(s, rects, hit, false)) { freed = true; break; }
+    }
+    if (!freed) { s.x = px; s.z = pz; s.heading = ph; }   // (nowhere to go this piece)
+  }
+  if (!hit.length) return;
+  // the way into the docks lost, the way along them kept
+  const fx = Math.sin(s.heading), fz = Math.cos(s.heading), rx = -Math.cos(s.heading), rz = Math.sin(s.heading);
+  let vx = fx * s.u + rx * s.v, vz = fz * s.u + rz * s.v, impact = 0, into = 0;
+  const thrust = Math.abs(s.lever) > 0.15 ? Math.sign(s.lever) : 0;
+  s.rr *= turned ? 0.6 : 0;   // (the dock checks the swing it had; the blow below gives it its own)
+  const seen = [];
+  for (const c of hit) {
+    if (seen.some(o => o.nx * c.nx + o.nz * c.nz > 0.98)) continue;
+    seen.push(c);
+    const vn = vx * c.nx + vz * c.nz;
+    if (vn < 0) {
+      impact = Math.max(impact, -vn); vx -= c.nx * vn * 1.15; vz -= c.nz * vn * 1.15;
+      // (hit off its middle — the bow on a pier at an angle — it swings into line with it: the turn the blow gives a hull
+      //  of its length, I/m = L²/12; the heading grows as rr falls)
+      const g = swingOf(s, c);
+      if (Math.abs(g) > 0.5) s.rr -= -vn * g / (s.S.L * s.S.L / 12 + g * g) * 1.4;
+    }
+    const dn = (s.dx || 0) * c.nx + (s.dz || 0) * c.nz;
+    if (dn < 0) { s.dx -= c.nx * dn; s.dz -= c.nz * dn; }   // (the surf's shove: not into the quay)
+    into = Math.max(into, -(thrust * (fx * c.nx + fz * c.nz)));
+  }
+  vx *= 0.97; vz *= 0.97;
+  s.u = vx * fx + vz * fz; s.v = vx * rx + vz * rz;
+  if (impact > 0.6 && !s.bumped) { ev.push('bump'); s.bumped = 0.6; }
+  else if (into > 0.5 && Math.hypot(s.u, s.v) < 0.4) { ev.push('pinned'); s.bumped = Math.max(s.bumped, 0.3); }   // (the lever pushing it straight into one)
 }
 /** A point on the boat (x to port, y up from the water line, z forward) in the world, with its pitch and roll. */
 export function boatPoint(s, px, py, pz) {

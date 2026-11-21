@@ -37,7 +37,7 @@ const playingSt = () => room ? room.st : on ? tuned() : null;
 
 export function init(a) {
   app = a;
-  bus.on('frame', () => { const now = performance.now(); if (now - lastT > 250) { lastT = now; tick(); talkers(); } });
+  bus.on('frame', () => { const now = performance.now(); if (now - lastT > 250) { lastT = now; tick(); tellTuned(); talkers(); } });
   bus.on('sound', () => tick(true));
   window.addEventListener('keydown', e => {
     if (e.code !== 'KeyR' || e.repeat || !inside || e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '') || document.activeElement?.isContentEditable) return;
@@ -61,6 +61,18 @@ export function init(a) {
 }
 
 const vehicleOn = () => !!(app.driving?.id || app.boating?.active || app.flight?.active);   // (a car, a boat, an aircraft)
+// What the car radio plays, for the AI agents riding with you (docs/features/awareness.md §2: "Car radio: …"): while you
+// drive a car, the page tells the server the station on (or null, off) as it changes and once on getting in — at most once
+// a second, again every minute as a reminder (a server that restarted forgets); getting out says off once.
+const TUNE_GAP_MS = 1000, TUNE_AGAIN_MS = 60000;
+let told = null, toldAt = 0;
+function tellTuned() {
+  if (!app) return;
+  const driving = !!app.driving?.id, want = driving && on ? tuned()?.id || null : null, t = performance.now();
+  if (want === told && (!want || t - toldAt < TUNE_AGAIN_MS)) return;
+  if (t - toldAt < TUNE_GAP_MS || !app.net?.send) return;   // (the next tick says it)
+  if (app.net.send({ t: 'radio_tune', station: want })) { told = want; toldAt = t; }
+}
 /** The radio studio the listener stands in (2026-10-27, the product owner: "when i walk in that particular station, i want
  *  that station to be playing inside its own module"): its room on the floor the listener is on, and its station. */
 function studioHere() {

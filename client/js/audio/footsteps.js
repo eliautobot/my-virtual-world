@@ -56,7 +56,7 @@ export function surfaceAt(x, y, z, ctx = -1) {
   if (h < sea - 0.08 && y < sea + 0.05) return 'water';
   const road = I.roads?.top?.(x, z);
   if (road != null && Math.abs(road - y) < 0.6) return 'concrete';
-  const mod = groundAt(S.world, x, z); if (mod) return mod;   // (a world module's paving: a car park, an apron, a plaza; gravel)
+  const mod = groundAt(S.world, x, z, y); if (mod) return mod;   // (a world module's paving: a car park, an apron, a plaza, a dock's decks and grounds; gravel)
   if (y - Math.max(h, sea) > 0.35) return 'wood';   // (above the ground and no road: a deck, a pier, a boardwalk)
   return GROUND[biome(I, x, z, h, 1)?.kind] || 'grass';
 }

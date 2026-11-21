@@ -1667,6 +1667,12 @@ body.flying-crash::after { content: ''; position: fixed; inset: 0; background: r
 .rh-quit { pointer-events: auto; margin-top: 6px; opacity: .8; }
 #ringpick, #ringres, #fishpick, #fishres { position: fixed; left: 0; right: 0; margin: 0 auto; top: 80px; width: min(620px, calc(100vw - 24px)); max-height: calc(100vh - 220px); overflow-y: auto; z-index: 6; padding: 14px 16px; pointer-events: auto; box-sizing: border-box; }
 #ringpick.hidden, #ringres.hidden, #fishpick.hidden, #fishres.hidden { display: none; }
+/* (on a boat, Esc: back to the dock? — player/boating.js askLeave) */
+#boatleave { position: fixed; left: 0; right: 0; margin: 0 auto; top: 30vh; width: min(420px, calc(100vw - 24px)); z-index: 8; padding: 16px 18px; pointer-events: auto; box-sizing: border-box; text-align: center; }
+#boatleave.hidden { display: none; }
+#boatleave h3 { margin: 0 0 6px; }
+#boatleave .bl-why { margin: 0 0 12px; line-height: 1.4; }
+#boatleave .rr-acts { justify-content: center; }
 .rp-head { display: flex; justify-content: space-between; align-items: center; } .rp-head h3 { margin: 0; }
 .rp-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 8px 4px; border-top: 1px solid var(--line); }
 .rp-row.off { opacity: .55; }
@@ -1758,6 +1764,21 @@ body:not(.boat-walk) .bt-deck { display: none; }
 .fh-clock { font-family: var(--font-mono, ui-monospace, monospace); color: #ffd36a; } .fh-late { color: #ff8a6a; }
 .fh-bounties div { font-size: 12px; color: #cfe6f1; } .fh-bounties div.done { color: #7ff0b2; } .fh-bounties small { color: #ffd36a; }
 .fh-cool { font-size: 12px; color: #9fc4d8; }
+/* the crew aboard, fishing the same trip: you and each companion's tally (play/fishing-game.js crewUi) */
+.fh-crew { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .12); font-size: 12px; }
+.fh-chead { font-weight: 600; margin-bottom: 2px; color: #cfe6f2; }
+.fh-crow { display: grid; grid-template-columns: minmax(60px, 1fr) auto auto auto 18px; gap: 8px; align-items: baseline; }
+.fh-crow b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fh-crow span { color: #9fc4d8; font-variant-numeric: tabular-nums; }
+.fh-crow small { text-align: center; }
+.fh-crow small.dim { grid-column: 1 / -1; margin-top: -2px; text-align: left; }
+.rr-crew { margin: 10px 0 4px; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .05); text-align: left; }
+.rr-chead { font-weight: 600; margin-bottom: 4px; }
+.rr-crow { padding: 3px 0; }
+.rr-crow small { display: block; opacity: .8; }
+.rr-cst { color: #f5c54a; letter-spacing: 1px; }
+.rr-claim { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .12); }
+.rr-claim p { margin: 0 0 6px; }
 #fishctl { position: fixed; right: 18px; bottom: 112px; z-index: 5; display: grid; justify-items: end; gap: 8px; pointer-events: none; }
 #fishctl > * { pointer-events: auto; }
 .fc-lure, .fc-in { background: rgba(8,18,26,.72); color: #e8f1fa; font-size: 13px; } .fc-lure small { color: #9fc4d8; }
@@ -2025,3 +2046,28 @@ body.fishing #boathud .bh-row, body.fishing #boathud .bh-top { display: none; } 
 .mtools .mname { font-weight: 600; margin-right: 6px; }
 .mtools .mstat.bad { color: var(--bad, #ff7b7b); }
 @media (pointer: coarse) { .mtools .btn.small { min-height: 40px; padding: 6px 12px; } }
+
+/* trading with one of your agents (ui/companion-trade.js) */
+.ct-win { width: min(760px, calc(100vw - 24px)); max-height: calc(100vh - 60px); overflow-y: auto; padding: 14px 16px; box-sizing: border-box; }
+.ct-head { display: flex; align-items: center; gap: 8px; font-size: 16px; margin-bottom: 10px; }
+.ct-head b { flex: 1; }
+.ct-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 640px) { .ct-cols { grid-template-columns: 1fr; } }
+.ct-cols h4 { margin: 0 0 6px; }
+.ct-list { display: flex; flex-direction: column; gap: 4px; max-height: 38vh; overflow-y: auto; padding-right: 4px; }
+.ct-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px; background: rgba(255, 255, 255, .04); border: 1px solid transparent; }
+.ct-row.on { border-color: var(--accent, #6cc4ff); background: rgba(108, 196, 255, .12); }
+.ct-row.off { opacity: .5; }
+.ct-ic { font-size: 18px; width: 22px; text-align: center; }
+.ct-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ct-nm small { display: block; opacity: .7; }
+.ct-qty { display: flex; align-items: center; gap: 6px; }
+.ct-qty b { min-width: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.ct-coin, .ct-memo { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.ct-coin .input { width: 90px; }
+.ct-memo .input { flex: 1; }
+.ct-sum { margin-top: 10px; }
+.ct-word { margin: 0 0 10px; font-style: italic; opacity: .9; }
+.ct-status { min-height: 1.4em; margin-top: 8px; }
+.ct-status.done, .ct-status.edit-after { color: #8be09a; }
+.ct-status.declined { color: #ffb4a8; }

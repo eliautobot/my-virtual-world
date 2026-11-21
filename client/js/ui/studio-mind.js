@@ -130,7 +130,7 @@ export async function brainTab(C, body, live) {
     can.push([ms.thinks && ms.does.includes('problems'), '🧭 Deals with problems — rent, money, a home, a job — within your spending rules']);
     can.push([ms.thinks && ms.does.includes('speech'), '🗣️ Says its own words when people talk to it — every line checked by moderation first']);
   }
-  can.push([!!(linked && linked.kind !== 'openai-decisions') || isExt(r), '💬 Chats with you']);
+  can.push([!!(linked && !/-decisions$/.test(linked.kind)) || isExt(r), '💬 Chats with you']);   // (a decision service — OpenAI Decisions, TypeSafe — never chats)
   if (ok(fw)) can.push([fw.settings.enabled && fw.status.active, '⚡ Decides for itself what it does (Free Will)']);
   const wallet = ok(econ) ? econ.agents.find(a => a.id === C.id) : null;
   if (wallet) can.push([!wallet.limits.paused && wallet.limits.scopes.length > 0, `👛 Uses money${wallet.limits.scopes.length ? `: ${wallet.limits.scopes.join(', ')}` : ''}`]);

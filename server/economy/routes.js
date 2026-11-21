@@ -132,7 +132,11 @@ export function addEconomyRoutes(router, econ, d) {
     if (!biz) throw new LedgerError('not_found', 'That place doesn\'t sell anything.', 404);
     const where = d.whereIs?.(ctx.P.account.id);
     if (!where || !d.isAt(where, biz)) throw new LedgerError('not_here', `Go to ${biz.name} to buy there.`, 409, { b: biz.b, f: biz.f });
-    return econ.buy({ actor: me(ctx.P) }, { business: biz.id, items: b.items, idem: b.idem });
+    const r = econ.buy({ actor: me(ctx.P) }, { business: biz.id, items: b.items, idem: b.idem });
+    // (food bought sitting at a table there is served in front of the player — or when they sit down: the server's players)
+    let served = null;
+    if (!r.replay) { try { served = d.bought?.(ctx.P.account.id, biz, r.items) ?? null; } catch { served = null; } }
+    return served ? { ...r, served } : r;
   }) });
   router.add({ method: 'POST', path: '/api/economy/business/configure', cap: 'economy.use', handler: run(ctx => { const b = body(ctx); return { business: parts.businesses.configure(me(ctx.P), String(b.id || ''), b) }; }) });
   router.add({ method: 'POST', path: '/api/economy/business/move', cap: 'economy.use', handler: run(ctx => {

@@ -409,7 +409,7 @@ export const EMOJI = {
   '🌿': 'leaf', '🌱': 'sprout', '🌷': 'tulip', '🌳': 'tree', '🌲': 'pine', '🪴': 'mountains', '🏝': 'island', '🌊': 'waves', '⛲': 'fountain',
   '🏠': 'house', '⌂': 'house', '🏡': 'house-garden', '🏘': 'houses', '🏢': 'office', '🏙': 'city', '🏗': 'crane', '🏛': 'columns', '🏦': 'bank',
   '🏪': 'store', '🏬': 'store', '🛍': 'bag', '🛒': 'cart', '☕': 'cup', '🍽': 'utensils', '🍔': 'utensils', '🏋': 'dumbbell', '🛣': 'road', '🛗': 'elevator',
-  '🚪': 'door', '🧱': 'bricks', '🪟': 'window', '⬛': 'room', '🧹': 'eraser', '🚇': 'metro', '🚏': 'busstop', '⛴': 'ship', '🚢': 'ship', '🚤': 'boat',
+  '🚪': 'door', '🧱': 'bricks', '🪟': 'window', '⬛': 'room', '🧹': 'eraser', '🚇': 'metro', '🚏': 'busstop', '🚗': 'racecar', '⛴': 'ship', '🚢': 'ship', '🚤': 'boat',
   '✈': 'plane', '🛩': 'plane', '🎈': 'balloon', '🪧': 'billboard',
   '💰': 'money', '💳': 'card', '🪙': 'coin', '👛': 'wallet', '🧾': 'receipt', '📊': 'bar-chart', '📈': 'chart-up', '🏷': 'tag', '💎': 'gem', '📜': 'scroll',
   '📒': 'ledger', '💼': 'briefcase', '🎁': 'gift', '🏆': 'trophy', '📦': 'box', '🩺': 'pulse',

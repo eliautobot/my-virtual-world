@@ -84,8 +84,8 @@ export class Agents {
     this.fx = grow(this.fx, Float32Array); this.fz = grow(this.fz, Float32Array); this.fy = grow(this.fy, Float32Array);
     this.clip = grow(this.clip, Int16Array); this.pclip = grow(this.pclip, Int16Array);
     this.pph = grow(this.pph, Float32Array); this.lph = grow(this.lph, Float32Array);
-    this.fadeT = grow(this.fadeT, Float64Array); this.last = grow(this.last, Int32Array);
-    for (let i = old; i < m; i++) { this.fx[i] = NaN; this.clip[i] = -1; this.ctx[i] = -2; this.last[i] = -9; this.fadeT[i] = -1e9; }
+    this.fadeT = grow(this.fadeT, Float64Array); this.last = grow(this.last, Int32Array); this.carF = grow(this.carF, Int32Array);
+    for (let i = old; i < m; i++) { this.fx[i] = NaN; this.clip[i] = -1; this.ctx[i] = -2; this.last[i] = -9; this.fadeT[i] = -1e9; this.carF[i] = -9; }
     this.drawn = new Int32Array(m);
     this.n = m;
   }
@@ -94,7 +94,8 @@ export class Agents {
     this.parkB = new Uint8Array(B.length);
     B.forEach((b, i) => { if (b && !b.gone && b.type === 'park') this.parkB[i] = 1; });
   }
-  setAppearance(i, arr) { if (i < PLAYER_APP) this.ensure(i + 1); this.chars.setAppearance(i, Array.isArray(arr) ? arrToApp(arr) : arr); }
+  // (a resident not shown as an agent, and not a player: one the crowd may draw — render/characters.js CROWD)
+  setAppearance(i, arr) { if (i < PLAYER_APP) this.ensure(i + 1); this.chars.setAppearance(i, Array.isArray(arr) ? arrToApp(arr) : arr, i < PLAYER_APP && !S.people?.[i]?.v); }
   /** Lab checks: person i drawn at (x, y, z) on floor ctx, facing yaw, playing clip (anim.js CLIP) at phase ph (0..1;
    *  null: as time goes), whatever their plan says; pose(i, null) lets them go. */
   pose(i, o) { if (o) this.forced.set(i, o); else this.forced.delete(i); }
@@ -128,6 +129,8 @@ export class Agents {
     evalPlan(p, t, _e);
     this.k[i] = _e.k;
     if (!this.seen[i]) { this.seen[i] = 1; this.ox[i] = this.oy[i] = this.oz[i] = 0; return; }
+    // (just out of a car, drawn in its seat until now — render/car-occupants.js: beside it at once, not gliding out through the door)
+    if (this.carF[i] >= this.frame - 2) { this.ox[i] = this.oy[i] = this.oz[i] = 0; this.last[i] = -9; return; }
     const dx = this.rx[i] - _e.x, dy = this.ry[i] - _e.y, dz = this.rz[i] - _e.z;
     if (dx * dx + dz * dz < 12 && Math.abs(dy) < 0.6 && p.ctx[_e.k] === this.ctx[i]) { this.ox[i] = dx; this.oy[i] = dy; this.oz[i] = dz; }
     else { this.ox[i] = this.oy[i] = this.oz[i] = 0; this.last[i] = -9; }
@@ -147,7 +150,16 @@ export class Agents {
     this.frustum.setFromProjectionMatrix(this.pv);
     const PL = this.frustum.planes;
     const fb = S.focus.b, ff = S.focus.f, parkB = this.parkB, sel = S.sel, hov = S.hover;
-    const L0 = q.lod0 * q.lod0, L1 = q.lod1 * q.lod1, L2 = q.lod2 * q.lod2;
+    // each level by how tall a person stands on the screen (scene.js QUALITY px0/px1/px2): pixels × distance = k for a
+    // person 1.75 m tall, from the camera's field of view and the height drawn (its pixel ratio; not the automatic
+    // resolution's moment-to-moment scale) — so each level's distance, this frame
+    const k = 1.75 * window.innerHeight * q.pr / (2 * Math.tan(cam.fov * Math.PI / 360)), at = px => (px > 0 ? k / px : 0);
+    const L0 = at(q.px0) ** 2, L1 = at(q.px1) ** 2, L2 = at(q.px2) ** 2, L0own = at(q.px0Own ?? q.px0) ** 2;   // (L0own: a model of their own — scene.js px0Own)
+    // the crowd's close-up level for the residents largest on the screen (Settings → Display → Character detail: by the
+    // graphics quality — High and Medium, none on Low — always, or never)
+    if (!(this.frame & 63) || this.closePx == null) { const v = localStorage.getItem('mvw.charDetail') || 'auto'; this.closePx = v === 'standard' ? 0 : v === 'close' ? q.pxCloseAsked : q.pxClose; }
+    this.closeM = at(this.closePx);
+    const LC = this.closeM * this.closeM;
     const ky = 1 - Math.exp(-dt * 12), ko = Math.exp(-dt * 4.5);
     const frame = ++this.frame;
     let out = 0, inside = 0, moving = 0, under = 0, nd = 0;
@@ -214,7 +226,7 @@ export class Agents {
       for (let pl = 0; pl < 6; pl++) { const P = PL[pl], nn = P.normal; if (nn.x * x + nn.y * cy + nn.z * z + P.constant < -1.3) { inF = false; break; } }
       if (!inF) continue;
       const dx = x - cp.x, dy = cy - cp.y, dz = z - cp.z, d2 = dx * dx + dy * dy + dz * dz;
-      const lod = d2 < L0 ? 0 : d2 < L1 ? 1 : d2 < L2 ? 2 : -1;
+      const lod = d2 < (chars.crowdOf[i] === undefined ? L0own : L0) ? 0 : d2 < L1 ? 1 : d2 < L2 ? 2 : -1;
       if (lod < 0) continue;
       // yaw
       const target = F ? F.yaw : p.yaw[k];
@@ -251,7 +263,9 @@ export class Agents {
       // (someone between the camera and a screen the person is using — ui/pc-onscreen.js: the body isn't drawn meanwhile,
       // what is on the table in front of it is)
       const ghost = this.hideFn ? this.hideFn(i, x, y, z) : false;
+      chars.close = d2 < LC;
       chars.push(lod, x, y, z, yw, a, ph, w > 0 ? this.pclip[i] : a, this.pph[i], w, i, prop, (i === sel ? 2 : i === hov ? 1 : 0) | (indoor ? 4 : 0), item, ghost);
+      chars.close = false;
       if (lod < 2 && !ghost && (indoor ? blobIn : blobOut)) this.blobs.add(x, y, z, indoor);
       if (item && lod < 2) {
         // (typing at a table, the drink by the laptop stands on the same top as the laptop: a bar's counter is higher)
@@ -263,10 +277,14 @@ export class Agents {
     this.assignOrders();
     for (const e of this.extra) {
       const dx = e.x - cp.x, dy = e.y + 0.9 - cp.y, dz = e.z - cp.z, d2 = dx * dx + dy * dy + dz * dz;
-      const lod = d2 < L0 ? 0 : d2 < L1 ? 1 : 2;
-      chars.push(lod, e.x, e.y, e.z, e.yaw, e.clip, e.ph, e.pclip ?? e.clip, e.pph ?? 0, e.w ?? 0, e.app, e.prop || 0, e.flags || 0);
+      const lod = d2 < L0own ? 0 : d2 < L1 ? 1 : 2;   // (a player: a model of their own)
+      chars.push(lod, e.x, e.y, e.z, e.yaw, e.clip, e.ph, e.pclip ?? e.clip, e.pph ?? 0, e.w ?? 0, e.app, e.prop || 0, e.flags || 0, e.item || 0);
       if (lod < 2 && ((e.flags & 4) ? blobIn : blobOut)) this.blobs.add(e.x, e.y, e.z, !!(e.flags & 4));
+      // (a player's meal at their seat — player/meals.js: the plate in front of them, as a resident's)
+      if (e.food && lod < 2) this.food.place(e.x, e.y, e.z, e.yaw, e.raw ?? e.clip, e.clip, e.food, e.food2 || 0);
     }
+    // the people in cars, in their seats (render/car-occupants.js): after the cars' poses for this frame are known
+    if (this.seated) { try { this.seated.draw(this, { t: S.simT ?? t, frame, cp, PL, L0, L1, L2, now }); } catch (e) { if (!this.seatErr) { this.seatErr = 1; console.error('[mvw] car occupants', e); } } }
     chars.end(); this.food.end(); this.blobs.end(blobIn, blobOut);
     this.nDrawn = nd;
     Object.assign(this.stats, { out, inside, moving, under, drawn: nd, t });

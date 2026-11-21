@@ -4,7 +4,8 @@
 // lures and tackle; the cafés and restaurants their food and drink; the shops their goods. An item is { id, name, icon,
 // cat (a category below), value (hundredths of a Virtual Coin: what it's worth — a one-of-a-kind piece may carry its
 // own in its attrs.vc), rarity, stack (the most a plain stack holds), unique (each piece is one of a kind: a fish with
-// its own length and weight, kept apart and shown grouped), trade (may be given or traded; default yes), desc }.
+// its own length and weight, kept apart and shown grouped), trade (may be given or traded; default yes), desc, sold (the
+// line of a venue's menu it is when bought there to take home: server/economy/policy.js menus) }.
 import { SPECIES, FINDS, RARITY } from './fish-species.js';
 import { LURES, RODS, REELS, LINES, LEADER, HOOKS } from './fishing-gear.js';
 import { FOOD } from './food.js';
@@ -24,15 +25,28 @@ export const CAT_BY_ID = Object.freeze(Object.fromEntries(ITEM_CATS.map(c => [c.
 export const RARITY_ORDER = Object.freeze({ common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 });
 export const rarityColor = r => RARITY[r]?.color || RARITY.common.color;
 
-const ITEMS = new Map();
-/** Adds kinds of item (a module's own): each { id, name, icon, cat, value, rarity?, stack?, unique?, trade?, desc? }. */
+const ITEMS = new Map(), SOLD = new Map();
+/** Adds kinds of item (a module's own): each { id, name, icon, cat, value, rarity?, stack?, unique?, trade?, desc?, sold? }. */
 export function registerItems(list) {
   for (const it of list) {
     if (!it?.id || !it.name || !CAT_BY_ID[it.cat]) throw new Error(`Bad item: ${JSON.stringify(it).slice(0, 120)}`);
     ITEMS.set(it.id, Object.freeze({ rarity: 'common', stack: 999, unique: false, trade: true, desc: '', icon: '📦', value: 0, ...it }));
+    if (it.sold) SOLD.set(it.sold, it.id);
   }
 }
 export const itemOf = id => ITEMS.get(String(id)) || null;
+/** The item a venue's menu line is when bought there to take home (a shop's 'groceries': 'goods:groceries'), or null:
+ *  what is had on the spot (a coffee, a meal, a gym session) is nothing to carry home. */
+export const takeHomeItem = line => SOLD.get(String(line)) || null;
+/** The menu lines to take home whose item a text names ("Groceries at Store 21": ['groceries']): what an errand is for. */
+export function takeHomeNamed(text) {
+  const t = ` ${String(text ?? '').toLowerCase()} `, out = [];
+  for (const [line, id] of SOLD) {
+    const name = ITEMS.get(id)?.name.toLowerCase(), i = name ? t.indexOf(name) : -1;
+    if (i > 0 && !/[\p{L}\p{N}]/u.test(t[i - 1]) && !/[\p{L}\p{N}]/u.test(t[i + name.length])) out.push(line);
+  }
+  return out;
+}
 export const allItems = () => [...ITEMS.values()];
 /** What a piece is worth (hundredths): its own (attrs.vc) for a one-of-a-kind, else its kind's. */
 export const itemValue = (def, attrs) => (attrs && Number.isFinite(attrs.vc) ? Math.round(attrs.vc) : def?.value || 0);
@@ -85,9 +99,9 @@ registerItems([
   ...[...RODS, ...REELS, ...LINES, ...HOOKS, LEADER].map(g => ({ id: `gear:${g.id}`, name: g.name, icon: g.id.startsWith('reel') ? '⚙️' : g.id.startsWith('hook') ? '🪝' : '🎣', cat: 'tackle', value: vcOf(g.price || 0), rarity: g.tier >= 5 ? 'legendary' : g.tier >= 4 ? 'epic' : g.tier >= 3 ? 'rare' : g.tier >= 2 ? 'uncommon' : 'common', stack: 9, desc: g.blurb })),
   // food and drink: the cafés' and restaurants' menu items (to take away)
   ...FOOD.map(f => ({ id: `food:${f.id}`, name: f.name, icon: f.icon || '🍽️', cat: 'food', value: f.price || 0, stack: 99, desc: f.course === 'drink' ? 'A drink.' : 'Something to eat.' })),
-  // the shops' goods
-  { id: 'goods:groceries', name: 'Groceries', icon: '🛒', cat: 'goods', value: 500, stack: 99, desc: 'A bag of groceries.' },
-  { id: 'goods:bag', name: 'Shopping bag', icon: '🛍️', cat: 'goods', value: 1200, stack: 99, desc: 'Something from the shops.' },
+  // the shops' goods (sold: the shops' menu lines, what someone takes home from the checkout)
+  { id: 'goods:groceries', name: 'Groceries', icon: '🛒', cat: 'goods', value: 500, stack: 99, desc: 'A bag of groceries.', sold: 'groceries' },
+  { id: 'goods:bag', name: 'Shopping bag', icon: '🛍️', cat: 'goods', value: 1200, stack: 99, desc: 'Something from the shops.', sold: 'goods' },
   { id: 'goods:flowers', name: 'Bunch of flowers', icon: '🎁', cat: 'goods', value: 800, stack: 20, desc: 'A gift for someone.' },
   { id: 'goods:gift', name: 'Gift box', icon: '🎁', cat: 'goods', value: 1500, stack: 20, desc: 'Wrapped, with a bow.' },
 ]);

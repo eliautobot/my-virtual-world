@@ -171,7 +171,7 @@ function coverHtml(slots) {
   if (!rows.length) return '';
   const seg = x => { if (x.all) return [[0, 24]]; const e = x.end; return e > 24 ? [[x.start, 24], [0, e - 24]] : [[x.start, e]]; };
   return `<div class="pp-cov">${rows.map(s => `<div class="pp-cbar" aria-hidden="true">${s.holders.flatMap(x => seg(x).map(([a, b]) => `<i class="${x.agent?.mine ? 'mine' : ''}" style="left:${(a / 24 * 100).toFixed(2)}%;width:${((b - a) / 24 * 100).toFixed(2)}%"></i>`)).join('')}</div>
-    ${s.holders.map(x => `<div class="pp-cl"><span>${x.agent?.emoji ? esc(x.agent.emoji) + ' ' : ''}${esc(x.name)}</span><small>${esc(spanText(x))}</small></div>`).join('')}`).join('')}</div>`;
+    ${s.holders.map(x => `<div class="pp-cl"><span>${x.agent?.emoji ? esc(x.agent.emoji) + ' ' : ''}${esc(x.name)}</span><small>${esc(spanText(x))}${x.now ? ` · <span class="wk-st st-${esc(x.now.state)}">${esc(x.now.text)}</span>` : ''}</small></div>`).join('')}`).join('')}</div>`;
 }
 // what a position pays (2026-10-28, the product owner: "every post should have a Pay ... the user picks a payment amount"):
 // an hour, to whoever works there; who pays it (the business there, the city for a world module, else its owner)
@@ -209,7 +209,7 @@ function paintMenu() {
   const sl = st.open.k !== null && st.open.k !== undefined ? it.slots.find(s => s.k === st.open.k) : null, only = sl ? { ...it, slots: [sl] } : it;   // (a seat: that seat only)
   const icon = ICON[it.t] || (it.t === 'broadcast_desk' ? '🎙️' : it.kind === 'desk' ? '💼' : '🛎️'), who = agentAt(only);
   const all = only.slots.flatMap(s => s.holders || []), mine = all.filter(x => x.agent?.mine);
-  const now = who ? `${who.holder.agent?.emoji ? who.holder.agent.emoji + ' ' : ''}${esc(who.holder.name)} ${who.holder.post ? 'is on duty 24/7' : 'works here'}${all.length > 1 ? ` · ${all.length} share it` : ''}`
+  const now = who ? `${who.holder.agent?.emoji ? who.holder.agent.emoji + ' ' : ''}${esc(who.holder.name)} ${who.holder.post ? 'is on duty 24/7' : 'works here'}${all.length > 1 ? ` · ${all.length} share it` : ''}${who.holder.now && who.holder.now.state !== 'on_duty' ? ` · <span class="wk-st st-${esc(who.holder.now.state)}">${esc(who.holder.now.text)}</span>` : ''}`
     : only.slots.find(s => s.holder) ? `${esc(only.slots.find(s => s.holder).holder.name)} works here` : sl ? 'This seat is free' : 'No one works here yet';
   const head = `<div class="pp-h"><span class="pp-ic" aria-hidden="true">${icon}</span><div><b>${esc(it.name)}${sl ? ` · seat ${seatNo(it, sl.k)}` : ''}</b><small>${now}</small></div><button type="button" class="pp-x" data-pp="close" aria-label="Close">✕</button></div>`;
   let body;

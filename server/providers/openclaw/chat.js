@@ -23,6 +23,12 @@ function cardOf(c) {
     ...(c && Number.isInteger(c.revision) ? { revision: c.revision } : {}), ...(c && Number.isFinite(c.updatedAt) ? { updatedAt: c.updatedAt } : {}) };
 }
 
+// (the note about the agent's body in the city this installation sends with a message — server/senses/ — goes before the
+//  person's words; never with a command of OpenClaw's own: a slash command, or a stop phrase OpenClaw takes on its own
+//  ("stop", "please stop": docs/web/control-ui/chat.md), which only works as the whole message)
+const STOP_PHRASE = /^\s*(stop|stop run|stop action|stop openclaw|please stop|abort|halt)\s*[.!]?\s*$/i;
+const withNote = p => { const t = String(p.input || ''), n = typeof p.note === 'string' ? p.note.slice(0, 4000) : ''; return n && !/^\s*[/[]/.test(t) && !STOP_PHRASE.test(t) ? `${n}\n\n${t}` : t; };
+
 export class LinkChat {
   /** @param {import('./link.js').GatewayLink} link  @param {{ emit: (e: object) => void, kind: string }} o */
   constructor(link, { emit, kind }) {
@@ -277,7 +283,7 @@ export class LinkChat {
         await this.prefsFor(key, agentId, p.model, p.effort);
         // (how a message sent while the agent works is taken: the gateway's own setting — messages.queue, steer by default —
         // as OpenClaw's Control UI sends it; queue 'later': after the running turn, whatever that setting)
-        const sent = await l.request('chat.send', { sessionKey: key, agentId, message: String(p.input || ''), idempotencyKey: runId, ...(p.queue === 'later' ? { queueMode: 'followup' } : {}),
+        const sent = await l.request('chat.send', { sessionKey: key, agentId, message: withNote(p), idempotencyKey: runId, ...(p.queue === 'later' ? { queueMode: 'followup' } : {}),
           ...(attachments.length ? { attachments } : {}) }, { timeoutMs: SEND_TIMEOUT_MS });
         const theirs = sent && sent.runId ? normalizeSessionProjectionRunId(sent.runId) : null;
         if (theirs && theirs !== runId) this.alias.set(theirs, runId);
@@ -337,7 +343,8 @@ export class LinkChat {
     await this.link.request('sessions.patch', { key, agentId, ...patch });
     this.prefs.set(key, { model: model || last.model, effort: effort || last.effort });
   }
-  /** The person's files, as the gateway takes them (base64), checked against the limits it announced (never assumed). */
+  /** The person's files, as the gateway takes them (base64), checked against the limits it announced (never assumed). A
+   *  file is on disk (path) or comes with the message (data, base64: its eyes' picture — server/senses/eye.js). */
   async files(list) {
     const lim = (this.link.hello && this.link.hello.policy && this.link.hello.policy.attachments) || null;
     const maxPayload = this.link.hello && this.link.hello.policy && this.link.hello.policy.maxPayload;
@@ -347,7 +354,7 @@ export class LinkChat {
       const image = /^image\//.test(f.mime || '');
       const cap = lim ? (image ? lim.maxImageBytes : lim.maxBytes) : null;
       if (cap && f.size > cap) throw fail('too_large', `${f.name} is larger than this OpenClaw gateway takes (${Math.round(cap / 1048576)} MB${image ? ' for an image' : ''})`);
-      const buf = await fs.readFile(f.path);
+      const buf = typeof f.data === 'string' ? Buffer.from(f.data, 'base64') : await fs.readFile(f.path);
       total += Math.ceil(buf.length / 3) * 4;
       if (maxPayload && total > maxPayload * 0.9) throw fail('too_large', 'These files together are more than the gateway takes in one message; send fewer at a time');
       out.push({ type: image ? 'image' : 'file', mimeType: f.mime || 'application/octet-stream', fileName: f.name, origin: 'file', content: buf.toString('base64'), sizeBytes: buf.length });

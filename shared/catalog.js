@@ -524,6 +524,10 @@ export const USES = {
   dj: { label: 'DJing', icon: '🎧', rate: { fun: 0.2 } },
   perform: { label: 'Playing music', icon: '🎹', rate: { fun: 0.2 } },
   gogo: { label: 'Dancing on stage', icon: '💃', rate: { fun: 0.1 } },
+  // (a companion fishing from its owner's boat: server/play/fishing-crew.js — fun, as a game is, a little company too)
+  fish: { label: 'Fishing', icon: '🎣', rate: { fun: 0.7, social: 0.1 } },
+  // (an AI agent in the air: flying a ring course itself, or riding along in its owner's aircraft — server/play/flight-crew.js)
+  fly: { label: 'Flying', icon: '✈️', rate: { fun: 0.8, social: 0.1 } },
 };
 
 export const USE_LIST = Object.keys(USES);

@@ -196,7 +196,11 @@ function onKey(e) {
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
   if (t?.closest?.('.psc-view')) return;   // (typing on an agent's own screen: its keys — provider-screen.js)
+  // (in a chat window, or on a button, link or disclosure of a dialog: Enter is theirs — it presses what has the focus)
+  if (t?.closest?.('.chatwin') || (t?.closest?.('[role="dialog"]') && t.closest('button, summary, a[href], [role="button"]'))) return;
   if (document.querySelector('.modal-back, .auth-back')) return;
+  // (a game asking something — "Back to the dock?" —: Enter answers it, player/boating.js)
+  if (document.querySelector('[role="alertdialog"]:not(.hidden)')) return;
   if (!auth.can('players.chat') || !(app.remote && app.remote.me) || S.mode !== 'play') return;
   e.preventDefault(); e.stopPropagation();
   openChat();

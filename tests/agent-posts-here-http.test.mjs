@@ -9,6 +9,15 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { startServer, ownerSession, userSession, httpClient } from './helpers/server.mjs';
 import { isServiceDesk } from '../shared/catalog.js';
+
+/** A seat's holder without its status now (whether they are there this moment: server/workplace/presence.js — on shift,
+ *  once the staff lists know them; checked here only for its shape): what the test pins. */
+function holderOf(h) {
+  if (!h) return h;
+  const { now, ...rest } = h;
+  if (now !== undefined) { assert.ok(['on_duty', 'coming', 'late', 'away', 'break'].includes(now.state), JSON.stringify(now)); assert.ok(now.text); }
+  return rest;
+}
 import { ctxOf } from '../shared/constants.js';
 
 let s, owner, ann, annId, A, B, C, desk, staffed;
@@ -41,7 +50,7 @@ test('the floor: its owner sees the counters and desks there and who is at each;
   const it = mine.items.find(x => x.id === staffed.item);
   assert.ok(it && isServiceDesk(it.t) && it.name, JSON.stringify(mine));
   assert.ok(mine.items.every(x => isServiceDesk(x.t)), 'only counters, checkouts and reception desks');
-  assert.deepEqual(it.slots[0].holder, { name: staffed.worker, post: false, agent: null });
+  assert.deepEqual(holderOf(it.slots[0].holder), { name: staffed.worker, post: false, agent: null });
   assert.deepEqual((await floorOf(ann, staffed.b, staffed.f)).items, [], 'Ann holds nothing here: she sees nothing');
   assert.deepEqual((await floorOf(owner, 99999, 0)).items, []);
   assert.notEqual((await httpClient(s.url).get(`/api/agent-posts/floor?b=${staffed.b}&f=${staffed.f}`)).status, 200, 'signed out: no');
@@ -62,7 +71,7 @@ test('posted from the desk: there at once, on duty; the resident working there m
   assert.equal(on.act.label, 'On duty');
   // the floor says so; the resident is between jobs or works somewhere else, never back on that spot
   const it = (await floorOf(owner, staffed.b, staffed.f)).items.find(x => x.id === staffed.item);
-  assert.deepEqual(it.slots[0].holder, { name: A.name, post: true, agent: { id: A.id, name: A.name, emoji: A.emoji || '', mine: true } });
+  assert.deepEqual(holderOf(it.slots[0].holder), { name: A.name, post: true, agent: { id: A.id, name: A.name, emoji: A.emoji || '', mine: true } });
   const people = (await owner.get('/api/people')).json, list = people.people || people;
   const worker = list.find(p => p.n === staffed.worker && p.i !== A.i);
   assert.ok(worker, 'the resident');

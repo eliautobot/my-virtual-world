@@ -9,6 +9,7 @@ import { TEXTURED } from '../client/assets/chars/index.js';
 import { CHARACTERS } from '../shared/appearance.js';
 import { TRIPO_CLIPS } from '../client/js/render/charClips.js';
 import { COMMON, SKIN_GLSL } from '../client/js/render/char-glsl.js';
+import { addKindHelpers } from './helpers/char-kinds.mjs';
 
 const read = path => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 // Exact pre-rollout world values and selected Lab male, recorded in the
@@ -55,9 +56,10 @@ async function renderer(saved = WORLD, mode = 'ok') {
       if (mode === 'reject') throw new Error('fixture unavailable');
       return { ok: mode !== '404', json: async () => structuredClone(saved) };
     }, console };
-  vm.runInNewContext(source.slice(start, end).replace('export class Characters', 'class Characters')
+  addKindHelpers(source, context);
+  vm.runInContext(source.slice(start, end).replace('export class Characters', 'class Characters')
     + '\nglobalThis.C = Characters;', context, { filename: 'production-characters.js' });
-  const chars = new context.C({ capacity: 0, lods: [] });
+  const chars = new context.C({ capacity: 0, lods: [], crowd: false });   // (the crowd from parts: tests/crowd.test.mjs)
   assert.ok(chars.rigReady && typeof chars.rigReady.then === 'function');
   const settings = await chars.rigReady; await chars.ready;
   assert.equal(requests.length, 1); assert.equal(requests[0].url, '/assets/chars/rig.json');

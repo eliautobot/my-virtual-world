@@ -248,3 +248,15 @@ body.play .selcard .insp { border-top: 1px solid color-mix(in srgb, var(--kc) 30
   .selcard, .selcard.open, .selcard .insp, .selcard:not(.open) .insp { transition: none; }
   .fi.new, .sel-feed .act::after { animation: none; }
 }
+
+/* Who is at work (server/workplace/presence.js): a person's status on its shift, and its co-workers' (ui/ui.js workRows,
+   the ⋯ of a seat, the Companions bar) */
+.wk-st { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; line-height: 16px; background: color-mix(in srgb, var(--muted, #8a8f98) 18%, transparent); color: var(--text, inherit); white-space: normal; }
+.wk-st.st-on_duty { background: color-mix(in srgb, var(--good, #3fb27f) 22%, transparent); }
+.wk-st.st-coming { background: color-mix(in srgb, var(--accent, #4aa3ff) 20%, transparent); }
+.wk-st.st-late { background: color-mix(in srgb, var(--gold, #e0a83a) 28%, transparent); }
+.wk-st.st-away { background: color-mix(in srgb, var(--bad, #e25d5d) 22%, transparent); }
+.wk-st.st-break { background: color-mix(in srgb, var(--muted, #8a8f98) 24%, transparent); }
+.wk-team { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wk-mate { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; min-width: 0; }
+.wk-mate small { opacity: .75; }

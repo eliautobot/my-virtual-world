@@ -333,3 +333,20 @@ test('each kind of fish fights its own way: small ones dart, runners scream off,
   for (let i = 0; i < 6; i++) { const F = fightSetup(sf, f, L, { d0: 25, seed: 600 + i }); let run = 0; while (!F.out) { const e = fightStep(F, botInput(F, 1)); if (e.includes('jump')) { run++; most = Math.max(most, run); } else if (F.mode !== 'jump' && e.length && !e.includes('spike')) run = 0; } }
   assert.ok(most >= 2, `a sailfish tail-walks (${most} jumps in a row)`);
 });
+
+test('a companion\'s hand on the reel (botInput push, server/play/fishing-tactics.js): hard is quicker with more lines snapped, easy slower; steady the good player as before', () => {
+  const sea = SPECIES.filter(s => s.water === 'sea' && !s.legend).slice(0, 30), L = KITS.starter;
+  const play = push => {
+    let n = 0, landed = 0, secs = 0, snaps = 0;
+    for (const sp of sea) for (let seed = 1; seed <= 12; seed++) {
+      const F = fightSetup(sp, { kg: fishOf(sp, 0.9).kg }, L, { d0: 10, seed });
+      for (let k = 0; !F.out && k < MAX_FIGHT_S / 0.1 + 10; k++) fightStep(F, botInput(F, 0.7, push));
+      n++; if (F.out === 'landed') { landed++; secs += F.t; } if (F.out === 'snap') snaps++;
+    }
+    return { rate: landed / n, secs: secs / Math.max(1, landed), snaps };
+  };
+  const easy = play(-1), steady = play(0), hard = play(1);
+  assert.ok(hard.secs < steady.secs * 0.95 && steady.secs < easy.secs, `quicker the harder (${easy.secs.toFixed(1)} / ${steady.secs.toFixed(1)} / ${hard.secs.toFixed(1)} s)`);
+  assert.ok(hard.snaps > steady.snaps, `more lines snapped hard (${steady.snaps} → ${hard.snaps})`);
+  assert.ok(Math.abs(hard.rate - steady.rate) < 0.08 && Math.abs(easy.rate - steady.rate) < 0.08, 'a choice of ways, not a better one');
+});

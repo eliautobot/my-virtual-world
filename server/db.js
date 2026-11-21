@@ -2605,6 +2605,37 @@ const MIGRATIONS = [
         OR (key = 'sound.effects' AND json_extract(value, '$') = 80) OR (key = 'sound.vehicles' AND json_extract(value, '$') = 80)
         OR (key = 'sound.radio' AND json_extract(value, '$') = 70));`,
   },
+  // v58 (agent awareness, 2026-11-16 — docs/features/awareness.md, server/senses/): how much each agent's brain is told
+  // about its surroundings in its chats — off, only when it asks, when its owner is with it, always — as its owner chose
+  // in its Studio (no row: the installation's default, awareness.defaultMode).
+  {
+    additive: true,
+    up: `CREATE TABLE IF NOT EXISTS agent_awareness (
+     world_id TEXT NOT NULL,
+     agent_id INTEGER NOT NULL,
+     mode TEXT NOT NULL CHECK (mode IN ('off', 'ask', 'together', 'always')),
+     updated INTEGER NOT NULL,
+     updated_by INTEGER,
+     PRIMARY KEY (world_id, agent_id)
+   );`,
+  },
+  // v59 (group conversations, 2026-11-17 — groups in the companions' voice and the chats): what was said in one group (a
+  // person with several agents), so every agent in it is told what the others said. Keyed by its members.
+  {
+    additive: true,
+    up: `CREATE TABLE IF NOT EXISTS group_turns (
+     id INTEGER PRIMARY KEY,
+     world_id TEXT NOT NULL,
+     owner_id INTEGER NOT NULL,
+     group_key TEXT NOT NULL,
+     speaker TEXT NOT NULL,
+     speaker_id INTEGER,
+     speaker_name TEXT NOT NULL,
+     text TEXT NOT NULL,
+     at INTEGER NOT NULL
+   );
+   CREATE INDEX IF NOT EXISTS group_turns_lookup ON group_turns (world_id, owner_id, group_key, id);`,
+  },
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 export const MIGRATION_INFO = Object.freeze(MIGRATIONS.map((m, i) => Object.freeze({ version: i + 1, additive: !!m.additive })));

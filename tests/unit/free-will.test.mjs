@@ -156,6 +156,23 @@ test('agents with Free Will choose for themselves: asked ahead, answers used for
   h.close();
 });
 
+test('switched on while the city runs (the server starting, a service added): the end of the plan it is in is asked about', async () => {
+  const c = city();
+  c.sim.start();
+  await run(c, null, 1);   // (plans committed before Free Will was there)
+  const h = harness(c);
+  h.fw.attach();
+  const before = h.fw.heap.size;
+  for (const a of h.records) h.fw.setSettings(a, { enabled: true }, 1);
+  assert.equal(h.fw.byPerson.size, AGENTS);
+  assert.ok(h.fw.heap.size >= before + AGENTS, `each one's current plan got its question (${h.fw.heap.size - before})`);
+  // (each due within its current plan: nothing waits a whole plan more)
+  const latest = Math.max(...[...h.fw.byPerson.keys()].map(i => c.sim.agents[i].plan.t));
+  await run(c, h.fw, (latest - c.t()) * 16 / 3600 + 0.5);
+  assert.ok(h.fw.stats.asked + h.fw.stats.skippedRoutine + Object.values(h.fw.stats.reasons).reduce((n, v) => n + v, 0) >= AGENTS, 'every agent reached its first choice point with a question asked or a reason');
+  h.close();
+});
+
 test('an answer that arrives after its choice point: the routine chose, and the log says "late" with what the request cost', async () => {
   const c = city();
   const held = [];
@@ -236,3 +253,33 @@ test('refusals and answers that are not options fall back to the routine; switch
   h.close();
 });
 
+
+test('a moment\'s decision that fails (decideNow): a routine row with its why — not an outcome the why-log refuses, which lost its whole batch', async () => {
+  const c = city();
+  c.sim.start();
+  let fail = null;
+  const h = harness(c, { decide: (cn, request) => { if (fail) { const e = new Error('no answer'); e.code = fail; throw e; } return mockDecisions.decide({ config: cn.config, request }); } });
+  const errors = [];
+  h.fw.log = { info() {}, warn() {}, error: (...a) => errors.push(a.join(' ')) };
+  try {
+    h.fw.setSettings(h.records[0], { enabled: true }, 1);
+    const id = h.records[0].id;
+    assert.ok([...h.fw.byPerson.values()].some(v => v.agentId === id), 'Free Will on for it');
+    h.fw.record({ agentId: id, type: 'leisure', outcome: 'routine', reason: 'not_possible' });   // (another row in the same batch)
+    const request = { input: 'Out with Kim.', questions: [{ type: 'choice', name: 'do', instructions: 'What now?', choices: [{ value: 'stay', description: 'Carry on' }, { value: 'look0', description: 'Look' }] }] };
+    fail = 'timeout';
+    assert.equal(await h.fw.decideNow(id, request, { type: 'moment', options: [{ id: 'stay', kind: 'stay', label: 'Carry on' }] }), null);
+    fail = 'provider_error';
+    assert.equal(await h.fw.decideNow(id, request, { type: 'check' }), null);
+    const rows = rowsOf(h);
+    assert.deepEqual(errors, [], 'nothing refused');
+    assert.deepEqual(rows.map(r => [r.choice, r.outcome, r.reason]), [['leisure', 'routine', 'not_possible'], ['moment', 'routine', 'timeout'], ['check', 'routine', 'service_provider_error']]);
+    // and a row the table does refuse costs only itself, not the others written with it
+    h.fw.record({ agentId: id, type: 'moment', outcome: 'routine', reason: 'a' });
+    h.fw.record({ agentId: id, type: 'moment', outcome: 'bogus', reason: 'b' });
+    h.fw.record({ agentId: id, type: 'moment', outcome: 'chosen', reason: 'c' });
+    assert.deepEqual(rowsOf(h).slice(3).map(r => r.reason), ['a', 'c']);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /failed for 1 of 3 row\(s\).*CHECK constraint failed.*outcome bogus, choice moment/);
+  } finally { h.close(); }
+});

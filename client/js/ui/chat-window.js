@@ -5,7 +5,9 @@
 // written as it comes (the socket's pieces; the events route as a fallback), Markdown with code
 // blocks to copy, the reasoning a model shows, the steps it took, what it took (model, tokens, cost, time); Stop; edit a
 // message, write an answer again; attachments (any file: pick, drop, paste; images shrunk before they go); the chat's
-// own model and thinking effort; voice — dictation, read aloud and voice mode (chat-voice.js). Everything it shows comes
+// own model and thinking effort; voice — dictation, read aloud and voice mode (chat-voice.js); 📷 Share my view — a picture of
+// what the person sees of the world, and whose characters are in it (share-view.js); under an answer, 👁 what it knew of its
+// surroundings (chat-aware.js). Everything it shows comes
 // from the server, which decides who may chat with what.
 // Opened by the manager for every way of talking to someone (the selection card's Talk, the right-click menu's Talk, the
 // Agent Studio's Chat, the floating 💬 button, the team list); who can't chat is told in one line.
@@ -31,6 +33,8 @@ import { options as voiceOptions } from './voice.js';
 import { inset as docksInset } from './docks.js';
 import { itemsHtml as noteItems, approvalStatuses, clickItem as noteClick } from './notify.js';
 import * as hermesView from './providers/hermes-chat.js';
+import { awareHtml, toggleAware } from './chat-aware.js';
+import { hasWorld, captureView } from './share-view.js';
 
 let app;   // (the page: given by create)
 // (Agent Providers: the window is the same for every agent; a provider with a view of its own lays its turns out the way
@@ -64,6 +68,8 @@ export function room() {
   const css = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topbar-height')) || 56;
   // (where the selection widget ends at the top, open or folded to its handle: ui.js selRoom)
   const selB = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sel-b')) || 0;
+  // (a phone: the window spans the screen's width, a sheet over the world's buttons — kept clear, they left it 262 px of 390)
+  if (phone()) return { top: Math.max(css + GAP, selB), right: 6, left: 6, bottom: 8 };
   const fb = document.getElementById('floatbtns'), fbW = fb ? fb.offsetWidth : 0;   // (0 when it is not shown)
   return {
     top: Math.max(css + GAP, selB),
@@ -150,7 +156,9 @@ const ZOOM_MIN = 0.1, ZOOM_MAX = 8, ZOOM_STEP = 1.25;
 function fileIcon(n) { const e = (/\.(\w+)$/.exec(n || '') || [])[1]?.toLowerCase(); return /^(png|jpe?g|gif|webp)$/.test(e) ? '🖼' : /^(mp4|m4v|mov|webm|mkv|avi|3gp)$/.test(e) ? '🎥' : /^(mp3|m4a|wav|ogg|oga|opus|flac|aac)$/.test(e) ? '🎧' : '📄'; }
 function metaLine(meta) {
   if (!meta) return '';
-  const bits = [meta.model, meta.effort && meta.effort !== 'off' ? `${meta.effort} effort` : '', Number.isFinite(meta.tokensIn) ? `${kTok(meta.tokensIn)} in · ${kTok(meta.tokensOut || 0)} out` : '', money(meta.cost), Number.isFinite(meta.ms) ? secs(meta.ms) : ''].filter(Boolean);
+  // (the part of what went in its provider read from its cache, charged at its cache price: docs/features/awareness.md §4)
+  const cached = Number.isFinite(meta.cachedIn) ? ` (${kTok(meta.cachedIn)} cached)` : '';
+  const bits = [meta.model, meta.effort && meta.effort !== 'off' ? `${meta.effort} effort` : '', Number.isFinite(meta.tokensIn) ? `${kTok(meta.tokensIn)} in${cached} · ${kTok(meta.tokensOut || 0)} out` : '', money(meta.cost), Number.isFinite(meta.ms) ? secs(meta.ms) : ''].filter(Boolean);
   return bits.length ? `<span class="cw-meta" title="What this answer took">${esc(bits.join(' · '))}</span>` : '';
 }
 /**
@@ -272,17 +280,23 @@ export function create(a, mgr, o = {}) {
     }
     return pick(id, session, { latest, project, quiet });
   }
-  /** The open agent's own chats and projects (the Sidebar's list). */
+  /** The open agent's own chats and projects (the Sidebar's list), and the one it is talked with now (current). */
   async function loadList(tok = W.token) {
     try {
       const r = await getJSON(`/api/chat/recent?agent=${W.agentId}`);
       if (!W || tok !== W.token) return;
-      W.sessions = r.sessions || []; W.projects = r.projects || [];
-    } catch { if (W && tok === W.token) { W.sessions = []; W.projects = []; } }
+      W.sessions = r.sessions || []; W.projects = r.projects || []; W.current = r.current ?? null;
+    } catch { if (W && tok === W.token) { W.sessions = []; W.projects = []; W.current = null; } }
   }
 
-  /** Shows agent `id`'s chat `sessionId` (null: a new chat, made when the first message is sent). */
-  async function pick(id, sessionId, { latest = false, project = null, quiet = false } = {}) {
+  /** Shows agent `id`'s chat `sessionId` (null: a new chat, made when the first message is sent). While it opens, the
+   *  companions' voice asking for this window's chat waits for it (ensure). */
+  function pick(id, sessionId, o = {}) {
+    const p = pickNow(id, sessionId, o);
+    if (W) W.picking = p;
+    return p;
+  }
+  async function pickNow(id, sessionId, { latest = false, project = null, quiet = false } = {}) {
     // (a chat another window shows: that window comes forward — one chat is never in two windows)
     const elsewhere = sessionId ? mgr.holder(id, sessionId, me) : null;
     if (elsewhere) { mgr.front(elsewhere, { reveal: true }); if (!W.agentId) close(); return; }
@@ -317,8 +331,9 @@ export function create(a, mgr, o = {}) {
     paintKind();
     await listP;
     if (!W || tok !== W.token) return;
-    // (its latest chat — unless another window shows it: then a new one here, beside it)
-    if (latest && !sessionId) { const s0 = W.sessions[0]; sessionId = s0 && !mgr.holder(id, s0.id, me) ? s0.id : null; W.want = sessionId; }
+    // (the chat it is talked with now — the one last written in, the server's one rule (server/chat/sessions.js current),
+    // which the companions' voice and E face to face follow too —; unless another window shows it: then a new one here)
+    if (latest && !sessionId) { const s0 = W.current ? sessionOf(W.current) : null; sessionId = s0 && !mgr.holder(id, s0.id, me) ? s0.id : null; W.want = sessionId; }
     if (W.view === 'project') loadProject(W.projectId);
     if (!can.ok) { const rec = agentRec(id); if (!can.fix && !W.sessions.some(s => s.agentId === id)) { close(); return quiet ? undefined : app.toast?.(can.message, '', 4500, '💬'); } blocked(can, rec); head(); return; }
     W.el.querySelector('.cw-blocked').classList.add('hidden');
@@ -450,6 +465,7 @@ export function create(a, mgr, o = {}) {
             <div class="cw-tools">
               <button type="button" class="cw-tool cw-attach" title="Attach files (images, PDFs, documents, code)" aria-label="Attach files">＋</button>
               <input type="file" class="cw-file" multiple hidden>
+              <button type="button" class="cw-tool cw-shot hidden" title="Share my view: a picture of what you see of the world right now, sent with your next message" aria-label="Share my view"><span aria-hidden="true">📷</span><span class="cw-tool-lb">Share my view</span></button>
               <button type="button" class="cw-tool cw-model" aria-haspopup="listbox" title="Model"><span class="cw-tool-lb">Model</span> ▾</button>
               <button type="button" class="cw-tool cw-effort" aria-haspopup="listbox" title="Thinking effort"><span aria-hidden="true">💡</span> <span class="cw-tool-lb">Default</span> ▾</button>
               <button type="button" class="cw-tool cw-ctx hidden" title="Context"><svg class="cw-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8"/><circle class="cw-ring-v" cx="10" cy="10" r="8"/></svg><span class="cw-tool-lb">0%</span></button>
@@ -518,6 +534,7 @@ export function create(a, mgr, o = {}) {
     };
     $('.cw-attach').onclick = () => $('.cw-file').click();
     $('.cw-file').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
+    $('.cw-shot').onclick = () => shareView();
     $('.cw-send').onclick = () => submit({ button: true });
     $('.cw-queue').onclick = () => view()?.submit?.(cctx(), { queue: true });
     $('.cw-vq').onclick = e => {
@@ -619,7 +636,7 @@ export function create(a, mgr, o = {}) {
   function setMode(choice, { save = true } = {}) {
     W.choice = choice;
     if (save) store.set(MODE_KEY, choice);
-    const mode = phone() ? 'max' : choice;
+    const mode = choice;   // (a phone floats too: its window is sized and moved like any other — full screen is a press away)
     W.mode = mode;
     // (put away: neither over the world nor floating — the world goes on drawing; ui/main.js covered)
     W.el.classList.toggle('min', W.min);
@@ -629,7 +646,7 @@ export function create(a, mgr, o = {}) {
     const b = $w('.cw-max');
     b.innerHTML = icon(mode === 'max' ? 'restore' : 'maximize');
     b.title = mode === 'max' ? 'Back to a window' : 'Full screen'; b.setAttribute('aria-label', b.title); b.setAttribute('aria-pressed', String(mode === 'max'));
-    b.classList.toggle('hidden', phone());
+    b.classList.remove('hidden');
     place();
     fit();
     mgr.changed(me);
@@ -663,6 +680,8 @@ export function create(a, mgr, o = {}) {
    *  one's size, when they float there already. */
   function firstGeo(availW, availH) {
     const last = store.get(GEO_KEY, null) || {}, others = mgr.rects(me);
+    // (a phone: the whole width, a little over half the height, so the world and the hotbar stay in view)
+    if (!last.w && phone()) return { w: Math.round(availW), h: Math.round(Math.min(availH, Math.max(320, availH * 0.56))), r: 0, b: 0 };
     if (!others.length) return last;
     return spotFor(Number(last.w) || 460, Number(last.h) || Math.min(680, availH), availW, availH, others);
   }
@@ -703,8 +722,8 @@ export function create(a, mgr, o = {}) {
   /** The window's height follows the visible part of the screen (a phone's keyboard takes some of it). */
   function fit() {
     const vv = window.visualViewport, box = $w('.chatwin');
-    if ((phone() ? 'max' : W.choice) !== W.mode) return setMode(W.choice, { save: false });
-    if (phone() && vv) box.style.height = `${Math.round(vv.height - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topbar-height')) || 56))}px`;
+    if (W.choice !== W.mode) return setMode(W.choice, { save: false });
+    if (W.mode === 'max' && phone() && vv) box.style.height = `${Math.round(vv.height - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topbar-height')) || 56))}px`;
     else if (W.mode === 'max') box.style.height = '';
     else place();
     W.wide = box.getBoundingClientRect().width >= WIDE_PX;
@@ -940,7 +959,7 @@ export function create(a, mgr, o = {}) {
   /** A new chat with this agent (in `project`, when started from it). */
   function newChat({ project = null } = {}) {
     if (!W || !W.agentId) return;
-    W.session = null; W.messages = []; W.newIn = project; W.pending.mode = null; abandonRun();
+    W.session = null; W.want = null; W.messages = []; W.newIn = project; W.pending.mode = null; abandonRun();
     W.obs = null; W.plan = null; W.usage = null; W.prov = null; stopWatching();
     head(); paintSide(); paintThread(); paintComposer();
     if (!W.wide) toggleSide(false);
@@ -1426,8 +1445,13 @@ export function create(a, mgr, o = {}) {
     if (m.role === 'user') {
       if (W.editing === m.id) return `<div class="cw-msg user editing" data-id="${m.id}"><textarea class="cw-edit-in input" aria-label="Edit your message">${esc(m.text)}</textarea>
         <div class="cw-edit-acts"><button type="button" class="btn" data-a="edit-cancel">Cancel</button><button type="button" class="btn primary" data-a="edit-send">Send</button></div></div>`;
-      return `<div class="cw-msg user"${m.id ? ` data-id="${m.id}"` : ''}>${filesHtml(m.meta?.attachments)}${m.text ? `<div class="cw-bubble" data-noicon>${esc(m.text)}</div>` : ''}
+      return `<div class="cw-msg user"${m.id ? ` data-id="${m.id}"` : ''}>${toHtml(m.meta?.to)}${filesHtml(m.meta?.attachments)}${m.text ? `<div class="cw-bubble" data-noicon>${esc(m.text)}</div>` : ''}
         <div class="cw-mact">${m.id && !W.run && rewrites() ? '<button type="button" class="cw-ic" data-a="edit" title="Edit and send again" aria-label="Edit">✎</button>' : ''}<button type="button" class="cw-ic" data-a="copy" title="Copy" aria-label="Copy">⧉</button></div></div>`;
+    }
+    // an outing with its owner (server/companions/outings.js): a divider across the thread, at the time in this page's clock
+    if (m.role === 'system' && m.status === 'outing') {
+      const out = m.meta?.outing !== 'end';
+      return `<div class="cw-msg sys cw-modeline outing ${out ? 'out' : 'back'}"${m.id ? ` data-id="${m.id}"` : ''}><span><span aria-hidden="true">${out ? '🧭' : '🏠'}</span> ${esc(m.text)}${whenOf(m.ts)}</span></div>`;
     }
     // a switch between Work and Life (CHAT.md §13): a divider across the thread
     if (m.role === 'system' && m.status === 'mode') {
@@ -1439,16 +1463,33 @@ export function create(a, mgr, o = {}) {
       return `<div class="cw-msg sys${fail ? ' bad' : ''}"${m.id ? ` data-id="${m.id}"` : ''}><span>${esc(m.text)}</span>${fail && last !== false && !W.run && rewrites() ? ' <button type="button" class="btn small" data-a="retry">Try again</button>' : ''}</div>`;
     }
     const v = view();
+    // (what it knew of its surroundings when it answered: a chip beside what the answer took, its panel under the answer —
+    // ui/chat-aware.js; open ones stay open when the thread is drawn again)
+    const awKey = m.id != null ? `${W.session?.id ?? ''}:${m.id}` : '', awOn = !!awKey && !!W.awareOpen?.has(awKey), aw = awareHtml(m, awKey, awOn), awOpen = aw.panel && awOn ? ' aw-open' : '';
     if (v) {
       // (the provider's own drawing of the turn; the window's own copy, read aloud, media and what it took around it)
-      return `<div class="cw-msg assistant pv${m.status === 'stopped' ? ' stopped' : ''}"${m.id ? ` data-id="${m.id}"` : ''}><div class="cw-mbody">${v.answerHtml(m, { last: last === true, sid: W.session?.id ?? null })}${mediaHtml(m.meta?.media)}${apprHtml(m.meta?.approvals)}
-        ${v.actionsHtml ? v.actionsHtml(m, { last, busy: !!W.run, read: m.id && m.text ? readBtn(m.id) : '', meta: metaLine(m.meta), caps: W.can?.caps || {} }) : `<div class="cw-mact"><button type="button" class="cw-ic" data-a="copy" title="Copy" aria-label="Copy">⧉</button>${m.id && m.text ? readBtn(m.id) : ''}${metaLine(m.meta)}</div>`}</div></div>`;
+      return `<div class="cw-msg assistant pv${m.status === 'stopped' ? ' stopped' : ''}${awOpen}"${m.id ? ` data-id="${m.id}"` : ''}><div class="cw-mbody">${v.answerHtml(m, { last: last === true, sid: W.session?.id ?? null })}${mediaHtml(m.meta?.media)}${apprHtml(m.meta?.approvals)}
+        ${v.actionsHtml ? v.actionsHtml(m, { last, busy: !!W.run, read: m.id && m.text ? readBtn(m.id) : '', meta: aw.chip + metaLine(m.meta), caps: W.can?.caps || {} }) : `<div class="cw-mact"><button type="button" class="cw-ic" data-a="copy" title="Copy" aria-label="Copy">⧉</button>${m.id && m.text ? readBtn(m.id) : ''}${aw.chip}${metaLine(m.meta)}</div>`}${aw.panel}</div></div>`;
     }
     const r = render(m.text);
-    return `<div class="cw-msg assistant${m.status === 'stopped' ? ' stopped' : ''}"${m.id ? ` data-id="${m.id}"` : ''}><div class="cw-mav" data-avatar>${esc(rec?.emoji || '🤖')}</div><div class="cw-mbody">
+    return `<div class="cw-msg assistant${m.status === 'stopped' ? ' stopped' : ''}${awOpen}"${m.id ? ` data-id="${m.id}"` : ''}><div class="cw-mav" data-avatar>${esc(rec?.emoji || '🤖')}</div><div class="cw-mbody">
       ${m.meta?.thinking ? `<details class="cw-think"><summary>Thought${Number.isFinite(m.meta.ms) ? ` for ${secs(m.meta.ms)}` : ''}</summary><div class="cw-think-t" data-noicon>${esc(m.meta.thinking)}</div></details>` : ''}
       ${m.meta?.steps?.length ? stepsHtml(m.meta.steps.map(s => ({ ...s, ...(W.stepSeen.get(String(s.id)) || {}), done: true })), false) : ''}${tabCardsHtml(m.meta?.steps)}<div class="cw-md" data-noicon>${r.html}</div>${mediaHtml(m.meta?.media)}${apprHtml(m.meta?.approvals)}${m.status === 'stopped' ? '<div class="cw-stopped">Stopped</div>' : ''}
-      <div class="cw-mact"><button type="button" class="cw-ic" data-a="copy" title="Copy" aria-label="Copy">⧉</button>${m.id && m.text ? readBtn(m.id) : ''}${last && rewrites() ? '<button type="button" class="cw-ic" data-a="regen" title="Write it again" aria-label="Write it again">↻</button>' : ''}${metaLine(m.meta)}</div></div></div>`;
+      <div class="cw-mact"><button type="button" class="cw-ic" data-a="copy" title="Copy" aria-label="Copy">⧉</button>${m.id && m.text ? readBtn(m.id) : ''}${last && rewrites() ? '<button type="button" class="cw-ic" data-a="regen" title="Write it again" aria-label="Write it again">↻</button>' : ''}${aw.chip}${metaLine(m.meta)}</div>${aw.panel}</div></div>`;
+  }
+  /** " · 8:21 AM" (another day: " · 16 Nov, 8:21 AM"), in this page's clock — an outing's divider. */
+  function whenOf(ts) {
+    const d = new Date(Number(ts)), now = new Date();
+    if (!Number.isFinite(d.getTime()) || !ts) return '';
+    const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return ` · ${d.toDateString() === now.toDateString() ? t : `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })}, ${t}`}`;
+  }
+  /** A line said to a group (the companions' voice, server/chat/groups.js): who it was said to, over it. */
+  function toHtml(to) {
+    const l = Array.isArray(to) ? to.filter(x => typeof x === 'string' && x).slice(0, 8) : [];
+    if (l.length < 2) return '';
+    const names = `${l.slice(0, -1).join(', ')} and ${l[l.length - 1]}`;
+    return `<div class="cw-to" title="Said to the group: ${esc(names)}">to ${esc(names)}</div>`;
   }
   function readBtn(id) {
     const on = W.voice?.readingId === id;
@@ -1781,6 +1822,13 @@ export function create(a, mgr, o = {}) {
       case 'copy': { const t = m ? m.text : el.querySelector('.cw-bubble, .cw-md')?.innerText || ''; if (await copyText(t)) { b.textContent = '✓'; setTimeout(() => { b.textContent = '⧉'; }, 1200); } break; }
       case 'regen': regenerate(); break;
       case 'speak': if (m) W.voice.readAloud(m); break;
+      case 'aware': {
+        // (opened where it is; remembered by its chat and answer, so drawing the thread again keeps it open)
+        const open = toggleAware(b), key = b.dataset.aw;   // (the chat's id and the answer's: ids of a provider's are this page's own)
+        W.awareOpen = W.awareOpen || new Set();
+        if (key) { if (open) W.awareOpen.add(key); else W.awareOpen.delete(key); }
+        break;
+      }
       case 'edit': startEdit(id); break;
       case 'edit-cancel': W.editing = null; paintThread(); break;
       case 'edit-send': { const t = el.querySelector('.cw-edit-in').value.trim(); if (t) sendEdit(id, t); break; }
@@ -1852,6 +1900,8 @@ export function create(a, mgr, o = {}) {
     const ok = !!W.can?.ok, caps = W.can?.caps || {};
     $w('.cw-foot').classList.toggle('hidden', !ok);
     $w('.cw-attach').classList.toggle('hidden', !caps.attachments);
+    // (📷 where the world is on the page, for an agent that reads pictures)
+    $w('.cw-shot').classList.toggle('hidden', !caps.attachments || !hasWorld(app));
     const mb = $w('.cw-model');
     mb.classList.toggle('hidden', !caps.models);
     const mid = curModel() || W.prov?.model || W.models?.default || '';
@@ -1880,8 +1930,9 @@ export function create(a, mgr, o = {}) {
     box.classList.toggle('hidden', !W.files.length);
     box.onclick = e => { const x = e.target.closest('[data-x]'); if (!x) return; const f = W.files[Number(x.dataset.x)]; f?.xhr?.abort(); if (f?.preview) URL.revokeObjectURL(f.preview); W.files.splice(Number(x.dataset.x), 1); paintFiles(); paintSend(); };
   }
-  /** Files to attach: images shrunk to IMG_MAX_SIDE first when large, each uploaded with its progress. */
-  async function addFiles(list) {
+  /** Files to attach: images shrunk to IMG_MAX_SIDE first when large, each uploaded with its progress. o.view: what a
+   *  picture of the world shows (📷 Share my view: ui/share-view.js), sent with the message that carries it. */
+  async function addFiles(list, { view = null } = {}) {
     if (!W || !W.can?.ok) return;
     if (!W.can.caps?.attachments) return app.toast?.(`${agentRec(W.agentId)?.name || 'This agent'} can't read files.`, 'bad');
     const name = agentRec(W.agentId)?.name || 'This agent';
@@ -1893,12 +1944,24 @@ export function create(a, mgr, o = {}) {
       if (av && !W.can.caps?.files) { app.toast?.(`${name} can't take videos or recordings (${file.name}).`, 'bad', 5000); continue; }
       const cap = W.limits && !image ? W.limits.maxBytes : null;
       if (cap && file.size > cap) { app.toast?.(`${file.name} is ${mb(file.size)}; ${name}'s provider takes files up to ${mb(cap)}.`, 'bad', 6000); continue; }
-      const f = { name: file.name || 'file', size: file.size, mime: file.type, status: 'up', progress: 0, preview: /^image\/(png|jpeg|gif|webp)$/.test(file.type) ? URL.createObjectURL(file) : null };
+      const f = { name: file.name || 'file', size: file.size, mime: file.type, status: 'up', progress: 0, preview: /^image\/(png|jpeg|gif|webp)$/.test(file.type) ? URL.createObjectURL(file) : null, ...(view ? { view } : {}) };
       W.files.push(f); paintFiles(); paintSend();
       let body = file;
       if (f.preview && file.type !== 'image/gif') { try { const s = await shrink(file); if (s) { body = s.blob; f.name = s.name; } } catch { /* sent as it is */ } }
       upload(f, body);
     }
+  }
+  /** 📷 Share my view: a picture of what this person sees of the world now, attached like any picture, what it shows
+   *  (where the camera is, whose characters are on screen) going with the message that carries it. */
+  async function shareView() {
+    if (!W || !W.can?.ok || W.shooting) return;
+    const w = W, b = $w('.cw-shot');
+    w.shooting = true; b.disabled = true; b.setAttribute('aria-busy', 'true');
+    try {
+      const { file, view } = await captureView(app);
+      if (W === w) await addFiles([file], { view });
+    } catch (e) { app.toast?.(e.message || 'The picture could not be taken.', 'bad'); }
+    finally { w.shooting = false; b.disabled = false; b.removeAttribute('aria-busy'); }
   }
   async function shrink(file) {
     const bmp = await createImageBitmap(file);
@@ -1930,7 +1993,7 @@ export function create(a, mgr, o = {}) {
   async function ensureSession() {
     if (W.session) return W.session;
     const r = await post('/api/chat-sessions/create', { agent: W.agentId, label: 'New chat' });
-    W.session = r.session;
+    W.session = r.session; W.want = r.session.id;
     // (started in a project: in it before its first message, so that message already follows the project's instructions)
     if (W.newIn) { try { W.session = (await post('/api/chat-sessions/move', { agent: W.agentId, session: W.session.id, project: W.newIn })).session; } catch (e) { app.toast?.(e.message, 'bad'); } }
     W.newIn = null;
@@ -1960,7 +2023,9 @@ export function create(a, mgr, o = {}) {
     try {
       const s = await ensureSession();
       if (follow && !item) input.value = '';   // (cleared at once: the next one can be written while this one goes)
-      const r = await postRun({ agent: W.agentId, session: s.id, input: text, attachments: files.map(f => f.id), ...zoneArg(), ...(follow && redirect ? { queue: 'redirect' } : follow && later ? { queue: 'later' } : {}) });
+      // (a picture of the world among them — 📷 Share my view: what it shows goes with it, for the server to check and tell)
+      const shared = files.find(f => f.view)?.view || null;
+      const r = await postRun({ agent: W.agentId, session: s.id, input: text, attachments: files.map(f => f.id), ...(shared ? { view: shared } : {}), ...zoneArg(), ...(follow && redirect ? { queue: 'redirect' } : follow && later ? { queue: 'later' } : {}) });
       if (!W || tok !== W.token) return true;   // (it went; the window moved on meanwhile)
       // (a chat just begun has its session on the provider now: followed from this first answer on — what the provider
       // does there from elsewhere, the background tasks this answer starts)
@@ -1987,6 +2052,12 @@ export function create(a, mgr, o = {}) {
         W.queued.push({ id: r.runId, buf: [], ended: null });
         W.stick = true; paintThread(); paintSend();
       } else { W.messages.push(mine); startRun(r.runId); }
+      // (a plain command its body just carried out — "follow me", "wait here": server/companions/ — a line under the message)
+      if (r.companion?.text) {
+        const k = W.messages.indexOf(mine);
+        W.messages.splice(k >= 0 ? k + 1 : W.messages.length, 0, { role: 'system', text: r.companion.text, status: r.companion.ok ? 'companion' : 'companion_refused' });
+        paintThread();
+      }
       refreshList();
       return true;
     } catch (e) {
@@ -2020,7 +2091,7 @@ export function create(a, mgr, o = {}) {
     const input = $w('.cw-in'), text = input.value.trim(), files = W.files.filter(f => f.status === 'ok' && f.id);
     if (!text && !files.length) return;
     const q = outbox();
-    q.items.push({ id: `q${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, text, files: files.map(f => ({ id: f.id, name: f.name, mime: f.mime, status: 'ok' })) });
+    q.items.push({ id: `q${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, text, files: files.map(f => ({ id: f.id, name: f.name, mime: f.mime, status: 'ok', ...(f.view ? { view: f.view } : {}) })) });
     input.value = ''; grow();
     for (const f of W.files) if (f.preview) URL.revokeObjectURL(f.preview);
     W.files = []; paintFiles();
@@ -2086,7 +2157,7 @@ export function create(a, mgr, o = {}) {
       stop: () => stop(),
       /** The composer's words and files, taken out of it (into the queue). */
       take: () => {
-        const i = $w('.cw-in'), text = i.value.trim(), files = W.files.filter(f => f.status === 'ok' && f.id).map(f => ({ id: f.id, name: f.name, mime: f.mime }));
+        const i = $w('.cw-in'), text = i.value.trim(), files = W.files.filter(f => f.status === 'ok' && f.id).map(f => ({ id: f.id, name: f.name, mime: f.mime, ...(f.view ? { view: f.view } : {}) }));
         if (!text && !files.length) return null;
         i.value = ''; grow();
         for (const f of W.files) if (f.preview) URL.revokeObjectURL(f.preview);
@@ -2311,11 +2382,14 @@ export function create(a, mgr, o = {}) {
   }
   /** Voice mode's turn: `text` as the person's message (an answer being stopped ends first). Resolves the run's id. */
   async function sendVoice(text) {
-    for (let k = 0; W && W.run && k < 60; k++) await sleep(100);
+    // (an answer still going: a few seconds for it to end — longer for one being stopped, as when the person went on
+    //  talking while it was thought: it ends as soon as its brain lets go)
+    for (let k = 0; W && W.run && k < (W.run.stopAsked ? 200 : 60); k++) await sleep(100);
     if (!W || !W.can?.ok) throw new Error('This chat isn\'t available now.');
     if (W.run) throw new Error('It is still answering; try again in a moment.');
     const tok = W.token, s = await ensureSession();
-    const r = await postRun({ agent: W.agentId, session: s.id, input: text, ...zoneArg() });
+    // (said out loud: answered out loud, as people talk — server/chat/chat.js SPOKEN_LINE)
+    const r = await postRun({ agent: W.agentId, session: s.id, input: text, spoken: true, ...zoneArg() });
     if (!W || tok !== W.token) throw new Error('The chat changed.');
     W.messages.push(r.message || { role: 'user', text });
     startRun(r.runId);
@@ -2552,7 +2626,8 @@ export function create(a, mgr, o = {}) {
     const after = W.messages.slice(W.messages.map(m => m.role).lastIndexOf('user') + 1), ans = after.find(m => m.role === 'assistant');
     W.voice.onRun('end', R, { text: ans ? ans.text : R.text, error: e.status === 'error' ? (e.error || 'It could not answer.') : null });
     // (its owner's own agent: the answer in its bubble too, on this page only — ui/talk-bar.js)
-    if (e.status === 'ok' && (ans?.text || R.text)) app.talk?.bubble(W.agentId, ans ? ans.text : R.text);
+    // (once a run: the companions' voice shows the same answer — ui/companion-voice.js —, and speaks it itself)
+    if (e.status === 'ok' && (ans?.text || R.text)) app.talk?.bubble(W.agentId, ans ? ans.text : R.text, { spoken: !!W.voice?.voiceMode, run: R.id });
   }
   /** The events route: what the socket missed (a page that was away, a socket down) — and the end, for sure. */
   async function poll(R) {
@@ -2586,6 +2661,28 @@ export function create(a, mgr, o = {}) {
     /** Placed by the person's Side by side: floating, at `g`. */
     arrange: g => { if (!W) return; W.geo = g; if (W.min) W.min = false; setMode('float', { save: false }); store.set(GEO_KEY, W.geo); },
     frame: m => { if (W) onFrame(m); },
+    /** A line the server put in a chat by itself (an outing's divider, server/companions/outings.js): drawn here when this
+     *  window shows that chat. */
+    line: m => {
+      if (!W || !m?.message || m.agent !== W.agentId || !W.session || W.session.id !== m.session) return;
+      if (W.messages.some(x => x.id === m.message.id)) return;
+      W.messages.push(m.message);
+      paintThread();
+    },
+    /** The chat it shows, made now if it is a New chat not yet written in (the companions' voice speaks in it: one
+     *  conversation, the one the person has open) — after it has finished opening. Its id, or null. */
+    ensure: async () => {
+      if (!W) return null;
+      for (let p = null; W && W.picking && W.picking !== p;) { p = W.picking; try { await p; } catch { /* said in the window */ } }
+      if (!W || !W.agentId || !W.can?.ok) return null;
+      if (W.session) return W.session.id;
+      try {
+        const s = await ensureSession();
+        if (!W) return s?.id ?? null;
+        head(); refreshList(); mgr.changed(me);
+        return s.id;
+      } catch { return null; }
+    },
     agents: () => { if (W) { head(); paintSide(); } },
     presence: () => { if (W) head(); },
     approvals: () => { if (W) apprStatus(true).then(() => W && paintThread()); },

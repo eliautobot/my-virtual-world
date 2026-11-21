@@ -13,6 +13,7 @@
 //   speech:  one line to say out loud, nothing else (./speech.js checks it, then the moderation service)
 // A plan its owner asked for (by hand or in a chat) may be marked done, never dropped by the agent.
 import { TRAIT_KEYS } from '../agent-life/traits.js';
+import { WALK } from './speech.js';
 
 export const LIMITS = Object.freeze({
   plan: { plans: 4, short: 0, long: 0, people: 0 },
@@ -46,7 +47,7 @@ export function parseAnswer(raw) {
  */
 export function readActions(kind, o, ctx) {
   const lim = LIMITS[kind];
-  const out = { plans: [], done: [], drop: [], memories: [], people: [], trait: null, aspiration: null, thought: null, reply: null, tellOwner: null, say: null, unfriend: null, start: null };
+  const out = { plans: [], done: [], drop: [], memories: [], people: [], trait: null, aspiration: null, thought: null, reply: null, tellOwner: null, say: null, unfriend: null, start: null, invite: null, accept: null };
   if (!o || !lim) return out;
   const open = new Map((ctx.plans || []).map(p => [p.id, p]));
   const have = new Set((ctx.plans || []).map(p => p.text.toLowerCase()));
@@ -112,6 +113,13 @@ export function readActions(kind, o, ctx) {
   }
   if (kind === 'problem') out.tellOwner = text(o.tell_owner, 3, 300);
   if (kind === 'speech') out.say = typeof o.say === 'string' ? String(o.say).slice(0, 400) : null;   // (its checks are the voice's)
+  // (going somewhere together, docs/features/companions.md §7: an invitation names one of the places it was offered, or a
+  // walk; an answer to one is yes or no — nothing else counts)
+  if (kind === 'speech' && typeof o.invite === 'string' && o.invite.trim()) {
+    const want = clean(o.invite, 80).toLowerCase(), p = (ctx.places || []).find(x => x.name.toLowerCase() === want);
+    if (p) out.invite = { place: p.name }; else if (want === WALK || want === 'walk') out.invite = { place: WALK };
+  }
+  if (kind === 'speech' && typeof o.accept === 'boolean') out.accept = o.accept;
   return out;
 }
 
@@ -123,7 +131,8 @@ export function applyActions(life, agentId, act, ctx) {
   const done = { plans: [], done: [], dropped: [], memories: [], people: [], trait: null, aspiration: null, thought: act.thought || null, skipped: [] };
   const byId = new Map((ctx.plans || []).map(p => [p.id, p]));
   const step = (what, fn) => { try { fn(); return true; } catch (e) { done.skipped.push(`${what}: ${e.code || e.message}`); return false; } };
-  for (const id of act.done) if (step('done', () => life.setIntention(agentId, id, 'done'))) done.done.push(byId.get(id).text);
+  // (a plan its body does is done only when its day shows it: life.setIntention check — else it stays open, and why is kept)
+  for (const id of act.done) if (step('done', () => life.setIntention(agentId, id, 'done', { check: true }))) done.done.push(byId.get(id).text);
   for (const id of act.drop) if (step('drop', () => life.setIntention(agentId, id, 'dropped'))) done.dropped.push(byId.get(id).text);
   for (const p of act.plans) if (step('plan', () => life.addIntention(agentId, { kind: p.kind, text: p.text, today: true }, ctx.source || 'mind'))) done.plans.push(`${p.kind === 'must' ? 'must' : 'want'}: ${p.text}`);
   for (const m of act.memories) if (step('memory', () => life.addMemory(agentId, { term: m.term, kind: m.term === 'long' ? 'lesson' : 'event', text: m.text, importance: m.importance }, ctx.memorySource || 'mind'))) done.memories.push(`${m.term}: ${m.text}`);

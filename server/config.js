@@ -20,7 +20,7 @@ export const SERVER_SETTINGS = Object.freeze([
   'MVW_COOKIE_NAME', 'MVW_KEY_FILE', 'MVW_SECRET_KEY', 'MVW_SECRET_KEY_PREVIOUS', 'MVW_KEY_POLL_MS',
   'MVW_WS_PER_ADDRESS', 'MVW_WS_MAX', 'MVW_PROVIDER_MEDIA_CACHE_MB', 'MVW_GATEWAY_IS_LOCAL', 'MVW_REQUIRE_HTTPS',
   'MVW_PROVIDER_TEST', 'MVW_PROVIDER_RUN_TIMEOUT_MS', 'MVW_TWILIO_TEST_URL', 'MVW_PROBLEM_SCAN_MS', 'MVW_CHROME', 'MVW_HOUSING', 'MVW_STARTER_MAP', 'MVW_SOUNDTRACK', 'MVW_RADIO',
-  'MVW_ASSET_CACHE', 'MVW_UPDATE_CHECK', 'MVW_UPDATE_TEST_URL',
+  'MVW_ASSET_CACHE', 'MVW_UPDATE_CHECK', 'MVW_UPDATE_TEST_URL', 'MVW_EYES_TIMEOUT_MS', 'MVW_CROWD_STUDIO',
 ]);
 /** Older names that still work, with a warning (C102): none at present. */
 export const LEGACY_SETTINGS = Object.freeze({});
@@ -202,5 +202,11 @@ export function loadConfig({ env = process.env, root, release = null, routeTable
   cfg.wsMax = int('MVW_WS_MAX', 1000, 1, 1000000);
   // how much of the media of agent providers' answers is kept on disk (Agent Providers: images, video an agent attached)
   cfg.providerMediaCacheMb = int('MVW_PROVIDER_MEDIA_CACHE_MB', 1024, 16, 1048576);
+  // How long a page has to draw an agent's eyes' picture (server/senses/eye.js): longer for a machine that draws slowly.
+  cfg.eyesTimeoutMs = int('MVW_EYES_TIMEOUT_MS', 4000, 500, 30000);
+  // The Crowd Studio (client/dev/crowd-studio.html: the crowd's tuning and its bake changed) only where it is switched on
+  // (2026-11-20, the product owner): off, its pages are not found and the tuning and bake can't be changed, by anyone; the
+  // crowd is drawn with the tuning in use (the release's own, else one saved while it was on) all the same.
+  cfg.crowdStudio = given('MVW_CROWD_STUDIO') ? bool('MVW_CROWD_STUDIO') : false;
   return { cfg: Object.freeze(cfg), errors, warnings };
 }

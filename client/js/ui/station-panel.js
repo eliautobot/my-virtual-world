@@ -87,7 +87,9 @@ function paintHead() {
   const st = stations().find(s => s.id === openId); if (!st || !panel) return;
   panel.style.setProperty('--sp', st.color || '#4aa3ff');
   panel.querySelector('.sp-name').textContent = `${st.freq} ${st.band} · ${st.name}`;
-  panel.querySelector('.sp-line').textContent = [st.line, st.hostNames?.length ? `Hosts: ${st.hostNames.map(x => x.name).join(', ')}` : st.dj ? '' : 'No hosts yet: post agents at its broadcast desk (⋯)', st.dj ? `DJ: ${st.dj.name}` : ''].filter(Boolean).join(' · ');
+  // (on the air: those in the studio; whose shift it is but who aren't there, and why — server/workplace/presence.js)
+  const away = (st.away || []).map(x => `${x.name}: ${x.text.replace(/^(Late|Away)/, w => w.toLowerCase())}`);
+  panel.querySelector('.sp-line').textContent = [st.line, st.hostNames?.length ? `Hosts: ${st.hostNames.map(x => x.name).join(', ')}` : st.dj ? '' : away.length ? 'No one in the studio right now' : 'No hosts yet: post agents at its broadcast desk (⋯)', st.dj ? `DJ: ${st.dj.name}` : '', away.length ? `Not in: ${away.join('; ')}` : ''].filter(Boolean).join(' · ');
 }
 /** Its recent shows (server/radio/ aired, 2026-10-28): when, who was on, what about; one opened: what each of them said
  *  (it went out on the air: anyone may read it). */

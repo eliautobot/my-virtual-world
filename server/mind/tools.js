@@ -21,8 +21,12 @@ const TOOLS = {
   pay: { scope: 'pay', about: '{"tool":"pay","to":"<my owner, a person I know or a place>","amount":<VC>,"memo":"what for"} — pay someone' },
   ask_owner: { scope: 'pay', about: '{"tool":"ask_owner","amount":<VC>,"why":"..."} — ask my owner for money (they answer in their wallet)' },
   give: { scope: 'pay', about: '{"tool":"give","item":"<a thing I HOLD>","n":1,"to":"<my owner or a person I know>"} — give something I hold (my owner\'s rules decide, as for paying)' },
+  // (to its own owner: what it holds is theirs to ask for — 2026-11-20, "they should be able to give me an inventory item")
+  give_owner: { about: '{"tool":"give_owner","item":"<a thing I HOLD>","n":1} — give something I hold to my owner (when they ask, or I want to)' },
+  // (a trade of its own — 2026-11-20, "companions should trade themselves too": its owner, or another agent of its owner's)
+  offer_trade: { about: '{"tool":"offer_trade","to":"<my owner, or another agent of my owner\'s>","give":[{"item":"<a thing I HOLD>","n":1}],"want":[{"item":"<a thing THEY hold>","n":1}],"vc":0,"wantVc":0,"note":"why, in a few words"} — propose a trade (they see it and accept or decline; nothing changes hands until they do; give or want may be empty, vc/wantVc are VC)' },
 };
-const FOR = { problem: ['flats', 'rent_flat', 'ask_owner'], chat: ['flats', 'menu', 'rent_flat', 'buy', 'pay', 'give'] };
+const FOR = { problem: ['flats', 'rent_flat', 'ask_owner', 'offer_trade'], chat: ['flats', 'menu', 'rent_flat', 'buy', 'pay', 'give', 'give_owner', 'offer_trade'] };
 const vc = c => `${(c / 100).toFixed(c % 100 ? 2 : 0)} VC`;
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f«»]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 const q = (s, n = 80) => `«${clean(s, n)}»`;
@@ -108,7 +112,23 @@ export function toolbox({ agent, kind, ctx, money, wallet, people, idem }) {
           const r = money.pay(agent.id, who.to, amount, clean(u.memo, 100), `${idem}:${++n}`);
           return { tool, ok: true, money: true, ...pending(r), text: answer(r) || `done: paid ${vc(amount)} to ${clean(who.name, 50)}`, say: told(r, `Paid ${vc(amount)} to ${to}${clean(u.memo, 60) ? ` (${clean(u.memo, 60)})` : ''}`) };
         }
+        case 'offer_trade': {
+          const t = clean(u.to, 60).toLowerCase();
+          let to = null, toName = '';
+          if (!t || t === 'my owner' || t === 'owner' || t === 'you' || t === (ctx.ownerName || '').toLowerCase()) { to = 'owner'; toName = 'you'; }
+          else { const who = (ctx.peopleRefs || []).find(r => r.name.toLowerCase() === t && r.kind === 'agent'), p = who ? people[Number(who.id)] : null; if (p?.agentId) { to = { kind: 'agent', id: Number(p.agentId) }; toName = clean(who.name, 40); } }
+          if (!to) return { tool, ok: false, text: `not done: I can propose trades to my owner or their other agents — not ${q(u.to, 40)}` };
+          const lines = v => (Array.isArray(v) ? v : []).slice(0, 6).map(x => ({ item: clean(x?.item, 60), qty: Math.max(1, Math.min(9999, Math.floor(Number(x?.n) || 1))) })).filter(x => x.item);
+          const give = lines(u.give), want = lines(u.want), coin = v => { const x = amountOf(v); return x || 0; };
+          if (!give.length && !want.length && !coin(u.vc) && !coin(u.wantVc)) return { tool, ok: false, text: 'not done: say what I give and what I would like' };
+          const say = l => l.map(x => `${x.qty > 1 ? `${x.qty} × ` : ''}${x.item}`).join(', ');
+          did++; what = `propose a trade to ${toName}: ${[say(give), coin(u.vc) ? vc(coin(u.vc)) : ''].filter(Boolean).join(' + ') || 'nothing'} for ${[say(want), coin(u.wantVc) ? vc(coin(u.wantVc)) : ''].filter(Boolean).join(' + ') || 'nothing'}`;
+          const r = money.offerTrade(agent.id, { to, give, want, vc: coin(u.vc), wantVc: coin(u.wantVc), memo: clean(u.note, 140) });
+          return { tool, ok: true, ...pending(r), text: answer(r) || `done: proposed — ${what.replace(/^propose a trade to [^:]*: /, '')}; ${toName === 'you' ? 'they' : toName} will accept or decline`, say: told(r, `Proposed a trade: ${what.replace(/^propose a trade to [^:]*: /, '')}`) };
+        }
+        case 'give_owner':
         case 'give': {
+          if (tool === 'give_owner') { if (owner == null) return { tool, ok: false, text: 'not done: I have no owner to give it to' }; u = { ...u, to: 'my owner' }; }
           const who = payee(u.to), cnt = Math.max(1, Math.min(9999, Math.floor(Number(u.n) || 1)));
           if (!who) return { tool, ok: false, text: `not done: I can give to my owner, a person I know or a place — not ${q(u.to, 40)}` };
           const thing = clean(u.item, 60);

@@ -32,12 +32,17 @@ export function addPlayRoutes(router, d) {
     P.setProfile(who.account.id, { bio: body.bio === undefined ? undefined : String(body.bio ?? ''), showcase: body.showcase })) });
   router.add({ method: 'POST', path: '/api/play/start', cap: 'play.use', handler: wrap(({ body, P: who }) =>
     P.start(who.account, str(body.module), str(body.course), body.where ?? null)) });
+  // (a page reloaded mid-run: the run it has under way, to take up again — server/play/play.js current)
+  router.add({ method: 'GET', path: '/api/play/current', cap: 'play.use', handler: wrap(({ url, P: who }) => ({ current: P.current(who.account, str(url.searchParams.get('module') || '', 24) || null) })) });
   router.add({ method: 'POST', path: '/api/play/finish', cap: 'play.use', handler: wrap(({ body, P: who }) => {
     const r = P.finish(who.account, str(body.run), body.report);
     if (r.ok) { const x = d.onFinish?.(who.account, r); if (x && typeof x === 'object') Object.assign(r, x); }   // (a module's own after-math: the fishing trip's catch into the inventory)
     return r;
   }) });
   router.add({ method: 'POST', path: '/api/play/act', cap: 'play.use', handler: wrap(({ body, P: who }) => P.act(who.account, str(body.run), str(body.act, 24), body.body)) });
+  // where a run stands, as its page says (a module with moment(): Order Up, the arcade, the airport) — for the agents
+  // with the player (docs/features/awareness.md §5), never for the score
+  router.add({ method: 'POST', path: '/api/play/moment', cap: 'play.use', handler: wrap(({ body, P: who }) => P.moment(who.account, str(body.run), body.live)) });
   router.add({ method: 'POST', path: '/api/play/abandon', cap: 'play.use', handler: wrap(({ body, P: who }) => P.abandon(who.account, str(body.run))) });
   // Order Up's cook (server/play/cook.js): the Cookbook and the running totals (?id: another cook's, as their profile)
   if (d.cooks) {
@@ -52,6 +57,11 @@ export function addPlayRoutes(router, d) {
     router.add({ method: 'POST', path: '/api/fishing/sell', cap: 'play.use', handler: wrap(({ body, P: who }) =>
       F.sell(who.account, Array.isArray(body.stacks) ? body.stacks.map(int).filter(v => v != null).slice(0, 200) : null)) });
   }
+  // a fishing session's catch (server/play/fishing-crew.js claim): one player with their companions only — the companions
+  // keep their catch, or all of it is the player's (once, by the player whose trip it was)
+  // fishing together: aboard someone's boat as its crew, their trip joined — a run of one's own along on it (server/play/fishing-crew.js)
+  if (d.fishingCrew) router.add({ method: 'POST', path: '/api/fishing/join', cap: 'play.use', handler: wrap(({ body, P: who }) => d.fishingCrew()?.joinTrip(who, str(body.run)) ?? { ok: false, why: 'off', text: 'Fishing together is off here' }) });
+  if (d.fishingCrew) router.add({ method: 'POST', path: '/api/fishing/session/claim', cap: 'play.use', handler: wrap(({ body, P: who }) => d.fishingCrew()?.claim(who, str(body.run), body.take === true) ?? { ok: false, why: 'off', text: 'Companions don\'t fish here' }) });
   // the angler (server/play/angler.js): the counter's tackle, bait and boat upgrades, what you fish with, your skills
   const A = d.angler;
   if (A) {

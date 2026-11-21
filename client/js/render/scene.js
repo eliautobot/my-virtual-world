@@ -103,10 +103,17 @@ Object.defineProperty(THREE.Material.prototype, 'onBeforeCompile', {
 });
 
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
+// People's detail by their size on the screen (2026-11-20, the product owner: "detail by on-screen size"): how tall a
+// person stands on the screen, in the pixels drawn, picks their level (render/agents.js) — px0 and up the near level,
+// px1 the middle, px2 the far, smaller not drawn; pxClose and up the crowd's close-up level (Character detail; Low: only
+// when asked, pxCloseAsked). The same person keeps the same look on a phone, a laptop or a 4K screen, zoomed in or out.
+// (At 1080 pixels tall, High: close-up within ~10 m, near ~14 m, middle ~120 m, far ~650 m.) px0Own: the near level for
+// the few drawn with a model of their own — agents, players, characters built in the Agent Studio — to about where it was
+// (High ~38 m): a handful, no cost to speak of, their faces as they were.
 export const QUALITY = {
-  low: { name: 'low', charMap: 512, pr: 1, shadows: false, shadowSize: 0, bloom: false, aa: false, lod0: 16, lod1: 55, lod2: 300 },
-  medium: { name: 'medium', charMap: 1024, pr: Math.min(DPR, 1.25), shadows: true, shadowSize: 1024, bloom: false, aa: true, lod0: 26, lod1: 85, lod2: 450 },
-  high: { name: 'high', charMap: 2048, pr: Math.min(DPR, 1.6), shadows: true, shadowSize: 2048, bloom: true, aa: true, lod0: 38, lod1: 120, lod2: 650 },
+  low: { name: 'low', charMap: 512, pr: 1, shadows: false, shadowSize: 0, bloom: false, aa: false, px0: 300, px1: 45, px2: 8, pxClose: 0, pxCloseAsked: 410, px0Own: 155 },
+  medium: { name: 'medium', charMap: 1024, pr: Math.min(DPR, 1.25), shadows: true, shadowSize: 1024, bloom: false, aa: true, px0: 230, px1: 29, px2: 5.5, pxClose: 330, pxCloseAsked: 330, px0Own: 95 },
+  high: { name: 'high', charMap: 2048, pr: Math.min(DPR, 1.6), shadows: true, shadowSize: 2048, bloom: true, aa: true, px0: 170, px1: 20, px2: 3.8, pxClose: 245, pxCloseAsked: 245, px0Own: 65 },
 };
 /** Uniforms shared by every custom material (updated once per frame). */
 const SanitizeShader = {

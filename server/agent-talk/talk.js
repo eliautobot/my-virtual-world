@@ -102,7 +102,7 @@ export class Talk {
       const me = sim.agents[i]?.plan ? sim.agentInfo(i) : null;
       const x = Number.isFinite(at?.x) ? at.x : (me?.pos.x ?? 0) + 1, z = Number.isFinite(at?.z) ? at.z : (me?.pos.z ?? 0) + 1;
       if (me?.act && (me.act.use === 'sleep' || me.act.use === 'nap')) throw new TalkError(409, 'asleep', `${a.name} is asleep`);
-      sim.hold(i, x, z, undefined, '', null, name);   // (it turns to them; its day says who it talked with)
+      sim.hold(i, x, z, undefined, '', null, name, P.account.id);   // (it turns to them; its day says who it talked with)
       place = me?.act?.place || '';
     }
     if (!s) {
@@ -125,7 +125,8 @@ export class Talk {
     if (!this.agents.isOwner(P, a)) throw new TalkError(404, 'not_found', 'No such agent');
     const i = this.bodyOf(a), sim = this.simOf();
     if (i < 0 || !sim || !at) return { ok: false };
-    return { ok: !!sim.hold(i, at.x, at.z) };
+    // (talking with its owner in person, a companion is still with them: server/companions/ view, its senses)
+    return { ok: !!sim.hold(i, at.x, at.z, undefined, '', null, null, P.account.id) };
   }
   /** The conversation now open between the account and the agent (null: none, or its time is up — the next message
    *  starts a new one). */

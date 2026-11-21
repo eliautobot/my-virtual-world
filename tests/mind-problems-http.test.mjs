@@ -23,10 +23,13 @@ function answer(messages) {
   const sys = messages.find(m => m.role === 'system')?.content || '';
   if (/In this chat you talk with/.test(sys)) {
     const k = users.findLastIndex(u => !/^RESULTS:/.test(u)), msg = users[k], rounds = users.length - 1 - k;
-    const where = /(?:café|restaurant) «([^»]+)»/.exec(sys)?.[1];
+    // (the places near it: in its senses' note, or from looking around — server/senses/; an old prompt: its instructions)
+    const where = /(?:café|restaurant) «([^»]+)»/.exec([sys, ...users.slice(k)].join('\n'))?.[1];
     if (/coffee/.test(msg)) {
-      if (rounds === 0) return /"tool":"menu"/.test(sys) ? { use: [{ tool: 'menu', place: where }] } : 'I can\'t buy anything.';
-      if (rounds === 1) return /"tool":"buy"/.test(sys) ? { use: [{ tool: 'buy', place: where, items: [{ item: 'I1', n: 1 }] }] } : 'Couldn\'t: that is not something I may do now';
+      const got = users.slice(k + 1).join('\n');
+      if (!where) return /"tool":"look"/.test(sys) && !/- look:/.test(got) ? { use: [{ tool: 'look' }] } : 'I don\'t know a place for that.';
+      if (!/- menu/.test(got)) return /"tool":"menu"/.test(sys) ? { use: [{ tool: 'menu', place: where }] } : 'I can\'t buy anything.';
+      if (!/- buy/.test(got)) return /"tool":"buy"/.test(sys) ? { use: [{ tool: 'buy', place: where, items: [{ item: 'I1', n: 1 }] }] } : 'Couldn\'t: that is not something I may do now';
       return /done: bought/.test(last) ? 'Bought it.' : `Couldn't: ${/not done: ([^\n]*)/.exec(last)?.[1] || '?'}`;
     }
     if (/pay me back/.test(msg)) {
@@ -162,7 +165,10 @@ test('in a chat its owner asks it to buy and to pay: done within its rules, refu
   const before = await wallet(A);
   let ev = await chat(owner, A, sess.id, 'Could you get a coffee?');
   assert.equal(ev.find(e => e.type === 'run.end').text, 'Bought it.');
-  const lines = ev.filter(e => e.type === 'tool.end').map(e => e.text);
+  // (it looked around first for the places near it — its senses: server/senses/ — then the menu, then bought)
+  const steps = ev.filter(e => e.type === 'tool.start').map(e => e.name);
+  assert.deepEqual(steps, ['look', 'menu', 'buy']);
+  const lines = ev.filter(e => e.type === 'tool.end').map(e => e.text).slice(1);
   assert.match(lines[0], /^AT «[^»]+»: \[I1\]/);
   assert.match(lines[1], /^done: bought .+ for [\d.]+ VC$/);
   const spent = before - await wallet(A);

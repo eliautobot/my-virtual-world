@@ -161,8 +161,11 @@ export class Inventory {
     const s = this.q.get.get(this.w, Number(stack)), me = subj('agent', agentId);
     if (!s || s.owner !== ownerKey(me)) throw bad('That isn\'t in your inventory.', 'not_found', 404);
     const n = Math.floor(Number(qty)), value = itemValue(itemOf(s.item), s.attrs ? JSON.parse(s.attrs) : null) * (n || 1);
-    this.e.parts.agents.check(agentId, 'pay', value, { approved });   // (throws approval_required above its owner's line)
     const dst = this.recipient(to);
+    // (to its own owner, or another of their agents: it stays theirs — their rules guard their money from its spending, not
+    //  from themselves; else as paying)
+    const owner = this.e.agentOwner(agentId), home = owner != null && ((dst.kind === 'account' && Number(dst.id) === owner) || (dst.kind === 'agent' && Number(dst.id) !== Number(agentId) && this.e.agentOwner(dst.id) === owner));
+    if (!home) this.e.parts.agents.check(agentId, 'pay', value, { approved });   // (throws approval_required above its owner's line; to its owner or their other agents: it stays theirs)
     const out = this.move(me, dst, Number(stack), n, { kind: 'give', actor: `agent:${agentId}`, memo: String(memo || '').slice(0, 140), idem: idem ? `agive:${agentId}:${String(idem).slice(0, 80)}` : null });
     if (!out.dup) this.tell(dst, me, out);
     return out;

@@ -53,11 +53,11 @@ export function create({ THREE, group, play, app }) {
         if (ev.who === 1) {
           play.float('GOAL!', [0, T + 0.32, 0.35], { color: '#fde047', size: 40, life: 1.4 });
           play.float(`+${ev.pts}${ev.tags.length ? ' ' + ev.tags.join(' · ') : ''}`, [0, T + 0.2, 0.3], { color: '#ffffff', size: 24, life: 1.5 });
-        } else play.float('Goal against', [0, T + 0.25, -0.35], { color: '#93c5fd', size: 26, life: 1.3 });
+        } else play.float(play.foe?.agent ? `${play.foe.Name} scores!` : 'Goal against', [0, T + 0.25, -0.35], { color: '#93c5fd', size: 26, life: 1.3 });
       } else if (ev.k === 'block') play.float('BLOCK +10', [ev.x, T + 0.15, ev.z], { color: '#4ade80', size: 22 });
       else if (ev.k === 'dead') play.float('Dead ball: served again', [0, T + 0.2, 0], { color: '#cbd5e1', size: 20 });
       else if (ev.k === 'hurry') play.float('10 seconds!', [0, T + 0.3, 0], { color: '#fca5a5', size: 26 });
-      else if (ev.k === 'over') play.float(ev.win ? (ev.shutout ? 'SHUTOUT WIN!' : 'YOU WIN!') : ev.me === ev.cpu ? 'A DRAW' : 'THE COMPUTER WINS', [0, T + 0.35, 0], { color: ev.win ? '#fde047' : '#e2e8f0', size: 36, life: 2 });
+      else if (ev.k === 'over') play.float(ev.win ? (ev.shutout ? 'SHUTOUT WIN!' : 'YOU WIN!') : ev.me === ev.cpu ? 'A DRAW' : `${(play.foe?.agent ? play.foe.short : 'THE COMPUTER')} WINS`, [0, T + 0.35, 0], { color: ev.win ? '#fde047' : '#e2e8f0', size: 36, life: 2 });
     },
     sfx(ev) {
       if (ev.k === 'kick') return ['footkick', 0.06];
@@ -84,9 +84,9 @@ export function create({ THREE, group, play, app }) {
     },
     hud(s) {
       return {
-        info: `You ${s.me} · ${s.cpu} CPU · ⏱ ${clock(s.clock)}`,
+        info: `You ${s.me} · ${s.cpu} ${play.foe?.agent ? play.foe.name : 'CPU'} · ⏱ ${clock(s.clock)}`,
         hint: s.t < 360 ? `Point at the ball to bring your men to it · click (or Z) to kick · first to ${GOALS}` : '',
-        board: [`${s.me}  -  ${s.cpu}`, clock(s.clock)],
+        board: [`${s.me}  -  ${s.cpu}`, play.foe?.agent ? `VS ${play.foe.short}  ${clock(s.clock)}` : clock(s.clock)],
       };
     },
     dispose() {},

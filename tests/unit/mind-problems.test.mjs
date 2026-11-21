@@ -106,10 +106,10 @@ const people = [{ id: 0 }, { id: 1, agentId: 9 }];
 test('tools: by kind of thought and its owner\'s rules; references from the results; at most two money actions; refusals said', () => {
   const m = fakeMoney();
   const T = toolbox({ agent: { id: 1 }, kind: 'problem', ctx, money: m, wallet: wallet(), people, idem: 'mind:1:5' });
-  assert.deepEqual(T.names, ['flats', 'rent_flat', 'ask_owner']);
-  assert.deepEqual(toolbox({ agent: { id: 1 }, kind: 'chat', ctx, money: m, wallet: wallet(), people, idem: 'x' }).names, ['flats', 'menu', 'rent_flat', 'buy', 'pay', 'give']);
-  assert.deepEqual(toolbox({ agent: { id: 1 }, kind: 'chat', ctx, money: m, wallet: wallet(['buy']), people, idem: 'x' }).names, ['menu', 'buy'], 'only what its owner allows');
-  assert.deepEqual(toolbox({ agent: { id: 1 }, kind: 'problem', ctx, money: m, wallet: wallet(undefined, true), people, idem: 'x' }).names, [], 'paused: nothing');
+  assert.deepEqual(T.names, ['flats', 'rent_flat', 'ask_owner', 'offer_trade']);
+  assert.deepEqual(toolbox({ agent: { id: 1 }, kind: 'chat', ctx, money: m, wallet: wallet(), people, idem: 'x' }).names, ['flats', 'menu', 'rent_flat', 'buy', 'pay', 'give', 'give_owner', 'offer_trade']);
+  assert.deepEqual(toolbox({ agent: { id: 1 }, kind: 'chat', ctx, money: m, wallet: wallet(['buy']), people, idem: 'x' }).names, ['menu', 'buy', 'give_owner', 'offer_trade'], 'only what its owner allows — and giving its owner what they ask for, proposing trades (they accept or not)');
+  assert.deepEqual(toolbox({ agent: { id: 1 }, kind: 'problem', ctx, money: m, wallet: wallet(undefined, true), people, idem: 'x' }).names, ['offer_trade'], 'paused: nothing that spends (a proposal waits for their yes)');
   // a flat by a reference "flats" gave; before that, none
   assert.match(T.run([{ tool: 'rent_flat', flat: 'F1' }])[0].text, /use a flat from the list/);
   const [list] = T.run([{ tool: 'flats' }]);

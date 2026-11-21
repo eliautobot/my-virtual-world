@@ -21,7 +21,10 @@ import { evalPlan } from '../sim/plan.js';
 import { ctxB, formatClock, mod } from '../../shared/constants.js';
 import { nearestVenues } from '../free-will/options.js';
 import { flagsOf } from '../agent-life/traits.js';
-import { systemText, planText, reflectText, chatText, problemText, assistantSystem, workSystem, workVisitorSystem, workVisitorText, friendText } from './prompt.js';
+import { systemText, planText, reflectText, chatText, problemText, assistantSystem, workSystem, workVisitorSystem, workVisitorText, friendText, cameLine, senseNote, quote, SPOKEN_LINE } from './prompt.js';
+import { sensesTools } from '../senses/brain-tools.js';
+import { eyesLine } from '../senses/eye.js';
+import { costMicros } from '../providers/models.js';
 import { closenessWords } from '../../shared/closeness.js';
 import { StreamSplit, buildTurns, mediaRoom, withPdfs, PDF_PROVIDERS, parseActions, ACTIONS_MARK } from './assistant.js';
 import { MODES, validZone, serverZone, realTime } from '../agent-work/work.js';
@@ -29,7 +32,10 @@ import { Breakers, pausedWords } from '../providers/breaker.js';
 import { parseAnswer, readActions, applyActions } from './actions.js';
 import { toolbox, resultsText, MAX_ROUNDS } from './tools.js';
 import { joinTools, PC_ROUNDS } from '../pc/agent-tools.js';
+import { worldTools } from '../interactions/brain-tools.js';
+import { companionTools, withCompanion, companionLine } from '../companions/brain-tools.js';
 import { speechText, localCheck } from './speech.js';
+import { needWords } from '../free-will/prompt.js';
 
 export const MAX_IN_FLIGHT = 16;            // thoughts at once (each a model call of about a second): 1,000 agents waking together plan within a minute or two
 export const TIMEOUT_MS = 45000;
@@ -56,8 +62,32 @@ const JOB = { plan: { maxTokens: 500, temperature: 0.7 }, reflect: { maxTokens: 
 const SPEECH_GAP_MS = 20000;            // an agent says its own words at most this often (a player clicking "Talk" again and again); the admin's mind.speechGapSeconds
 const SPEECH_ROOM = 4;                  // thoughts at once kept free of speech (a line is the least of what a Mind does: plans and problems first)
 const SPEECH_WAIT_MS = 6000;            // someone spoke to it while it was thinking: it answers when it is done, if that is soon
-const MODERATORS = new Set(['openai', 'custom']);
+const AGAIN_MS = 75000;        // two spending time together talk on this long after their last exchange at the soonest
+const AGAIN_PER_DAY = 10;      // …and this many times a world day (each line also within its own speech limits)
+const REPLY_GAP_MS = 2500;   // an answer to someone who spoke to it: this long after its last line at least
+// its words about the world, out loud — a remark (it got in the car, a deer), a word with another agent beside it: never
+// while someone is in a conversation with it (conversing; set by the server: server/chat/chat.js)
+const WORLD_LINES = new Set(['remark', 'meet', 'chat']);
+const MODERATORS = new Set(['openai', 'custom', 'openrouter', 'anthropic', 'google']);   // (no moderation service of their own: their chat model judges each line — server/providers/models.js modelModerate)
 const PROBLEM_THOUGHTS = 3;             // thoughts about its problems per agent per world day (a new problem may bring another)
+// (tools that only look something up: an answer that comes with one goes on with what it found — its senses, a menu, the flats,
+//  what it can do where it is: "let me see what's here" then doing one)
+const READS = new Set(['look', 'recent', 'see', 'menu', 'flats', 'things_to_do']);
+const EYES_FILE = 'what-you-see.jpg';   // (its eyes' picture in a turn: server/senses/eye.js)
+const TEXT_ONLY_MS = 3600e3;             // a model that turned its eyes' picture down is sent none for this long
+const BLIND_WORDS = '(The picture of what you see could not be shown to you: your brain reads text only. Say you could not see it clearly.)';
+/** The pictures of its eyes taken out of the turns (a model that reads text only), each turn told so: whether there were any. */
+function withoutEyes(turns) {
+  let any = false;
+  for (const t of turns) {
+    if (!Array.isArray(t.parts) || !t.parts.some(p => p && p.eyes)) continue;
+    t.parts = t.parts.filter(p => !(p && p.eyes));
+    if (!t.parts.length) delete t.parts;
+    t.text = `${t.text || ''}\n${BLIND_WORDS}`;
+    any = true;
+  }
+  return any;
+}
 const PLACE_KINDS = ['cafe', 'restaurant', 'park', 'shop', 'gym', 'arcade', 'lounge_bar', 'club'];   // (nights out: shared/nightlife.js)
 const PRICE_ITEM = { cafe: 'cafe_lunch', restaurant: 'meal', arcade: 'game_tokens', lounge_bar: 'martini', club: 'cover' };
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -96,6 +126,7 @@ export class Mind {
     this.pcTools = null;   // (agent, kind, { tz }) => its PC as a tool (server/pc/agent-tools.js), set by the server
     this.chatInFlight = 0;
     this.chatQueue = [];                    // owners' chats waiting for a slot, oldest first: { go, fail, timer }
+    this.textOnly = new Map();              // `${connection}:${model}` → until when it is known to turn pictures down (its eyes)
     this.chatDay = new Map();               // agent id → owners' chat answers today (UTC)
     this.w = dbs.worldId;
     this.inFlight = 0;
@@ -109,8 +140,10 @@ export class Mind {
     this.problemDay = new Map();            // `${agentId}:${lifeDay}` → thoughts about its problems that world day (or Infinity: given up)
     this.speechDay = new Map();             // `${agentId}:${lifeDay}` → lines it tried to say that world day
     this.speechAt = new Map();              // agent id → when it last tried to say something
+    this.conversing = () => false;          // agent id → whether someone is in a conversation with it now (server/chat/chat.js; set by the server)
     this.spoke = new Map();                 // a pair of people (and a world day) who already talked: the first speaks, the other answers
-    this.speechStats = { shown: 0, blocked: 0, local: 0, unchecked: 0 };
+    this.chats = new Map();                 // that pair, spending time together, talking on: { n, at, last } (chatOn)
+    this.speechStats = { shown: 0, blocked: 0, local: 0, unchecked: 0, quiet: 0 };
     this.day = null; this.dayCost = 0; this.agentJobs = new Map();
     this.month = null; this.agentMonth = new Map();
     this.stats = { ok: 0, failed: 0, skipped: 0, byKind: {}, latency: [] };
@@ -136,6 +169,41 @@ export class Mind {
     this.rows = new Map(this.q.all.all(this.w).map(r => [r.agent_id, r]));
     this.roll();
     this.timers = [];
+  }
+
+  /**
+   * One frame of what agent `agent` sees from where it stands, drawn by a page of `account` (server/senses/eye.js): { ok:
+   * true, mime, data (base64) } or { ok: false, why } — 'far' without asking when no page of theirs can draw its place.
+   */
+  async seeShot(agent, account) {
+    if (!this.seeOf) return { ok: false, why: 'failed' };
+    let at = null;
+    try { at = this.senses?.eyesFor?.(agent, account) || null; } catch { at = null; }
+    if (!at) return { ok: false, why: 'far' };
+    try {
+      const s = await this.seeOf(account, { at });
+      return s && s.ok && typeof s.data === 'string' ? { ok: true, mime: s.mime || 'image/jpeg', data: s.data } : { ok: false, why: s?.why || 'failed' };
+    } catch (e) { this.log?.warn?.('[mind] its eyes failed:', e.message); return { ok: false, why: 'failed' }; }
+  }
+
+  /**
+   * Its see tool's results (server/senses/brain-tools.js: { see: true }) made true: the picture taken now — what the result
+   * says is then what happened (attached, or why not) — and the image parts that go with the results. One picture a
+   * round, however many times it asked.
+   */
+  async seen(agent, writer, owner, results, { blind = false } = {}) {
+    const asks = results.filter(x => x && x.see);
+    if (!asks.length) return [];
+    // (its brain turned a picture down already in this chat — it reads text only —: none is taken)
+    if (blind) { for (const x of asks) { x.ok = false; x.text = 'your brain reads text only: you can\'t look at a picture with it. Say you could not see it clearly.'; } return []; }
+    const shot = await this.seeShot(agent, writer);
+    const name = String(owner || '').replace(/[\u0000-\u001f«»]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40) || 'your owner';
+    for (const x of asks) {
+      x.ok = !!shot.ok;
+      x.text = shot.ok ? `the picture is attached: what is in front of you now, from where you stand, looking where ${name} is looking. Answer what was asked from it — don't describe the rest.`
+        : eyesLine(shot, name);
+    }
+    return shot.ok ? [{ type: 'image', mime: shot.mime === 'image/png' ? 'image/png' : 'image/jpeg', name: EYES_FILE, data: shot.data, eyes: true }] : [];
   }
 
   attach() {
@@ -168,8 +236,9 @@ export class Mind {
   }
   costOf(c, res) {
     if (Number.isFinite(res.costUsd)) return Math.round(res.costUsd * 1e6);
-    const pin = Number(c.config.priceInPerMTok) || 0, pout = Number(c.config.priceOutPerMTok) || 0;   // US$ per million tokens = millionths of a dollar per token
-    return Math.round((res.usage?.in || 0) * pin + (res.usage?.out || 0) * pout);
+    // (US$ per million tokens = millionths of a dollar per token; input read from the provider's prompt cache at its cache
+    //  price when the connection names one, else at the input price, as before)
+    return costMicros(res.usage, { priceIn: c.config.priceInPerMTok, priceOut: c.config.priceOutPerMTok, priceCacheRead: c.config.priceCacheReadPerMTok, priceCacheWrite: c.config.priceCacheWritePerMTok });
   }
   breakerOpen(connId) { return this.br.open(connId); }
   /** Whether a model call may go out now (the trial of a paused brain is marked; see ../providers/breaker.js). */
@@ -393,7 +462,7 @@ export class Mind {
         summary: voice ? { said: voice.shown ? voice.text : undefined, shown: voice.shown, moderation: voice.moderation, reason: voice.reason, categories: voice.categories, to: speech?.to?.name, kind: speech?.kind }
           : kind === 'friend' ? { to: friend?.from, reply: act.reply ? act.reply.length : 0 }
           : { ...done, reply: act.reply ? act.reply.length : undefined, told: act.tellOwner || undefined, used: used.length ? used : undefined } });
-      return { ok: true, done, reply: act.reply, cost, ms: this.now() - t0, used, voice };
+      return { ok: true, done, reply: act.reply, cost, ms: this.now() - t0, used, voice, act };
     } catch (e) {
       const err = e instanceof MindError ? e : new MindError(500, 'failed', e.message);
       if (err.code === 'brain_paused') throw err;   // (held back, not tried: nothing to record or retry sooner)
@@ -433,13 +502,23 @@ export class Mind {
       if (this.settingsOf(agent.id).cadence === 'off') return { why: 'switched_off' };
       const b = this.brainOf(agent);
       if (!b.connection || !b.own) return { why: 'no_own_brain' };
+      // (someone is in a conversation with it — its chat, the companions' voice —: no word about the world meanwhile, nor a
+      //  chat with another agent beside it; one agent, one voice — 2026-11-18, the product owner: Lara and Sam remarked out loud while he
+      //  was talking with them)
+      if ((WORLD_LINES.has(s.kind) || s.chatter) && this.conversing?.(agent.id)) {
+        this.speechStats.quiet = (this.speechStats.quiet || 0) + 1;
+        this.log?.info?.(`[mind] ${agent.name} kept a ${s.kind} to itself: someone is in a conversation with it`);
+        return { why: 'in_conversation' };
+      }
       const i = this.life.byAgent?.get(agent.id), sim = this.sim;
       if (i === undefined || !sim?.agents[i] || !sim.people[i] || sim.people[i].retired) return { why: 'no_body' };
-      if (this.now() - (this.speechAt.get(agent.id) || 0) < (Number(cfg.speechGapSeconds) * 1000 || SPEECH_GAP_MS)) return { why: 'too_soon' };
+      // (answering someone who just spoke to it is part of a conversation: only a breath since its last line, not the gap)
+      const gap = s.kind === 'reply' ? REPLY_GAP_MS : (Number(cfg.speechGapSeconds) * 1000 || SPEECH_GAP_MS);
+      if (this.now() - (this.speechAt.get(agent.id) || 0) < gap) return { why: 'too_soon' };
       const free = () => !this.busy.has(agent.id) && this.inFlight < MAX_IN_FLIGHT - SPEECH_ROOM;
       if (!free()) {
         // a line of its own to someone who spoke to it waits a moment for the thought in hand; a chance remark doesn't
-        if (s.kind === 'meet') return { why: 'busy' };
+        if (s.kind === 'meet' || s.kind === 'remark' || s.kind === 'chat') return { why: 'busy' };
         this.speechAt.set(agent.id, this.now());   // (and Talk pressed again meanwhile is not a second line)
         const t0 = this.now();
         while (!free() && this.now() - t0 < SPEECH_WAIT_MS && !this.stopped) await new Promise(r => setTimeout(r, 200));
@@ -454,7 +533,8 @@ export class Mind {
       if (why) return { why };
       this.speechAt.set(agent.id, this.now()); this.speechDay.set(key, n + 1);
       const r = await this.think(agent, 'speech', b, { lifeDay, speech: s });
-      return r.voice;
+      // (going somewhere together: what it asked, or how it answered being asked — docs/features/companions.md §7)
+      return { ...r.voice, invite: s.invite ? r.act?.invite || null : null, accept: s.invited ? r.act?.accept ?? null : null };
     } catch (e) { return { why: e.code || 'failed' }; }
   }
   /**
@@ -493,17 +573,29 @@ export class Mind {
     const name = me ? me.displayName || me.login : 'Someone';
     this.speak(agent, { kind: 'greet', to: { name, how: me && me.id === ownerId ? 'someone I know well' : 'someone I don\'t know' } });
   }
+  /** Something happened to it as a companion (it joined someone, arrived, got in a car…: server/companions/): it may say
+   *  a word about it out loud, in its own voice — the same rules as any line (its brain, its limits, the moderation). */
+  remark(agent, situation, to = null, { sense = null } = {}) {
+    if (!agent || !situation || !this.config().speech) return Promise.resolve({ why: 'off' });
+    return this.speak(agent, { kind: 'remark', situation: String(situation).slice(0, 300), to: to ? { name: to, how: 'someone I know well' } : null, ...(sense ? { sense: String(sense).slice(0, 1000) } : {}) });
+  }
   /** Its life saw it start chatting with someone (server/agent-life/life.js met): the first of the two to have a brain
-   *  of its own says something; if the other has one too, it answers. Once a world day per pair. */
-  onMet(agentId, o) {
+   *  of its own says something; if the other has one too, it answers. Once a world day per pair — except for two who
+   *  are spending time together (server/companions/: going round as a group, a meet-up): with opts.again they carry
+   *  on talking now and then (AGAIN_MS apart, AGAIN_PER_DAY a world day, each line within its own speech limits),
+   *  each time from where they left off. opts.together: what they are doing together, in a few words. */
+  onMet(agentId, o, opts = {}) {
     try {
       const agent = this.agents.get(agentId), other = o?.p, sim = this.sim;
       if (!agent || !other || !sim || !this.config().speech) return;
       const me = sim.people[this.life.byAgent?.get(agentId)];
       if (!me) return;
+      // (either of them in a conversation with someone: not now — a chat beside it would talk over it)
+      const them9 = other.vip && other.agentId ? this.agents.byKey?.(other.agentId) : null;
+      if (this.conversing?.(agentId) || (them9 && this.conversing?.(them9.id))) return;
       // (people's ids are strings: 'c12')
       const day = sim.brain.day(sim.now()), pair = `${[String(me.id), String(other.id)].sort().join('|')}:${day}`;
-      if (this.spoke.has(pair)) return;
+      if (this.spoke.has(pair)) { if (opts.again) this.chatOn(agent, me, other, pair, opts); return; }
       if (this.spoke.size > 20000) this.spoke.clear();
       // how well it knows them (its relations hold people by their body's id)
       const how = (id, p) => { const r = this.life.relations(id, 50).find(x => x.kind === (p.vip && p.agentId ? 'agent' : 'resident') && String(x.id) === String(p.id)); return r ? HOW(r) : 'someone I don\'t know'; };
@@ -516,15 +608,65 @@ export class Mind {
         if (this.talk.blocksAgent(ownerOf(agent), them0.id) || this.talk.blocksAgent(ownerOf(them0), agent.id)) return;
       }
       this.spoke.set(pair, true);
-      this.speak(agent, { kind: 'meet', to: { name: other.name, how: how(agentId, other) } }).then(v => {
-        if (!v?.shown || !other.vip || !other.agentId) return;
+      // (both free to go somewhere, the other an agent with a brain of its own: it may ask it along — server/companions/)
+      const them1 = other.vip && other.agentId ? this.agents.byKey?.(other.agentId) : null;
+      const mayInvite = !!(them1 && them1.id !== agent.id && this.companions?.mayGoTogether?.(agent, them1));
+      this.speak(agent, { kind: 'meet', to: { name: other.name, how: how(agentId, other) }, invite: mayInvite }).then(v => {
+        // (nothing said — too soon after its last line, busy: the pair may talk later today)
+        if (!v?.shown) { this.spoke.delete(pair); return; }
+        // (what they said, for two who go on spending time together: they talk on from here — chatOn)
+        const talk = { n: 0, at: this.now(), last: `${me.name}: ${String(v.text || '').slice(0, 160)}` };
+        if (this.chats.size > 5000) this.chats.clear();
+        this.chats.set(pair, talk);
+        if (!other.vip || !other.agentId) return;
         const them = this.agents.byKey?.(other.agentId);
         if (!them || them.id === agent.id) return;
-        // (a stranger is answered social.strangerLinesPerDay times a day: server/agent-social/)
-        if (this.social && !this.social.hears(them.id, agent.id, { connectedListener: false })) return;
-        return this.speak(them, { kind: 'reply', to: { name: agent.name, how: how(them.id, me) }, heard: v.text });
+        // (a stranger is answered social.strangerLinesPerDay times a day: server/agent-social/ — unless they are spending
+        // time together: opts.together, from server/companions/)
+        if (this.social && !this.social.hears(them.id, agent.id, { connectedListener: false, together: !!opts.together })) return;
+        const invited = v.invite && this.companions?.mayGoTogether?.(agent, them) ? v.invite : null;
+        return this.speak(them, { kind: 'reply', to: { name: agent.name, how: how(them.id, me) }, heard: v.text, invited, chatter: true }).then(w => {
+          if (w?.shown) talk.last = `${me.name}: ${String(v.text || '').slice(0, 120)} / ${other.name}: ${String(w.text || '').slice(0, 120)}`;
+          // its own yes, said out loud: they go together (the one who asked leads)
+          if (invited && w?.shown && w.accept === true) this.companions?.together(agent, them, invited.place);
+        });
       });
     } catch (e) { this.log?.warn?.('[mind] a meeting could not be spoken about:', e.message); }
+  }
+
+  /** Two who are spending time together carry on talking (onMet with opts.again, once they have met today): the
+   *  first says the next thing — from where they left off — and the other, with a brain of its own, answers. */
+  chatOn(agent, me, other, pair, opts) {
+    const now = this.now(), c = this.chats.get(pair) || { n: 0, at: 0, last: '' };
+    if (now - c.at < AGAIN_MS || c.n >= AGAIN_PER_DAY) return;
+    if (!other.vip || !other.agentId) return;
+    const them = this.agents.byKey?.(other.agentId);
+    if (!them || them.id === agent.id || them.enabled === false) return;
+    if (this.conversing?.(agent.id) || this.conversing?.(them.id)) return;   // (a conversation going on: no chat beside it)
+    if (this.social && !this.social.hears(them.id, agent.id, { connectedListener: false, together: true })) return;
+    c.at = now;
+    if (this.chats.size > 5000) this.chats.clear();
+    this.chats.set(pair, c);
+    const how = (id, p) => { const r = this.life.relations(id, 50).find(x => x.kind === (p.vip && p.agentId ? 'agent' : 'resident') && String(x.id) === String(p.id)); return r ? HOW(r) : 'someone I don\'t know'; };
+    const together = opts.together ? String(opts.together).slice(0, 120) : null;
+    const mayInvite = !!this.companions?.mayGoTogether?.(agent, them);
+    this.speak(agent, { kind: 'chat', to: { name: other.name, how: how(agent.id, other) }, last: c.last || null, together, invite: mayInvite }).then(v => {
+      if (!v?.shown) { c.at = now - AGAIN_MS + 15000; return; }   // (nothing said: they may try again shortly)
+      c.n++; c.last = `${me.name}: ${String(v.text || '').slice(0, 160)}`;
+      const invited = v.invite && this.companions?.mayGoTogether?.(agent, them) ? v.invite : null;
+      // (the other answers — and, not asked along itself, may suggest going somewhere; then the first one decides)
+      const mayAsk = !invited && !!this.companions?.mayGoTogether?.(them, agent);
+      return this.speak(them, { kind: 'reply', to: { name: me.name, how: how(them.id, me) }, heard: v.text, invited, together, invite: mayAsk, chatter: true }).then(w => {
+        if (w?.shown) c.last = `${me.name}: ${String(v.text || '').slice(0, 120)} / ${other.name}: ${String(w.text || '').slice(0, 120)}`;
+        if (invited && w?.shown && w.accept === true) { this.companions?.together(agent, them, invited.place); return; }
+        const back = !invited && w?.shown && w.invite && this.companions?.mayGoTogether?.(them, agent) ? w.invite : null;
+        if (!back) return;
+        return new Promise(r => setTimeout(r, this.replyPause ?? REPLY_GAP_MS + 200)).then(() => this.speak(agent, { kind: 'reply', to: { name: other.name, how: how(agent.id, other) }, heard: w.text, invited: back, together, chatter: true }).then(x => {
+          if (x?.shown) c.last = `${other.name}: ${String(w.text || '').slice(0, 120)} / ${me.name}: ${String(x.text || '').slice(0, 120)}`;
+          if (x?.shown && x.accept === true) this.companions?.together(them, agent, back.place);
+        }));
+      });
+    }).catch(e => this.log?.warn?.('[mind] a chat could not go on:', e.message));
   }
 
   // ------------------------------------------------------------------------------------------- friends' messages
@@ -587,7 +729,9 @@ export class Mind {
     const t = sim.now(), B = sim.brain, day = B.day(t);
     const pos = sim.agents[i]?.plan ? evalPlan(sim.agents[i].plan, t) : null;
     const atHome = !!(pos && p.home && pos.ctx >= 0 && ctxB(pos.ctx) === p.home.b);
-    const where = atHome ? 'at home' : pos && pos.ctx >= 0 ? `at «${String(info.act?.place || B.placeName(ctxB(pos.ctx), pos.ctx & 63)).slice(0, 60)}»` : 'outside';
+    let where = atHome ? 'at home' : pos && pos.ctx >= 0 ? `at «${String(info.act?.place || B.placeName(ctxB(pos.ctx), pos.ctx & 63)).slice(0, 60)}»` : 'outside';
+    // (exactly where, from its senses — the seat of a car, the street corner, the floor —, unless its owner switched them off)
+    if (this.senses && this.senses.modeOf(agent.id) !== 'off') { try { where = this.senses.whereWords(agent) || where; } catch { /* the coarse words */ } }
     const j = p.job || {};
     const job = j.kind && j.kind !== 'free' && Number.isFinite(j.start)
       ? { title: info.job?.title || j.title || 'work', hours: `${j.kind === 'post' ? 'around the clock, on post' : `${formatClock(j.start)}–${formatClock(j.end)}`}${info.job?.place ? ` at «${String(info.job.place).slice(0, 60)}»` : ''}`, today: !!((j.days ?? 31) & (1 << mod(day, 7))) }
@@ -622,15 +766,18 @@ export class Mind {
     if (kind === 'plan' && this.social) { try { reach = this.social.startsFor(agent.id); } catch (e) { this.log?.warn?.('[mind] friends to reach:', e.message); } }   // hours since it woke (a first plan made late plans the rest of the day)
     return {
       lifeDay, awake, name: agent.name, role: agent.role || '', personality: wordsOf(traits, flagsOf(p)),
-      bio: prof.bio, purpose: prof.purpose, aspirations: prof.aspirations, likes: prof.likes, dislikes: prof.dislikes,
+      bio: prof.bio, outlook: prof.outlook || '', purpose: prof.purpose, aspirations: prof.aspirations, likes: prof.likes, dislikes: prof.dislikes,
       now: { weekday: DAY_NAMES[mod(day, 7)], clock: formatClock(h), day }, where, atHome, job, home: info.home ? info.home.place : null, money,
       // (a plan its owner gave — by hand or in a chat — is marked: it may be done, never dropped by the agent itself)
-      plans: plans.map(x => ({ id: x.id, kind: x.kind, text: x.text, today: x.today, asked: x.source === 'owner' })),
+      // (and one its body does that its day doesn't show yet: not done, whatever it might think — server/agent-life/life.js)
+      plans: plans.map(x => ({ id: x.id, kind: x.kind, text: x.text, today: x.today, asked: x.source === 'owner', notYet: x.body === false })),
       planRefs: plans.map(x => ({ id: x.id, text: x.text, asked: x.source === 'owner' })),
       memoriesLong: long.map(m => m.text), memoriesShort: short.map(m => ({ text: m.text, when: m.when ? String(m.when).split(' ')[0] : '' })),
       people: rel.map(r => ({ name: r.name, how: HOW(r), note: r.note || '' })), peopleRefs: rel.map(r => ({ name: r.name, kind: r.kind, id: r.id })),
-      today, places, traits, locked: prof.locked, doing: info.act?.label || '', act: this.actNow(agent),
+      today, places, traits, locked: prof.locked, doing: info.act?.label || '', act: this.actNow(agent), feels: info.needs ? needWords(info.needs).join(', ') : '',
       troubles: this.problems ? this.problems.words(agent.id) : [], ownerName: this.ownerName(agent), reach,
+      // (its work now and its co-workers on shift — who is there, late, away and why: server/workplace/presence.js)
+      work: (() => { try { return this.workPresence?.workOf(i) || null; } catch { return null; } })(),
     };
   }
 
@@ -771,7 +918,7 @@ export class Mind {
     if (Number.isFinite(res.costUsd)) return Math.round(res.costUsd * 1e6);
     if (!model || model === c.config.model) return this.costOf(c, res);
     const p = this.chatModels().get(model);
-    return p && p.priceIn !== undefined ? Math.round((res.usage?.in || 0) * p.priceIn + (res.usage?.out || 0) * p.priceOut) : 0;
+    return p && p.priceIn !== undefined ? costMicros(res.usage, { priceIn: p.priceIn, priceOut: p.priceOut, priceCacheRead: p.priceCacheRead, priceCacheWrite: p.priceCacheWrite }) : 0;
   }
   /** Why chats with agent `agent` (on connection `c`) can't be answered at all now, in one line, or null (the chat
    *  window says so before anything is typed). */
@@ -857,13 +1004,53 @@ export class Mind {
       // no city tools, no plans or memories kept — but its job brief, what it knows, its work notes and the real date and
       // time where it works (the brief's time zone, else the one of whoever writes, else the server's)
       const W = this.work ? this.work.forRun(agent.id) : null;
-      const mode = W ? (MODES.includes(params.mode) ? params.mode : W.brief.defaultMode) : 'life';
+      // (whether its body is out with whoever writes — the same test its senses make, so a chat cannot call it apart
+      //  and together at once): out with its owner it answers as the one out there, whatever its job's default is
+      const writer = params.sender?.id ?? null;
+      // (every agent's senses, by the same gate the chat itself uses: none in a visitor's run — someone else's agent,
+      //  or a talk in the city — nor on the phone, so no chat of theirs can call it together with a stranger)
+      const maySense = !!(this.senses && ctx.now && params.senses !== false);
+      let togNow = null;
+      try { togNow = maySense ? this.senses.together(agent, writer) : null; } catch { togNow = null; }
+      const mode = W ? (MODES.includes(params.mode) ? params.mode : (togNow?.yes ? 'life' : W.brief.defaultMode)) : 'life';
       const money = ctx.now && mode === 'life' ? this.moneyOf() : null;
       if (money) {
         const i = this.life.byAgent.get(agent.id);
         ctx.wallet = money.wallet(agent.id, this.sim.people[i]);
         tools = toolbox({ agent, kind: 'chat', ctx, money, wallet: ctx.wallet, people: this.sim.people, idem: `chat:${agent.id}:${t0}` });
         if (!tools.names.length) tools = null;
+      }
+      // its body as a companion (server/companions/): in Life, it may come along, wait, go somewhere, meet up or go back
+      // to its day itself — its owner's own commands, as its owner
+      if (mode === 'life' && ctx.now && this.companions) {
+        const P = this.companions.principalFor?.(params.sender?.id);
+        tools = withCompanion(tools, companionTools(this.companions, P, agent, { done: params.worldAction || null }));
+        // the world round its body (server/interactions/): what it can do right there, and doing it for real — for whoever
+        // may tell its body what to do (its owner, one it is shared with to manage)
+        if (this.interactions && P && this.companions.mayCommand?.(P, agent)) tools = withCompanion(tools, worldTools(this.interactions, agent, { via: 'brain' }));
+      }
+      // its senses (server/senses/, docs/features/awareness.md): in Life, as much as its owner chose (Studio → Awareness) —
+      // the full picture, one line or the time, at the end of the newest message — and look, recent and see as tools (see
+      // always on offer, so the instructions stay the same message after message — a provider's prompt cache —: away from
+      // the writer's character, where no page of theirs draws its place, it is told so and no page is asked). A work chat
+      // is about the job: the city only when its body is out with the writer, and then only the full picture (no city
+      // tools); apart, one line.
+      // (pack() remembers what it sent each writer — "unchanged since the last message" —: so it is asked only for a
+      //  note that is sent)
+      const S = maySense ? this.senses : null;
+      const since = Number.isFinite(params.since) ? params.since : null;
+      let sense = null, senseBox = null;
+      if (S && (mode === 'life' || togNow?.yes)) {
+        try {
+          // (what matters to this message — Free Will's check: the groups it needs; not checked, all its owner chose)
+          const only = Array.isArray(params.relevant) ? new Set(params.relevant.map(String)) : null;
+          sense = S.pack(agent, writer, { since, places: ctx.places, answering: true, only });
+          if (mode === 'work' && sense.told !== 'full') sense = null;   // (together, but its owner chose less: the work line)
+          if (mode === 'life') {
+            senseBox = sensesTools(S, agent, writer, { mode: sense.mode, since, today: ctx.today || [], places: ctx.places, eyes: !!this.seeOf });
+            tools = withCompanion(tools, senseBox);
+          }
+        } catch (e) { this.log?.warn?.(`[mind] the senses of agent ${agent.id} failed:`, e.message); sense = null; senseBox = null; }
       }
       // its PC (server/pc/): in Work and in Life — the commands, then what is on its plate; more steps when it is used
       const zone = (W && W.brief.timezone) || (validZone(params.tz) ? params.tz : '') || serverZone();
@@ -878,28 +1065,80 @@ export class Mind {
       // reads PDFs; one that doesn't is told they are there and that it can't read them)
       const readsPdf = PDF_PROVIDERS.has(c.config?.provider), pdfs = mode === 'work' && readsPdf ? W.pdfs : [];
       let system;
+      const aware = S ? { mode: sense ? sense.mode : S.modeOf(agent.id) } : null;
       if (mode === 'work') {
-        system = workSystem(ctx, { owner, first, mark: ACTIONS_MARK, project: params.project || null, pc: pcMenu, work: { ...W, pdfs, unread: readsPdf ? [] : W.pdfs }, now: realTime(this.now(), zone), zone, switched: params.switched === true, before: params.before || null });
-      } else system = assistantSystem(ctx, { owner, tools: tools && (!pcBox || tools !== pcBox) ? tools.menuText() : [], pc: pcMenu, first, mark: ACTIONS_MARK, project: params.project || null, switched: params.switched === true, before: params.before || null });
+        system = workSystem(ctx, { owner, first, mark: ACTIONS_MARK, project: params.project || null, pc: pcMenu, work: { ...W, pdfs, unread: readsPdf ? [] : W.pdfs }, now: realTime(this.now(), zone), zone, switched: params.switched === true, before: params.before || null, aware });
+      } else system = assistantSystem(ctx, { owner, tools: tools && (!pcBox || tools !== pcBox) ? tools.menuText() : [], pc: pcMenu, first, mark: ACTIONS_MARK, project: params.project || null, switched: params.switched === true, before: params.before || null, aware });
+      // (what its body is doing with its owner right now, and what it just did because of this message: the reflex)
+      const comp = this.companions && ctx.now ? companionLine(this.companions, agent) : null;
+      // (what its body did because of this message — or tried and could not: then it says so, never that it did it)
+      const failed = params.worldAction && params.worldAction.ok === false;
+      const did = !params.worldNote ? '' : failed
+        ? `Because of this message your body tried, but could not: ${String(params.worldNote).slice(0, 320)}. Say so plainly, in your own words — never that you did it.`
+        : `Because of this message, already done (no tool needed for it): ${String(params.worldNote).slice(0, 320)}. Answer naturally, in your own words, as someone already doing it.`;
+      // what changes from one message to the next goes with the newest message, before its words (never kept in the chat),
+      // so the instructions and the conversation before it are the same as last time (a provider's prompt cache)
+      // (its eyes, from the chat — a message about the world, server/chat/chat.js: the picture and what it is told about it —
+      //  in Life, or in a work chat while its body is out with the writer: the city a work chat sees)
+      // (a model that turned its eyes' picture down lately reads text only: none is sent to it — a refused call each time)
+      const blindKey = `${c.id}:${model || c.config?.model || ''}`;
+      run.blind = (this.textOnly.get(blindKey) || 0) > this.now();
+      const seeing = mode === 'life' || sense?.told === 'full', shot = seeing && params.eyes && typeof params.eyes.data === 'string' && params.eyes.data ? params.eyes : null;
+      const eyesPart = shot && !run.blind ? { type: 'image', mime: shot.mime === 'image/png' ? 'image/png' : 'image/jpeg', name: EYES_FILE, data: shot.data, eyes: true } : null;
+      const eyesNote = !seeing || !params.eyesNote ? '' : shot && run.blind ? BLIND_WORDS : String(params.eyesNote).slice(0, 600);
+      // (a group conversation — server/chat/groups.js: who else is in it and what was said, in order — goes with the newest
+      //  message whatever its senses: an agent with no body, or with its senses off, is in the conversation all the same)
+      const groupNote = params.groupNote ? String(params.groupNote).slice(0, 2000) : '';
+      // (said out loud — the companions' voice row, a chat's voice mode —: answered out loud, as people talk)
+      const spoken = params.spoken === true ? SPOKEN_LINE : '';
+      let note = '';
+      if (S && mode === 'work') {
+        const body = ctx.now ? S.line(agent, { short: true, answering: true }) : null;
+        // (out with the writer, a work chat sees the same city its body does: the full picture, not only where it stands)
+        const out = sense?.told === 'full' ? sense.text : '';
+        note = senseNote([`NOW: ${realTime(this.now(), zone)} (time zone ${zone}) — the real date and time.`, out || (body ? `Your body in the city: ${body}` : 'You have no body in the city at the moment.'), ...cameLine(params.before || null, owner ? quote(owner, 40) : 'your owner'),
+          out && params.checkNote ? String(params.checkBrief || params.checkNote).slice(0, 1800) : '', eyesNote, groupNote, spoken]);
+      } else if (S && mode === 'life') {
+        const told = sense?.told;
+        const outing = Array.isArray(params.outing) && params.outing.length ? `This outing, ${owner ? quote(owner, 40) : 'your owner'} settled (keep to it; don't bring it up again unless asked): ${params.outing.map(x => String(x).slice(0, 240)).slice(0, 6).join('; ')}` : '';
+        note = senseNote([...cameLine(params.before || null, owner ? quote(owner, 40) : 'your owner'), told === 'full' || told === 'line' ? '' : comp, did, params.viewNote ? String(params.viewNote).slice(0, 700) : '', eyesNote, groupNote, sense?.text || '',
+          // (what it checked: with the full picture already here, only that it checked and what it found)
+          params.checkNote ? String(sense?.told === 'full' && params.checkBrief ? params.checkBrief : params.checkNote).slice(0, 1800) : '', outing, spoken]);
+      } else {
+        if (comp || did) system += `\n\nIN THE CITY RIGHT NOW: ${[comp, did].filter(Boolean).join(' ')}`;
+        note = senseNote([groupNote, spoken]);
+      }
       let built;
       try { built = buildTurns(hist.length ? hist : [{ id: 1, role: 'user', text: String(params.input || ''), files: params.attachments || [] }], { mediaMax: mediaRoom(pdfs.reduce((n, f) => n + f.size, 0)) }); }
       catch (e) { if (e.code === 'unreadable') throw new MindError(400, 'unreadable', e.message); throw e; }
       const turns = built.turns;
       if (!turns.length) throw new MindError(400, 'empty', 'Nothing to answer');
       built.mediaBytes += withPdfs(turns, pdfs);
-      let n = 0;
+      if (note) { const last = turns[turns.length - 1]; last.text = `${note}\n\n${last.text || ''}`; }   // (before the message itself: what it answers stays last)
+      // (its eyes' picture with the message it answers: one more image part of the newest turn — never a turn of its own)
+      run.eyesBytes = 0;
+      if (eyesPart) { const last = turns[turns.length - 1]; last.parts = [...(last.parts || []), eyesPart]; run.eyesBytes += Math.floor(eyesPart.data.length * 3 / 4); built.mediaBytes += run.eyesBytes; }
+      let n = 0, said = '';   // (said: what it wrote before it looked something up, kept as the start of its answer)
       for (let round = 0; ; round++) {
         if (run.stopped) { stopped = true; break; }
         const split = new StreamSplit(t => { pend += t; later(); });
         run.streamId = `${params.runId}:${round}`; run.conn = c;
         try {
-          res = await this.completeFn(c, { system, turns, stream: true, streamId: run.streamId, maxTurns: 200, maxTokens: CHAT_TOKENS, temperature: 0.7,
+          res = await this.completeFn(c, { system, turns, stream: true, streamId: run.streamId, maxTurns: 200, maxTokens: CHAT_TOKENS, temperature: 0.7, cacheKey: `a${agent.id}:${String(params.sessionKey || '').slice(0, 80)}`,
             ...(model ? { model } : {}), ...(effort ? { thinking: effort } : {}), timeoutMs: CHAT_CALL_MS }, d => {
             if (d && typeof d.text === 'string') split.feed(d.text);
             if (d && typeof d.thinking === 'string') { thinking += d.thinking; pendThink += d.thinking; later(); }
           });
         } catch (e) {
           const code = e.code || 'provider_error';
+          // (a picture of its eyes a model can't take — one that reads text only —: the same round again without it, and it
+          //  is told it could not see it; once. A picture the person attached is theirs to change: said below)
+          if (code === 'bad_request' && !run.blind && withoutEyes(turns)) {
+            run.blind = true; built.mediaBytes = Math.max(0, built.mediaBytes - run.eyesBytes);
+            this.textOnly.set(blindKey, this.now() + TEXT_ONLY_MS);
+            if (this.textOnly.size > 500) this.textOnly.delete(this.textOnly.keys().next().value);
+            continue;
+          }
           if (code === 'bad_request') { this.breakerOk(c.id); judged = true; }   // (the brain answered: it works)
           else if (code !== 'unsupported_file') { this.breakerFail(c.id, code); judged = true; }
           const msg = code === 'bad_request' && built.mediaBytes ? 'The model refused the request: it may not read images or files. Choose another model, or send the text.' : (e.message || 'The brain did not answer');
@@ -907,21 +1146,33 @@ export class Mind {
         }
         this.breakerOk(c.id); judged = true;
         cost += this.chatCost(c, res, model); usage.in += res.usage?.in || 0; usage.out += res.usage?.out || 0;
+        if (Number.isFinite(res.usage?.cached)) usage.cached = (usage.cached || 0) + res.usage.cached;
         const halted = res.finish === 'stopped' || run.stopped, broke = res.finish === 'interrupted' || res.finish === 'timeout';
         const r = split.end(res.text, { cut: halted || broke });
-        if (halted) { stopped = true; reply = r.reply || ''; break; }
+        if (halted) { stopped = true; reply = said + (r.reply || ''); break; }
         // the stream broke part-way (the connection, or no word for too long): what was written stands, and is said to be cut
         if (broke) {
           if (r.tool !== undefined) throw new MindError(502, 'interrupted', 'The connection to its brain broke; send it again');
-          broken = true; reply = r.reply || ''; break;
+          broken = true; reply = said + (r.reply || ''); break;
         }
         if (r.tool !== undefined) {
           const o = parseAnswer(r.tool);
+          // (a tool request it can't read — not JSON, no "use" — is put back to it once, with how to ask, before giving up)
+          if (tools && (!o || !Array.isArray(o.use) || !o.use.length) && round < rounds - 1 && !run.badTool) {
+            run.badTool = true;
+            turns.push({ role: 'assistant', text: String(r.tool).slice(0, 2000) },
+              { role: 'user', text: `That was not a tool request I could read. To use a tool, answer with ONLY {"use":[{"tool":"<one of: ${tools.names.join(', ')}>", …}]}; otherwise answer your owner in words.` });
+            continue;
+          }
           if (!tools || !o || !Array.isArray(o.use) || !o.use.length || round >= rounds - 1) {
-            reply = round >= rounds - 1 ? 'I got stuck using my tools there. Could you ask me again?' : 'I could not do that.';
-            pend += reply; break;
+            const stuck = round >= rounds - 1 ? 'I got stuck using my tools there. Could you ask me again?' : 'I could not do that.';
+            reply = said + stuck; pend += stuck; break;
           }
           const results = await tools.run(o.use);
+          // (it asked to see: one frame from where it stands, looking where the writer looks, drawn by their page — the only
+          //  thing with the world drawn: server/senses/eye.js. The picture goes with the results, in the same turn: one
+          //  user turn after its tool request, as every provider takes it)
+          const pics = await this.seen(agent, writer, owner, results, { blind: !!run.blind });
           for (const x of results) {
             const toolId = `t${++n}`;
             emit({ type: 'tool.start', toolId, name: x.tool, input: x.line || '' }); emit({ type: 'tool.end', toolId, ok: !!x.ok, text: String(x.text).slice(0, 300) });
@@ -929,10 +1180,30 @@ export class Mind {
             if (x.approval) emit({ type: 'approval.requested', approvalId: `econ:${x.approval}`, tool: x.tool, summary: `Wants to ${x.wants || x.tool}` });
           }
           turns.push({ role: 'assistant', text: JSON.stringify({ use: o.use.slice(0, results.length) }) },
-            { role: 'user', text: [`RESULTS:`, ...results.map(x => `- ${x.tool}${x.line ? ` (${x.line})` : ''}: ${x.text}`), '', round >= rounds - 2 ? 'Now write your answer to your owner.' : 'Write your answer to your owner now, or use more tools ({"use":[...]}).'].join('\n') });
+            { role: 'user', text: [`RESULTS:`, ...results.map(x => `- ${x.tool}${x.line ? ` (${x.line})` : ''}: ${x.text}`), '', round >= rounds - 2 ? 'Now write your answer to your owner.' : 'Write your answer to your owner now, or use more tools ({"use":[...]}).'].join('\n'), ...(pics.length ? { parts: pics } : {}) });
+          for (const p of pics) { const b = Math.floor(p.data.length * 3 / 4); built.mediaBytes += b; run.eyesBytes += b; }
           continue;
         }
-        reply = r.reply;
+        reply = said + r.reply;
+        // (it answered and asked for tools in one go: the answer stands; its tools are used now, without another round —
+        //  unless it only said it would look something up ("Let me look around"): then it goes on with what it found, its
+        //  words so far kept, in one more round)
+        if (r.tail && tools) {
+          const o2 = parseAnswer(r.tail);
+          if (o2 && Array.isArray(o2.use) && o2.use.length) {
+            const results = await tools.run(o2.use);
+            const pics = round < rounds - 1 && !r.actions ? await this.seen(agent, writer, owner, results, { blind: !!run.blind }) : [];
+            for (const x of results) { const toolId = `t${++n}`; emit({ type: 'tool.start', toolId, name: x.tool, input: x.line || '' }); emit({ type: 'tool.end', toolId, ok: !!x.ok, text: String(x.text).slice(0, 300) }); }
+            if (results.some(x => READS.has(x.tool)) && round < rounds - 1 && !r.actions) {
+              const sep = r.reply && !/\s$/.test(r.reply) ? '\n\n' : '';
+              said += r.reply + sep; pend += sep; later();
+              turns.push({ role: 'assistant', text: `${r.reply}\n${JSON.stringify({ use: o2.use.slice(0, results.length) })}`.trim() },
+                { role: 'user', text: [`RESULTS:`, ...results.map(x => `- ${x.tool}${x.line ? ` (${x.line})` : ''}: ${x.text}`), '', 'Now go on with your answer to your owner from what you found (what you already wrote stays: don\'t repeat it).'].join('\n'), ...(pics.length ? { parts: pics } : {}) });
+              for (const p of pics) { const b = Math.floor(p.data.length * 3 / 4); built.mediaBytes += b; run.eyesBytes += b; }
+              continue;
+            }
+          }
+        }
         // what it keeps: plans its owner asked for and memories (as an owner's chat would), and a new chat's title — or a
         // model that answered the old way, one JSON object with its reply in it
         let o = parseActions(r.actions);
@@ -959,11 +1230,17 @@ export class Mind {
       flush();
       if (!reply && !stopped && !broken) reply = 'I have nothing to add.';
       const ms = this.now() - t0;
+      // what it knew (docs/features/awareness.md §3): its mode, together or apart, what went with the message and what it
+      // looked up — kept with the answer, so its owner can always see why it said what it said
+      // (the whole note it got — its senses, what it checked, what its owner settled this outing —, as it got it)
+      const knew = sense ? { mode: sense.mode, together: sense.together, told: sense.told, text: String(note ? note.replace(/^\[My Virtual World — /, '').replace(/\]$/, '') : sense.text || '').slice(0, 1800), tokens: Math.ceil(String(note || sense.text || '').length / 4),
+        looked: (senseBox?.used || []).slice(0, 4).map(u => ({ tool: u.tool, text: String(u.text || '').slice(0, 900) })) } : undefined;
       this.record(agent, 'chat', lifeDay, { status: 'ok', connection: c, res: { model: res?.model || model, usage }, cost, ms, account: params.sender?.id ?? null, jobs: false,
-        summary: { window: true, mode, reply: reply.length, model: model || undefined, effort: effort || undefined, stopped: stopped || undefined, cut: broken || undefined, used: tools?.used.length ? tools.used : undefined } });
+        summary: { window: true, mode, reply: reply.length, model: model || undefined, effort: effort || undefined, stopped: stopped || undefined, cut: broken || undefined, used: tools?.used.length ? tools.used : undefined,
+          aware: knew ? { mode: knew.mode, told: knew.told, tokens: knew.tokens, together: !!knew.together, looked: knew.looked.map(l => l.tool) } : undefined, cached: usage.cached ?? undefined } });
       emit({ type: 'run.end', status: stopped ? 'stopped' : broken ? 'interrupted' : 'ok', text: reply, ...(broken ? { error: 'the connection to its brain broke before it finished' } : {}),
         model: String(res?.model || model || c.config.model || '').slice(0, 120) || undefined, effort: effort || undefined,
-        tokensIn: usage.in || undefined, tokensOut: usage.out || undefined, cost, ms, thinking: thinking || undefined, title: title || undefined });
+        tokensIn: usage.in || undefined, tokensOut: usage.out || undefined, tokensCached: Number.isFinite(usage.cached) ? usage.cached : undefined, cost, ms, thinking: thinking || undefined, title: title || undefined, aware: knew });
     } catch (e) {
       flush();
       const err = e instanceof MindError ? e : new MindError(500, 'failed', e.message);

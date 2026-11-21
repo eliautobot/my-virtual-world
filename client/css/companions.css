@@ -1,0 +1,56 @@
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* Companions (js/ui/companions.js): the party bar on the left above the map — a head, each companion's face with what it
+   is doing — its panel, one companion's menu, and the row on an agent's own card. */
+#party { position: fixed; left: calc(var(--dock-lb, 0px) + 12px); bottom: 224px; z-index: 3; display: flex; flex-direction: column; align-items: flex-start;
+  gap: 6px; max-width: min(320px, calc(100vw - 24px)); pointer-events: none; transition: left .18s ease; }
+#party.hidden { display: none; }
+#party > * { pointer-events: auto; }
+.party-head { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-0);
+  color: var(--text); font: inherit; font-size: 12px; cursor: pointer; box-shadow: var(--shadow); }
+.party-head small { opacity: .7; font-variant-numeric: tabular-nums; }
+.party-head:hover, .party-head.on { border-color: var(--gold); }
+.party-head:focus-visible, .party-face:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: 2px; }
+.party-faces { display: flex; flex-direction: column; gap: 5px; }
+.party-face { display: flex; align-items: center; gap: 8px; min-width: 168px; max-width: 280px; padding: 5px 10px 5px 5px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--bg-0); color: var(--text); font: inherit; cursor: pointer; text-align: left; box-shadow: var(--shadow); position: relative; }
+.party-face:hover { border-color: var(--gold); }
+.pf-av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; background: var(--btn-hover); flex: none; }
+.pf-ic { position: absolute; left: 25px; top: 23px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px;
+  background: var(--bg-0); border: 1px solid var(--line); }
+.pf-t { display: flex; flex-direction: column; min-width: 0; }
+.pf-t b { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-t small { font-size: 11px; opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.party-face.st-following { border-left: 3px solid var(--good, #3cb371); }
+.party-face.st-riding { border-left: 3px solid var(--gold); }
+.party-face.st-waiting, .party-face.st-away { border-left: 3px solid var(--line); }
+.party-face.st-meetup, .party-face.st-going { border-left: 3px solid var(--vw-accent, var(--gold)); }
+.party-face.own-choice { border-left-style: dashed; }   /* (agents who went together by their own choice) */
+.party-panel { width: min(320px, calc(100vw - 24px)); max-height: min(420px, calc(100vh - 320px)); overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.pp-sec { display: flex; flex-direction: column; gap: 6px; }
+.pp-sec + .pp-sec { border-top: 1px solid var(--line); padding-top: 8px; }
+.pp-sh { font-size: 12px; font-weight: 600; }
+.party-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.party-row b { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.party-pick { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; }
+.party-pick label, .party-here { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.party-here { font-size: 11.5px; opacity: .85; }
+.party-place { display: flex; flex-direction: column; gap: 4px; }
+.party-place .input { width: 100%; }
+.party-menu { position: fixed; left: 0; top: 0; z-index: 5; width: 260px; max-width: calc(100vw - 16px); padding: 8px; display: flex; flex-direction: column; gap: 4px;
+  max-height: min(520px, calc(100vh - 16px)); overflow: auto; }
+.party-menu .btn.primary { align-self: flex-start; }
+.cp-card { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px; }
+.cp-st { font-size: 12px; opacity: .85; }
+.cp-card .row { display: flex; flex-wrap: wrap; gap: 4px; }
+body.play #party { bottom: 222px; }
+@media (pointer: coarse) {
+  #party { bottom: auto; top: 112px; }
+  body.play #party { top: 150px; }
+  .party-face { min-width: 0; padding-right: 6px; }
+  .party-face .pf-t small { display: none; }
+}
+@media (max-width: 760px) { .party-face .pf-t { max-width: 120px; } }
+
+/* a companion out with you while it should be at work (its shift: server/workplace/presence.js) */
+.party-face .pf-work { display: block; color: var(--gold, #e0a83a); font-weight: 600; }
+.party-face.on-shift .pf-av { box-shadow: 0 0 0 2px var(--gold, #e0a83a); }

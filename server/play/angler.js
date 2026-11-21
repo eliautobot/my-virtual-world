@@ -9,7 +9,7 @@
 import { subj } from '../economy/economy.js';
 import { moduleLevel } from '../../shared/play.js';
 import { RODS, REELS, LINES, HOOKS, LEADER, LURES, LURE_BY_ID, BOAT_UPGRADES, UPGRADE_BY_ID, SKILLS, SKILL_MAX, RESPEC_PRICE, GEAR, STARTER, loadout } from '../../shared/fishing-gear.js';
-import { FishError } from './fish-market.js';
+import { FishError, anglerOf } from './fish-market.js';
 import { SPECIES, speciesOf } from '../../shared/fish-species.js';
 
 const fail = (status, code, msg) => { throw new FishError(status, code, msg); };
@@ -32,8 +32,10 @@ export class Angler {
         ON CONFLICT (world_id, account_id, species) DO UPDATE SET n = n + $n,
           best_cm = CASE WHEN $kg > best_kg THEN $cm ELSE best_cm END, best_at = CASE WHEN $kg > best_kg THEN $t ELSE best_at END, best_kg = MAX(best_kg, $kg)`),
       dexCount: this.db.prepare('SELECT COUNT(*) AS n FROM fish_dex WHERE world_id = ? AND account_id = ? AND n > 0'),
-      records: this.db.prepare(`SELECT r.species, r.account_id AS id, a.display_name AS name, r.kg, r.cm, r.at FROM fish_records r
-        LEFT JOIN accounts a ON a.id = r.account_id AND a.world_id = r.world_id WHERE r.world_id = ?`),
+      // (a record an AI agent set is named by the agent: it fishes as minus its id — server/play/fishing-crew.js)
+      records: this.db.prepare(`SELECT r.species, r.account_id AS id, COALESCE(a.display_name, g.name) AS name, r.kg, r.cm, r.at FROM fish_records r
+        LEFT JOIN accounts a ON r.account_id > 0 AND a.id = r.account_id AND a.world_id = r.world_id
+        LEFT JOIN agents g ON r.account_id < 0 AND g.id = -r.account_id AND g.world_id = r.world_id WHERE r.world_id = ?`),
       record: this.db.prepare('SELECT account_id AS id, kg FROM fish_records WHERE world_id = ? AND species = ?'),
       recordPut: this.db.prepare(`INSERT INTO fish_records (world_id, species, account_id, kg, cm, at) VALUES ($w, $s, $a, $kg, $cm, $t)
         ON CONFLICT (world_id, species) DO UPDATE SET account_id = $a, kg = $kg, cm = $cm, at = $t WHERE $kg > fish_records.kg`),
@@ -53,7 +55,7 @@ export class Angler {
   holds(id) {
     const inv = this.inv, out = { gear: new Set(), lures: {} };
     if (!inv) return null;
-    const who = subj('account', id);
+    const who = anglerOf(id);   // (a player, or an AI agent fishing as minus its id)
     inv.welcome(who);
     for (const s of inv.list(who)) {
       if (s.item.startsWith('gear:')) out.gear.add(s.item.slice(5));
@@ -74,8 +76,11 @@ export class Angler {
       const best = SLOTS[slot].filter(g => H.gear.has(g.id)).sort((a, b) => b.tier - a.tier)[0];
       return best ? best.id : STARTER[slot];
     };
+    // (an AI agent with no bait of its own — its welcome kit has none — is lent the starter's for the trip by the dock, as
+    // the starter's rod is: it fishes with what it holds once it holds some)
+    const lures = id < 0 && !Object.values(H.lures).some(n => n > 0) ? { ...STARTER.lures } : H.lures;
     // (and the angler's fishing level: a beginner's line guard, bigger fish for the higher ranks — shared/fishing-gear.js RANKS)
-    return { rod: pick('rod'), reel: pick('reel'), line: pick('line'), hook: pick('hook'), leader: H.gear.has(LEADER.id) && kit.leader !== false, lures: H.lures, boat: { ...(kit.boat || {}) }, skills: { ...(kit.skills || {}) }, level: this.level(id) };
+    return { rod: pick('rod'), reel: pick('reel'), line: pick('line'), hook: pick('hook'), leader: H.gear.has(LEADER.id) && kit.leader !== false, lures, boat: { ...(kit.boat || {}) }, skills: { ...(kit.skills || {}) }, level: this.level(id) };
   }
   /** The kit's numbers for the boat (shared/boat-model.js newBoat): its top speed (engine and seamanship) and the anchor's hold. */
   boatKit(id) { const L = loadout(this.tripKit(id)); return { speed: L.boatSpeed, anchor: L.boat.anchor }; }
@@ -143,6 +148,38 @@ export class Angler {
     }
     fail(400, 'bad_request', 'Buy gear, bait or a boat upgrade');
   }
+  /**
+   * An AI agent buys bait or lures at dock store B (its body there: server/play/fishing-crew.js) with its own money, within
+   * its owner's rules (the economy's agent limits, scope 'buy': above its owner's line they agree first — a LedgerError
+   * approval_required, its id in the detail). 2026-11-20, the product owner: "idk if they can buy bait even though i asked". → { bought,
+   * n (the bait now held), paid (hundredths) }.
+   */
+  buyForAgent(agentId, B, { id, packs = 1 } = {}, approved = false) {
+    const E = this.econ, inv = this.inv, acct = -Number(agentId), who = anglerOf(acct);
+    if (!E || !inv || E.paused?.()) fail(409, 'closed', 'The dock store is closed (the economy is off)');
+    if (!B || !B.tackle || B.gone) fail(409, 'not_here', 'Not at a dock store');
+    const l = LURE_BY_ID[String(id)]; if (!l) fail(404, 'not_found', 'No such bait');
+    const lvl = this.level(acct);
+    if (lvl < l.level) fail(403, 'locked', `${l.name} needs fishing level ${l.level}`);
+    const n = Math.max(1, Math.min(MAX_PACKS, Math.floor(Number(packs) || 1))), cents = Math.round(l.price * n * 100), stamp = `${this.now()}:${this.buys = (this.buys || 0) + 1}`;   // (each purchase its own: two in a millisecond are two)
+    E.parts.agents?.check?.(Number(agentId), 'buy', cents, { approved });   // (its owner's rules: throws when it may not)
+    const w = E.walletFor(who);
+    if (w.status === 'frozen') fail(409, 'frozen', 'Its wallet is frozen');
+    E.dbs.tx(() => {
+      E.ledger.transfer(w.id, E.sink('tackle').id, cents, { kind: 'purchase', actor: `agent:${agentId}`, memo: `${B.name || 'Dock Store'} — ${n} × ${l.name}`, idem: `abait:${agentId}:${l.id}:${stamp}`, ref: `store:${B.idx ?? B.id ?? ''}` });
+      inv.add(who, `lure:${l.id}`, l.pack * n, null, { kind: 'buy', actor: `agent:${agentId}`, memo: B.name || 'The dock store', idem: `abait-in:${agentId}:${l.id}:${stamp}` });
+    });
+    return { bought: `${l.pack * n} × ${l.name}`, n: this.holds(acct)?.lures[l.id] || l.pack * n, paid: cents, lure: l.id };
+  }
+  /** What an angler fishes with, in words for its brain: the rod, and the bait — its own, or the starter's the dock lends
+   *  (an agent with none of its own). */
+  kitWords(id) {
+    const H = this.holds(id), T = this.tripKit(id), rod = GEAR[T.rod]?.name || 'a rod';
+    const own = H ? Object.entries(H.lures).filter(([, n]) => n > 0) : [];
+    const list = o => o.map(([lid, n]) => `${n} ${LURE_BY_ID[lid]?.name || lid}`).join(', ');
+    const lent = id < 0 && !own.length;
+    return `${H?.gear.has(T.rod) ? `my own ${rod}` : `the dock's ${rod} (lent)`}; bait and lures: ${own.length ? `my own — ${list(own)}` : lent ? `none of my own — the dock lends the starter's for each trip (${list(Object.entries(STARTER.lures))}); bait I buy at a dock store is mine` : 'none'}`;
+  }
   /** Chooses what to fish with (anywhere): { rod | reel | line: id } you hold, or { leader: true | false }. */
   use(account, b = {}) {
     const me = account.id, H = this.holds(me), r = this.row(me);
@@ -184,7 +221,7 @@ export class Angler {
   afterTrip(account, result) {
     const run = result?.row ? this.market?.q.run.get(this.w, account.id, result.row) : null;
     if (!run || run.id <= (this.row(account.id).stats.lastRun || 0)) return null;   // (once per trip: its record's id only grows)
-    const detail = parse(run.detail), row = run.id, inv = this.inv, who = subj('account', account.id), used = detail.used || {};
+    const detail = parse(run.detail), row = run.id, inv = this.inv, who = anglerOf(account.id), used = detail.used || {};
     if (inv && row) for (const [lure, n] of Object.entries(used)) {
       if (!LURE_BY_ID[lure] || !(n > 0)) continue;
       const stacks = inv.list(who).filter(s => s.item === `lure:${lure}`);

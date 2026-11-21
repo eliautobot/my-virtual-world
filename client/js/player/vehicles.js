@@ -11,6 +11,7 @@ import {bodyOffset,packPose,unpackPose} from '/shared/vehicle-world.js';
 import {PF_DRIVING} from '/shared/playerproto.js';
 import {getLocalSim,preloadDriving,worldChanged,drivePhysicsMode} from './drive-physics.js';
 import {LOCAL_STEP} from '/shared/vehicle-local.js';
+import {F_HIDDEN} from '/shared/proto.js';
 import {ROAD_TOP} from '../render/island-roads.js';
 import {TyreSmoke} from '../render/tyre-smoke.js';
 /** Tyre marks on the island's roads lie on the drawn surface, like the cars (render/traffic.js), not ROAD_TOP under it
@@ -105,8 +106,9 @@ export class VehicleClient {
  syncObstacles(sim){const me=sim.cur,list=[];
   for(const r of this.byId.values()){const c=r.draw;if(c.id===this.id||Math.abs(c.x-me.x)>60||Math.abs(c.z-me.z)>60)continue;const rig=this.rigs[c.k];if(!rig)continue;
    const q=c.rotation||yawQ(c.yaw),o=bodyOffset(q,rig.height/2+.18);list.push({key:'c'+c.id,kind:'car',x:c.x+o.x,y:(c.y||0)+o.y,z:c.z+o.z,rotation:q,hl:rig.halfLength,hh:rig.height/2,hw:rig.halfWidth});}
-  const A=this.app.agents;if(A){if(!this.people||sim.steps%6===0){this.people=[];for(let i=0;i<A.n;i++)if(A.ctx[i]===-1&&Math.abs(A.rx[i]-me.x)<25&&Math.abs(A.rz[i]-me.z)<25)this.people.push(i);}
-   for(const i of this.people)list.push({key:'a'+i,kind:'person',x:A.rx[i],y:A.ry[i],z:A.rz[i]});}
+  const A=this.app.agents;if(A){if(!this.people||sim.steps%6===0){this.people=[];for(let i=0;i<A.n;i++)if(A.ctx[i]===-1&&!(A.fl[i]&F_HIDDEN)&&Math.abs(A.rx[i]-me.x)<25&&Math.abs(A.rz[i]-me.z)<25)this.people.push(i);}
+   // (people hidden this moment — riding in a car, a companion in yours — are no obstacle: 2026-11-16, a rider was hit, again and again)
+   for(const i of this.people)if(!(A.fl[i]&F_HIDDEN))list.push({key:'a'+i,kind:'person',x:A.rx[i],y:A.ry[i],z:A.rz[i]});}
   for(const r of this.app.remote?.byPid?.values()||[]){const e=r.extra;if(r.you||r.ctx!==-1||!e||(e.flags&PF_DRIVING)||Math.abs(e.x-me.x)>25||Math.abs(e.z-me.z)>25)continue;list.push({key:'p'+r.pid,kind:'person',x:e.x,y:e.y,z:e.z});}
   sim.setObstacles(list);}
  reset(){this.stopSim();this.clockQ=[];this.streamOffset=null;this.ready=false;this.version=-1;this.presentationTime=null;this.ownDelay.reset();this.otherDelay.reset();this.fullAt=this.fullTime=null;this.gaps=[];this.neutral();if(this.pending){clearTimeout(this.pending.timer);this.pending.reject(new Error('Vehicle connection changed; waiting for the server'));this.pending=null;}for(const id of this.byId.keys())this.marks.removeVehicle(id);this.byId.clear();}

@@ -161,7 +161,11 @@ test('chatting: the owner\'s requests become plans and memories, shown as steps;
   await chat(owner, a, sess.id, 'And a cake, if you can.');
   // the chat window: the conversation goes as turns (the marker and what it kept never in it), the agent's life in the system message
   const req = [...seen].reverse().find(x => x.body?.messages?.some(m => m.role === 'user' && /And a cake/.test(m.content)))?.body;
-  assert.deepEqual(req.messages.slice(1).map(m => `${m.role}:${m.content}`), ['user:Please buy flowers for the party.', 'assistant:Hello there!', 'user:And a cake, if you can.']);
+  // (its senses come with the newest message only, before its words: never kept in the conversation — server/senses/)
+  const note = /^\[My Virtual World — [\s\S]*?\]\n\n/;
+  assert.match(req.messages.at(-1).content, note, 'what it can tell right now, with the newest message');
+  assert.deepEqual(req.messages.slice(1).map(m => `${m.role}:${m.content.replace(note, '')}`), ['user:Please buy flowers for the party.', 'assistant:Hello there!', 'user:And a cake, if you can.']);
+  assert.doesNotMatch(req.messages[1].content, note, 'never kept with an earlier one');
   assert.match(req.messages[0].content, /works for «Owner»/); assert.match(req.messages[0].content, /YOUR LIFE IN THE CITY:\nWHO I AM/);
   assert.equal(req.stream, true, 'streamed');
   assert.equal((await thoughts(a)).filter(t => t.kind === 'chat' && t.status === 'ok').length, 2);

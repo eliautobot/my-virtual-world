@@ -21,6 +21,7 @@
 import { S, bus } from '../core/state.js';
 import { auth } from '../core/auth.js';
 import { h, esc } from '../core/util.js';
+import { getJSON, post } from '../core/net.js';
 import { create, tiles, sideAnswer } from './chat-window.js';
 
 const MAX = 4;                         // windows open at once
@@ -35,12 +36,14 @@ let restoredFor = null, restoring = false, saveT = null, saved = null, paintQ = 
 
 export function init(a) {
   app = a;
-  app.chat = { open, openPerson, openPhone, close: closeAll, isOpen: () => wins.some(w => !w.min), windows: () => wins.length };
+  app.chat = { open, openPerson, openPhone, current, close: closeAll, isOpen: () => wins.some(w => !w.min), windows: () => wins.length };
   bus.on('openagent', id => open(id));
   bus.on('msg:chat', m => {
     if (m.side) { const w = wins.find(x => x.agentId === m.agent && x.sessionId() === m.session); sideAnswer(m, w ? w.ctx() : null); return; }
     for (const w of [...wins]) w.frame(m);
   });
+  // (a line the server put in a chat by itself — an outing's divider —: in the window that shows that chat)
+  bus.on('msg:chat_line', m => { for (const w of wins) w.line(m); });
   bus.on('agentlist', () => { for (const w of wins) w.agents(); restore(); });
   bus.on('presence', () => { for (const w of wins) w.presence(); });
   // (signed out, or another account: its windows close — and come back when it signs in again)
@@ -115,6 +118,27 @@ export async function open(id = null, { session = null, onClose = null, newWindo
   if (!w) { app.toast?.(`${MAX} chat windows are open: close one to open another.`, '', 4200, '💬'); return null; }
   await w.show(id, { session, onClose });
   return w;
+}
+/**
+ * The chat agent `id` is talked with now — one conversation, the one rule every way of talking with it follows (the
+ * companions' voice, ui/companion-voice.js; E face to face and Talk, ui/talk-bar.js, through open; a window opening the
+ * agent): the chat a window shows for it (the one used last — a New chat there, not yet written in, is made now when
+ * `make`); else its current one, the server's (the one last written in: server/chat/sessions.js current); else, with
+ * `make`, a first chat for an agent that has none. Nothing else ever starts a chat: only the person's New chat. → its id,
+ * or null.
+ */
+export async function current(id, { make = false } = {}) {
+  const w = showing(id);
+  if (w) {
+    const sid = w.sessionId();
+    if (sid !== null && sid !== undefined) return sid;
+    if (make) { const made = await w.ensure(); if (made) return made; }
+  }
+  let r = null;
+  try { r = await getJSON(`/api/chat/recent?agent=${id}`); } catch { return null; }
+  if (r?.current) return r.current;
+  if (!make || (r?.sessions || []).length) return r?.sessions?.[0]?.id ?? null;
+  try { return (await post('/api/chat-sessions/create', { agent: id, label: 'New chat' }))?.session?.id ?? null; } catch { return null; }
 }
 /** A new window (null: four are open). o: how it comes back with the page. */
 function make(o = {}) {

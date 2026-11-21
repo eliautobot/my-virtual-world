@@ -27,8 +27,8 @@ const freeOn = dir => { try { const s = fs.statfsSync(dir); return s.bavail * s.
 export class AssetCompressor {
   /** dir: the folder served (client/assets/chars); cache: where the compressed copies are kept; log: { info, error };
    *  minFree: the space the cache's disk keeps (bytes); label: what the files are, for the log. */
-  constructor({ dir, cache, log = console, minFree = 1024 ** 3, label = 'characters\'' }) {
-    this.dir = dir; this.cache = cache; this.log = log; this.minFree = minFree; this.label = label;
+  constructor({ dir, cache, log = console, minFree = 1024 ** 3, label = 'characters\'', match = PACK }) {
+    this.dir = dir; this.cache = cache; this.log = log; this.minFree = minFree; this.label = label; this.match = match;
     this.ready = new Map();   // file → { br, gz } paths of finished copies (each may be missing)
     this.version = '';
     fs.mkdirSync(cache, { recursive: true });
@@ -49,7 +49,7 @@ export class AssetCompressor {
       let st; try { st = fs.statSync(file); } catch { continue; }
       if (!st.isFile()) continue;
       h.update(`${name}\0${st.size}\0${Math.round(st.mtimeMs)}\n`);
-      if (!PACK.test(name)) continue;
+      if (!this.match.test(name)) continue;
       const key = crypto.createHash('sha1').update(`${name}\0${st.size}\0${Math.round(st.mtimeMs)}`).digest('hex').slice(0, 20);
       const out = { br: path.join(this.cache, key + '.br'), gz: path.join(this.cache, key + '.gz') };
       keep.add(key + '.br'); keep.add(key + '.gz');

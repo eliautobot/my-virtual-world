@@ -14,9 +14,15 @@
 // board: { w, h, x0, x1, y0, y1, z | cx, cz, ry } (its LED panel, item frame; turned ry about its middle), update(s, dt), event(ev), sfx(ev), buzz(ev),
 // part(part, M, s), pointer(ptr, camera) → { px, py } | null, hud(s) → { info, meter, hint, balance? }, paint?(ctx, w, h, s) (draws
 // the LED panel itself, every frame, instead of its lines), reset(), dispose() }.
+// A two-sided table (air hockey, foosball, pool: the game's `cpu`) is played against the computer — or against an AI agent
+// of the player's at the other end (2026-11-17, the product owner: "I want to play with my AI agents"; server/play/
+// versus.js): opening it asks a companion with them to play (its Free Will decides, or it joins in), the game waits while it
+// decides and walks over (or the player plays the computer at once), and the run is laid out with it — its name and face
+// on the screen (play.foe: shared/versus.js foeOf; the views say it for "the computer"), its hand in the sim — and its
+// result on the results card.
 import * as THREE from 'three';
 import { auth } from '../core/auth.js';
-import { holdView, releaseView } from '../core/state.js';
+import { holdView, releaseView, bus } from '../core/state.js';
 import { getJSON, post } from '../core/net.js';
 import { esc } from '../core/util.js';
 import { CATALOG } from '/shared/catalog.js';
@@ -24,8 +30,10 @@ import { machineGame } from '/shared/arcade/catalog.js';
 import { SIMS } from '/shared/arcade/sims.js';
 import { InputLog, inputValue, inputBits, TICK_HZ } from '/shared/arcade/core.js';
 import { fmtVc } from '/shared/play.js';
+import { foeOf, waitState, WAIT_MAX_MS } from '/shared/versus.js';
 import { ArcadeInput } from './arcade-pad.js';
 import { sfx, buzz, unlockSound } from './arcade-sound.js';
+import { moments } from './moments.js';
 import { text as pixelText } from '/arcade/fx.js';
 
 const VIEWS = {
@@ -86,6 +94,7 @@ class Play {
     this.M = new THREE.Matrix4().makeRotationY(e.yaw).setPosition(e.x, e.y, e.z);
     this.input = new ArcadeInput({ onPress: n => this.press(n) });
     this.floats = []; this.boardKey = '';
+    this.two = !!g.cpu; this.foe = foeOf(null); this.vsView = null;   // (a two-sided table: who is at the other end)
   }
   /** A point of the machine's own frame (shared/arcade/machines.js) in the world. */
   world(p) { return new THREE.Vector3(p[0], p[1], p[2]).applyMatrix4(this.M); }
@@ -118,7 +127,7 @@ class Play {
     const def = CATALOG[this.e.t];
     this.root = html(`<div class="mp-root" role="dialog" aria-label="${esc(this.g.title)}">
       <div class="mp-touch"></div>
-      <div class="mp-top"><span class="mp-title">${esc(this.g.icon || '🎮')} ${esc(this.g.title)}</span><b class="mp-score">0</b><span class="mp-info"></span>
+      <div class="mp-top"><span class="mp-title">${esc(this.g.icon || '🎮')} ${esc(this.g.title)}</span><span class="mp-foe hidden"></span><b class="mp-score">0</b><span class="mp-info"></span>
         <button type="button" class="mp-btn mp-pause" title="Pause (Esc)" aria-label="Pause">⏸</button><button type="button" class="mp-btn mp-leave" title="Leave" aria-label="Leave ${esc(def?.name || '')}">✕</button></div>
       <div class="mp-meter hidden"><i></i><span>POWER</span></div>
       <div class="mp-bal hidden"><i></i><b></b><span>BALANCE</span></div>
@@ -126,7 +135,7 @@ class Play {
     </div>`);
     document.body.appendChild(this.root);
     document.body.classList.add('mp-playing');
-    this.E = { bal: this.root.querySelector('.mp-bal'), balDot: this.root.querySelector('.mp-bal b'), score: this.root.querySelector('.mp-score'), info: this.root.querySelector('.mp-info'), meter: this.root.querySelector('.mp-meter'), bar: this.root.querySelector('.mp-meter i'), hint: this.root.querySelector('.mp-hint'), floats: this.root.querySelector('.mp-floats'), menu: this.root.querySelector('.mp-menu') };
+    this.E = { foe: this.root.querySelector('.mp-foe'), bal: this.root.querySelector('.mp-bal'), balDot: this.root.querySelector('.mp-bal b'), score: this.root.querySelector('.mp-score'), info: this.root.querySelector('.mp-info'), meter: this.root.querySelector('.mp-meter'), bar: this.root.querySelector('.mp-meter i'), hint: this.root.querySelector('.mp-hint'), floats: this.root.querySelector('.mp-floats'), menu: this.root.querySelector('.mp-menu') };
     this.root.querySelector('.mp-leave').addEventListener('click', () => this.close());
     this.root.querySelector('.mp-pause').addEventListener('click', () => (this.state === 'playing' ? this.pause() : null));
     this.root.addEventListener('pointerdown', () => unlockSound(), { capture: true, passive: true });
@@ -189,22 +198,63 @@ class Play {
     });
     B.tex.needsUpdate = true;
   }
+  /** The table for two this game is played at (POST /api/versus/table: on, its companions are asked; off, let go). */
+  versus(on) {
+    if (!this.two || !auth.can('play.use') || !Number.isInteger(this.e.b) || !Number.isInteger(this.e.id)) return Promise.resolve(null);
+    return post('/api/versus/table', { b: this.e.b, f: this.e.f ?? 0, id: this.e.id, on }).catch(() => null);
+  }
+  /** Before a run of a two-sided game: a companion deciding whether to play, or walking to the other end — the game waits
+   *  (a card says who; "Play the computer" goes ahead without it), at most WAIT_MAX_MS. → the one ready there, or null. */
+  async waitForFoe() {
+    if (!this.two || !auth.can('play.use')) return null;
+    const t0 = performance.now();
+    this.vsView = this.vsOpen ? await getJSON('/api/versus').catch(() => null) : await this.versus(true);
+    this.vsOpen = true; this.vsSkip = false;
+    let w = waitState(this.vsView, 0);
+    while (w.wait && !this.vsSkip && cur === this) {
+      const card = this.E.menu.querySelector('.mp-vs-wait p');
+      if (card) card.textContent = w.text;
+      else this.menu(html(`<div class="mp-card mp-vs-wait"><b>${esc(this.g.title)}</b><p>${esc(w.text)}</p><button type="button" class="sel" data-act="cpu">▶ Play the computer</button><button type="button" data-act="leave">✕ Leave</button></div>`));
+      await new Promise(r => { this.vsWake = r; setTimeout(r, 700); });
+      if (this.vsSkip || cur !== this) break;
+      if (!this.vsFresh) this.vsView = await getJSON('/api/versus').catch(() => this.vsView);
+      this.vsFresh = false;
+      w = waitState(this.vsView, performance.now() - t0, WAIT_MAX_MS);
+    }
+    this.menu(null);
+    if (w.text && !w.wait && !w.foe) this.float(w.text, [0, 1.3, 0], { color: '#c4b5fd', size: 18, life: 3 });
+    return this.vsSkip ? null : w.foe;
+  }
+  /** A word from the server about the table (msg:versus): how it stands now, at once (the waiting card wakes). */
+  onVersus(m) {
+    if (!this.two || !m?.view) return;
+    this.vsView = m.view; this.vsFresh = true; this.vsWake?.();
+  }
   async start() {
     this.state = 'loading'; this.menu(null);
     let st = null, practice = !auth.can('play.use');
+    if (!practice && this.two) await this.waitForFoe();
+    if (cur !== this) return;
     if (!practice) {
+      const where = this.two && Number.isInteger(this.e.b) ? { b: this.e.b, f: this.e.f ?? 0, id: this.e.id } : undefined;
       for (let k = 0; k < 2 && !st; k++) {
-        try { st = await post('/api/play/start', { module: 'arcade', course: this.g.id }); }
+        try { st = await post('/api/play/start', { module: 'arcade', course: this.g.id, ...(where && !this.vsSkip ? { where } : {}) }); }
         catch (err) { if (err.status === 429 && k === 0) await new Promise(r => setTimeout(r, 1600)); else { practice = true; break; } }
       }
       if (!st) practice = true;
     }
     if (cur !== this) return;
     this.run = st ? { id: st.run, best: st.best?.score || 0 } : null;
+    (this.moments ||= moments()).start(this.run?.id); this.sayAt = 0;   // (where the game stands, for the AI agents with you: ./moments.js)
     this.practice = practice;
     this.best = this.run?.best || 0;
     const seed = st?.data?.seed ?? ((Math.random() * 4294967296) >>> 0);
-    this.s = this.sim.init(seed >>> 0); this.log = new InputLog(); this.acc = 0; this.last = performance.now();
+    // (the other player: an AI agent at the other end — the run laid out with its hand, its name on the screen — or the computer)
+    this.foe = foeOf(st?.data?.vs || null);
+    this.E.foe.classList.toggle('hidden', !this.foe.agent);
+    this.E.foe.textContent = this.foe.agent ? `vs ${this.foe.emoji} ${this.foe.name}` : '';
+    this.E.foe.title = this.foe.agent ? `${this.foe.name} is playing you from the other end (arcade level ${st.data.vs.level || 1})` : '';
+    this.s = this.sim.init(seed >>> 0, st?.data?.vs || null); this.log = new InputLog(); this.acc = 0; this.last = performance.now();
     this.view.reset?.(this.s);
     this.state = 'playing';
     sfx('coin');
@@ -235,6 +285,10 @@ class Play {
       }
       if (n >= 6) this.acc = 0;
       if (z) buzz(z);
+      if (this.run && this.state === 'playing' && now - (this.sayAt || 0) > 1000) {   // (looked at once a second; sent every few: ./moments.js)
+        this.sayAt = now;
+        this.moments?.say({ score: this.sim.score(this.s), lives: Number.isFinite(this.s.lives) ? this.s.lives : null, detail: this.sim.detail ? this.sim.detail(this.s) : null });
+      }
     }
     if (!this.paused) { this.view.update?.(this.s, dt, now); this.sparks.update(dt); }
     // a camera that moves with the game (a rider on the bull): the held pose follows it
@@ -280,14 +334,14 @@ class Play {
   press(n) {
     unlockSound();
     if (this.state === 'playing') { if (n === 'START' || n === 'BACK') this.pause(); return; }
-    if (this.state === 'paused' || this.state === 'results') {
+    if (this.state === 'paused' || this.state === 'results' || this.state === 'loading') {   // (loading: the card waiting for the one at the other end)
       const btns = [...this.E.menu.querySelectorAll('[data-act]')];
       if (!btns.length) return;
       let i = Math.max(0, btns.findIndex(b => b.classList.contains('sel')));
       if (n === 'U' || n === 'L') i = Math.max(0, i - 1);
       else if (n === 'D' || n === 'R') i = Math.min(btns.length - 1, i + 1);
       else if (n === 'A' || n === 'START') { this.act(btns[i].dataset.act); return; }
-      else if (n === 'B' || n === 'BACK') { this.act(this.state === 'paused' ? 'resume' : 'leave'); return; }
+      else if (n === 'B' || n === 'BACK') { this.act(this.state === 'paused' ? 'resume' : this.state === 'loading' ? 'cpu' : 'leave'); return; }
       btns.forEach((b, k) => b.classList.toggle('sel', k === i)); sfx('select');
     }
   }
@@ -300,6 +354,7 @@ class Play {
     if (a === 'resume') this.resume();
     else if (a === 'again' || a === 'restart') { this.abandon(); this.start(); }
     else if (a === 'leave') this.close();
+    else if (a === 'cpu') { this.vsSkip = true; this.vsWake?.(); }   // (play the computer now: don't wait for a companion)
   }
   pause() {
     if (this.state !== 'playing') return;
@@ -310,7 +365,7 @@ class Play {
   async finish() {
     this.state = 'over';
     const run = this.run, score = this.sim.score(this.s);
-    this.run = null;
+    this.run = null; this.moments?.stop();
     const pend = run ? post('/api/play/finish', { run: run.id, report: { log: this.log.encode(), score, ticks: this.log.ticks } }).catch(err => ({ ok: false, why: err.message })) : Promise.resolve(null);
     await new Promise(r => setTimeout(r, 1500));   // (the last ball drops, the buzzer sounds)
     const res = await pend;
@@ -331,16 +386,19 @@ class Play {
       ${res?.ok ? `<div class="mp-stars">${[0, 1, 2].map(k => `<span class="${k < stars ? 'on' : ''}" style="animation-delay:${k * 0.2}s">★</span>`).join('')}</div>` : ''}
       ${tags.length ? `<div class="mp-tags">${tags.join('')}</div>` : ''}${why ? `<div class="mp-why">${esc(why)}</div>` : ''}
       ${res?.badges?.length ? `<div class="mp-badges">${res.badges.map(b => `<span title="${esc(b.desc)}">${b.icon} ${esc(b.label)}</span>`).join('')}</div>` : ''}
+      ${res?.vs ? `<div class="mp-vs"><span class="mp-vs-who">${esc(res.vs.emoji)} ${esc(res.vs.name)}</span><q>${esc(res.vs.line)}</q><small>${fmt(res.vs.score)} pts for ${esc(res.vs.name)} · +${res.vs.xp} XP${res.vs.levelUp ? ` · arcade level ${res.vs.level}!` : ''}${res.vs.badges?.length ? ` · ${res.vs.badges.map(b => `${b.icon} ${esc(b.label)}`).join(', ')}` : ''}</small></div>` : ''}
       <ol class="mp-board">${board.length ? board.map((r, i) => `<li class="${r.id === me ? 'me' : ''}"><i>${i + 1}</i><span>${esc(r.name || 'Player')}</span><b>${fmt(r.score)}</b></li>`).join('') : '<li class="none">No scores yet: be the first</li>'}</ol>
       <div class="mp-btns"><button type="button" class="sel" data-act="again">▶ Play again</button><button type="button" data-act="leave">✕ Leave</button></div></div>`));
     if (res?.ok && res.newBest) sfx('fanfare');
   }
-  abandon() { if (this.run) { post('/api/play/abandon', { run: this.run.id }).catch(() => {}); this.run = null; } }
+  abandon() { if (this.run) { post('/api/play/abandon', { run: this.run.id }).catch(() => {}); this.run = null; } this.moments?.stop(); }
   close() {
     if (cur !== this) return;
     cur = null;
     this.abandon();
     clearInterval(this.holdT); this.hold(false);
+    this.vsSkip = true; this.vsWake?.();
+    if (this.vsOpen) this.versus(false);   // (the table let go: the one at the other end comes back to the player's side)
     this.input.detach();
     document.removeEventListener('visibilitychange', this.onVis);
     removeEventListener('resize', this.onResize);
@@ -373,6 +431,10 @@ export function playMachine(e, o = {}) {
 
 export function init(a) {
   app = a;
+  bus.on('msg:versus', m => {
+    cur?.onVersus(m);
+    if (m?.text) app.toast?.(m.text, m.state === 'ready' ? 'good' : '', 3800);   // (on its owner's page wherever they are)
+  });
   app.machinePlay = {
     active: false, play: playMachine, playsInWorld,
     get session() { return cur; },

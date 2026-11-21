@@ -20,7 +20,7 @@ import { auth } from '../core/auth.js';
 import { getJSON, post } from '../core/net.js';
 import { esc } from '../core/util.js';
 import { CATALOG } from '/shared/catalog.js';
-import { GAMES, gameOf, machineGame } from '/shared/arcade/catalog.js';
+import { gameOf, machineGame, LIBRARY, cabinetGame as cabinetGameAt } from '/shared/arcade/catalog.js';
 import { fmtVc } from '/shared/play.js';
 import { ARCADE_SCREEN } from '../render/furniture.js';
 import { RACING } from '/shared/arcade/machines.js';
@@ -28,11 +28,12 @@ import { toQuad } from '../ui/pc-onscreen.js';
 import { ArcadeInput } from './arcade-pad.js';
 import { inputValue } from '/shared/arcade/core.js';
 import { sfx, buzz, unlockSound, engine } from './arcade-sound.js';
+import { moments } from './moments.js';
 import { text as pixelText } from '/arcade/fx.js';
 
 const COVER_W = 240, COVER_H = 320, COVER_FPS = 8, COVER_FPS_PHONE = 4, COVER_PER_FRAME = 2, NEAR = 8, TOP_TTL = 120e3, MARQ_W = 384, MARQ_H = 128;
 const _fm = new THREE.Matrix4();
-const BUILTIN = GAMES.filter(g => g.kind === 'builtin' && g.cabinet);   // (the cabinets' library; a machine's own game is played at it)
+const BUILTIN = LIBRARY;   // (the cabinets' library; a machine's own game is played at it)
 /** Whether a piece of type t is played: a cabinet (its library), a machine with a screen (its game on it), or a machine
  *  played in the world (./machine-play.js). */
 export const playable = t => !!(CATALOG[t]?.arcade || machineGame(t));
@@ -44,9 +45,9 @@ const mods = new Map();
 const gameMod = id => { let p = mods.get(id); if (!p) { p = import(`/arcade/games/${id}.js`); mods.set(id, p); } return p; };
 const isFull = () => matchMedia('(pointer: coarse)').matches || innerWidth < 760;
 const fmt = n => Math.max(0, Math.floor(n || 0)).toLocaleString('en-US');
-const hashId = s => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
-/** The game a cabinet shows and offers first: its own choice when it has one, else one of the library by its place. */
-export const cabinetGame = e => gameOf(e.it?.g)?.id || BUILTIN[hashId(`${e.b}.${e.f}.${e.id}`) % BUILTIN.length].id;
+/** The game a cabinet shows and offers first: its own choice when it has one, else one of the library by its place
+ *  (shared/arcade/catalog.js: the same game an AI agent plays there). */
+export const cabinetGame = e => cabinetGameAt(e.b, e.f, e.id, e.it?.g);
 /** The cabinet's screen as a world matrix: a 1 × 1 plane at the glass (scaled to it), a hair in front of it. A machine
  *  with a screen of its own: that screen. */
 function screenMatrix(e, out = new THREE.Matrix4()) {
@@ -373,6 +374,7 @@ class Session {
     }
     if (cur !== this || this.game !== g) return;
     this.run = st ? { id: st.run, best: st.best?.score || 0 } : null;
+    (this.moments ||= moments()).start(this.run?.id);   // (where the game stands, for the AI agents with you: ./moments.js)
     const seed = st?.data?.seed ?? ((Math.random() * 4294967296) >>> 0);
     this.practice = practice;
     if (!this.frame || this.frameGame !== g.id) {
@@ -403,6 +405,7 @@ class Session {
     else if (m.t === 'sfx') { for (const [name, p] of (m.l || []).slice(0, 12)) sfx(name, p); }
     else if (m.t === 'buzz') buzz(Number(m.ms) || 0);
     else if (m.t === 'engine') engine(Number(m.v), { rpm: Number(m.rpm), boost: !!m.boost, skid: Number(m.skid) });
+    else if (m.t === 'live') { if (this.state === 'playing') this.moments?.say({ score: Number(m.score) || 0, lives: m.lives ?? null, detail: m.detail || null }); }
     else if (m.t === 'over') this.over(m);
     else if (m.t === 'error') { this.menu(html(`<div class="arc-menu arc-load"><b>Out of order</b><small>${esc(m.msg || 'The game did not start')}</small><button type="button" data-nav="${this.machine ? 'leave' : 'games'}" class="sel">${this.machine ? '✕ Leave' : '☰ Games'}</button></div>`)); this.state = 'results'; }
   }
@@ -424,7 +427,7 @@ class Session {
     if (this.state !== 'playing') return;
     this.state = 'over';
     const g = this.game, run = this.run;
-    this.run = null;
+    this.run = null; this.moments?.stop();
     let res = null;
     const pend = run ? post('/api/play/finish', { run: run.id, report: { log: String(m.log || ''), score: Number(m.score) || 0, ticks: Number(m.ticks) || 0 } }).catch(err => ({ ok: false, why: err.message })) : Promise.resolve(null);
     await new Promise(r => setTimeout(r, 1700));   // (the game's own GAME OVER first)
@@ -457,6 +460,7 @@ class Session {
   }
   abandon() {
     if (this.run) { post('/api/play/abandon', { run: this.run.id }).catch(() => {}); this.run = null; }
+    this.moments?.stop();
   }
   endFrame() {
     engine(-1);
@@ -515,6 +519,8 @@ export function init(a) {
   app.arcade = { playAt, playing: false, screens, cabinetGame, playable, get session() { return cur; } };
   bus.on('frame', () => screens.frame());
   bus.on('focus', closePop);
+  // its owner's page: an AI agent's game played beside them, as the arcade's own toast (server/play/arcade-crew.js)
+  bus.on('msg:crew_arcade', m => app.toast?.(`${m.icon || '🕹️'} ${m.text}${m.stars > 0 ? ` ${'★'.repeat(m.stars)}${'☆'.repeat(3 - m.stars)}` : ''}${m.place && m.place <= 3 ? ` · #${m.place} on the board` : ''}`, 'good', 4200));
   app.hooks = app.hooks || { key: [], click: [], hover: [] };
   app.hooks.click.push(ev => {
     if (S.mode !== 'explore' || S.focus.b < 0 || cur) { closePop(); return false; }

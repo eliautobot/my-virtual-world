@@ -19,6 +19,9 @@ import { buildGrid, walkable, nearestFree, cellCenter, nearWall, wallBetween, fu
 import { STEP, GRAVITY, JUMP_V, topUnder, tallUnder, PARK_EDGE, parkEdgeTop } from '/shared/standable.js';
 import { bridgePiers } from '/shared/island-roads.js';
 import { airPhase, landPhase, hipLift, LAND_T } from './jump-pose.js';
+import { servedNow } from './meals.js';
+import { eatClip } from '../render/char-props.js';
+import { getJSON } from '../core/net.js';
 import { elevatorStops } from '/shared/building.js';
 import { interiorBounds } from '/shared/edit.js';
 import { WALL_H } from '../render/interiors.js';
@@ -57,6 +60,10 @@ function resetDriveView() { DV.yaw = 0; DV.pitch = null; DV.zoom = 1; DV.dirty =
 
 const R = 0.26, WALK = 1.55, RUN = RUN_SPEED, SUB = 0.12, NONE = [];   // (the server holds players to RUN_SPEED)
 const MOVE_CODES = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight']);
+// the seats a meal is eaten at (a table's chair, a booth, a bar stool): sitting there in a place that serves food, the
+// player may order (🧾 Order: the place's menu, ui/economy.js) and what they buy is served in front of them (./meals.js)
+const MEAL_SEATS = new Set(['sit_eat', 'sit_high', 'sit_drink'].map(n => CLIP[n]).filter(c => c !== undefined));
+const FOOD_PLACES = new Set(['restaurant', 'cafe', 'lounge_bar', 'club']);
 const EAT_CODES = new Set([...MOVE_CODES, 'PageUp', 'PageDown', 'BracketLeft', 'BracketRight', 'KeyF', 'KeyT', 'KeyG', 'KeyQ']);
 const _l = {}, _eye = {};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -722,6 +729,15 @@ function pose(t) {
     const st = CLIP_STRIDE[clip];
     ph = st > 0 ? P.dist / st : t / Math.max(0.3, CLIP_DUR[clip]);
   }
+  // (its meal at its seat — ./meals.js: the plate in front of it, the dish eaten its way; a drink on the table beside it)
+  const sv = P.state === 'use' && MEAL_SEATS.has(P.useClip) ? servedNow(app.remote?.me?.pid) : null;
+  let food = 0, side = 0, item = 0;
+  const raw = clip;
+  if (sv) {
+    food = sv.item; side = sv.side;
+    const e = sv.sip ? clip : eatClip(clip, sv.item);
+    if (e !== clip) { clip = e; item = sv.item; ph = t / Math.max(0.3, CLIP_DUR[clip]); }
+  }
   ph -= Math.floor(ph);
   if (clip !== P.clip) { P.pclip = P.clip; P.pph = P.ph; P.fadeT = t; P.clip = clip; }
   P.ph = ph;
@@ -729,6 +745,7 @@ function pose(t) {
   const X = P.extra;
   X.x = P.x; X.y = P.y - lift; X.z = P.z; X.yaw = P.yaw; X.clip = clip; X.ph = ph; X.pclip = P.pclip; X.pph = P.pph; X.w = w; X.prop = prop;
   X.flags = P.ctx >= 0 ? 4 : 0;
+  X.food = food; X.food2 = side; X.raw = raw; X.item = item;
 }
 
 // ------------------------------------------------------------------ interaction
@@ -817,7 +834,7 @@ function findTarget() {
   if (best) {
     const K = '<kbd>E</kbd> ';
     if (best.k === 'ext') html = K + best.html;
-    else if (best.k === 'stand') html = K + 'Stand up';
+    else if (best.k === 'stand') html = K + 'Stand up' + (orderPlace() ? ' · <kbd>O</kbd> 🧾 Order' : '');
     else if (best.k === 'talk') { const p = S.people[best.i]; html = K + `Talk to ${esc(p ? p.n : 'them')}${p && p.v ? ` <span data-avatar>${esc(p.e || '')}</span>` : ''}`; }
     else if (best.k === 'player') html = K + `Talk to ${esc(best.name || 'them')}`;
     else if (best.k === 'elev') html = K + 'Take the elevator';
@@ -828,6 +845,24 @@ function findTarget() {
     }
   }
   if (E.prompt._h !== html) { E.prompt._h = html; E.prompt.innerHTML = html; E.prompt.classList.toggle('hidden', !html); }
+  E.order?.classList.toggle('hidden', !orderPlace());
+}
+/** Where the player may order now — sitting at a table (or a bar stool) in a place that serves food: { b, f }, or null. */
+function orderPlace() {
+  if (!P.active || P.state !== 'use' || P.ctx < 0 || !MEAL_SEATS.has(P.useClip) || !app.econ) return null;
+  const B = bld(P.ctx >> 6), f = P.ctx & 63, L = B && S.world?.levels?.[B.lv?.[f]];
+  return L && FOOD_PLACES.has(L.venue) ? { b: B.idx, f } : null;
+}
+/** 🧾 Order: the place's menu (ui/economy.js) — what is bought there is served in front of the player (./meals.js). */
+async function order() {
+  const at = orderPlace();
+  if (!at) return;
+  cam.unlockMouse();   // (the menu is clicked: the mouse is the person's again)
+  let j = null;
+  try { j = await getJSON(`/api/economy/place?b=${at.b}&f=${at.f}`); } catch (e) { app.toast(e.message || 'The menu could not be opened', 'bad'); return; }
+  const biz = j?.business;
+  if (!biz?.menu?.length) { app.toast('Nothing to order here', '', 2400); return; }
+  app.econ.openMenu(biz);
 }
 function interact() {
   if (!P.active || busy || app.custOpen) return;
@@ -876,7 +911,7 @@ function decorNear(x, z) {
 }
 function useSlot(t) {
   const sl = t.sl, now = nowS();
-  P.slot = { x: P.x, z: P.z, ax: t.ax, az: t.az, outY: P.ctx < 0 ? P.y : null };   // (outY: where it stood up from, outdoors)
+  P.slot = { x: P.x, z: P.z, ax: t.ax, az: t.az, outY: P.ctx < 0 ? P.y : null, use: sl.use || '' };   // (outY: where it stood up from, outdoors)
   P.state = 'use'; P.emote = null; P.vx = P.vz = 0;
   P.useClip = CLIP[sl.anim] ?? CLIP.idle; P.useProp = PROP[sl.prop || 'none'] || 0;
   P.yaw = P.tyaw = t.e.yaw + sl.yaw;
@@ -957,6 +992,7 @@ function onKey(e) {
     return true;
   }
   if (c === 'KeyE') { if (!e.repeat) interact(); return true; }
+  if (c === 'KeyO' && orderPlace()) { if (!e.repeat) order(); return true; }
   if (c === 'Space') { if (!app.driving?.id && !e.repeat) jump(); return true; }
   if (app.driving?.id) {
     if (c === 'KeyC') { if (!e.repeat) { resetDriveView(); app.toast('Camera: the usual view behind the car', '', 1500); } return true; }   // (the driving camera)
@@ -972,11 +1008,13 @@ function buildHud(root) {
   const keysHtml = 'Mouse look · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> run · <kbd>E</kbd> interact · <kbd>Space</kbd> jump · <kbd>Z</kbd> wave · <kbd>X</kbd> dance · <kbd>C</kbd> clap · <kbd>Esc</kbd> frees the cursor, again leaves';
   E.hud = root.appendChild(h(`<div id="phud" class="hidden"><div class="prompt hidden"></div><div class="keys">${isTouch() ? 'Stick: walk (all the way: run) · drag the world: look · E: interact or talk' : keysHtml}</div></div>`));
   E.prompt = E.hud.querySelector('.prompt');
-  E.bar = root.appendChild(h('<div id="playbar" class="panel hidden"><span class="pn"></span><button class="btn small home" title="Go home: your flat, a building on your lot, or the starting point" aria-label="Go home">🏠<span class="pl"> Go home</span></button><button class="btn small look" title="Change how you look" aria-label="My look">🎨<span class="pl"> My look</span></button><button class="btn small leave" title="Leave Play mode (Esc)" aria-label="Leave">✕<span class="pl"> Leave</span></button></div>'));
+  E.bar = root.appendChild(h('<div id="playbar" class="panel hidden"><span class="pn"></span><button class="btn small home" title="Go home: your flat, a building on your lot, or the starting point" aria-label="Go home">🏠<span class="pl"> Go home</span></button><button class="btn small primary order hidden" title="Order something to eat or drink here (O)" aria-label="Order">🧾<span class="pl"> Order</span></button><button class="btn small look" title="Change how you look" aria-label="My look">🎨<span class="pl"> My look</span></button><button class="btn small leave" title="Leave Play mode (Esc)" aria-label="Leave">✕<span class="pl"> Leave</span></button></div>'));
   E.pn = E.bar.querySelector('.pn');
   E.bar.querySelector('.look').onclick = () => app.openCustomizer?.({ kind: 'player' });
+  E.order = E.bar.querySelector('.order');
+  E.order.onclick = () => order();
   E.bar.querySelector('.home').onclick = goHome;
-  E.bar.querySelector('.leave').onclick = () => { if (app.driving?.id) leaveDriving(); else { releaseView('Flying'); releaseView('Boat'); app.setMode('explore'); } };   // (Leave is a way out of the cockpit and off the boat: core/state.js holdView)
+  E.bar.querySelector('.leave').onclick = () => { if (app.driving?.id) leaveDriving(); else if (app.boating?.active && app.boating.askLeave) app.boating.askLeave(); else { releaseView('Flying'); releaseView('Boat'); app.setMode('explore'); } };   // (on a boat: "Back to the dock?" first, as Esc)   // (Leave is a way out of the cockpit and off the boat: core/state.js holdView)
   E.elev = root.appendChild(h('<div id="elev" class="panel hidden"><div class="row" style="justify-content:space-between"><b class="et">🛗 Elevator</b><button class="btn small icon x" title="Close (Esc)">✕</button></div><div class="hint">Choose a floor</div><div class="grid"></div></div>'));
   E.elevT = E.elev.querySelector('.et'); E.elevGrid = E.elev.querySelector('.grid');
   E.elev.querySelector('.x').onclick = closeElevator;

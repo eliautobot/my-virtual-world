@@ -15,3 +15,5 @@ node_modules/
 # Program notes of the rebuild (plan, progress, evidence). They hold installation-specific and personal details, so
 # they are kept in their own repository inside docs/parity and are never part of the product.
 /docs/parity/
+# Screenshots of checks run in a real browser (tools/car-occupants-check.mjs and the like)
+/checks/

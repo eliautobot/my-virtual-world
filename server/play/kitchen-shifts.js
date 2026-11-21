@@ -19,15 +19,16 @@ const TICK_MS = 20000, BREAK_MS = 4 * 60000, AUTO_DAY = 16, DAY_MS = 86400e3;
 
 export class KitchenShifts {
   /** o: { play: PlayCore, cooks: CookRecord, posts: Posts, world(), freeWill?(agentId) → on, notify?(accountId, m), ownerOf?(agent) → account id, now?, log? } */
-  constructor({ play, cooks, posts, world, freeWill = () => false, notify = null, ownerOf = a => a.ownerId ?? null, now = () => Date.now(), log = null }) {
-    Object.assign(this, { play, cooks, posts, worldOf: world, freeWill, notify, ownerOf, now, log });
+  constructor({ play, cooks, posts, world, freeWill = () => false, notify = null, ownerOf = a => a.ownerId ?? null, presence = () => null, now = () => Date.now(), log = null }) {
+    Object.assign(this, { play, cooks, posts, worldOf: world, freeWill, notify, ownerOf, presenceOf: presence, now, log });
     this.state = new Map();   // agent id → { run, next, done: [times] , last }
     this.timer = null;
   }
   attach() { this.timer = setInterval(() => { try { this.tick(); } catch (e) { this.log?.warn?.('[orderup] shifts', e.message); } }, TICK_MS); this.timer.unref?.(); return this; }
   stop() { clearInterval(this.timer); this.timer = null; }
 
-  /** The agents cooking now: [{ agent, b, f, item }] — on post at a kitchen's station (24/7), or working one on its hours. */
+  /** The agents cooking now: [{ agent, b, f, item }] — on post at a kitchen's station (24/7), or working one on its hours,
+   *  and at that station this moment (who is at work: server/workplace/presence.js). */
   onDuty() {
     const W = this.worldOf(), sim = this.posts.simOf(), people = sim?.people || [], out = [];
     let clock = null;
@@ -38,6 +39,9 @@ export class KitchenShifts {
       if (!r) continue;
       const B = W.buildings[r.b], L = B && !B.gone ? W.levels[B.lv?.[r.f]] : null, it = L?.items.find(x => x.id === r.id);
       if (!it?.t?.startsWith('ou_') || !(L.mods || []).some(m => m.kind === 'kitchen' && m.id === it.mod)) continue;
+      // (and there, at its station: a cook out with someone, not in yet or on a break cooks nothing — server/workplace/presence.js)
+      const P = this.presenceOf?.();
+      if (P && !P.onDutyAt(i, `${r.b}:${r.f}:${r.id}:${r.k}`)) continue;
       out.push({ agent: a, b: r.b, f: r.f, item: r.id });
     }
     return out;
@@ -55,22 +59,48 @@ export class KitchenShifts {
   }
   /** A Rush begun for agent d: laid out by the server, cooked by the agent now, recorded once its minutes have passed. */
   begin(d, s) {
-    const cook = { id: -d.agent.id }, pr = this.play.progress(cook.id).modules.orderup;
-    const open = COURSES.filter(c => pr.unlocked.includes(c.id)), course = open[open.length - 1] || COURSES[0];
-    let st;
-    try { st = this.play.start(cook, 'orderup', course.id, { b: d.b, f: d.f }, { auto: true }); }
-    catch (e) { s.next = this.now() + BREAK_MS; this.log?.info?.(`[orderup] ${d.agent.name} can't cook at ${d.b}:${d.f}: ${e.message}`); return; }
-    const { log } = cookRush(st.data, course, { level: pr.level });
-    s.run = { id: st.run, log, course, due: this.now() + course.dur * 1000 + 1500, at: { b: d.b, f: d.f }, stations: st.data.stations };
+    const course = this.courseFor(d.agent.id);
+    try { s.run = this.lay(d.agent.id, { b: d.b, f: d.f }, course); }
+    catch (e) { s.next = this.now() + BREAK_MS; this.log?.info?.(`[orderup] ${d.agent.name} can't cook at ${d.b}:${d.f}: ${e.message}`); }
+  }
+  /** A Rush's minutes over: recorded (below); a few minutes' break before the next. */
+  end(id, s) {
+    const run = s.run; s.run = null;
+    const t = this.now(); s.next = t + BREAK_MS;
+    this.record(id, run);
+  }
+
+  // ---------------------------------------------------------------- a Rush: laid out, cooked, recorded (a shift's, or one
+  // an agent cooks by its own choice or alongside its owner: ./kitchen-play.js — the same Rush, the same record)
+  /** The Rush level agent id cooks: the last it has opened. */
+  courseFor(agentId) {
+    const pr = this.play.progress(-agentId).modules.orderup, open = COURSES.filter(c => pr.unlocked.includes(c.id));
+    return open[open.length - 1] || COURSES[0];
+  }
+  /** Rushes agent id has cooked today, on its shifts and by its own choice, and how many a day it may: { today, cap }. */
+  today(agentId) { const s = this.state.get(Number(agentId)), t = this.now(); return { today: s ? s.done.filter(x => t - x < DAY_MS).length : 0, cap: AUTO_DAY }; }
+  /**
+   * A Rush laid out by the server for agent id in the kitchen at (b, f) and cooked by it beat by beat at its level
+   * (./kitchen-play.js passes where.seed and o.along for a companion cooking alongside its owner's Rush, from: the beat it
+   * got there). Throws the play core's refusal. → { id (the run), log, course, due (ms: its minutes over), at, stations,
+   * start (ms: the Rush's clock), level }.
+   */
+  lay(agentId, where, course, { along = null, from = 0 } = {}) {
+    const cook = { id: -agentId }, pr = this.play.progress(cook.id).modules.orderup;
+    const st = this.play.start(cook, 'orderup', course.id, where, { auto: true, ...(along ? { along } : {}) });
+    const start = this.play.runs.get(st.run)?.at ?? this.now(), { log } = cookRush(st.data, course, { level: pr.level, from });
+    return { id: st.run, log, course, due: start + course.dur * 1000 + 1500, at: { b: where.b, f: where.f }, stations: st.data.stations, start, level: pr.level };
   }
   /** A Rush's minutes over: the server plays it again and records it (as a player's); the agent's skill points spent when
-   *  it chooses them itself; its owner told of new badges and levels. */
-  end(id, s) {
-    const run = s.run, cook = { id: -id }, a = this.posts.agents.get(id); s.run = null;
-    const t = this.now(); s.next = t + BREAK_MS; s.done.push(t); s.lastAt = t;
+   *  it chooses them itself; its owner told of new badges and levels. → the play core's result ({ ok, score, stars, xp,
+   *  module, badges (with the Cookbook's) … }), or null when it did not count. */
+  record(id, run) {
+    const cook = { id: -id }, a = this.posts.agents.get(id), t = this.now();
+    const s = this.state.get(id) || { next: 0, done: [] }; this.state.set(id, s);
+    s.done.push(t); s.lastAt = t;
     let r;
-    try { r = this.play.finish(cook, run.id, { log: run.log }); } catch (e) { this.log?.warn?.('[orderup] an agent\'s Rush', e.message); return; }
-    if (!r?.ok) { this.log?.info?.(`[orderup] ${a?.name}'s Rush did not count: ${r?.why}`); return; }
+    try { r = this.play.finish(cook, run.id, { log: run.log }); } catch (e) { this.log?.warn?.('[orderup] an agent\'s Rush', e.message); return null; }
+    if (!r?.ok) { this.log?.info?.(`[orderup] ${a?.name}'s Rush did not count: ${r?.why}`); return null; }
     let c = null; try { c = this.cooks.afterRush(cook.id, r); } catch (e) { this.log?.warn?.('[orderup] an agent\'s Cookbook', e.message); }
     const badges = [...(r.badges || []), ...(c?.badges || [])];
     s.last = { course: run.course.id, label: run.course.label, score: r.score, stars: r.stars, xp: r.xp, level: r.module.level, badges: badges.map(b => b.id), at: t };
@@ -80,6 +110,7 @@ export class KitchenShifts {
       const bits = [...(r.module.level > r.module.was ? [`reached Order Up level ${r.module.level}`] : []), ...badges.map(b => `earned ${b.icon} ${b.label}`)];
       try { this.notify(owner, { t: 'mind', ev: 'note', agent: { id: a.id, name: a.name }, text: `${a.name} ${bits.join(', ')} cooking ${run.course.label} (${r.score} pts, ${'★'.repeat(r.stars) || 'no stars'})` }); } catch { /* the owner's notice is a courtesy */ }
     }
+    return { ...r, badges };
   }
   /** Whether agent a spends its own skill points: with Free Will on, unless its owner keeps that choice (cook.js mode). */
   chooses(a) { return this.cooks.modeOf(-a.id) === 'self' || (this.cooks.modeOf(-a.id) !== 'owner' && !!this.freeWill(a.id)); }

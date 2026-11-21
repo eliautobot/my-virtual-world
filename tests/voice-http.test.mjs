@@ -218,6 +218,16 @@ test('a member brings their own voice service (and it may not reach inside the n
   assert.equal(spoken.length, n, 'nothing reached it');
   assert.equal((await bob.post('/api/voice/prefs', { speak: { connection: mine.json.id } })).status, 404, 'Bob can\'t use Ann\'s service');
   assert.equal((await ann.post('/api/voice/prefs', { listen: { language: 'english please' } })).status, 400);
+  // live voice: how long a pause before it answers, checking the words of a pause, learning one's pauses — kept, checked
+  const lv = (await ann.get('/api/voice/options')).json.prefs.listen;
+  assert.deepEqual([lv.patience, lv.smart, lv.learn], ['normal', true, true], 'the usual: a normal pause, words checked, pauses learned');
+  const pp = await ann.post('/api/voice/prefs', { listen: { patience: 'patient', smart: false, learn: false } });
+  assert.equal(pp.status, 200, pp.text);
+  assert.deepEqual([pp.json.listen.patience, pp.json.listen.smart, pp.json.listen.learn, pp.json.listen.language], ['patient', false, false, 'en'], 'the rest of listening kept');
+  assert.equal((await ann.post('/api/voice/prefs', { listen: { patience: 'forever' } })).json.code, 'bad_patience');
+  assert.equal((await ann.get('/api/voice/options')).json.prefs.listen.patience, 'patient', 'kept');
+  assert.equal((await bob.get('/api/voice/options')).json.prefs.listen.patience, 'normal', 'each their own');
+  assert.equal((await ann.post('/api/voice/prefs', { speak: { patience: 'quick' } })).json.speak.patience, undefined, 'speaking has no patience');
   // back to automatic
   assert.equal((await ann.post('/api/voice/prefs', { speak: { connection: null }, listen: { connection: 'auto' } })).json.speak.connection, null);
   assert.equal((await ann.get('/api/voice/options')).json.speak.source, 'installation');

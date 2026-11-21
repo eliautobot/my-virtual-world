@@ -203,18 +203,46 @@ export const REFUSED = {
 
 const q = (s, n = 200) => `«${String(s ?? '').replace(/[\u0000-\u001f«»]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n)}»`;
 
-/** One line to say: c = { name, role, personality, likes, now, where, doing }, s = { kind: 'greet'|'meet'|'reply', to: { name, how }, heard }. */
+/** The word for going somewhere together without a place: a stroll. */
+export const WALK = 'a walk';
+/**
+ * One line to say: c = { name, role, personality, likes, now, where, doing, places }, s = { kind: 'greet'|'meet'|'reply'|
+ * 'remark'|'chat' (spending time together, talking on: last — what they said last, together — what they're doing),
+ * to: { name, how }, heard, situation (a remark's: what just happened), invite (meet: it may ask them to go
+ * somewhere together now — docs/features/companions.md §7), invited ({ place } — a reply: they asked it along) }.
+ */
 export function speechText(c, s) {
   const who = `${q(s.to?.name || 'Someone', 40)} (${s.to?.how || 'someone I don\'t know'})`;
   const situation = s.kind === 'greet' ? `${who} walks up to me and says hello.`
-    : s.kind === 'reply' ? `${who} just said to me: ${q(s.heard, MAX_LINE)}`
-      : `I've just started chatting with ${who}.`;
+    : s.kind === 'reply' ? `${s.together ? `I'm spending time with ${who} — ${q(s.together, 120)}. ` : ''}${s.together ? 'They' : who} just said to me: ${q(s.heard, MAX_LINE)}${s.invited ? ` — they are asking me to go ${s.invited.place === WALK ? 'for a walk' : `to ${q(s.invited.place, 80)}`} with them now.` : ''}`
+      : s.kind === 'remark' ? q(s.situation, 300)
+        : s.kind === 'chat' ? `I'm spending time with ${who}${s.together ? ` — ${q(s.together, 120)}` : ''}.${s.last ? ` What we said last: ${q(s.last, 300)}.` : ''}`
+          : `I've just started chatting with ${who}.`;
+  // (asking them along: offered when both are free — never while answering an invitation of theirs)
+  const ask = !!s.invite && !s.invited;
+  const places = ask ? (c.places || []).slice(0, 6) : [];
+  const lead = `TASK: Say one short thing out loud (under 100 characters), in my own voice — natural, friendly${s.kind === 'reply' ? ', answering them' : s.kind === 'remark' ? ', about what just happened' : s.kind === 'chat' ? ', carrying on our conversation with something new (not hello again)' : ''}`;
+  const task = s.invited
+    ? ['TASK: Say one short thing out loud (under 100 characters), in my own voice, answering them — and decide for myself whether to go with them now (my mood, my needs, what I am doing). Saying no is fine.',
+      'JSON: {"say":"...","accept":true or false}']
+    : ask
+      ? [`${lead}. ${s.together
+        // (two who are spending time together suggest doing something now and then, as people out together do)
+        ? `We are spending time together: if it feels right (my mood, my needs, what I am doing, what we just talked about), I may suggest we go somewhere together right now — one of PLACES, or "${WALK}". Otherwise I just keep talking.`
+        : `If I genuinely feel like it (my mood, my personality, what I'm doing), I may also ask them to come somewhere with me right now: one of PLACES, or "${WALK}". Most of the time I just chat.`}`,
+        `PLACES: ${places.length ? places.map(p => q(p.name, 60)).join(', ') : 'none nearby'}.`,
+        `JSON: {"say":"..."} or {"say":"...","invite":"<one of PLACES, or ${WALK}>"} (the line itself asks them).`]
+      : [`${lead}${s.kind === 'chat' ? ': where we are, what we are doing, or a question for them' : ''}.`, 'JSON: {"say":"..."}'];
   return [
     `WHO I AM: ${q(c.name, 40)}${c.role ? `, ${q(c.role, 60)}` : ''}${c.personality?.length ? `; I am ${c.personality.join(', ')}` : ''}.${c.likes?.length ? ` I like ${c.likes.slice(0, 3).map(x => q(x, 40)).join(', ')}.` : ''}`,
-    `NOW: ${c.now.weekday} ${c.now.clock}, ${c.where}.${c.doing ? ` I am ${q(c.doing, 80)}.` : ''}`,
+    `NOW: ${c.now.weekday} ${c.now.clock}, ${c.where}.${c.doing ? ` I am ${q(c.doing, 80)}.` : ''}${c.feels ? ` I feel ${c.feels}.` : ''}`,
+    // (what it senses right now — Free Will's moments, server/free-will/moments.js: its words are about what is really there)
+    ...(s.sense ? [`WHAT I SENSE RIGHT NOW (true; nothing else around me is): ${String(s.sense).replace(/\n/g, ' | ').slice(0, 1000)}`] : []),
+    ...(c.work?.onShift ? [`AT WORK: I am the ${q(c.work.role, 40)} at ${q(c.work.place, 60)}, ${String(c.work.text || '').replace(/^On duty$/, 'on duty').toLowerCase()}.${(c.work.team || []).filter(x => x.state !== 'on_duty').length ? ` Not here: ${c.work.team.filter(x => x.state !== 'on_duty').slice(0, 4).map(x => `${q(x.name, 40)} (${String(x.text).toLowerCase()})`).join(', ')}.` : ''}`] : []),
     situation,
     '',
-    `TASK: Say one short thing out loud (under 100 characters), in my own voice — natural, friendly${s.kind === 'reply' ? ', answering them' : ''}. Everyone around me hears it: nothing about money, my owner or anything private; no links, names of websites or contact details.`,
-    'JSON: {"say":"..."}',
+    task[0],
+    'Everyone around me hears it: nothing about money, my owner or anything private; no links, names of websites or contact details.',
+    ...task.slice(1),
   ].join('\n');
 }

@@ -34,7 +34,7 @@ export function level(kind) {
 
 /** A media player in the page at the Videos and recordings volume (silenced by us, not by its own controls, comes back). */
 function setMedia(el) {
-  if (!(el instanceof HTMLMediaElement)) return;
+  if (!(el instanceof HTMLMediaElement) || el.dataset.mvwVoice) return;   // (an agent's voice in the city: audio/voices.js sets its own, by distance)
   const v = level('media');
   try { el.volume = v; } catch { /* some players refuse */ }
   if (v === 0) { if (!el.muted) { el.muted = true; el.dataset.mvwMuted = '1'; } }

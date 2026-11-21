@@ -5,11 +5,13 @@
 // strikers (each hit as hard as the striker moved); a goal 100, a hard one (a SLAP SHOT) or one off a rail (a BANK SHOT)
 // 50 more, stopping a hard shot of the computer's in front of your goal (a SAVE) 20; winning 500, without letting one in
 // 300 more. The computer gets quicker with every goal you score.
+// Someone else at the other end (an AI agent: server/play/versus.js): its hand is the run's (init's o.k: core.js handOf)
+// and its own score is kept as yours is, by the same rules (other(): its side of the game, for its own record).
 // Controls: the pointer (the mouse over the table, a finger on it) moves your striker there (as fast as a hand); or
 // ▲ ▼ ◀ ▶, A to move quicker. The sim (rules only; the game in the world is client/js/play/machines/puck-rush.js):
 // deterministic, see shared/arcade/core.js; metres in the table's frame (x right as you face it, z toward you), speeds in
 // metres a step (1/60 s).
-import { BTN, baseState, roll } from '../core.js';
+import { BTN, baseState, roll, handOf } from '../core.js';
 import { HOCKEY } from '../machines.js';
 
 const { hw: HW, hl: HL, goal: GW, puckR: PR, strikerR: SR } = HOCKEY;
@@ -23,9 +25,9 @@ export const toPx = (x, z) => [Math.round(((x + HW) / (2 * HW)) * 255), Math.rou
 const fromPx = (px, py) => [(px / 255) * 2 * HW - HW, (py / 255) * HL];
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
-export function init(seed) {
+export function init(seed, o = null) {
   return {
-    ...baseState(seed),
+    ...baseState(seed), hand: handOf(o), cs: 0, csaves: 0, cslaps: 0, cbanks: 0,   // (the other side's hand, its score and its own counts)
     px: 0, pz: 0.35, vx: 0, vz: 0,                  // the puck
     sx: 0, sz: HOCKEY.park, ox: 0, oz: HOCKEY.park,  // your striker (and where it was a step ago)
     cx: 0, cz: -HOCKEY.park, qx: 0, qz: -HOCKEY.park, cvx: 0, cvz: 0,   // the computer's
@@ -74,11 +76,15 @@ function think(s, P) {
     x = y - w;
     P.tx = clamp(x, -GW - 0.06, GW + 0.06); P.tz = zd;
   } else { P.mode = 'home'; P.tx = s.px * 0.35; P.tz = -HL + 0.28; }
-  P.tx += (roll(s, 41) - 20) * CPU.err * (1 - lv / 9);
+  let e = (roll(s, 41) - 20) * CPU.err * (1 - lv / 9);
+  if (s.hand) e *= s.hand.err;
+  P.tx += e;
 }
 function moveCpu(s) {
   s.qx = s.cx; s.qz = s.cz;
-  const lv = Math.min(6, s.me), vmax = CPUV + 0.004 * lv, acc = CPUA + 0.0012 * lv, P = s.plan;
+  const lv = Math.min(6, s.me), P = s.plan;
+  let vmax = CPUV + 0.004 * lv, acc = CPUA + 0.0012 * lv;
+  if (s.hand) { vmax *= s.hand.sp; acc *= s.hand.sp; }
   if (--P.t <= 0) { P.t = CPUT - Math.min(2, lv >> 1) + roll(s, 3); think(s, P); }
   let dx = P.tx - s.cx, dz = P.tz - s.cz;
   const d = Math.sqrt(dx * dx + dz * dz);
@@ -100,6 +106,7 @@ function hit(s, x, z, vx, vz, who) {
   if (sp > VMAX) { s.vx = (s.vx / sp) * VMAX; s.vz = (s.vz / sp) * VMAX; }
   s.last = who; s.bank = false;
   if (who === 1 && before > 0.035 && s.pz > HL * 0.45) { s.saves++; s.score += 20; s.ev.push({ k: 'save', x: s.px, z: s.pz }); }
+  else if (who === -1 && before < -0.035 && s.pz < -HL * 0.45) { s.csaves++; s.cs += 20; }   // (the other side's save, for its score)
   if (-vn > 0.004) s.ev.push({ k: 'hit', who, v: -vn, x: s.px, z: s.pz });
 }
 function goal(s, who) {
@@ -110,12 +117,18 @@ function goal(s, who) {
     if (sp > SLAP) { pts += 50; s.slaps++; tags.push('SLAP SHOT'); }
     if (s.bank && s.last === 1) { pts += 50; s.banks++; tags.push('BANK SHOT'); }
     s.score += pts; s.ev.push({ k: 'goal', who, pts, tags, x: s.px, me: s.me, cpu: s.cpu });
-  } else { s.cpu++; s.ev.push({ k: 'goal', who, pts: 0, tags: [], x: s.px, me: s.me, cpu: s.cpu }); }
+  } else {
+    s.cpu++; let pts = 100;   // (the other side's goal: its score by the same rules, the screen as before)
+    if (sp > SLAP) { pts += 50; s.cslaps++; }
+    if (s.bank && s.last === -1) { pts += 50; s.cbanks++; }
+    s.cs += pts; s.ev.push({ k: 'goal', who, pts: 0, tags: [], x: s.px, me: s.me, cpu: s.cpu });
+  }
   s.vx = 0; s.vz = 0;
 }
 function end(s) {
   s.over = true; s.win = s.me > s.cpu;
   if (s.win) { s.score += 500 + (s.cpu === 0 ? 300 : 0); }
+  if (s.cpu > s.me) s.cs += 500 + (s.me === 0 ? 300 : 0);
   s.ev.push({ k: 'over', win: s.win, me: s.me, cpu: s.cpu, shutout: s.win && s.cpu === 0 });
 }
 
@@ -154,3 +167,6 @@ export function step(s, inp) {
 export const over = s => s.over;
 export const score = s => s.score;
 export const detail = s => ({ me: s.me, cpu: s.cpu, win: s.win, saves: s.saves, slaps: s.slaps, banks: s.banks });
+/** The other side's game (the one at the far end: an AI agent's run of its own, server/play/versus.js): its score by the
+ *  same rules, and its counts — me its goals, them yours. */
+export const other = s => ({ score: s.cs, detail: { me: s.cpu, them: s.me, win: s.cpu > s.me, draw: s.cpu === s.me, saves: s.csaves, slaps: s.cslaps, banks: s.cbanks } });

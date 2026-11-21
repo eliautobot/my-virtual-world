@@ -66,6 +66,10 @@ test('history is the provider\'s export plus the mirror lines the provider does 
   const merged = mergeHistory([{ role: 'user', text: 'a' }, { role: 'assistant', text: 'b' }, { text: 7 }, null], [{ role: 'user', text: 'a', ts: 1 }, { role: 'assistant', text: 'c', ts: 2 }]);
   assert.deepEqual(merged.map(m => `${m.source}:${m.role}:${m.text}`), ['provider:user:a', 'provider:assistant:b', 'mirror:assistant:c']);
   assert.deepEqual(mergeHistory(null, null), []);
+  // the same words twice are two messages (an agent answering "Sure." to two questions)
+  const twice = mergeHistory([], [{ role: 'user', text: 'q1' }, { role: 'assistant', text: 'Sure.' }, { role: 'user', text: 'q2' }, { role: 'assistant', text: 'Sure.' }]);
+  assert.deepEqual(twice.map(m => m.text), ['q1', 'Sure.', 'q2', 'Sure.']);
+  assert.deepEqual(mergeHistory([{ role: 'assistant', text: 'Sure.' }], [{ role: 'assistant', text: 'Sure.' }, { role: 'assistant', text: 'Sure.' }]).map(m => m.source), ['provider', 'mirror'], 'one the provider has, one it hasn\'t');
 });
 
 test('a session belongs to one account and one agent: others never find it; new never destroys, delete does (C119)', () => {

@@ -201,7 +201,11 @@ test('the fish market: a trip\'s catch goes into the inventory; the dock store b
   const send = o => ws.send(JSON.stringify(o));
   send({ t: 'pobserve', on: false });
   await sleep(1600);
-  const st = await owner.post('/api/play/start', { module: 'fishing', course: 'harbour-morning', where: m.id });
+  // (at the marina to start its trip: where the earlier tests left the player may be another dock, too far from this one
+  //  — warped there, and started once the server has the player there)
+  send({ t: 'pwarp', x: m.x, z: m.z, ctx: -1 });
+  let st = null;
+  for (let k = 0; k < 20; k++) { await sleep(300); st = await owner.post('/api/play/start', { module: 'fishing', course: 'harbour-morning', where: m.id }); if (st.status !== 409 || st.json?.code !== 'not_here') break; }
   assert.equal(st.status, 200, JSON.stringify(st.json));
   const run = st.json.run, L = kitFor(STARTER, 'sea');
   // a fish: hook until something takes it, then land it no sooner than that gear could have

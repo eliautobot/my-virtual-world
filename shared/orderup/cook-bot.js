@@ -22,11 +22,13 @@ export function cookPace(level) {
 /**
  * The Rush laid out by the server (data: { seed, stations, kitchen, menu, skills }) on course (a Rush level of
  * module.js COURSES) cooked by an agent of `level`: → { log (what it pressed, as the page would send), S (how it went) }.
+ * from: the beat it gets to the kitchen (a companion joining its owner's Rush under way: server/play/kitchen-play.js) —
+ * nothing is pressed before it is there, the tickets of before waiting (or walking out) as they would for anyone.
  */
-export function cookRush(data, course, { level = 1 } = {}) {
+export function cookRush(data, course, { level = 1, from = 0 } = {}) {
   const S = newRush(data.stations, { seed: data.seed, dur: course.dur, kitchen: data.kitchen || undefined, menu: data.menu || undefined, course: courseParams(course), ...(data.skills ? { skills: { you: data.skills } } : {}) });
-  const rng = new RNG(`cook:${data.seed}:${level | 0}`), pace = cookPace(level), log = [], sid = t => data.stations.find(x => x.t === t)?.id;
-  let wait = rng.int(10, 30), f = null;   // (it reads the first tickets)
+  const rng = new RNG(`cook:${data.seed}:${level | 0}${from > 0 ? `:${from | 0}` : ''}`), pace = cookPace(level), log = [], sid = t => data.stations.find(x => x.t === t)?.id;
+  let wait = Math.max(0, from | 0) + rng.int(10, 30), f = null;   // (it gets there, and reads the first tickets)
   for (let n = 0; !S.over && n < 20000; n++) {
     let worked = null;
     if (wait > 0) wait--;

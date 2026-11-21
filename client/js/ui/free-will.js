@@ -29,7 +29,7 @@ export const WHY = {
   service_paused: 'the decision service is paused after failures', daily_limit: 'the world\'s daily limit was reached', agent_daily_limit: 'its daily limit was reached',
   busy: 'too many decisions at once', order: 'its own AI gave it something to do', resume: 'it went back to what a message interrupted', no_time: 'there was no time to ask', off: 'Free Will was off', error: 'something went wrong preparing it', plan_changed: 'its plans changed',
 };
-export const CHOICE = { leisure: 'Free time', task: 'Task', meal: 'Meal', morning: 'Morning', shift: 'Way to work', rest: 'Rest', after_task: 'After a task' };
+export const CHOICE = { leisure: 'Free time', task: 'Task', meal: 'Meal', morning: 'Morning', shift: 'Way to work', rest: 'Rest', after_task: 'After a task', job: 'A job', moment: 'A moment with you', check: 'Your message, checked' };
 export const why = r => WHY[r] || (String(r || '').startsWith('service_') ? 'the decision service failed' : 'routine');
 export const usd = micro => (micro >= 10000 ? `$${(micro / 1e6).toFixed(2)}` : `$${(micro / 1e6).toFixed(4)}`);
 const pct = p => `${Math.round(p * 100)}%`;
@@ -45,6 +45,8 @@ export function row(r) {
     return `<li class="fw-item chosen"><div>${head}</div><div class="fw-pick">✓ ${esc(r.label || label(r.chosen))}${r.reason === 'next_best' ? ' <small class="dim">(its first pick was no longer possible)</small>' : ''}</div>
       <div class="fw-opts">${opts.map(o => `<div class="fw-opt${o.id === r.chosen ? ' on' : ''}"><span class="fw-bar" style="width:${Math.max(3, Math.round(o.p * 100))}%"></span><span class="fw-ol">${esc(label(o.id))}</span><span class="fw-op">${pct(o.p)}</span></div>`).join('')}</div></li>`;
   }
+  // (a moment with its owner, or its owner's message checked: what it did, or that it let it pass)
+  if (r.choice === 'moment' || r.choice === 'check') return `<li class="fw-item routine"><div>${head}</div><div class="dim">${r.outcome === 'failed' ? `No answer — ${esc(why(r.reason))}` : r.label ? esc(r.label) : 'Let it pass'}</div></li>`;
   return `<li class="fw-item routine"><div>${head}</div><div class="dim">Followed its routine — ${esc(why(r.reason))}${r.label ? ` (it had picked ${esc(r.label)})` : ''}</div></li>`;
 }
 

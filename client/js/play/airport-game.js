@@ -15,9 +15,11 @@ import { getJSON, post } from '../core/net.js';
 import { formatScore, fmtVc } from '/shared/play.js';
 import { AIRCRAFT } from '/shared/aircraft-specs.js';
 import { anglesOf } from '/shared/flight-model.js';
+import { moments } from './moments.js';
 
 const SAMPLE_MS = 125, MAX_RINGS = 32;
 let app = null, E = {}, cat = null, prog = null, run = null, rings = null, beam = null, last = null;
+const live = moments();   // (where the course stands — the rings flown, the clock — for the AI agents with you: ./moments.js)
 const C_NEXT = new THREE.Color('#ffc83d'), C_LATER = new THREE.Color('#5ad7ff'), C_FAR = new THREE.Color('#d8f3ff');
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _y = new THREE.Vector3(0, 1, 0);
 
@@ -102,6 +104,7 @@ async function start(courseId) {
   const m = cat.modules.find(x => x.id === 'airport'), c = m.courses.find(x => x.id === courseId);
   run = { id: r.run, course: c, m, rings: r.data.rings, limit: r.limit, stars: r.stars, best: r.best, t0: performance.now(), path: [], next: 0, gateAt: null, lastSample: 0, flashAt: 0 };
   last = null;
+  live.start(r.run);
   drawRings();
   E.hud.classList.remove('hidden');
   E.hud.querySelector('.rh-name').textContent = `🏁 ${c.label}`;
@@ -110,7 +113,7 @@ async function start(courseId) {
 /** Ends a run without a result (why: told in a toast; null: quietly). */
 async function stop(why) {
   if (!run) return;
-  const id = run.id; run = null;
+  const id = run.id; run = null; live.stop();
   rings.count = 0; beam.visible = false; E.hud.classList.add('hidden');
   if (why) app.toast(`🏁 ${why} — the run did not count`, 'warn', 3000);
   try { await post('/api/play/abandon', { run: id }); } catch { /* it lapses by itself */ }
@@ -148,6 +151,7 @@ function frame(s) {
           bus.emit('ring:pass', { k: run.next, gate: run.next === 0, last: run.next === run.rings.length - 1 });
           run.next++; run.flashAt = now;
           if (run.next >= run.rings.length) { finish(); return; }
+          live.say({ passed: run.next, secs: run.gateAt != null ? Math.round((t - run.gateAt) / 1000) : 0 }, { now: true });
         }
       }
     }
@@ -169,6 +173,7 @@ let hudAt = 0;
 function hud(s, t) {
   const now = performance.now(); if (now - hudAt < 70) return; hudAt = now;
   const R = run.rings, nx = R[run.next], el = run.gateAt != null ? (t - run.gateAt) / 1000 : 0;
+  live.say({ passed: run.next, secs: Math.round(el) });
   E.hud.querySelector('.rh-n').textContent = `Ring ${Math.min(run.next + 1, R.length)} of ${R.length}`;
   E.hud.querySelector('.rh-time').textContent = run.gateAt == null ? 'Through the gate to start' : formatScore(run.m, el);
   const [t1, t2, t3] = run.stars, pace = el <= t3 ? 3 : el <= t2 ? 2 : el <= t1 ? 1 : 0, left = run.limit - el;
@@ -183,7 +188,7 @@ function hud(s, t) {
   }
 }
 async function finish() {
-  const r = run; run = null;
+  const r = run; run = null; live.stop();
   rings.count = 0; beam.visible = false; E.hud.classList.add('hidden');
   let res;
   try { res = await post('/api/play/finish', { run: r.id, report: { aircraft: app.flight.type, path: r.path } }); }

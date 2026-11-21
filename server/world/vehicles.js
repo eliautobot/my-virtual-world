@@ -18,6 +18,7 @@ import {applyWater,waterDepth,POSE_MAX_DEPTH} from '../../shared/vehicle-water.j
 import {Island} from '../../shared/terrain.js';
 import {buildingPads} from '../../shared/island-build.js';
 import {PF_OBSERVING,PF_USING,PF_DRIVING} from '../../shared/playerproto.js';
+import {CarSeats} from './car-seats.js';
 const RIGS=JSON.parse(fs.readFileSync(new URL('../../shared/vehicle-rigs.json',import.meta.url),'utf8')).rigs;
 const BRAKE={throttle:0,steer:0,brake:1,handbrake:false};
 const finite=(n)=>typeof n==='number'&&Number.isFinite(n);
@@ -37,8 +38,10 @@ export async function createVehicles(options){
   return new Vehicles(options);
 }
 export class Vehicles {
- constructor({world,worldId,players,store,perms,clock,actors=()=>[],residentCars=()=>[],now=()=>Date.now(),log=null}){
-  Object.assign(this,{world,worldId,players,store,perms,clock,actors,residentCars,now,log});this.physics=new RAPIER.World({x:0,y:-9.81,z:0});this.dynamics=new VehicleDynamics(this.physics);
+ constructor({world,worldId,players,store,perms,clock,actors=()=>[],residentCars=()=>[],announce=()=>{},now=()=>Date.now(),log=null}){
+  Object.assign(this,{world,worldId,players,store,perms,clock,actors,residentCars,now,log});
+  // who rides in each car besides its driver (companions with their player: server/world/car-seats.js), told to every page
+  this.seats=new CarSeats({places:id=>{const c=this.all?.get(id);return c?Math.max(0,(VEHICLE_KINDS[c.k]?.seats||1)-1):0;},announce});this.physics=new RAPIER.World({x:0,y:-9.81,z:0});this.dynamics=new VehicleDynamics(this.physics);
   const saved=store.load('vehicles');this.traffic=new VehicleTraffic(world,{seed:`${worldId}:traffic`,nextId:saved?.worldId===worldId?Math.max(saved.nextId||1,...(Array.isArray(saved.cars)?saved.cars.slice(0,128):[]).filter(c=>Number.isSafeInteger(c.id)).map(c=>c.id+1)):1});this.all=this.traffic.all;this.trafficRoads=world.roads;
   this.lifecycle=new VehicleUseLifecycle();this.owners=new Map();this.staticBodies=[];this.kinematic=new Map();this.pedestrians=new Map();this.tickN=0;this.at=now();this.dirty=false;
   this.stats={ticks:0,physicsMs:0,frames:0,bytes:0,entries:0,exits:0,refused:0};this.buildStatic();
@@ -142,7 +145,7 @@ export class Vehicles {
   this.toServer(c,'exit');const point=this.safeExit(c);if(!point)return this.reply(ws,m,false,'No clear exit beside the vehicle; move to an open area');
   this.release(c,point);this.reply(ws,m,true,'Exited',{point});this.sendDrive(ws,null,'exited',point);this.stream(ws);
  }
- release(c,point){const p=this.players.byId.get(c.driver);if(c.owner)this.owners.delete(c.owner);c.driver=0;c.owner=null;c.mode=2;c.used=true;c.deadline=this.now()+300000;c.inputAt=0;
+ release(c,point){const p=this.players.byId.get(c.driver);if(c.owner)this.owners.delete(c.owner);c.lastDriver=c.driver||c.lastDriver||0;c.driver=0;c.owner=null;c.mode=2;c.used=true;c.deadline=this.now()+300000;c.inputAt=0;
   if(p){this.lifecycle.exit(c.id,p.id,this.now(),p.ctx>=0);c.deadline=this.lifecycle.records.get(c.id)?.deadline||c.deadline;}this.dynamics.setControls(String(c.id),BRAKE);
   if(p){p.vehicleId=null;p.x=point.x;p.y=point.y;p.z=point.z;p.ctx=-1;p.flags&=~PF_DRIVING;p.clip=0;p.ver++;p.dirty=true;p.lastAt=this.now();this.players.toAccount(p.id,{t:'pmoved',...point,ctx:-1,yaw:p.yaw,text:'Exited vehicle'});}
   this.stats.exits++;this.dirty=true;
@@ -197,7 +200,7 @@ export class Vehicles {
    const life=this.lifecycle.records.get(c.id);
    if(c.driver||c.mode===0||!life?.used||life.deadline===null||blockAt(this.g,c.x,c.z))c.roadAt=null;else{c.roadAt??=now;life.deadline=Math.min(life.deadline,c.roadAt+ROAD_CLEANUP_MS);}
   }
-  for(const id of this.lifecycle.update(now,pid=>(this.players.byId.get(pid)?.ctx??-1)>=0)){const c=this.all.get(id);if(c&&!c.driver){if(this.body(c))this.dynamics.remove(String(id));this.removeKinematic(c);this.all.delete(id);this.dirty=true;}}
+  for(const id of this.lifecycle.update(now,pid=>(this.players.byId.get(pid)?.ctx??-1)>=0)){const c=this.all.get(id);if(c&&!c.driver){if(this.body(c))this.dynamics.remove(String(id));this.removeKinematic(c);this.all.delete(id);this.seats.clear(id);this.dirty=true;}}
   if(this.tickN%600===0&&this.dirty)this.save();this.stats.ticks++;this.stats.physicsMs=performance.now()-start;
  }
  stream(ws){if(ws.readyState!==1||!ws.P||!this.perms.allowed(ws.P,'world.view')||ws.bufferedAmount>500000)return;const p=this.players.byId.get(ws.pid),view=ws.view||p||{x:0,z:0},list=[];
@@ -205,7 +208,7 @@ export class Vehicles {
   // Traffic and resting parked cars need no tyre contacts: protocol 3 sends them compact (40 bytes instead of 216).
   const frame=encodeVehicles(list.slice(0,512).map(c=>c.mode===0?{...c,v:c.v*rate,vx:Math.cos(c.yaw)*c.v*rate,vz:-Math.sin(c.yaw)*c.v*rate,compact:v3}:v3&&c.mode===2&&!this.body(c)&&c.physics!=='client'?{...c,compact:true}:this.present(c)),this.at,{version:v3?3:ws.vehicleProtocol===2?2:1});ws.send(frame);this.stats.frames++;this.stats.bytes+=frame.byteLength;
  }
- resync(ws,m={}){if(m.protocol===2||m.protocol===3)ws.vehicleProtocol=m.protocol;if(Number.isFinite(m.radius))ws.vehicleRadius=Math.max(120,Math.min(400,m.radius));this.stream(ws);if(!Number.isSafeInteger(m.req)||m.req<1)return;const known=ws.vehicleCommands?.get(m.req);if(known)this.players.send(ws,known);
+ resync(ws,m={}){if(m.protocol===2||m.protocol===3)ws.vehicleProtocol=m.protocol;if(Number.isFinite(m.radius))ws.vehicleRadius=Math.max(120,Math.min(400,m.radius));this.stream(ws);if(this.seats.size)this.players.send(ws,this.seats.state());if(!Number.isSafeInteger(m.req)||m.req<1)return;const known=ws.vehicleCommands?.get(m.req);if(known)this.players.send(ws,known);
   const c=this.owners.get(ws),p=this.players.byId.get(ws.pid),entered=m.op==='enter'&&c?.id===m.id,exited=m.op==='exit'&&!c&&p&&!p.vehicleId;
   this.players.send(ws,{t:'drive_status',req:m.req,ok:!!(entered||exited),id:entered?c.id:null,point:exited?{x:p.x,y:p.y,z:p.z}:null,why:entered?'Driving':exited?'Exited':'The action was not applied; current seat is unchanged'});
  }

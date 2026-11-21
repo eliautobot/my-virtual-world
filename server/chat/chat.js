@@ -11,10 +11,39 @@ import { LAZY_KEY } from './sessions.js';
 import { mergeHistory } from './transcript.js';
 import { task as cleanTask, NATIVE_CALLS } from '../providers/bus.js';
 import { isAv } from './attachments.js';
+import { GROUP_MAX } from './groups.js';
+import { withMarks } from './marks.js';
+import { eyesLine } from '../senses/eye.js';
+import { SPOKEN_LINE } from '../mind/prompt.js';
 
 /** An adapter's error codes about the request itself, as HTTP statuses (any other error is the provider's: 502). */
 const ADAPTER_STATUS = Object.freeze({ bad_request: 400, not_found: 404, forbidden: 403 });
+/** What of its senses goes with a message (Free Will's check, server/free-will/moments.js: the groups it needs), or null:
+ *  not checked — all of it, as its owner chose. */
+const onlyOf = pre => (Array.isArray(pre?.relevant) ? new Set(pre.relevant) : null);
 import { MODES, validZone } from '../agent-work/work.js';
+
+const nameWords = s => String(s ?? '').replace(/[\u0000-\u001f«»\[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+const NOTE_HEAD = '[My Virtual World — ';
+/** A message as its writer wrote it: without the note about the agent's body that went before it (server/senses/). */
+export const withoutNote = t => String(t).replace(/^\[My Virtual World — [\s\S]*?\]\n\n/, '');
+const TOLD = ['full', 'line', 'pointer', 'none'];
+/** What an answer's agent knew — its senses with the message (docs/features/awareness.md §3) — as kept with the answer. */
+function awareOf(x) {
+  if (!x || typeof x !== 'object' || !TOLD.includes(x.told)) return undefined;
+  return { mode: String(x.mode || '').slice(0, 12), together: x.together ? String(x.together).slice(0, 120) : null, told: x.told, text: String(x.text || '').slice(0, 1800),
+    tokens: Number(x.tokens) || 0, looked: (Array.isArray(x.looked) ? x.looked : []).slice(0, 4).map(l => ({ tool: String(l?.tool || '').slice(0, 20), text: String(l?.text || '').slice(0, 900) })) };
+}
+const META_ROOM = 7800;   // (the transcript keeps a message's meta up to 8,000 bytes: server/chat/transcript.js)
+/** A message's meta within what the transcript keeps: its reasoning is shortened first, then what it looked up, then what it knew. */
+function fitMeta(meta) {
+  const size = () => Buffer.byteLength(JSON.stringify(meta));
+  while (size() > META_ROOM && meta.thinking) { meta.thinking = meta.thinking.slice(0, Math.floor(meta.thinking.length * 0.75)); if (meta.thinking.length < 200) delete meta.thinking; }
+  if (size() > META_ROOM && meta.aware?.looked?.length) meta.aware.looked = meta.aware.looked.map(l => ({ ...l, text: l.text.slice(0, 240) }));
+  if (size() > META_ROOM && meta.aware) meta.aware.text = meta.aware.text.slice(0, 500);
+  if (size() > META_ROOM) delete meta.aware;
+  return meta;
+}
 
 export class ChatError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -22,6 +51,9 @@ export class ChatError extends Error {
 
 const EVENT_BUFFER = 500;
 const RUN_KEEP_MS = 5 * 60 * 1000;
+// a conversation with an agent is going on while an answer is being written, and this long after its last line either way
+// (its world commentary waits meanwhile: one agent, one voice — server/mind/mind.js speak)
+export const CONVO_QUIET_MS = 2 * 60 * 1000;
 const INPUT_MAX = 100000;   // (a pasted document or log)
 const EFFORTS = ['off', 'low', 'medium', 'high'];
 // (a provider names its own thinking levels per model — OpenClaw: off, minimal, low, medium, high, xhigh…; the provider
@@ -35,7 +67,7 @@ const VISITOR_HIDDEN = /^(tool\.|approval\.|question\.|plan\.|native$)/;   // a 
 const MAX_ATTACHMENTS = 10;
 // only these event fields leave the server (the bus already whitelists them; this is the browser-facing subset)
 const PUBLIC = ['type', 'ts', 'text', 'thinking', 'pct', 'status', 'error', 'toolId', 'name', 'input', 'ok', 'approvalId', 'tool', 'summary', 'approved',
-  'model', 'effort', 'tokensIn', 'tokensOut', 'cost', 'ms', 'title',
+  'model', 'effort', 'tokensIn', 'tokensOut', 'tokensCached', 'aware', 'cost', 'ms', 'title',
   // (Agent Providers: what a run is doing, a step's kind and how it ended, an approval's command and its choices, the context meter)
   'phase', 'replace', 'toolKind', 'exitCode', 'cwd', 'approvalKind', 'command', 'options', 'decision', 'expiresAt', 'used', 'size',
   'questionId', 'questions', 'answers', 'explanation', 'steps', 'markdown', 'media', 'steered',
@@ -48,7 +80,10 @@ export class Chat {
    * @param {{ agents, connections, registry, host, bus, sessions, transcripts, attachments, references, agentOk: (key: string) => boolean,
    *   send: (accountId: number, frame: object) => void, log?: object, now?: () => number }} o
    */
-  constructor({ agents, connections, registry, host, bus, sessions, transcripts, attachments, references, projects = null, work = null, agentOk, send, inproc = {}, media = null, log = null, now = () => Date.now() }) {
+  constructor({ agents, connections, registry, host, bus, sessions, transcripts, attachments, references, projects = null, work = null, agentOk, send, seeOf = null, groups = null, inproc = {}, media = null, log = null, now = () => Date.now() }) {
+    this.groups = groups;   // (a group conversation's shared lines: server/chat/groups.js)
+    this.talkAt = new Map();   // agent id → ms of the last line of a conversation with it (a message to it, its answer): conversing
+    this.seeOf = seeOf;     // (its eyes: one frame from where it stands when a message is about the world — server/senses/eye.js)
     this.media = media;     // the media of providers' answers (./provider-media.js): signed addresses, fetched once, cached
     this.inproc = inproc;   // kinds the server itself answers for (the connected agents of WP2.14): kind → async (connection, method, params)
     Object.assign(this, { agents, connections, registry, host, sessions, transcripts, attachments, references, projects, work, agentOk, send, log, now });
@@ -72,6 +107,30 @@ export class Chat {
     const s = sessionId === undefined || sessionId === null ? null : this.sessions.get(P.account.id, sessionId);
     if (sessionId !== undefined && sessionId !== null && (!s || s.agentId !== a.id)) throw new ChatError(404, 'not_found', 'No such session');
     return { a, s };
+  }
+  /** Whether this person may manage the agent: its owner, or someone it is shared with to manage. */
+  manages(P, a) { return !!(P?.account && a && (this.agents.isOwner(P, a) || (this.agents.level ? this.agents.level(P, a) === 'manage' : false))); }
+  /**
+   * The members of a group conversation a run is part of (server/chat/groups.js), from the agent ids the page sent: null
+   * when none (or only the agent itself). Every member must be an agent this person may chat with (the check its own
+   * agent passed: need()) and the run's agent one of them; repeats count once; at most GROUP_MAX. A talk in the city is
+   * never part of one. Else a 400 (bad_group) that says nothing about whose an agent is.
+   */
+  groupOf(P, a, group, talk = null) {
+    if (group === null || group === undefined) return null;
+    const bad = msg => new ChatError(400, 'bad_group', msg);
+    if (talk) throw bad('A talk in the city is not a group conversation');
+    if (!Array.isArray(group) || group.length > GROUP_MAX * 4) throw bad(`A group is a list of at most ${GROUP_MAX} agents`);
+    const ids = [...new Set(group.map(Number))];
+    if (ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw bad('A group is a list of agents');
+    if (ids.length > GROUP_MAX) throw bad(`A group has at most ${GROUP_MAX} agents`);
+    if (!ids.includes(a.id)) throw bad('This agent is not in that group');
+    if (ids.length < 2) return null;
+    if (!this.groups) throw new ChatError(501, 'unsupported', 'Group conversations are not available on this server');
+    return ids.map(id => {
+      if (id === a.id) return a;
+      try { return this.agentFor(P, id); } catch { throw bad('Everyone in a group must be an agent you can chat with'); }
+    });
   }
   /** The connection an agent talks through, or the reason it cannot. */
   linkOf(a) {
@@ -244,13 +303,14 @@ export class Chat {
    * Sends a message (or writes the last answer again: regenerate; or replaces one of the person's own messages and
    * everything after it: editFrom = its id). model / effort: this run's (else the session's own, else the agent's).
    */
-  async startRun(P, { agent, session, input, attachments = [], model, effort, regenerate = false, editFrom = null, tz = null, queue = null, rewind = null }, talk = null) {
+  async startRun(P, { agent, session, input, attachments = [], model, effort, regenerate = false, editFrom = null, tz = null, queue = null, rewind = null, view = null, aware = true, group = null, groupSay = false, to = null, spoken = false }, talk = null) {
     let text = String(input ?? '').trim();
     if (text.length > INPUT_MAX) throw new ChatError(413, 'too_long', 'That message is too long');
     // (talk: a conversation with someone else's agent in the city — server/agent-talk/ found the agent and its session
     // and checked who may talk with it; such a run is always a visitor's: its tools and what it asks its owner unseen)
     const { a, s } = talk ? { a: talk.a, s: talk.s } : this.need(P, agent, session);
     if (!s) throw new ChatError(400, 'bad_request', 'Which session?');
+    const members = this.groupOf(P, a, group, talk);
     const c = this.linkOf(a);
     // (a provider that takes messages while its agent works — OpenClaw: into the running turn, or after it — gets them;
     // anything else answers one message at a time. Writing again or editing waits for the answer either way.)
@@ -299,8 +359,41 @@ export class Chat {
       visitor: !!talk || (isExtKey(a.key) && !this.agents.isOwner(P, a)), ownerId: a.ownerId, approvals: new Map(), talk: !!talk };
     this.runs.set(runId, run);
     const meta = files.length ? { attachments: files.map(f => ({ id: f.id, name: f.name, mime: f.mime, size: f.size })) } : null;
-    if (!regenerate) run.userMessage = this.transcripts.append(P.account.id, a.id, s.id, { role: 'user', text, runId, meta });
+    // (the one-chat marks, ./marks.js: a line said to several of a group — the companions' voice; `to`: the members it was
+    // said to, else the whole group — keeps who, for the chat window's label; for the person only, never told to a brain)
+    const toNames = members ? members.filter(x => !Array.isArray(to) || to.map(Number).includes(x.id)).map(x => String(x.name || '').slice(0, 40)).filter(Boolean) : [];
+    const userMeta = toNames.length > 1 ? { ...(meta || {}), to: toNames } : meta;
+    if (!regenerate) run.userMessage = this.transcripts.append(P.account.id, a.id, s.id, { role: 'user', text, runId, meta: userMeta });
+    this.talkAt.set(a.id, this.now());
     this.sessions.touch(s.id);
+    // its owner's plain command — "follow me", "wait here", "let's go to the café", "you're dismissed" — is carried out at
+    // once (the reflex, server/companions/); what happened is a line in the chat and goes to its brain with the message.
+    // Anything less plain may be read by its decision service meanwhile (the answer is not held up for it).
+    let companion = null, pre = null;
+    if (!talk && !regenerate && text && this.companions && !run.visitor) {
+      try {
+        companion = this.companions.heard(P, a, text, { mode: s.mode || null });
+        if (companion) this.transcripts.append(P.account.id, a.id, s.id, { role: 'system', text: companion.text, runId, status: companion.ok ? 'companion' : 'companion_refused' });
+      } catch (e) { this.log?.warn?.('[chat] a command could not be carried out:', e.message); companion = null; }
+      // its Free Will checks its owner's message before it answers (server/free-will/moments.js): something said about the
+      // world is looked at, a request for its body is carried out, what its owner settles for this outing is kept — its
+      // owner's or a manager's, not someone it is only shared with to chat (what they say settles nothing of its outing)
+      if (this.moments && this.manages(P, a) && (s.mode || 'life') !== 'work' && !/^\s*[/[]/.test(text)) {
+        try { pre = await this.moments.checkMessage(a, P.account.id, text, { reflexDone: !!companion, P }); } catch (e) { this.log?.warn?.('[chat] checking a message failed:', e.message); pre = null; }
+        if (pre?.did && !companion) {
+          companion = pre.did;
+          try { this.transcripts.append(P.account.id, a.id, s.id, { role: 'system', text: companion.text, runId, status: companion.ok ? 'companion' : 'companion_refused' }); } catch { /* the chat may be gone */ }
+        }
+      }
+      try {
+        if (!companion && !pre) this.companions.understand(P, a, text).then(r => {
+          if (!r) return;
+          try { this.transcripts.append(P.account.id, a.id, s.id, { role: 'system', text: r.text, runId, status: r.ok ? 'companion' : 'companion_refused' }); } catch { /* the chat may be gone */ }
+          this.send(P.account.id, { t: 'companion_note', agent: a.id, session: s.id, ok: r.ok, text: r.text });
+        }).catch(e => this.log?.warn?.('[chat] reading a command failed:', e.message));
+      } catch (e) { this.log?.warn?.('[chat] reading a command failed:', e.message); }
+    }
+    const outing = this.moments ? this.moments.outingLines(a.id) : [];
     try {
       // a kind the server answers for itself also gets who wrote, which agent, and the conversation so far (the mirror,
       // with each message's attachments where they are still stored)
@@ -315,8 +408,68 @@ export class Chat {
         ...(recent.some(m => m.role === 'system' && m.status === 'mode') ? { switched: true } : {}),
         history: recent.filter(m => m.role !== 'system').map(m => ({ id: m.id, role: m.role, text: m.text,
           files: (m.meta?.attachments || []).map(f => this.attachments.pathOf(P.account.id, f.id)).filter(Boolean).map(f => ({ id: f.id, name: f.name, mime: f.mime, size: f.size, path: f.path })) })) } : {};
+      // its senses (server/senses/, docs/features/awareness.md): what it can tell about the city right now, as much as its
+      // owner chose — only in its owner's (or a manager's) own chats, never a visitor's, a talk in the city, someone it is
+      // only shared with to chat (its surroundings — its owner among them — are its owner's to know) or its phone
+      const sensing = aware !== false && !talk && !run.visitor && this.manages(P, a) && this.senses && this.senses.bodyOf(a) >= 0;
+      const since = sensing ? [...(recent.length ? recent : this.transcripts.read(P.account.id, a.id, s.id, 20))].reverse().find(m => m.role === 'assistant')?.ts ?? null : null;
+      // (a picture of the city they shared — 📷 Share my view —: what it shows, checked against the world)
+      const seen = sensing && view && files.some(f => /^image\//.test(f.mime)) ? this.senses.viewNote(a, P.account.id, view) : null;
       // (agent: this installation's key for the agent, which its events carry; agentKey: the provider's own name for it)
-      const out = await this.call(c, 'run', { runId, agent: a.key, agentKey: a.nativeId || a.key, sessionKey: s.key, input: text, attachments: files, ...prefs, ...inproc, ...(busy && queue ? { queue } : {}),
+      // (what its body just did: a built-in brain gets it apart from the message; another platform's agent with it, marked)
+      let said = text, note = null;
+      // a group conversation (server/chat/groups.js): who else is in it, and what was said, in order — the person's line kept
+      // once, with the first answer of the turn (groupSay; not again when an answer is written again), and every agent's
+      // answer kept when it ends (onEvent), before the run is seen as done: the next one hears it
+      let groupNote = null;
+      if (members) {
+        const gk = this.groups.key(members.map(m => m.id)), person = nameWords(P.account.displayName || P.account.login) || 'the person';
+        if (groupSay && !regenerate) this.groups.say(P.account.id, gk, { speaker: 'person', id: P.account.id, name: person, text });
+        groupNote = this.groups.note(P.account.id, gk, { self: a.id, members: members.map(m => ({ id: m.id, name: m.name })), person });
+        run.group = gk; run.groupName = a.name;
+      }
+      // its eyes (server/senses/eye.js): a message of the person's about the world (Free Will's check) — the page showing the
+      // world where its body stands draws one frame from there, and it goes with the message (a small JPEG, inline: nothing
+      // on disk). Only where it has its senses (its owner's or a manager's own chats), and only when its body is near their
+      // character (Senses.eyesFor);
+      // no page, or no answer in time: it is told it could not get a look, never shown someone else's view as its own.
+      let eyesNote = null, eyes = null;
+      const eyesAt = sensing && pre?.sight && this.seeOf && !isExtKey(a.key) && !files.some(f => /^image\//.test(f.mime)) ? this.senses.eyesFor?.(a, P.account.id) : null;
+      if (eyesAt) {
+        let shot = null;
+        try { shot = await this.seeOf(P.account.id, { at: eyesAt }); } catch (e) { this.log?.warn?.('[chat] its eyes failed:', e.message); shot = null; }
+        eyesNote = eyesLine(shot, nameWords(P.account.displayName || P.account.login) || 'your owner');
+        if (shot?.ok) eyes = { mime: shot.mime, data: shot.data, size: Math.floor(shot.data.length * 3 / 4) };
+      }
+      // (another platform's agent — OpenClaw, Hermes —: the note about its body goes with the message as `note`, and its
+      //  platform's adapter puts it before the words, unless they are one of the platform's own commands; a connected
+      //  agent — its own app — has its facts and its look with its messages already)
+      if (c.kind !== 'models' && !isExtKey(a.key)) {
+        const did = companion ? (companion.ok && companion.brain ? `Already done because of this message: ${companion.brain}.` : companion.ok === false ? `Your body tried because of this message, but could not: ${companion.brain || companion.text}. Say so — never that you did it.` : `${companion.text}.`) : '';
+        // (not with a platform's own words — a slash command, a skill's expanded instructions in [ … ] — nor with a message
+        //  steered into a turn already running: that turn was told when it started)
+        const own = /^\s*[/[]/.test(text);
+        const sense = sensing && !own && !busy ? this.senses.pack(a, P.account.id, { since, canLook: false, answering: true, only: onlyOf(pre) }) : null;
+        // (what Free Will's check found is what its senses showed: only where it has its senses — not on its phone)
+        const checked = sensing ? (sense?.told === 'full' ? pre?.brief : pre?.checked) : null;
+        // (out together, another platform's agent has no instructions of ours: one line on how what it notices is used)
+        const talk = sense?.told === 'full' && sense.together ? 'This is what you notice, not what to talk about: mention it only when it matters to what was said — talk like a friend beside them, briefly.' : '';
+        const body = [did, seen, sense?.text, talk, eyesNote, checked, outing.length ? `This outing, your owner settled (keep to it; don't bring it up again unless asked): ${outing.join('; ')}` : '', spoken === true && !own ? SPOKEN_LINE : ''].filter(Boolean);
+        const lines = [...body, ...(own ? [] : [groupNote])].filter(Boolean);
+        if (sense) run.aware = { mode: sense.mode, together: sense.together, told: sense.told, text: lines.join('\n').slice(0, 1800), tokens: Math.ceil(lines.join('\n').length / 4), looked: [] };
+        const by = nameWords(P.account.displayName || P.account.login) || 'your owner';
+        if (lines.length) note = `[My Virtual World — ${sense ? `from your body in the city, not written by ${by}` : body.length ? 'your body in the city' : `not written by ${by}`}:\n${lines.join('\n')}]`;
+      } else if (c.kind !== 'models') {
+        // (a connected agent — its own app —: what its body just did and the group's thread, after the words, marked)
+        const add = [companion ? (companion.ok && companion.brain ? `already done because of this message — ${companion.brain}.` : `${companion.text}.`) : '', run.visitor ? '' : groupNote].filter(Boolean);
+        if (add.length) said = `${text}\n\n[My Virtual World: ${add.join('\n')}]`;
+      }
+      // (the frame of its eyes: a built-in brain takes it apart — it decides whether its chat may use it —, another
+      //  platform's agent as one more picture with the message)
+      const eyeFile = eyes && c.kind !== 'models' ? { id: `eyes-${runId}`, name: 'what-you-see.jpg', mime: eyes.mime, size: eyes.size, data: eyes.data } : null;
+      const out = await this.call(c, 'run', { runId, agent: a.key, agentKey: a.nativeId || a.key, sessionKey: s.key, input: said, ...(note ? { note } : {}), attachments: eyeFile ? [...files, eyeFile] : files, ...prefs, ...inproc,
+        ...(c.kind === 'models' ? { since: Number.isFinite(since) ? since : null, senses: sensing, ...(seen ? { viewNote: seen } : {}), ...(eyesNote ? { eyesNote } : {}), ...(eyes ? { eyes: { mime: eyes.mime, data: eyes.data } } : {}), ...(groupNote ? { groupNote } : {}), ...(sensing && pre?.checked ? { checkNote: pre.checked, checkBrief: pre.brief } : {}), ...(sensing && Array.isArray(pre?.relevant) ? { relevant: pre.relevant } : {}), ...(outing.length ? { outing } : {}), ...(spoken === true ? { spoken: true } : {}) } : {}),
+        ...(companion && c.kind === 'models' ? { worldNote: companion.brain || companion.text, worldAction: { ok: companion.ok, action: companion.action, text: companion.text } } : {}), ...(busy && queue ? { queue } : {}),
         ...(rewind !== null && rewind !== undefined ? { rewind } : {}) });
       if (out && out.sessionKey && s.key === LAZY_KEY) this.sessions.setKey(s.id, out.sessionKey);
       this.tellRun(run);
@@ -328,11 +481,22 @@ export class Chat {
       } else { this.runs.delete(runId); this.transcripts.append(P.account.id, a.id, s.id, { role: 'system', text: e.message, runId, status: 'failed' }); }
       throw e;
     }
-    return { runId, session: this.sessions.get(P.account.id, s.id), message: run.userMessage || null };
+    return { runId, session: this.sessions.get(P.account.id, s.id), message: run.userMessage || null, ...(companion ? { companion: { ok: companion.ok, text: companion.text, action: companion.action } } : {}) };
+  }
+  /**
+   * Whether someone is in a conversation with agent agentId now: an answer of its is being written, or the last line
+   * either way was less than `ms` ago (2026-11-18, the product owner: "if there is an active conversation, the live commentary shouldn't
+   * be active … the same agent in two places at once"). Any conversation: its chat, the companions' voice, a talk in the city.
+   */
+  conversing(agentId, ms = CONVO_QUIET_MS) {
+    const id = Number(agentId);
+    for (const r of this.runs.values()) if (r.agentId === id && !r.done && !r.uncertain) return true;
+    return this.now() - (this.talkAt.get(id) || 0) < ms;
   }
   finish(runId, run, e) {
     if (run.done) return;
     run.done = true; run.at = this.now();
+    this.talkAt.set(run.agentId, this.now());
     this.push(run, runId, { ...e, ts: this.now() });
     this.tellRun(run);
     const t = setTimeout(() => this.runs.delete(runId), RUN_KEEP_MS); t.unref?.();
@@ -384,14 +548,19 @@ export class Chat {
       if (e.steered && e.status === 'ok' && !e.text && !media.length) { this.sessions.touch(run.sessionId); this.finish(e.runId, run, e); return; }
       // (an approval the answer filed — an agent's payment waiting for its owner's OK — stays with the answer, by its id)
       const approvals = run.visitor ? [] : [...run.approvals].map(([id, a]) => ({ id, tool: a.tool, summary: a.summary })).slice(0, 4);
-      const meta = Object.fromEntries(Object.entries({ model: e.model, effort: e.effort, tokensIn: e.tokensIn, tokensOut: e.tokensOut, cost: e.cost, ms: e.ms,
-        thinking: e.thinking ? e.thinking.slice(0, 6000) : undefined, approvals: approvals.length ? approvals : undefined, media: e.media }).filter(([, v]) => v !== undefined));
-      const m = Object.keys(meta).length ? meta : null;
+      const meta = Object.fromEntries(Object.entries({ model: e.model, effort: e.effort, tokensIn: e.tokensIn, tokensOut: e.tokensOut, cachedIn: Number.isFinite(e.tokensCached) ? e.tokensCached : undefined, cost: e.cost, ms: e.ms,
+        thinking: e.thinking ? e.thinking.slice(0, 6000) : undefined, approvals: approvals.length ? approvals : undefined, media: e.media,
+        // (what it knew: its senses with this message — docs/features/awareness.md §3)
+        aware: awareOf(e.aware || run.aware) }).filter(([, v]) => v !== undefined));
+      const m = Object.keys(meta).length ? fitMeta(meta) : null;
       // whatever the agent wrote is the person's to read, however the run ended (the product owner 19:27: a listener sent its answer and ended the run 'interrupted')
       const written = e.text || (e.status !== 'ok' ? run.partial : '');
       if (e.status !== 'ok' && written) this.transcripts.append(run.accountId, run.agentId, run.sessionId, { role: 'assistant', text: written, runId: e.runId, status: e.status, meta: m });
       const text = e.status === 'ok' ? (e.text || (media.length ? '' : 'The agent finished without sending an answer.')) : e.status === 'interrupted' ? (e.error || !written ? `The answer was interrupted: ${e.error || 'no reason was given'}. Send it again if you still want it.` : 'The agent ended the run before finishing.') : e.status === 'stopped' ? (written ? '' : 'Stopped.') : `The agent could not answer: ${e.error || 'unknown error'}`;
       if (text || media.length) this.transcripts.append(run.accountId, run.agentId, run.sessionId, { role, text, runId: e.runId, status: e.status, meta: role === 'assistant' ? m : null });
+      // (a group's shared thread: this answer — kept before the run is seen as done (finish, below), so whoever speaks next
+      //  in it, started the moment this one is done, is told what was just said)
+      if (run.group && role === 'assistant' && text) { try { this.groups?.say(run.accountId, run.group, { speaker: 'agent', id: run.agentId, name: run.groupName || '', text }); } catch { /* the group's own */ } }
       // the first answer names a new chat (the agent's own short title for it)
       if (e.title && (DEFAULT_LABEL.test(run.label || '') || this.registry.manifest(run.kind)?.capabilities?.titles)) { try { this.sessions.rename(run.accountId, run.sessionId, e.title); } catch { /* the session went */ } }
       this.sessions.touch(run.sessionId);
@@ -815,6 +984,8 @@ export class Chat {
     if (s.key !== LAZY_KEY) {
       try { out = await this.call(this.linkOf(a), 'history', { agentKey: a.nativeId || a.key, sessionKey: s.key }); provider = Array.isArray(out && out.messages) ? out.messages : []; } catch { /* the mirror still shows */ }
     }
+    // (the person's own words: the note about the agent's body this installation put before a message is the agent's to read)
+    provider = provider.map(m => (m && m.role === 'user' && typeof m.text === 'string' && m.text.startsWith(NOTE_HEAD) ? { ...m, text: withoutNote(m.text) } : m));
     // a provider whose history is the record (Agent Providers: OpenClaw keeps every turn, its steps and reasoning): its
     // messages, with only this installation's own notes after them (a message that could not be sent)
     if (out && out.authoritative) {
@@ -831,11 +1002,12 @@ export class Chat {
       };
       // (the media of its answers: signed addresses for this agent and session)
       const withMedia = m => (m.meta && m.meta.media ? { ...m, meta: { ...m.meta, media: this.media ? this.media.view(a.id, s.id, m.meta.media) : undefined } } : m);
-      return { messages: [...provider.map(m => ({ ...withMedia(withFiles(m)), source: 'provider' })), ...mirror.filter(m => m.role === 'system' && m.ts > last && /^(failed|uncertain)$/.test(m.status || ''))],
+      // (and this installation's marks: an outing's dividers in their place, a line said to a group — ./marks.js)
+      return { messages: withMarks([...provider.map(m => ({ ...withMedia(withFiles(m)), source: 'provider' })), ...mirror.filter(m => m.role === 'system' && m.ts > last && /^(failed|uncertain)$/.test(m.status || ''))], mirror),
         ...(out.usage ? { usage: out.usage } : {}), ...(out.session ? { session: { model: out.session.model, effort: out.session.effort } } : {}), ...(out.running ? { running: true } : {}),
         ...(out.plan ? { plan: out.plan } : {}), ...(out.planCan ? { planCan: { refresh: !!out.planCan.refresh, dismiss: !!out.planCan.dismiss } } : {}), ...live };
     }
-    return { messages: mergeHistory(provider, mirror), ...live };
+    return { messages: withMarks(mergeHistory(provider, mirror), mirror), ...live };
   }
   /**
    * One of a provider answer's media, for whoever may read its session: the file here ({ file, mime, size }), fetched
@@ -924,7 +1096,9 @@ export class Chat {
     if (projectId !== null && projectId !== undefined) { const p = this.ownProject(P, agentId, projectId); return { sessions: this.withWorking(this.sessions.inProject(P.account.id, p.id)), project: p }; }
     if (agentId !== null && agentId !== undefined) {
       const { a } = this.need(P, agentId);
-      return this.syncProvider(P, a).then(() => ({ sessions: this.withWorking(this.sessions.recent(P.account.id, 200, a.id)), projects: this.projects ? this.projects.list(P.account.id, a.id) : [] }));
+      // (current: the chat it is talked with now — Sessions.current, the one rule every way of talking with it follows)
+      return this.syncProvider(P, a).then(() => ({ sessions: this.withWorking(this.sessions.recent(P.account.id, 200, a.id)), projects: this.projects ? this.projects.list(P.account.id, a.id) : [],
+        current: this.sessions.current(P.account.id, a.id)?.id ?? null }));
     }
     return { sessions: this.withWorking(this.sessions.recent(P.account.id).filter(s => { const a = this.agents.get(s.agentId); return a && a.enabled && this.agents.canUse(P, a); })) };
   }

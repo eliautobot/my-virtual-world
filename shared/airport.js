@@ -9,7 +9,7 @@
 // the speeds, the order and the time the server saw, and works the time out. Shared by the browser and the server.
 import { RNG } from './rng.js';
 import { AIRCRAFT, maxRunSpeed } from './aircraft-specs.js';
-import { registerPlay } from './play.js';
+import { registerPlay, liveInt, liveNum, liveOf } from './play.js';
 
 // ------------------------------------------------------------------------------------------- the courses
 // style: loop (a ring of rings round the field), tour (out over the land and back), slalom (left-right down a line and
@@ -143,6 +143,16 @@ export const COURSES = Object.freeze(SPECS.map((s, k) => {
 }));
 export const COURSE_BY_ID = Object.freeze(Object.fromEntries(COURSES.map(c => [c.id, c])));
 
+/**
+ * Where a ring course stands, as the pilot's page says (POST /api/play/moment): { passed (rings flown through), secs (on
+ * the clock since the first ring) }; the number of rings is the server's own.
+ */
+export function flightMoment(live, ctx) {
+  const rings = Array.isArray(ctx.data?.rings) ? ctx.data.rings.length : 0, passed = liveInt(live.passed, 0, rings);
+  if (passed == null) return null;
+  return liveOf({ passed, rings, secs: passed ? liveNum(live.secs, 0, (ctx.serverMs ?? 0) / 1000 + 5) : null });
+}
+
 const done = (s, ids) => ids.every(id => (s.best[id]?.stars || 0) >= 1);
 const ofKind = k => COURSES.filter(c => c.aircraft === k).map(c => c.id);
 export const AIRPORT = registerPlay({
@@ -153,6 +163,7 @@ export const AIRPORT = registerPlay({
   /** The server lays the rings out over the airport the run starts at (server/play/play.js passes where). */
   prepare: (course, { airport, clearAt }) => (airport ? { rings: courseRings(course, airport, clearAt), airport } : null),
   verify: verifyFlight,
+  moment: flightMoment,
   badges: [
     { id: 'airborne', label: 'Airborne', icon: '🛫', desc: 'Finish your first ring course', tier: 'bronze', when: s => s.runs >= 1 },
     { id: 'barnstormer', label: 'Barnstormer', icon: '🛩️', desc: 'Finish every propeller-plane course', tier: 'silver', when: s => done(s, ofKind('prop')) },

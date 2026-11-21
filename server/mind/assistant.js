@@ -22,12 +22,14 @@ const TOOL_LOOK = 16;                     // characters looked at before an answ
 const TOOL_START = /^\{\s*"use"\s*:/;
 
 /** Splits one streamed model answer into what is shown (the answer) and what is not (a tool request; the actions). */
+/** A tool call written after some words: {"use":[ … */
+const TOOL_TAIL = /\{\s*"use"\s*:\s*\[/;
 export class StreamSplit {
   constructor(onText) { this.onText = onText; this.buf = ''; this.mode = 'start'; this.shown = 0; this.all = ''; }
   feed(piece) {
     if (!piece) return;
     this.all += piece;
-    if (this.mode === 'tool' || this.mode === 'actions') return;
+    if (this.mode === 'tool' || this.mode === 'actions' || this.mode === 'tail') return;
     this.buf += piece;
     if (this.mode === 'start' && !this.decide(false)) return;
     if (this.mode === 'text') this.flush(false);
@@ -46,6 +48,10 @@ export class StreamSplit {
   flush(end) {
     const i = this.buf.indexOf(ACTIONS_MARK);
     if (i >= 0) { this.emit(this.buf.slice(0, i).replace(/\s+$/, '')); this.buf = ''; this.mode = 'actions'; return; }
+    // tools asked for after some words (a model that answers and uses a tool in one go): the words shown, the tool's JSON
+    // never — held back for end() (2026-11-15: a bubble showed {"use":[{"tool":"come_along"}]})
+    const u = this.buf.search(TOOL_TAIL);
+    if (u >= 0) { this.emit(this.buf.slice(0, u).replace(/\s+$/, '')); this.buf = ''; this.mode = 'tail'; return; }
     let keep = 0;
     if (!end) for (let k = Math.min(ACTIONS_MARK.length - 1, this.buf.length); k > 0; k--) if (ACTIONS_MARK.startsWith(this.buf.slice(-k))) { keep = k; break; }
     this.emit(this.buf.slice(0, this.buf.length - keep));
@@ -59,6 +65,9 @@ export class StreamSplit {
     if (this.mode === 'text') { this.flush(!cut); if (cut) this.buf = ''; }
     let text = String(full || '');
     if (this.mode === 'tool') return { tool: text.trim() };
+    // words, then a tool call: the words are the answer, the call is carried out after it
+    { const u = text.search(TOOL_TAIL), m = text.indexOf(ACTIONS_MARK);
+      if (u >= 0 && (m < 0 || u < m)) { const tail = text.slice(u, m >= 0 ? m : undefined).trim(); return { reply: text.slice(0, u).trim(), actions: m >= 0 ? text.slice(m + ACTIONS_MARK.length).trim() : null, tail }; } }
     if (cut && !text.includes(ACTIONS_MARK)) text = text.slice(0, text.length - markTail(text));
     const i = text.indexOf(ACTIONS_MARK);
     return i >= 0 ? { reply: text.slice(0, i).trim(), actions: text.slice(i + ACTIONS_MARK.length).trim() } : { reply: text.trim(), actions: null };

@@ -199,11 +199,7 @@ export class Traffic {
       // A car the physics drives (a player's, or one a player used) has its wheels' contacts: each is lifted where it
       // touches a drawn road (and the body by their mean), so its tyres meet the road as drawn and stay on the ground
       // off it (the product owner 2026-10-21: an activated car's wheels sank into the drawn roads' pavement)
-      const lift = outside ? this.wheelLifts(c, terrain) : 0;
-      _p.set(c.x, c.y + lift, c.z); _s.set(1, 1, 1);
-      _q.set(c.rotation.x, c.rotation.y, c.rotation.z, c.rotation.w);
-      if (outside && Math.abs(c.rotation.x) < 1e-6 && Math.abs(c.rotation.z) < 1e-6) groundTilt(_q, c, terrain, KINDS[c.k].L / 2, KINDS[c.k].W / 2);
-      _q.multiply(_bridge); _m.compose(_p, _q, _s);
+      const lift = this.carMatrix(c, _m);
       for (const part of this.batches[c.k]) { part.mesh.setMatrixAt(idx, _m); if (part.tint) part.mesh.setColorAt(idx, _netColor.setHex(c.col)); }
       const a = this.assets[c.k];
       const plain = simple && c.id !== source.id && Math.hypot(c.x - camera.position.x, c.z - camera.position.z) > 60;   // Display → Vehicle detail: far wheels neither turn nor follow the ground
@@ -221,6 +217,20 @@ export class Traffic {
     this.batches.forEach((parts, k) => parts.forEach(({mesh: im}) => { im.count = counts[k]; uploadUsed(im.instanceMatrix, im.count); uploadUsed(im.instanceColor, im.count); }));
     this.wheelMeshes.forEach((im, k) => { im.count = counts[k] * 4; uploadUsed(im.instanceMatrix, im.count); });
     this.beamMeshes.forEach((im, k) => { im.count = counts[k]; im.visible = GU.uNight.value > .01; if (im.visible) uploadUsed(im.instanceMatrix, im.count); });
+  }
+  /** Where car c (a networked one: app.driving's draw state) is drawn: its body's matrix into `out` (the asset's frame:
+   *  +Z forward, origin on the ground under its middle). Beyond the city it is lifted onto the drawn roads (wheelLifts)
+   *  and, carrying only its heading, tilted with the ground. Returns the lift. The people in it are seated by the same
+   *  matrix (render/car-occupants.js), so they move with it exactly. */
+  carMatrix(c, out) {
+    const terrain = this.app.terrain || null, g = this.g;
+    const outside = terrain && (c.x < g.minX || c.x > g.maxX || c.z < g.minZ || c.z > g.maxZ);
+    const lift = outside ? this.wheelLifts(c, terrain) : 0;
+    _p.set(c.x, c.y + lift, c.z); _s.set(1, 1, 1);
+    _q.set(c.rotation.x, c.rotation.y, c.rotation.z, c.rotation.w);
+    if (outside && Math.abs(c.rotation.x) < 1e-6 && Math.abs(c.rotation.z) < 1e-6) groundTilt(_q, c, terrain, KINDS[c.k].L / 2, KINDS[c.k].W / 2);
+    _q.multiply(_bridge); out.compose(_p, _q, _s);
+    return lift;
   }
   /** How far a car is drawn above its physics pose beyond the city (ROAD_TOP on a drawn road, 0 off one): per wheel
    *  from its contact (kept for liftedWheel), the body by their mean; a car with no contacts (traffic on its lane) the

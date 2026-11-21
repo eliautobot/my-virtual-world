@@ -222,7 +222,12 @@ export class FreeWill {
       const waiting = [...status.values()].filter(x => !x.active).reduce((m, x) => (m[x.reason] = (m[x.reason] || 0) + 1, m), {});
       this.log?.info?.(`[free-will] ${next.size} agent(s) choosing for themselves${Object.keys(waiting).length ? `; switched on but waiting: ${Object.entries(waiting).map(([k, n]) => `${n} ${k}`).join(', ')}` : ''}`);
     }
+    const was = this.byPerson;
     this.byPerson = next; this.status = status;
+    // (an agent that has just started choosing for itself — the server starting, its owner switching it on, a decision
+    //  service added — gets its question for the end of the plan it is already in: else its first choice is a whole
+    //  plan away, hours of the world's time)
+    for (const i of next.keys()) if (!was.has(i) && sim.agents[i]?.plan) this.onCommit(sim.agents[i], sim.agents[i].plan);
   }
 
   /** Whether resident index i has Free Will right now (Brain.leisure asks this at every free-time choice). */
@@ -298,9 +303,10 @@ export class FreeWill {
     const home = a.p.home, atHome = !!(home && P.ctx === ctxOf(home.b, home.f));
     const at = { x: P.x, z: P.z, ctx: P.ctx, h, day, needs, atHome };
     const econ = this.econOf();
-    const options = buildChoice(type, brain, a, at, econ, P);
-    if (options.length < 2) return this.skip(a, 'one_option');
     const ctx = this.contextFn ? this.contextFn(e.agentId) : null;
+    // (its open plans for today are in its options: the place one names, offered and said to be in its plans — ./options.js)
+    const options = buildChoice(type, brain, a, at, econ, P, ctx?.planned);
+    if (options.length < 2) return this.skip(a, 'one_option');
     if (ctx) {
       // how well it knows each place: curious agents look for new ones, creatures of habit go back to their favourites
       for (const o of options) if (o.venue) { o.visits = ctx.familiarity(`${o.b}.${o.f}`); o.label = describeVenue(o.kind, o); }
@@ -326,6 +332,44 @@ export class FreeWill {
       .then(() => this.decideFn(conn, request, Math.round(windowMs)))
       .then(res => this.answered(a.i, job, res), err => this.failed(a.i, job, err))
       .finally(() => { this.inFlight--; if (this.pending.get(a.i) === job) this.pending.delete(a.i); });
+  }
+
+  /**
+   * One decision for a moment of agent `agentId` (server/free-will/moments.js: its companion's moments, its owner's
+   * message checked): its own decision service, within the same daily limits, breaker and room in flight as its other
+   * decisions, and in its why-log. request: { input, questions } (the Decisions shape). o: { type (the why-log's choice,
+   * e.g. 'moment'), options ([{ id, kind, label }] offered), place, when, timeoutMs, summary (answers → { chosen,
+   * label, conf, probs }) }. → { answers, ms, model } or null (Free Will off for it, a limit, no answer in time).
+   */
+  async decideNow(agentId, request, o = {}) {
+    const cfg = this.config();
+    let e = null, i = -1;
+    for (const [k, v] of this.byPerson) if (v.agentId === Number(agentId)) { e = v; i = k; break; }
+    if (!e || !cfg.enabled) return null;
+    const conn = e.connection;
+    if (this.breakerOpen(conn.id)) return null;
+    this.rollDay();
+    if (this.dayCalls >= cfg.dailyDecisions || (this.agentCalls.get(e.agentId) || 0) >= cfg.agentDailyDecisions || this.inFlight >= MAX_IN_FLIGHT) return null;
+    if (!this.br.allow(conn.id)) return null;
+    this.inFlight++; this.dayCalls++; this.agentCalls.set(e.agentId, (this.agentCalls.get(e.agentId) || 0) + 1); this.stats.asked++;
+    const t0 = this.now(), row = { agentId: e.agentId, type: o.type || 'moment', when: o.when || null, place: o.place || null, options: o.options || [], connId: conn.id };
+    try {
+      const res = await this.decideFn(conn, request, Math.max(300, Math.min(MAX_TIMEOUT_MS, o.timeoutMs || 4000)));
+      this.breakerOk(conn.id);
+      const ms = this.now() - t0, tok = Number.isFinite(res?.usage?.inputTokens) ? res.usage.inputTokens : null, micro = tok !== null ? Math.round(tok * e.price) : null;
+      this.dayCost += micro || 0; this.stats.answered++;
+      const sum = o.summary ? o.summary(res?.answers || []) : null;
+      this.record({ ...row, outcome: sum?.chosen ? 'chosen' : 'unused', reason: sum?.reason || null, chosen: sum?.chosen || null, label: sum?.label || null, probs: sum?.probs || null, conf: sum?.conf, ms, tok, micro });
+      this.stats.latency.push(ms); if (this.stats.latency.length > 2000) this.stats.latency.splice(0, 1000);
+      return res ? { answers: res.answers || [], ms, model: res.model || null } : null;
+    } catch (err) {
+      const code = err?.code || 'provider_error';
+      if (code === 'bad_request') this.breakerOk(conn.id); else this.breakerFail(conn.id, code);
+      // (no answer: it carries on as it is — a routine row with why, as for any other choice; the why-log allows chosen,
+      // routine and unused only: 'failed' made the whole batch it was in fail, every agent's rows with it)
+      this.record({ ...row, outcome: 'routine', reason: code === 'timeout' ? 'timeout' : `service_${String(code).slice(0, 32)}`, ms: this.now() - t0 });
+      return null;
+    } finally { this.inFlight--; void i; }
   }
 
   /**
@@ -507,7 +551,12 @@ export class FreeWill {
     if (!this.rows.length) return;
     const rows = this.rows; this.rows = [];
     try { this.dbs.tx(() => { for (const r of rows) this.q.row.run(r); }); }
-    catch (e) { this.log?.error?.('[free-will] writing the why-log failed:', e.message); }
+    catch (e) {
+      // (one row the table refuses doesn't cost the others in its batch: each on its own, those refused reported)
+      let bad = 0, why = e.message;
+      for (const r of rows) { try { this.q.row.run(r); } catch (e2) { bad++; why = `${e2.message} (outcome ${r.$outcome}, choice ${r.$choice})`; } }
+      if (bad) this.log?.error?.(`[free-will] writing the why-log failed for ${bad} of ${rows.length} row(s):`, why);
+    }
   }
   purge() {
     const days = Math.max(1, Number(this.config().keepDays) || 7);

@@ -3,7 +3,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseAnswer, readActions, applyActions, LIMITS } from '../../server/mind/actions.js';
-import { systemText, planText, reflectText, chatText } from '../../server/mind/prompt.js';
+import { systemText, planText, reflectText, chatText, mannerOf, togetherTalk } from '../../server/mind/prompt.js';
+import { Groups } from '../../server/chat/groups.js';
+import { DatabaseSync } from 'node:sqlite';
 
 const ctx = (o = {}) => ({
   name: 'Mia «the» Baker', role: 'Baker', personality: ['curious'], bio: 'Line one\nline two', purpose: '', aspirations: [], likes: ['bread'], dislikes: [],
@@ -112,4 +114,35 @@ test('closeness levels follow the admin\'s friend and stranger levels (defaults:
   assert.equal(closenessLevel(0.65, { friendAt: 0.2, knownAt: 0.1 }).label, 'Close friend', 'halfway from there to the top');
   assert.equal(closenessLevel(0.15, { friendAt: 0.2, knownAt: 0.1 }).label, 'Getting to know');
   assert.equal(closenessLevel(0.9, { ended: true }).label, 'Friendship ended');
+});
+
+test('two companions answer as two different people: their manner from their character, their outlook, and a group note that asks for no echo', () => {
+  // (2026-11-17: Lara — impulsive, very curious — and Sam — predictable, frugal, reserved — answered everything alike)
+  const lara = ctx({ name: 'Lara', traits: { curiosity: 1, spontaneity: 0.95, ambition: 1, thrift: 0, kindness: 0.25 }, outlook: 'Ferociously hopeful, dressed in cynicism' });
+  const sam = ctx({ name: 'Sam', traits: { curiosity: 0.55, spontaneity: 0, ambition: 1, thrift: 1, kindness: 0 } });
+  const lp = chatText(lara, { from: 'Kim', isOwner: true, history: [], message: 'Let\'s go see a tiger' });
+  const sp = chatText(sam, { from: 'Kim', isOwner: true, history: [], message: 'Let\'s go see a tiger' });
+  assert.match(lp, /HOW I AM WITH PEOPLE: I jump at a sudden idea and love a bit of adventure; new places, animals and things fascinate me/);
+  assert.match(lp, /My outlook: «Ferociously hopeful, dressed in cynicism»/);
+  assert.match(sp, /HOW I AM WITH PEOPLE: I like to know the plan first; sudden ideas make me hesitate;.*I watch every coin/);
+  assert.doesNotMatch(sp, /My outlook/);
+  assert.deepEqual(mannerOf({ curiosity: 0.5, kindness: 0.6 }), [], 'nothing stands out: no line');
+  assert.doesNotMatch(chatText(ctx({ traits: { curiosity: 0.5 } }), { from: 'Kim', isOwner: true, history: [], message: 'x' }), /HOW I AM WITH PEOPLE/);
+  // out with their owner: themselves, no repeating, their shift waits
+  const t = togetherTalk('Kim').join('\n');
+  assert.match(t, /Be yourself: .* decide what you think and whether you are up for something/);
+  assert.match(t, /Don't repeat yourself/);
+  assert.match(t, /your shift and your plans wait/);
+  // a group: the second one is told what the first said, and to answer as itself, not as an echo
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE group_turns (id INTEGER PRIMARY KEY, world_id TEXT, owner_id INTEGER, group_key TEXT, speaker TEXT, speaker_id INTEGER, speaker_name TEXT, text TEXT, at INTEGER)');
+  const g = new Groups({ db, worldId: 'w' });
+  const key = g.key([75, 76]);
+  g.say(1, key, { speaker: 'person', id: 1, name: 'Kim', text: 'Let\'s go see a tiger' });
+  g.say(1, key, { speaker: 'agent', id: 75, name: 'Lara', text: 'Yes! Where is it?' });
+  const note = g.note(1, key, { self: 76, members: [{ id: 75, name: 'Lara' }, { id: 76, name: 'Sam' }], person: 'Kim' });
+  assert.match(note, /group conversation with Kim, Lara\./);
+  assert.match(note, /as yourself and not as an echo/);
+  assert.match(note, /Never reuse another's words, reasons or the shape of their answer/);
+  assert.match(note, /Lara: Yes! Where is it\?/);
 });

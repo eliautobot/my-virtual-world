@@ -9,9 +9,12 @@
 // - Writes are batched (one transaction every few seconds); the line still in progress is kept in memory and shown.
 // - It gives Free Will (and later the Mind) a small context: the traits that stand out, purpose, today's plans, a few
 //   relevant memories, what the agent did earlier today, and how well it knows each place it could go.
+// - A plan that names a place of the world or a kind of activity ("Groceries at Store 21") is done by what its body does:
+//   closed when its log shows it (./activity.js didPlan), and never marked done by its brain while the log shows nothing
+//   of it (setIntention check).
 import { WEEKDAYS, formatClock, mod } from '../../shared/constants.js';
 import { TRAITS, FLAGS, TRAIT_KEYS, traitsOf, flagsOf, applyBody, storedTraits, traitWords, isTrait } from './traits.js';
-import { classifyAct } from './activity.js';
+import { classifyAct, placeNames, planCheck, didPlan } from './activity.js';
 import { closenessLevel } from '../../shared/closeness.js';
 
 export const SHORT_DAYS = 3;          // world days a short-term memory lasts
@@ -56,6 +59,10 @@ export class AgentLife {
     this.known = new Map();      // agent id → Map(placeKey → { n, lastDay }) — how well it knows each place
     this.relCache = new Map();   // agent id → Map(`${kind}|${id}` → { affinity, trust, interactions, name })
     this.autoToday = new Map();  // agent id → { day, n }: memories written by itself today
+    this.openPlans = new Map();  // agent id → { day, rows }: its open plans for today, for what its body does to close (keepPlans)
+    this.due = new Map();        // agent id → [{ id, at }]: plans its body is on its way to do, done at sim time at (keepPlans)
+    this.checks = new Map();     // plan id → { text, check }: what each plan asks of its body (./activity.js planCheck)
+    this.places = null;          // the world's place names a plan can name, and when they were read: { at, list }
     this.timers = [];
     this.observer = (a, act) => { if (this.byPerson.has(a.i)) { try { this.observe(a, act); } catch (e) { this.log?.warn?.('[agent-life] observing failed:', e.message); } } };
     this.onAgentsChanged = () => this.rebuild();
@@ -110,6 +117,7 @@ export class AgentLife {
       beyondDuty: db.prepare("SELECT COUNT(*) AS n FROM agent_activity WHERE world_id = ? AND agent_id = ? AND world_day BETWEEN ? AND ? AND kind NOT IN ('post', 'work', 'sleep', 'nap')"),
       activity: db.prepare('SELECT * FROM agent_activity WHERE world_id = ? AND agent_id = ? AND id < ? ORDER BY id DESC LIMIT ?'),
       todayActivity: db.prepare('SELECT * FROM agent_activity WHERE world_id = ? AND agent_id = ? AND world_day = ? ORDER BY id DESC LIMIT ?'),
+      activitySince: db.prepare('SELECT kind, place, world_day, at FROM agent_activity WHERE world_id = ? AND agent_id = ? AND at >= ? ORDER BY id DESC LIMIT 300'),
       known: db.prepare('SELECT agent_id, place_key, COUNT(*) AS n, MAX(world_day) AS last FROM agent_activity WHERE world_id = ? AND place_key IS NOT NULL GROUP BY agent_id, place_key'),
       purgeActivity: db.prepare('DELETE FROM agent_activity WHERE world_id = ? AND at < ?'),
       purgeShort: db.prepare("DELETE FROM agent_memories WHERE world_id = ? AND term = 'short' AND world_day < ?"),
@@ -174,10 +182,13 @@ export class AgentLife {
   classify(a, act) { return classifyAct(this.sim, a, act); }
 
   observe(a, act) {
+    const e = this.byPerson.get(a.i);
+    this.onTheWay(e.agentId, act);
     const c = this.classify(a, act);
     if (!c) return;
-    const e = this.byPerson.get(a.i), sim = this.sim;
+    const sim = this.sim;
     const day = this.worldDay(act.holdStart), minutes = Math.max(0, Math.round((act.holdEnd - act.holdStart) * sim.clock.dayScale / 60));
+    this.keepPlans(e.agentId, c, day, act);
     if (c.kind === 'post' || c.kind === 'work') this.workedWith(e.agentId, a, act, day, c.place);
     const cur = this.open.get(e.agentId) || this.resumeLine(e.agentId, c, act, day);
     // one line for consecutive parts of the same activity at the same place (a shift between breaks, browsing then buying)
@@ -350,6 +361,7 @@ export class AgentLife {
   }
 
   flush() {
+    this.arrived();
     if (!this.queue.length && !this.memQueue.length && !this.relQueue.size && !this.noteQueue.size) return;
     const acts = this.queue, mems = this.memQueue, rels = [...this.relQueue.values()], notes = [...this.noteQueue.values()];
     this.queue = []; this.memQueue = []; this.relQueue.clear(); this.noteQueue.clear();
@@ -379,7 +391,7 @@ export class AgentLife {
       this.loadKnown();
     } catch (e) { this.log?.warn?.('[agent-life] pruning failed:', e.message); }
   }
-  forgetAgent(agentId) { this.dbs.tx(() => { for (const q of this.forget) q.run(this.w, agentId); }); this.known.delete(agentId); this.relCache.delete(agentId); }
+  forgetAgent(agentId) { this.dbs.tx(() => { for (const q of this.forget) q.run(this.w, agentId); }); this.known.delete(agentId); this.relCache.delete(agentId); this.openPlans.delete(agentId); this.due.delete(agentId); }
 
   // ------------------------------------------------------------------------------------------- the profile
   person(agentId) { const i = this.byAgent.get(agentId); return i === undefined ? null : this.sim.people[i]; }
@@ -455,7 +467,14 @@ export class AgentLife {
     // on post around the clock (server/agent-posts/) it can't go anywhere: its open plans wait, 'held', until its owner lets
     // it go (2026-10-28: a posted agent still had its shopping and its walks open, and spoke of them)
     const held = this.onPost(agentId);
-    return this.q.intentions.all(this.w, agentId, this.now() - 86400000).map(r => ({ id: r.id, kind: r.kind, text: r.text, status: held && r.status === 'open' ? 'held' : r.status, today: r.world_day !== null, source: r.source, created: r.created }));
+    let lines = null;   // (its log since the oldest open plan that asks something of its body: read once, if any does)
+    return this.q.intentions.all(this.w, agentId, this.now() - 86400000).map(r => {
+      const check = r.status === 'open' ? this.checkOf(r) : null;
+      if (check && !lines) lines = this.linesSince(agentId, 0);
+      // (body: a plan its body does — false until its day shows it; null: nothing its body does says whether it is done)
+      return { id: r.id, kind: r.kind, text: r.text, status: held && r.status === 'open' ? 'held' : r.status, today: r.world_day !== null, source: r.source, created: r.created,
+        body: check ? didPlan(check, lines.filter(l => this.after(l, r))) : null };
+    });
   }
   /** Whether agent agentId's resident is on post around the clock. */
   onPost(agentId) { const i = this.byAgent?.get(agentId), sim = this.sim; return i !== undefined && !!sim?.people?.[i]?.post; }
@@ -466,18 +485,99 @@ export class AgentLife {
     if (this.q.countOpen.get(this.w, agentId).n >= MAX_OPEN_INTENTIONS) throw new LifeError(409, 'too_many', `At most ${MAX_OPEN_INTENTIONS} open plans; finish or drop one first`);
     const at = this.now();
     this.q.addIntention.run(this.w, agentId, today ? this.today() : null, kind, t, source, at, at);
+    this.openPlans.delete(agentId);
     return this.intentions(agentId);
   }
-  setIntention(agentId, id, status) {
+  /**
+   * A plan done, dropped or open again. check: its brain says it is done (its Mind, its own AI, a line on the air) — a plan
+   * its body does ("Groceries at Store 21") is done only when its day shows it since it was planned; otherwise it stays
+   * open and the brain is told so (409 not_done). Its owner's word, and the world's own (a date kept), are taken as given.
+   */
+  setIntention(agentId, id, status, { check = false } = {}) {
     if (!['open', 'done', 'dropped'].includes(status)) throw new LifeError(400, 'bad_status', 'A plan is open, done or dropped');
-    if (!this.q.intention.get(this.w, agentId, Number(id))) throw new LifeError(404, 'not_found', 'No such plan');
+    const row = this.q.intention.get(this.w, agentId, Number(id));
+    if (!row) throw new LifeError(404, 'not_found', 'No such plan');
+    if (check && status === 'done' && row.status === 'open' && !this.didIt(agentId, row)) {
+      throw new LifeError(409, 'not_done', `Not done yet: nothing in your day shows "${clean(row.text, 140)}" since you planned it. It stays open until you do it.`);
+    }
     this.q.setIntention.run(status, this.now(), this.w, agentId, Number(id));
+    this.openPlans.delete(agentId);
     return this.intentions(agentId);
   }
   removeIntention(agentId, id) {
     if (!this.q.intention.get(this.w, agentId, Number(id))) throw new LifeError(404, 'not_found', 'No such plan');
     this.q.delIntention.run(this.w, agentId, Number(id));
+    this.openPlans.delete(agentId);
     return this.intentions(agentId);
+  }
+  /** What plan row asks of its body (./activity.js planCheck: the places and kinds of activity it names), or null. */
+  checkOf(row) {
+    const c = this.checks.get(row.id);
+    if (c && c.text === row.text) return c.check;
+    const sim = this.sim;
+    if (!sim) return planCheck(row.text);
+    if (!this.places || this.now() - this.places.at > REBUILD_MS) this.places = { at: this.now(), list: placeNames(sim) };   // (renamed or new places: within a minute)
+    const check = planCheck(row.text, this.places.list);
+    this.checks.set(row.id, { text: row.text, check });
+    if (this.checks.size > 5000) this.checks.delete(this.checks.keys().next().value);
+    return check;
+  }
+  /** Its activity log since `at` (ms), and the line in progress once its body is there: [{ kind, place, world_day, at }],
+   *  newest first. */
+  linesSince(agentId, at) {
+    this.flush();
+    const cur = this.open.get(agentId), rows = this.q.activitySince.all(this.w, agentId, at), now = this.sim?.now();
+    return cur && !cur.$id && !(cur.start > now) ? [{ kind: cur.$kind, place: cur.$place, world_day: cur.$day, at: cur.$at }, ...rows] : rows;
+  }
+  /** Whether line l of its log came after plan row was made (on its day or later, for a plan for one day). */
+  after(l, row) { return l.at >= row.created && (row.world_day === null || l.world_day >= row.world_day); }
+  /** Whether its day shows plan row done, as far as its body goes (true for a plan its body has nothing to do with). */
+  didIt(agentId, row) {
+    const check = this.checkOf(row);
+    return !check || didPlan(check, this.linesSince(agentId, row.created).filter(l => this.after(l, row)));
+  }
+  /**
+   * What its body does closes the plans of today it does (2026-11-17, the product owner: "i want them to be able to
+   * actually do things"): shopping at Store 21 closes "Groceries at Store 21 after work" — once its body is there. The
+   * simulation plans an activity ahead (the way there first), so a plan it is on its way to do waits until then (due, and
+   * arrived); a change of plan on the way (onTheWay) leaves it open. c: the activity's line (classify), day: its world
+   * day, act: the activity. Its open plans are read once and kept until they change.
+   */
+  keepPlans(agentId, c, day, act) {
+    const today = this.today();
+    let o = this.openPlans.get(agentId);
+    if (!o || o.day !== today) this.openPlans.set(agentId, o = { day: today, rows: this.q.openIntentions.all(this.w, agentId, today, MAX_OPEN_INTENTIONS) });
+    const due = this.due.get(agentId) || [];
+    for (const r of o.rows) {
+      if ((r.world_day !== null && r.world_day > day) || due.some(x => x.id === r.id)) continue;
+      const check = this.checkOf(r);
+      if (check && didPlan(check, [c])) due.push({ id: r.id, at: act.holdStart });
+    }
+    if (due.length) this.due.set(agentId, due);
+    this.arrived(agentId);
+  }
+  /** A new activity of agentId's that starts before one it was on its way to do: its day changed on the way (someone it
+   *  talks to, its owner calling it along) — the plans that one would have done stay open. */
+  onTheWay(agentId, act) {
+    this.arrived(agentId);
+    const due = this.due.get(agentId);
+    if (!due) return;
+    const keep = due.filter(x => act.holdStart >= x.at);
+    if (keep.length) this.due.set(agentId, keep); else this.due.delete(agentId);
+  }
+  /** The plans whose body has got there by now are done (agentId's, or everyone's). */
+  arrived(agentId = null) {
+    const now = this.sim?.now();
+    if (now === undefined || !this.due.size) return;
+    for (const [id, due] of agentId === null ? this.due : [[agentId, this.due.get(agentId)]]) {
+      if (!due) continue;
+      const done = due.filter(x => x.at <= now);
+      if (!done.length) continue;
+      for (const x of done) { const r = this.q.intention.get(this.w, id, x.id); if (r?.status === 'open') this.q.setIntention.run('done', this.now(), this.w, id, x.id); }
+      const rest = due.filter(x => x.at > now);
+      if (rest.length) this.due.set(id, rest); else this.due.delete(id);
+      this.openPlans.delete(id);
+    }
   }
 
   // ------------------------------------------------------------------------------------------- memories
@@ -607,7 +707,9 @@ export class AgentLife {
     const row = this.q.profile.get(this.w, agentId), p = this.person(agentId);
     const day = this.today();
     const traits = traitsOf(a.key, p, json(row?.traits_json, {}));
-    const plans = this.q.openIntentions.all(this.w, agentId, day, 3).map(r => `${r.kind === 'must' ? 'must' : 'wants to'} ${r.text}`);
+    const open = this.q.openIntentions.all(this.w, agentId, day, MAX_OPEN_INTENTIONS), plans = open.slice(0, 3).map(r => `${r.kind === 'must' ? 'must' : 'wants to'} ${r.text}`);
+    // (its plans its body does, to find among its options: server/free-will/options.js withPlans — 'must' first)
+    const planned = open.map(r => ({ text: r.text, kind: r.kind, check: this.checkOf(r) })).filter(x => x.check);
     const mem = this.q.recall.all(this.w, agentId, day - 1).sort((x, y) => (y.importance - x.importance) || (y.id - x.id)).slice(0, 3).map(r => r.text);
     const earlier = [];
     const cur = this.open.get(agentId);
@@ -621,7 +723,7 @@ export class AgentLife {
     return {
       personality: traitWords(traits, flagsOf(p)), spontaneity: traits.spontaneity, bio: row?.bio || '', purpose: row?.purpose || '',
       aspirations: json(row?.aspirations_json, []).slice(0, 2), likes: json(row?.likes_json, []).slice(0, 3), dislikes: json(row?.dislikes_json, []).slice(0, 3),
-      plans, memories: mem, earlier: earlier.reverse(), familiarity: key => (known && known.get(key)?.n) || 0,
+      plans, planned, memories: mem, earlier: earlier.reverse(), familiarity: key => (known && known.get(key)?.n) || 0,
     };
   }
 }

@@ -20,6 +20,9 @@ COPY client ./client
 # The host tools owners use inside the container: account and key administration and backups, database copies.
 COPY tools/admin.mjs ./tools/admin.mjs
 COPY tools/deploy/dbcopy.mjs ./tools/deploy/dbcopy.mjs
+# The character builder's bake (server/characters/: tools/chars/custom-kind.mjs and what it runs, in a child process):
+# without it "Build your own" in the Agent Studio fails on an image.
+COPY tools/chars ./tools/chars
 
 # A tagged build records its release (--build-arg RELEASE_TAG=v2.0.0 --build-arg RELEASE_COMMIT=<commit>); without a
 # tag the server reports the development channel.

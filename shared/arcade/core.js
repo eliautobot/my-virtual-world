@@ -150,11 +150,12 @@ export function decodeLog(s, maxTicks = MAX_TICKS) {
 // ------------------------------------------------------------------------------------------- playing it again
 /**
  * Plays a sim from its seed through a log: → { state, ticks, over }. The sim stops at the step it ends on (later steps
- * in the log do not count). sim: { init(seed) → state, step(state, input), over(state), score(state) }.
+ * in the log do not count). sim: { init(seed, o?) → state, step(state, input), over(state), score(state) }; o: what the
+ * run was laid out with besides its seed (a two-sided game's other player: { k }, see handOf), or null.
  */
-export function replay(sim, seed, log, maxTicks = MAX_TICKS) {
+export function replay(sim, seed, log, maxTicks = MAX_TICKS, o = null) {
   const { runs } = typeof log === 'string' ? decodeLog(log, maxTicks) : { runs: log };
-  const s = sim.init(seed >>> 0);
+  const s = sim.init(seed >>> 0, o);
   let t = 0;
   for (const [v, n] of runs) {
     const inp = inputBits(v);
@@ -166,6 +167,18 @@ export function replay(sim, seed, log, maxTicks = MAX_TICKS) {
     }
   }
   return { state: s, ticks: t, over: sim.over(s) };
+}
+
+// ------------------------------------------------------------------------------------------- the other player
+/**
+ * How well the other side of a two-sided game plays (air hockey, foosball, pool: shared/arcade/catalog.js `cpu`): null
+ * for the computer's own hand; o.k (0 … 100) for someone else's — an AI agent at the other end, its hand from its arcade
+ * level (server/play/versus.js) — as { sp: its speed, err: how far off it aims }, each times the computer's. 50 is the
+ * computer's hand exactly, 100 quicker and truer. + − × ÷ only: the browser and the server step to the same state.
+ */
+export function handOf(o) {
+  const k = o && Number.isFinite(o.k) ? Math.max(0, Math.min(100, Math.round(o.k))) / 100 : null;
+  return k === null ? null : { sp: 0.8 + 0.4 * k, err: 0.4 + 1.2 * (1 - k) };
 }
 
 /** A fresh state's common part: the tick, the dice, the events. */

@@ -42,6 +42,9 @@ export class Net {
     this.offset = 0; this.samples = []; this.clock = null;
     this.plans = []; this.planVer = new Uint32Array(0);
     this.ws = null; this.connected = false; this.retry = 0; this.pingId = 0; this.pending = new Map();
+    // who rides in which car's seats besides its driver (server/world/car-seats.js): car id → [{ seat, kind, id }], kept
+    // here from the first message on, before the modules that draw them have loaded (render/car-occupants.js)
+    this.vseats = new Map();
     this.bytes = 0; this.lastMsg = 0; this.synced = false;
   }
   realNow() { return localReal() + this.offset; }
@@ -62,7 +65,7 @@ export class Net {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
-      this.connected = true; this.retry = 0; this.samples = [];
+      this.connected = true; this.retry = 0; this.samples = []; this.vseats.clear();   // (a new connection is told the seats afresh)
       bus.emit('net', true);
       for (let k = 0; k < 6; k++) setTimeout(() => this.ping(), 150 + k * 350);
     };
@@ -114,6 +117,8 @@ export class Net {
     this.connected = false;
     this.connect();
   }
+  /** A message kept for a module that loads late (see handle): handed over once, then gone. */
+  take(t) { const m = this.held?.[t] || null; if (this.held) delete this.held[t]; return m; }
   /** Sends a text message on the live connection; false when it is not open. */
   send(obj) {
     if (!this.connected || !this.ws || this.ws.readyState !== 1) return false;
@@ -127,8 +132,17 @@ export class Net {
   }
   handle(m) {
     if (m.t === 'drive_state') this.driveState = m;
+    if (m.t === 'vseats') {
+      const V = this.vseats;
+      if (Array.isArray(m.all)) { V.clear(); for (const [id, list] of m.all) if (Array.isArray(list) && list.length) V.set(id, list); }
+      else if (Number.isInteger(m.id)) { if (Array.isArray(m.seats) && m.seats.length) V.set(m.id, m.seats); else V.delete(m.id); }
+    }
     if ((m.t === 'pcorr' || m.t === 'pmoved') && this.playerYou) for (const k of ['x','y','z','ctx','yaw']) if (Number.isFinite(m[k])) this.playerYou[k] = m[k];
     if (m.t === 'you') this.playerYou = m;  // first authenticated attach may precede the optional player modules
+    // (its boat or aircraft, back at the helm after a reload: told on connecting — before the optional modules that draw
+    //  them are loaded; kept for them to take: player/boating.js, player/flight.js. 2026-11-20, the product owner: a reload at sea, the
+    //  boat "gone", swimming, and "Leave the vehicle first")
+    if ((m.t === 'bstate' || m.t === 'fstate') && m.ok && m.resumed) (this.held ||= {})[m.t] = m;
     switch (m.t) {
       case 'hello':
         if (m.clock && Number.isFinite(m.clock.serverTime) && !this.samples.length) this.offset = m.clock.serverTime - localReal();

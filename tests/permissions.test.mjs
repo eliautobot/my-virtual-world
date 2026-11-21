@@ -107,7 +107,7 @@ test('every route names a known capability with the decided lowest role and re-a
     ['GET /api/agent-api/inbox', 'GET /api/agent-api/me', 'GET /api/agent-api/wakeup', 'POST /api/agent-api/enroll', 'POST /api/agent-api/events', 'POST /api/agent-api/session', 'POST /api/agent-api/wakeup']);
   // WP1.10: guests say where they look (they see players' characters); moving, chatting and the rest need an account.
   assert.deepEqual(Object.fromEntries(Object.entries(ws).map(([t, m]) => [t, CAPS[m.cap].min])), {
-    ping: 'guest', resync: 'guest', pview: 'guest', pmove: 'member', pobserve: 'member', plook: 'member', pcam: 'member', phome: 'member', phomeat: 'member', ptravel: 'member', pwarp: 'admin', vcommand: 'member', vinput: 'member', vpose: 'member', vphysics: 'member', vresync: 'guest', fboard: 'member', fpose: 'member', fexit: 'member', fcrash: 'member', fleave: 'member', bboard: 'member', bpose: 'member', bexit: 'member', bleave: 'member', say: 'member',
+    ping: 'guest', resync: 'guest', pview: 'guest', pmove: 'member', pobserve: 'member', plook: 'member', pcam: 'member', phome: 'member', phomeat: 'member', ptravel: 'member', pwarp: 'admin', vcommand: 'member', vinput: 'member', vpose: 'member', vphysics: 'member', vresync: 'guest', fboard: 'member', fpose: 'member', fexit: 'member', fcrash: 'member', fleave: 'member', bboard: 'member', bpose: 'member', bexit: 'member', bleave: 'member', bjoin: 'member', banswer: 'member', bdeck: 'member', bresync: 'member', say: 'member', radio_tune: 'member', see: 'guest',
   });
 });
 

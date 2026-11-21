@@ -94,7 +94,7 @@ const SOUNDS = [
   ['volMaster', 'Master volume', 'Everything below, together.'],
   ['volWorld', 'World', 'Wind, rain, waves, birds, the city and thunder.'],
   ['volAircraft', 'Aircraft and games', 'Engines and wind while you fly, the ring game\'s chimes.'],
-  ['volVoices', 'Agents\' voices', 'Voice conversations and 🔊 read aloud.'],
+  ['volVoices', 'Agents\' voices', 'Agents talking in the city near you (and your own agents answering you), voice conversations and 🔊 read aloud. 0 % silences them.'],
   ['volMedia', 'Videos and recordings', 'Voicemail, and audio and video in chats and on the PC.'],
   ['volMusic', 'Live music', 'The lounge\'s band and the club\'s DJ, when you are on their floor.'],
   ['volEffects', 'Sound effects', 'Footsteps on every surface, jumps, landings and splashes, for you and the people near you.'],
@@ -148,7 +148,7 @@ function displayTab(d, body) {
       ${[['cut', 'Cutaway'], ['up', 'Full'], ['down', 'Low']].map(([v, t]) => `<option value="${v}"${S.walls === v ? ' selected' : ''}>${t}</option>`).join('')}</select></span></label>
     <p class="hint">While inside a building; also the <kbd>V</kbd> key.</p>
     ${[['wildlife', 'Wildlife', [['off', 'Off'], ['fewer', 'Fewer'], ['normal', 'Normal']]], ['weatherFx', 'Rain and lightning', [['off', 'Off'], ['on', 'On']]], ['promoAircraft', 'Promotional aircraft', [['off', 'Off'], ['on', 'On']]],
-      ['traffic', 'Traffic', [['off', 'Off'], ['light', 'Light'], ['normal', 'Normal']]], ['vehicleDetail', 'Vehicle detail', [['simple', 'Simple'], ['normal', 'Normal']]]]
+      ['traffic', 'Traffic', [['off', 'Off'], ['light', 'Light'], ['normal', 'Normal']]], ['vehicleDetail', 'Vehicle detail', [['simple', 'Simple'], ['normal', 'Normal']]], ['charDetail', 'Character detail', [['auto', 'By graphics quality'], ['standard', 'Standard'], ['close', 'Close-up (more detail on the people nearest you)']]]]
       .map(([k, label, opts]) => `<label>${label}<span class="row"><select class="input dp" data-k="${k}">${opts.map(([v, t]) => `<option value="${v}"${pref(k) === v ? ' selected' : ''}>${t}</option>`).join('')}</select></span></label>`).join('')}
     <p class="hint">For slower devices: these change only what this screen draws, not the world.</p>
     <label>Graphics quality<span class="row"><select class="input qual">

@@ -64,7 +64,9 @@ const ask = async (session, input, { agent = A, c = owner, ...extra } = {}) => {
   const end = await waitFor(async () => { const e = (await c.get(`/api/providers/runs/events?run=${r.json.runId}`)).json; return e && e.done ? e.events.map(x => x.event) : null; });
   assert.ok(end, 'the answer ended');
   const call = seen.slice(n).find(j => j.stream);
-  return { events: end, end: end.find(e => e.type === 'run.end'), system: call?.messages.find(m => m.role === 'system')?.content || '', call };
+  // (note: what goes with the newest message — the real time at work, its senses in Life: server/senses/)
+  const last = call?.messages.filter(m => m.role === 'user').at(-1)?.content, lastText = typeof last === 'string' ? last : (last || []).filter(p => p.type === 'text').map(p => p.text).join('\n');
+  return { events: end, end: end.find(e => e.type === 'run.end'), system: call?.messages.find(m => m.role === 'system')?.content || '', note: (/^\[My Virtual World — [\s\S]*?\]\n\n/.exec(lastText) || [''])[0], call };
 };
 const up = async (c, name, buf) => { const r = await c.request('POST', `/api/chat/attachments?name=${encodeURIComponent(name)}`, buf, { 'content-type': 'application/octet-stream' }); assert.equal(r.status, 200, r.text); return r.json.attachment; };
 
@@ -150,7 +152,8 @@ test('a chat in Work mode: the real time where it works, its brief, what it know
   assert.match(r.system, /This chat is WORK/);
   assert.match(r.system, /at «Acme Dental», an AI agent who works for/);
   assert.match(r.system, /in a tone that is professional/);
-  assert.match(r.system, /NOW: \w+day, \w+ \d{1,2}, \d{4} at \d{1,2}:\d{2} [AP]M E[DS]T \(time zone America\/New_York\)/, 'the brief\'s time zone wins over the writer\'s');
+  assert.match(r.note, /NOW: \w+day, \w+ \d{1,2}, \d{4} at \d{1,2}:\d{2} [AP]M E[DS]T \(time zone America\/New_York\)/, 'the brief\'s time zone wins over the writer\'s (with the message: the instructions stay the same)');
+  assert.doesNotMatch(r.system, /\d{1,2}:\d{2} [AP]M E[DS]T/, 'no clock in the instructions');
   assert.match(r.system, /YOUR JOB — «[^»]+»'s instructions[^\n]*\nAnswer the phone\.\nBook appointments\./);
   assert.match(r.system, /Open 9 to 5, Monday to Friday\./);
   assert.match(r.system, /--- FILE «prices\.md» ---\n# Prices\nCleaning: \$90/);
@@ -160,11 +163,11 @@ test('a chat in Work mode: the real time where it works, its brief, what it know
   assert.equal(typeof r.call.messages.find(m => m.role === 'user').content, 'string', '… and its PDF is not sent to it');
   // without a time zone in the brief: the writer's; without either, the server's
   assert.equal((await owner.post('/api/agent-work', { agent: A, timezone: '' })).status, 200);
-  assert.match((await ask(sess.id, 'and now?', { tz: 'Asia/Tokyo' })).system, /GMT\+9 \(time zone Asia\/Tokyo\)/);
+  assert.match((await ask(sess.id, 'and now?', { tz: 'Asia/Tokyo' })).note, /GMT\+9 \(time zone Asia\/Tokyo\)/);
   assert.equal((await owner.post('/api/providers/runs', { agent: A, session: sess.id, input: 'x', tz: 7 })).json.code, 'bad_timezone');
   const unknown = await ask(sess.id, 'a zone it does not know', { tz: 'Not/AZone' });
   assert.equal(unknown.end.status, 'ok', 'a browser\'s zone the server doesn\'t know never stops a chat');
-  assert.doesNotMatch(unknown.system, /Not\/AZone/);
+  assert.doesNotMatch(unknown.system + unknown.note, /Not\/AZone/);
   // what it keeps from work: notes (once each), never plans or memories in the city
   const before = (await owner.get(`/api/agent-life/profile?agent=${A}`)).json.plans.length;
   const k = await ask(sess.id, 'keep-note plan-it');

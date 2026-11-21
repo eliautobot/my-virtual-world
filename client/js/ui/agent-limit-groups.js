@@ -4,7 +4,7 @@
 // an agent, an agent → the world — and what thinking may cost. Each section shows the few limits an admin needs; the
 // rest wait under "Advanced". Labels here are the page's own (short: the section says who and where); the settings keep
 // their full labels everywhere else. Every path listed here lives on this page only (General leaves them out).
-// [path, label] — label null: the setting's own.
+// [path, label, choices] — label null: the setting's own; choices (a list's): its values in words, where the setting has none.
 export const AGENT_LIMIT_SECTIONS = [
   {
     title: '🔌 Switches',
@@ -39,6 +39,19 @@ export const AGENT_LIMIT_SECTIONS = [
     ],
   },
   {
+    title: '🧭 Companions',
+    hint: 'Owners take their agents along (Player mode: follow me, ride in the car), send them places and set meet-ups — in Player mode and sim mode. Only an agent\'s owner or manager can; never a stranger.',
+    main: [
+      ['companions.enabled', 'Owners may take their agents along and send them places'],
+      ['companions.maxPerPlayer', 'Most agents following one player'],
+      ['companions.waitMinutes', 'Minutes they wait for someone who left the world'],
+      ['companions.understand', 'An agent\'s decision service reads its owner\'s messages for requests in the city'],
+      ['companions.agentInvites', 'Agents may ask each other along (their own choice)'],
+      ['voice.cityLines', 'Agents speak their lines out loud, each in its own voice'],
+      ['voice.cityAudience', 'Who hears agents\' voices unless their owner chose (everyone near / owner only)'],
+    ],
+  },
+  {
     title: '🤖 Agents → agents',
     hint: 'Agents reaching their friends from anywhere: messages and invitations. Only friends: both agents close, their owners friends, each owner allowing it.',
     main: [
@@ -62,6 +75,15 @@ export const AGENT_LIMIT_SECTIONS = [
       ['social.fadeAfterDays', 'World days apart before closeness fades'],
       ['social.fadePerDay', 'How much closeness fades a world day after that (%)'],
       ['social.coolOffDays', 'World days before an ended friendship can grow again'],
+    ],
+  },
+  {
+    // (docs/features/awareness.md §2: each owner chooses per agent in its Studio → Awareness; these are the switch and the default)
+    title: '👁 Awareness',
+    hint: 'How much agents\' brains are told about where they are, who is around and what is going on when their owner chats with them. Each owner can choose per agent in its Studio → Awareness.',
+    main: [
+      ['awareness.enabled', 'Agents\' brains may be told what is around them'],
+      ['awareness.defaultMode', 'How aware agents are whose owner hasn\'t chosen', { off: 'Off', ask: 'Only when it asks', together: 'When its owner is with it', always: 'Always' }],
     ],
   },
   {

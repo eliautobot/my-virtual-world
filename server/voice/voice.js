@@ -42,6 +42,10 @@ const cleanText = (s, n) => String(s ?? '').replace(/[\u0000-\u001f<>]/g, '').tr
 const dayOf = t => new Date(t).toISOString().slice(0, 10);
 
 /** Checks a voice choice { connection, voice, model, speed, instructions, browserVoice, language } — a partial patch. */
+/** Who may hear an agent's voice in the city. */
+export const AUDIENCES = Object.freeze(['public', 'owner']);
+/** How long a pause before live voice answers (client/js/ui/voice-core.js PATIENCE). */
+export const PATIENCES = ['quick', 'normal', 'relaxed', 'patient'];
 function checkChoice(b, { listen = false } = {}) {
   const out = {};
   if (b.connection !== undefined) {
@@ -69,6 +73,14 @@ function checkChoice(b, { listen = false } = {}) {
     if (l && !LANG.test(l)) throw new VoiceError(400, 'bad_language', 'A language is a code like en or en-US');
     out.language = l;
   }
+  // (live voice — how long a pause before it answers, whether the words of a pause are checked, and whether its own pauses
+  //  are learned: client/js/ui/voice-core.js TurnTaker)
+  if (listen && b.patience !== undefined) {
+    if (!PATIENCES.includes(b.patience)) throw new VoiceError(400, 'bad_patience', `Patience is one of ${PATIENCES.join(', ')}`);
+    out.patience = b.patience;
+  }
+  if (listen && b.smart !== undefined) out.smart = b.smart !== false;
+  if (listen && b.learn !== undefined) out.learn = b.learn !== false;
   return out;
 }
 
@@ -106,11 +118,11 @@ export class Voice {
   }
 
   // ------------------------------------------------------------------------------------------- preferences
-  /** An account's own voice choices: { listen: { connection, model, language }, speak: { connection, voice, model, speed, instructions }, browserVoice }. */
+  /** An account's own voice choices: { listen: { connection, model, language, patience, smart, learn }, speak: { connection, voice, model, speed, instructions }, browserVoice }. */
   prefs(accountId) {
     let p = {};
     try { p = JSON.parse(this.q.prefs.get(this.w, Number(accountId))?.prefs_json || '{}') || {}; } catch { p = {}; }
-    return { listen: { connection: null, model: '', language: '', ...(p.listen || {}) }, speak: { connection: null, voice: '', model: '', speed: 1, instructions: '', unique: true, ...(p.speak || {}) }, browserVoice: p.browserVoice || '' };
+    return { listen: { connection: null, model: '', language: '', patience: 'normal', smart: true, learn: true, ...(p.listen || {}) }, speak: { connection: null, voice: '', model: '', speed: 1, instructions: '', unique: true, ...(p.speak || {}) }, browserVoice: p.browserVoice || '' };
   }
   setPrefs(P, body = {}) {
     const me = this.me(P), cur = this.prefs(me);
@@ -136,7 +148,10 @@ export class Voice {
     const v = a && a.voice && typeof a.voice === 'object' ? a.voice : {};
     const map = o => (o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).filter(([k, x]) => /^\d{1,9}$/.test(k) && typeof x === 'string' && x).slice(0, 50)) : {});
     return { connection: v.connection ?? null, voice: v.voice || '', model: v.model || '', speed: Number(v.speed) || 1, instructions: v.instructions || '', browserVoice: v.browserVoice || '',
-      voices: map(v.voices), auto: map(v.auto) };
+      voices: map(v.voices), auto: map(v.auto),
+      // who hears its voice in the city (server/voice/lines.js): 'public' (anyone near), 'owner' (its owner and those it is
+      // shared with to manage), '' (the world's default: voice.cityAudience)
+      audience: AUDIENCES.includes(v.audience) ? v.audience : '' };
   }
   /** The voice chosen for an agent on this service (in its Studio), or '' (none chosen: one is picked for it). */
   chosenVoice(av, c) {
@@ -156,6 +171,10 @@ export class Voice {
     }
     const cur = this.agentVoice(a), next = { ...cur, ...x };
     delete next.unique;
+    if (body.audience !== undefined) {
+      if (body.audience !== null && body.audience !== '' && !AUDIENCES.includes(body.audience)) throw new VoiceError(400, 'bad_audience', 'Who hears its voice: everyone near (public), only you (owner), or the world\'s default');
+      next.audience = body.audience || '';
+    }
     if (body.for !== undefined && body.for !== null && body.for !== '') {
       // its voice on one service — whichever speaks for it (its own, its owner's or the installation's); '' lets one be
       // picked for it again

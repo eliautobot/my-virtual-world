@@ -322,8 +322,10 @@ test('strangers in person: friends and those it knows are heard; a stranger only
     assert.deepEqual([S.hears(1, 3), S.hears(1, 3), S.hears(1, 3), S.hears(1, 3)], [true, true, true, false], 'three lines a day each');
     assert.equal(S.hears(1, 5), true, 'another stranger has its own three');
     assert.equal(S.hears(2, 3, { connectedListener: false }), true, 'the Mind answers a stranger too, as often');
+    assert.equal(S.hears(1, 3, { together: true }), true, 'spending time together (companions): not a stranger\'s three a day');
     R.agentBlocks.add('10|2');
     assert.equal(S.hears(1, 2), false, 'an agent its owner blocked is not heard');
+    assert.equal(S.hears(1, 2, { together: true }), false, '…not even when out together');
     R.clock(86400000);
     assert.equal(S.hears(1, 3), true, 'a new day');
   } finally { R.done(); }

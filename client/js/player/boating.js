@@ -17,7 +17,12 @@
 //   Esc: leave. Phone: the wheel on the left (slide), the lever on the right (slide; a notch at neutral), Anchor,
 //   Neutral, Walk, Off; on deck the stick walks, Fish / Wheel, Anchor.
 //
-// app.boating: { active, state(), type, module, id, frame, walking, fishing, deckToWorld, act } — the fishing game uses it.
+// Fishing together (2026-11-19, co-op): walk up to a boat that's out and stopped and press E to come aboard — the
+// skipper's friends at once, anyone else when the skipper says yes (a note on their screen) — as its crew: the boat is
+// theirs to drive (drawn here from the harbour's poses, smoothed), you walk its deck and fish from its spots; E at no
+// spot steps off when it's stopped alongside, Esc leaves (the harbour launch takes you back to the dock).
+//
+// app.boating: { active, guest, state(), type, module, id, frame, walking, fishing, deckToWorld, act } — the fishing game uses it.
 import * as THREE from 'three';
 import { S, bus, holdView, releaseView } from '../core/state.js';
 import { h, esc, isTouch } from '../core/util.js';
@@ -34,11 +39,11 @@ import { BoatFx } from '../render/boat-fx.js';
 const DT = 1 / 60, SEND_MS = 100, BOARD_D = 6, WALK = 1.35, REACH = 0.8;
 const CAM = { coastal: { dist: 15, pitch: 0.22 }, skiff: { dist: 11, pitch: 0.24 } };
 const DECK_CAM = { coastal: { dist: 6.5, pitch: 0.34 }, skiff: { dist: 5.5, pitch: 0.36 } };
-const B = { active: false, s: null, id: null, type: null, module: null, mesh: null, motors: [], acc: 0, sentAt: 0, keys: new Set(), pending: false, leaving: false, ending: false,
+const B = { active: false, guest: null, rb: null, s: null, id: null, type: null, module: null, mesh: null, motors: [], acc: 0, sentAt: 0, keys: new Set(), pending: false, leaving: false, ending: false,
   touch: { steer: 0, lever: null, neutral: false, anchor: false }, lastT: 0, real: 0, water: null, solids: [], solidsAt: -1e9,
   walk: null,   // on deck, off the wheel: { x, y, z (boat frame), yaw (0 the bow), fish (the spot fished from, or -1), dist (walked), moving, pose (a clip the fishing game asks for) }
   clip: CLIP.helm, pclip: CLIP.helm, pph: 0, fadeT: 0, ph: 0, camH: null, rings: null };
-let app = null, E = {}, mat = null, fx = null, remote = new Map(), rmesh = {}, pressed = { neutral: false, anchor: false };
+let app = null, E = {}, mat = null, fx = null, remote = new Map(), rmesh = {}, pressed = { neutral: false, anchor: false }, aboard = new Map();   // (aboard: pid → { boat, x, y, z, yaw } — the players aboard the boats near, on their decks)
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s1 = new THREE.Vector3(1, 1, 1), _pv = new THREE.Vector3(), _qv = new THREE.Quaternion();
 
 export function init(a) {
@@ -48,16 +53,31 @@ export function init(a) {
   window.addEventListener('keydown', e => { if (B.active && !typing(e)) { B.keys.add(e.code); if (e.code === 'Space' && !e.repeat && !B.walk) pressed.neutral = true; if (e.code === 'KeyQ' && !e.repeat) pressed.anchor = true; } });
   window.addEventListener('keyup', e => B.keys.delete(e.code));
   window.addEventListener('blur', () => B.keys.clear());
-  bus.on('msg:bstate', onState);
+  bus.on('msg:bstate', m => { app.net.take?.('bstate'); onState(m); });
   bus.on('msg:bcorr', m => { if (B.active && m.pose) { B.s.x = m.pose.x; B.s.z = m.pose.z; B.s.u = B.s.v = 0; B.prev?.p.set(m.pose.x, B.s.y, m.pose.z); } });
   bus.on('msg:pmoved', m => { if (m.boat === 'out' && B.active) end(m); });
+  // (driving a boat the harbour doesn't give this player — the server restarted, the boat went home —: let go of it, where the
+  //  server has the player; 2026-11-19: a page kept steering the old boat, and the one it took next "wasn't moving")
+  bus.on('msg:bgone', m => { if (!B.active) return; end({ x: m.x, y: m.y, z: m.z }); if (m.text) app.toast(`⚓ ${m.text}`, '', 3600); });
   bus.on('msg:harbour', onHarbour);
+  // (your boat: someone asks to come aboard — a yes from you lets them on; the crew coming and going)
+  bus.on('msg:bask', m => { if (!B.active || B.guest) return; app.toast(`${m.name || 'Someone'} wants to come aboard and fish with you`, '', 30000, '', '', { label: 'Let them aboard', run: () => app.net.send({ t: 'banswer', who: m.from, yes: true }) }); });
+  bus.on('msg:bcrew', m => { if (B.active && m.text) app.toast(`🚤 ${m.text}`, '', 3000); if (B.active) B.crew = m.crew || B.crew; });
   bus.on('mode', m => { if (m !== 'play' && B.active) leave(); });
   bus.on('frame', (dt, now) => { drawRemote(dt); effects(dt, now / 1000); if (B.top && B.render && B.s) B.top.visible = !B.walk || !topInTheWay(B.walk, B.render, B.s.heading); });   // (the canopy: once the camera has moved this frame)
   buildHud(document.getElementById('ui'));
   buildTouch(document.getElementById('ui'));
+  // (loaded after the page connected: its boat, if the server keeps one for its player — told then, kept by core/net.js —
+  //  and asked again once the page is ready (every module, its player's own, loaded), so a page never shows its player
+  //  swimming while the server has them at the helm; and asked whenever Play mode begins)
+  const ask = () => { if (!app.net.send({ t: 'bresync' })) { const off = bus.on('net', on => { if (on) { off(); app.net.send({ t: 'bresync' }); } }); } };
+  const ready = () => { const held = app.net.take?.('bstate'); if (held) onState(held); ask(); };
+  if (app.ready) ready(); else { const off = bus.on('ready', () => { off(); ready(); }); }
+  bus.on('mode', m => { if (m === 'play' && !B.active && app.ready) ask(); });
   app.boating = {
     get active() { return B.active; }, get type() { return B.type; }, get module() { return B.module; }, get id() { return B.id; },
+    /** Aboard someone else's boat as its crew: { skipper (account id), name } — or null (your own boat, or none). */
+    get guest() { return B.guest ? { ...B.guest } : null; },
     state: () => B.s, frame, envNow: () => (B.s ? envFor(B.s) : null),   // (envNow: the water and docks as it feels them: checks)
     /** On deck (off the wheel): { x, y, z, yaw, fish } in the boat's frame, or null at the wheel. */
     get walking() { return B.walk; },
@@ -70,9 +90,26 @@ export function init(a) {
     /** Held to the spot (a fish on, a cast going out): the walking keys and E don't move you or stand you up. */
     hold: on => { if (B.walk) B.walk.hold = !!on; },
     walk: on => setWalk(on), act: () => deckAct(),
+    /** Back to the dock? — asked first (Esc, the play bar's Leave). */
+    askLeave: () => askLeave(true),
     /** Auto-cruise to { x, z, label } (the fishing chart's course), or null to stop: the boat steers for it round the shallows and stops there. */
-    cruise: to => { B.cruise = to && B.active ? { ...to } : null; B.cruiseLever = B.touch.lever; if (to && B.walk) setWalk(false); bus.emit('boat-cruise', { on: !!B.cruise, to: B.cruise }); },
+    cruise: to => { if (B.guest) { if (to) app.toast(`${B.guest.name || 'The skipper'} is at the wheel`, '', 2400); return; } B.cruise = to && B.active ? { ...to } : null; B.cruiseLever = B.touch.lever; if (to && B.walk) setWalk(false); bus.emit('boat-cruise', { on: !!B.cruise, to: B.cruise }); },
     get cruising() { return B.cruise; },
+    /** Where player pid stands aboard a boat out near here, as this page draws that boat now: { x, y, z, yaw } — or null
+     *  (not aboard one; the harbour's rows: server/world/boats.js tick aboard). */
+    aboardAt: pid => {
+      const a = aboard.get(pid); if (!a) return null;
+      const q = app.boating.poseOf(a.boat); if (!q) return null;
+      const w = boatPoint({ x: q.x, y: q.y, z: q.z, heading: q.heading, pitch: q.pitch, roll: q.roll }, a.x, a.y, a.z);
+      return { x: w.x, y: w.y, z: w.z, yaw: q.heading + a.yaw };
+    },
+    /** A boat out as this page draws it now — its own, or anyone else's near: { x, y, z, heading, pitch, roll, type } or null
+     *  (the companions aboard are drawn at their spots on it: render/boat-crew.js). */
+    poseOf: id => {
+      if (B.active && id === B.id && B.s && B.render) return { x: B.render.p.x, y: B.render.p.y, z: B.render.p.z, heading: B.s.heading, pitch: B.s.pitch, roll: B.s.roll, type: B.type };
+      const r = remote.get(id);
+      return r ? { x: r.x, y: r.y, z: r.z, heading: r.h, pitch: r.p, roll: r.r, type: r.type } : null;
+    },
     debug: () => ({ keys: [...B.keys], t: B.s?.t, acc: B.acc, lastT: B.lastT, leaving: B.leaving, walk: B.walk && { ...B.walk }, top: B.top?.visible, topBox: B.topBox, 
       cam: app.stage.camera.position.toArray().map(v => +v.toFixed(2)), boat: B.render?.p.toArray().map(v => +v.toFixed(2)), h: B.s?.heading }),
   };
@@ -96,8 +133,22 @@ function target(P) {
     const d = Math.hypot(c.x - P.x, c.z - P.z) - BOATS[c.type].L * 0.45;
     if (d < bd) { bd = d; best = c; }
   }
+  // (someone's boat out and stopped close by: aboard as its crew, to fish together)
+  for (const r of remote.values()) {
+    if (!r.out || !r.skipper || Math.abs(r.v || 0) > 1.5 || Math.abs(P.y - r.y) > 4) continue;
+    const d = Math.hypot(r.x - P.x, r.z - P.z) - BOATS[r.type].L * 0.5;
+    if (d < bd) { bd = d; best = { id: r.id, type: r.type, crewOf: r.skipper }; }
+  }
   if (!best) return null;
+  if (best.crewOf) return { d: Math.max(0.1, bd), html: `Come aboard ${esc(best.crewOf)}'s ${esc(label(best.type))} <span class="dim">· fish together</span>`, act: () => join(best) };
   return { d: Math.max(0.1, bd), html: `Take the ${esc(label(best.type))} <span class="dim">· ${BOATS[best.type].icon}</span>`, act: () => board(best) };
+}
+/** Asks to come aboard someone's boat (their friend: at once; anyone else: when they say yes). */
+function join(c) {
+  if (B.pending || B.active) return;
+  B.pending = true;
+  app.net.send({ t: 'bjoin', id: c.id });
+  setTimeout(() => { if (B.pending) { B.pending = false; app.toast('No answer from the boat — try again', 'bad', 3000); } }, 5000);
 }
 function board(c) {
   if (B.pending || B.active) return;
@@ -107,8 +158,20 @@ function board(c) {
 }
 function onState(m) {
   B.pending = false;
-  if (!m.ok) { app.toast(m.text || 'Not now', 'bad', 3500); return; }
-  if (B.active) return;
+  if (!m.ok && m.none) return;   // (asked where its player is: on no boat — nothing to draw)
+  // (back at the helm — or aboard someone's boat — after a reload: in Play mode, as they were; not yet loaded: when it is)
+  if (m.ok && m.resumed && !app.ready) { const off = bus.on('ready', () => { off(); onState(m); }); return; }
+  if (m.ok && m.resumed && S.mode !== 'play') { app.setMode?.('play'); if (S.mode !== 'play') return; }
+  if (!m.ok) { app.toast(m.text || 'Not now', m.pending ? '' : 'bad', m.pending ? 5000 : 3500); return; }
+  if (B.active) {
+    // (aboard as crew already, the same boat: who's aboard now)
+    if (m.guest && B.guest && m.id === B.id) { B.crew = m.crew || B.crew; return; }
+    // (its own boat, kept for it across the server's restart: where the server has it now)
+    if (m.resumed && m.id === B.id && m.pose && B.s && !m.guest && !B.guest) { Object.assign(B.s, { x: m.pose.x, z: m.pose.z, heading: m.pose.h, u: 0, v: 0 }); B.prev?.p.set(m.pose.x, B.s.y, m.pose.z); return; }
+    // (another boat given to it while this page still drove an old one: the server's is the one — never ignored)
+    const P = app.player;
+    end({ x: P?.x ?? m.pose.x, y: P?.y ?? m.pose.y, z: P?.z ?? m.pose.z });
+  }
   start(m);
 }
 
@@ -117,8 +180,15 @@ function start(m) {
   const P = app.player, Sx = BOATS[m.type], pose = m.pose, w = waterUnder(pose.x, pose.z);
   B.s = newBoat(m.type, pose.x, w ? w.level : pose.y, pose.z, pose.h, app.fishStore?.boatKit?.() || {});   // (your engine and anchor upgrades, the seamanship skill: play/fish-store.js)
   if (m.resumed) { B.s.y = pose.y; B.s.pitch = pose.p || 0; B.s.roll = pose.r || 0; }
-  Object.assign(B, { active: true, id: m.id, type: m.type, module: m.module, acc: 0, sentAt: 0, leaving: false, ending: false, lastT: 0, water: w, walk: null, clip: CLIP.helm, pclip: CLIP.helm, camH: null, camY: null });
-  holdView('Boat', 'To get off the boat: stop at a dock and press E, or press Esc');   // (only getting off lets go of the view: core/state.js holdView)
+  Object.assign(B, { active: true, id: m.id, type: m.type, module: m.module, acc: 0, sentAt: 0, leaving: false, ending: false, lastT: 0, water: w, walk: null, clip: CLIP.helm, pclip: CLIP.helm, camH: null, camY: null,
+    guest: m.guest ? { skipper: m.skipper, name: m.skipperName || 'the skipper' } : null, crew: m.crew || null, rb: null });
+  if (B.guest) {   // (its crew: the boat where the harbour says, on the deck where you stood — or at your fishing spot)
+    B.s.y = pose.y; B.s.pitch = pose.p || 0; B.s.roll = pose.r || 0;
+    B.rb = { x: pose.x, y: pose.y, z: pose.z, h: pose.h, p: pose.p || 0, r: pose.r || 0, v: 0, vx: 0, vz: 0, tx: pose.x, ty: pose.y, tz: pose.z, th: pose.h, tp: pose.p || 0, tr: pose.r || 0, at: performance.now() };
+    const sp = Sx.deck.spots[m.spot] || Sx.deck.spots[0], at = m.dk?.at || [sp.x, sp.y, sp.z];
+    B.walk = { x: at[0], y: at[1], z: at[2], yaw: m.dk ? m.dk.yaw || 0 : sp.yaw, fish: -1, dist: 0, moving: false, pose: null };
+  }
+  holdView('Boat', B.guest ? 'To get off: when the boat is stopped alongside, press E away from a fishing spot — or Esc to go back to the dock' : 'To get off the boat: stop at a dock and press E, or press Esc');   // (only getting off lets go of the view: core/state.js holdView)
   B.prev = { p: new THREE.Vector3(B.s.x, B.s.y, B.s.z), q: new THREE.Quaternion() };
   B.render = { p: B.prev.p.clone(), q: new THREE.Quaternion() };
   B.keys.clear();
@@ -131,28 +201,32 @@ function start(m) {
   if (B.top) { B.top.castShadow = true; B.mesh.add(B.top); }
   app.stage.scene.add(B.mesh);
   if (P?.active) {
-    P.onVehicleEnter?.({ keys: matchMedia('(pointer: coarse)').matches ? `${Sx.label}: the lever (right) ahead or astern · the wheel (left) steers · ⚓ anchor · stop alongside a dock to step off` : `${Sx.label}: W/S throttle lever (through neutral to reverse) · A/D wheel · Space neutral · Q anchor · E step off when stopped alongside` });
+    P.onVehicleEnter?.({ keys: B.guest ? `Aboard ${B.guest.name}'s ${Sx.label}: WASD walk the deck · E fish from a spot / step off when stopped alongside · Esc back to the dock` : matchMedia('(pointer: coarse)').matches ? `${Sx.label}: the lever (right) ahead or astern · the wheel (left) steers · ⚓ anchor · stop alongside a dock to step off` : `${Sx.label}: W/S throttle lever (through neutral to reverse) · A/D wheel · Space neutral · Q anchor · E step off when stopped alongside` });
     if (!app.agents.extra.includes(P.extra)) app.agents.extra.push(P.extra);   // (you're seen at the helm, not hidden as in a car)
     const narrow = innerWidth < 760;
-    app.cam.goalDist = CAM[m.type].dist * (narrow ? 1.3 : 1); app.cam.goalPitch = CAM[m.type].pitch; app.stage.camera.fov = narrow ? 70 : 62;
+    const cm = B.guest ? DECK_CAM : CAM;
+    app.cam.goalDist = cm[m.type].dist * (narrow ? (B.guest ? 1.25 : 1.3) : 1); app.cam.goalPitch = cm[m.type].pitch; app.stage.camera.fov = narrow ? 70 : 62;
     app.cam.rates = { follow: 10, turn: 3.5 };
   }
   document.body.classList.add('boating');
+  document.body.classList.toggle('boat-guest', !!B.guest);
   E.hud.classList.remove('hidden');
-  E.name.textContent = `${Sx.icon} ${Sx.label}`;
+  E.name.textContent = B.guest ? `${Sx.icon} ${B.guest.name}'s ${Sx.label}` : `${Sx.icon} ${Sx.label}`;
   E.touch.classList.toggle('hidden', !isTouch());
   modeUi();
-  bus.emit('boating', { on: true, type: m.type, module: m.module });
+  bus.emit('boating', { on: true, type: m.type, module: m.module, guest: !!B.guest });
+  if (B.guest && !m.resumed) app.toast(`🚤 Aboard ${B.guest.name}'s boat — walk to a fishing spot (a ring on the deck) and press E`, 'good', 4200);
 }
 /** Off the boat (the server put the player on the dock or the shore). */
 function end(m) {
   if (!B.active) return;
+  E.leave?.classList.add('hidden');
   const P = app.player;
-  B.active = false; B.ending = false; B.leaving = false; B.walk = null;
+  B.active = false; B.ending = false; B.leaving = false; B.walk = null; B.guest = null; B.rb = null; B.crew = null;
   releaseView('Boat');
   if (B.mesh) { app.stage.scene.remove(B.mesh); B.mesh = null; B.motors = []; }   // (the geometry is shared: kept)
   if (B.rings) B.rings.visible = false;
-  document.body.classList.remove('boating', 'boat-walk');
+  document.body.classList.remove('boating', 'boat-walk', 'boat-guest');
   E.hud.classList.add('hidden'); E.touch.classList.add('hidden');
   Object.assign(B.touch, { steer: 0, lever: null });
   P?.onVehicleExit?.({ x: m.x, y: m.y, z: m.z });
@@ -212,6 +286,7 @@ function envFor(s) {
     water, level, wind, push: lake ? null : (x, z) => surfPush(x, z, level),   // (the surf's shove toward the shore)
     depth: (x, z) => { const ww = T?.ground?.water(x, z); return ww ? Math.max(0, ww.level - T.pointHeight(x, z)) : 0; },
     solid: (x, z) => B.solids.some(r => Math.abs((x - r.x) * r.c - (z - r.z) * r.n) <= r.hw && Math.abs((x - r.x) * r.n + (z - r.z) * r.c) <= r.hd),
+    rects: B.solids,   // (their shapes: the hull pushed off them and sliding along — shared/boat-model.js dockContact)
     limit: (x, z) => Math.abs(x) > WORLD_HALF - 250 || Math.abs(z) > WORLD_HALF - 250,
   };
 }
@@ -226,7 +301,8 @@ function nearSolids(x, z) {
 function frame(P, dt, t) {
   if (!B.active || !B.s) return;
   const s = B.s, Sx = s.S;
-  if (!B.leaving) {
+  if (B.guest) guestFollow(s, t);
+  else if (!B.leaving) {
     const env = envFor(s), inp = app.custOpen || app.mapOpen ? {} : input();
     const real = B.lastT ? Math.max(0, t - B.lastT) : dt; B.lastT = t;
     B.acc = Math.min(B.acc + real, 0.5); B.real = Math.min(real, 0.5);
@@ -269,17 +345,35 @@ function frame(P, dt, t) {
   cam.followDt = B.leaving ? 0 : B.real;
   if (S.focus.b >= 0) app.setFocus?.(-1);
   const now = performance.now();
-  if (now - B.sentAt > SEND_MS && !B.leaving) {
+  if (now - B.sentAt > SEND_MS && !B.leaving && B.guest) {   // (its crew: only where you stand and what you're doing)
+    B.sentAt = now;
+    app.net.send({ t: 'bdeck', dk: [+at[0].toFixed(2), +at[1].toFixed(2), +at[2].toFixed(2), +(W ? W.yaw : 0).toFixed(2), clip] });
+  } else if (now - B.sentAt > SEND_MS && !B.leaving) {
     B.sentAt = now;
     app.net.send({ t: 'bpose', ts: +s.t.toFixed(3), x: +s.x.toFixed(2), y: +s.y.toFixed(2), z: +s.z.toFixed(2), h: +s.heading.toFixed(4), p: +s.pitch.toFixed(3), r: +s.roll.toFixed(3), v: +s.u.toFixed(2), l: +s.lever.toFixed(2), an: s.anchor ? 1 : 0,
       dk: [+at[0].toFixed(2), +at[1].toFixed(2), +at[2].toFixed(2), +(W ? W.yaw : 0).toFixed(2), clip] });   // (where you stand on it, what you're doing)
   }
   hud(s, t);
 }
+/** Aboard as crew: the boat where the harbour has it (five times a second), smoothed and run on a little — the deck you
+ *  walk moves with it. */
+function guestFollow(s, t) {
+  const b = B.rb; if (!b) return;
+  const real = B.lastT ? Math.max(0, Math.min(0.5, t - B.lastT)) : 1 / 60; B.lastT = t; B.real = real;
+  const k = 1 - Math.exp(-real * 8), ahead = Math.min(0.5, (performance.now() - b.at) / 1000);
+  b.x += (b.tx + b.vx * ahead - b.x) * k; b.z += (b.tz + b.vz * ahead - b.z) * k; b.y += (b.ty - b.y) * k;
+  b.h += angDiff(b.h, b.th) * k; b.p += (b.tp - b.p) * k; b.r += (b.tr - b.r) * k;
+  s.x = b.x; s.y = b.y; s.z = b.z; s.heading = b.h; s.pitch = b.p; s.roll = b.r; s.u = b.v || 0; s.lever = b.l || 0; s.anchor = !!b.an;
+  const q = boatQuat(s);
+  B.prev.p.set(s.x, s.y, s.z); B.prev.q.set(q.x, q.y, q.z, q.w); B.acc = 0;
+}
 const angDiff = (a, b) => { let d = (b - a) % (2 * Math.PI); if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; return d; };
 function onEvent(ev) {
   if (ev === 'aground') app.toast('⚠️ Aground — back off (S) into deeper water', 'bad', 2600);
   else if (ev === 'bump') app.toast('Bump!', '', 1200);
+  // (the lever pushing it into a dock it can't pass, too slow to bump: held there without a word — "the boat wouldn't
+  //  move", 2026-11-17 — said, once every few seconds: back off the other way)
+  else if (ev === 'pinned') { const now = performance.now(); if (now - (B.pinnedSaid || 0) > 5000) { B.pinnedSaid = now; app.toast(B.s?.lever > 0 ? '⚓ Against the dock ahead — back off with S (reverse), then steer away' : '⚓ Against the dock behind — go ahead with W, then steer away', 'bad', 3200); } }
   else if (ev === 'anchor-down') app.toast('⚓ Anchor down', 'good', 1800);
   else if (ev === 'anchor-up') app.toast('⚓ Anchor up', '', 1500);
   else if (ev === 'plane') bus.emit('boat-plane');
@@ -288,7 +382,12 @@ function onEvent(ev) {
 function exit() {
   const s = B.s; if (!s || B.ending) return;
   if (B.walk) { deckAct(); return; }
-  if (Math.abs(s.u) > 1.5) { app.toast('Stop first (Space: the lever to neutral)', 'bad', 2200); return; }
+  stepOff();
+}
+/** Off the boat: stopped alongside a dock or the shore (the server decides where you step). */
+function stepOff() {
+  const s = B.s; if (!s || B.ending) return;
+  if (Math.abs(s.u) > 1.5) { app.toast(B.guest ? `Wait for ${B.guest.name} to stop` : 'Stop first (Space: the lever to neutral)', 'bad', 2200); return; }
   B.ending = true;
   app.net.send({ t: 'bexit' });
   setTimeout(() => { B.ending = false; }, 3000);
@@ -299,19 +398,35 @@ function leave() {
   app.net.send({ t: 'bleave' });
   setTimeout(() => { B.leaving = false; if (B.active) end({ x: B.s?.x ?? 0, y: 0, z: B.s?.z ?? 0 }); }, 4000);
 }
+/** Back to the dock? (Esc): what leaving now means — the trip, the companions, the crew, someone else's boat — Yes / Cancel. */
+function askLeave(open) {
+  if (!open || !B.active) { E.leave.classList.add('hidden'); return; }
+  const trip = app.fishing?.trip, mine = [...(app.boatCrew?.rows?.values() || [])].filter(r => r.boat === B.id).length, crew = (B.crew || []).filter(c => !c.skipper && c.id !== auth.account?.id).length;
+  const why = B.guest
+    ? `You leave ${esc(B.guest.name)}'s boat and the harbour launch takes you back to the dock${trip ? ' — your fishing trip ends and your catch is weighed in' : ''}.`
+    : [`${trip ? 'Your fishing trip ends (your catch is weighed in) and the' : 'The'} harbour master takes the boat back to its slip.`,
+      mine ? `Your ${mine === 1 ? 'companion comes' : `${mine} companions come`} ashore with you.` : '',
+      crew ? `Your crew (${crew} ${crew === 1 ? 'player' : 'players'}) ${trip ? 'end their trips and ' : ''}go ashore too.` : ''].filter(Boolean).join(' ');
+  E.leave.querySelector('.bl-why').innerHTML = why;
+  E.leave.classList.remove('hidden');   // (no focus moved: Enter and Esc answer it, the game keeps the keys)
+}
+function goLeave() { E.leave.classList.add('hidden'); if (!B.active) return; leave(); releaseView('Boat'); app.setMode?.('explore'); }
 function onKey(e) {
   if (!B.active) return false;
   const c = e.code;
   if (c === 'KeyE') { if (!e.repeat) exit(); return true; }
-  if (c === 'KeyF') { if (!e.repeat) setWalk(!B.walk); return true; }
-  if (c === 'Escape') { if (app.cam.locked) return false; if (!e.repeat) { leave(); releaseView('Boat'); app.setMode?.('explore'); } return true; }
+  if (c === 'KeyF') { if (!e.repeat) { if (B.guest) app.toast(`${B.guest.name} is at the wheel`, '', 2000); else setWalk(!B.walk); } return true; }
+  // Esc asks first (2026-11-20, the product owner: Esc "automatically takes me and the companions off the fishing game"):
+  // back to the dock only on a yes; Esc again or Cancel stays aboard
+  if (c === 'Escape') { if (!E.leave.classList.contains('hidden')) { if (!e.repeat) askLeave(false); return true; } if (app.cam.locked) return false; if (!e.repeat) askLeave(true); return true; }
+  if (c === 'Enter' && !E.leave.classList.contains('hidden')) { if (!e.repeat) goLeave(); return true; }
   return ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight'].includes(c);
 }
 
 // ------------------------------------------------------------------ on deck: walking about, fishing spots
 /** Off the wheel (on: true) to walk the deck, or back to it. Leaving it puts the lever in neutral. */
 function setWalk(on) {
-  if (!B.active || !B.s || B.leaving || !!B.walk === !!on) return;
+  if (!B.active || !B.s || B.leaving || !!B.walk === !!on || B.guest) return;
   const Sx = B.s.S, narrow = innerWidth < 760;
   if (on) {
     // the lever to neutral (and the phone's slider with it — but only if the slider was in use: a slider value overrides
@@ -342,6 +457,7 @@ function deckAct() {
     bus.emit('boat-fish', { on: true, spot: what.i, name: sp.name });
   }
   else if (what?.kind === 'wheel') setWalk(false);
+  else if (B.guest) stepOff();   // (its crew, at no spot: off the boat, when it's stopped alongside)
   else app.toast('Walk to a fishing spot (a ring on the deck) or back to the wheel', '', 2200);
   modeUi();
 }
@@ -351,7 +467,7 @@ function deckTarget() {
   if (W.fish >= 0) return { kind: 'stand', label: 'Stand up' };
   const Sx = BOATS[B.type], n = spotNear(B.type, W.x, W.z, REACH);
   if (n && Math.abs(n.spot.y - W.y) < 0.05) return { kind: 'fish', label: `Fish from the ${n.spot.name}`, i: n.i, spot: n.spot };
-  if (Math.hypot(W.x - Sx.helm[0], W.z - Sx.helm[2]) < REACH) return { kind: 'wheel', label: 'Take the wheel' };
+  if (!B.guest && Math.hypot(W.x - Sx.helm[0], W.z - Sx.helm[2]) < REACH) return { kind: 'wheel', label: 'Take the wheel' };
   return null;
 }
 /** A frame's walking: the keys or the stick, the way the camera looks, turned into the boat's frame; along the deck. */
@@ -416,7 +532,9 @@ function rings(W, R) {
 function modeUi() {
   const W = B.walk;
   document.body.classList.toggle('boat-walk', !!W);
-  E.keys.innerHTML = W
+  E.keys.innerHTML = B.guest
+    ? '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>E</kbd> fish / step off (stopped alongside) · <kbd>Esc</kbd> back to the dock'
+    : W
     ? '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>E</kbd> fish / wheel · <kbd>Q</kbd> anchor · <kbd>F</kbd> back to the wheel'
     : '<kbd>W</kbd><kbd>S</kbd> throttle · <kbd>A</kbd><kbd>D</kbd> wheel · <kbd>Space</kbd> neutral · <kbd>Q</kbd> anchor · <kbd>F</kbd> walk the deck · <kbd>E</kbd> step off';
 }
@@ -459,9 +577,10 @@ function buildTouch(root) {
   E.touch.querySelector('[data-a="anchor"]').addEventListener('click', () => { T.anchor = true; });
   E.touch.querySelector('[data-a="exit"]').addEventListener('click', () => exit());
   E.touch.querySelector('[data-a="walk"]').addEventListener('click', () => setWalk(true));
-  E.touch.querySelector('[data-a="wheel"]').addEventListener('click', () => setWalk(false));
+  E.touch.querySelector('[data-a="wheel"]').addEventListener('click', () => (B.guest ? stepOff() : setWalk(false)));
   E.touch.querySelector('[data-a="anchor2"]').addEventListener('click', () => { T.anchor = true; });
   E.act = E.touch.querySelector('[data-a="act"]'); E.act.addEventListener('click', () => deckAct());
+  E.wheelBtn = E.touch.querySelector('[data-a="wheel"]');
   function setLever(y) { handle.style.top = `${((1 - y) / 2 * 100).toFixed(1)}%`; }
   E.setLever = setLever;
   setLever(0);
@@ -479,6 +598,12 @@ function buildHud(root) {
     </div>
     <div class="bh-prompt hidden"></div>
     <div class="bh-keys"></div></div>`));
+  // (Esc: back to the dock? — asked first)
+  E.leave = root.appendChild(h(`<div id="boatleave" class="panel hidden" role="alertdialog" aria-modal="false" aria-labelledby="boatleave-t">
+    <h3 id="boatleave-t">⚓ Back to the dock?</h3><p class="bl-why"></p>
+    <div class="rr-acts"><button type="button" class="btn" data-a="stay">Cancel <kbd>Esc</kbd></button><button type="button" class="btn primary" data-a="go">Yes, back to the dock <kbd>Enter</kbd></button></div></div>`));
+  E.leave.querySelector('[data-a="stay"]').onclick = () => askLeave(false);
+  E.leave.querySelector('[data-a="go"]').onclick = () => goLeave();
   const q = s => E.hud.querySelector(s);
   Object.assign(E, { name: q('.bh-name'), warn: q('.bh-warn'), spd: q('.bh-spd'), hdg: q('.bh-hdg'), dep: q('.bh-dep'), fwd: q('.bh-fwd'), rev: q('.bh-rev'), gear: q('.bh-gear'), prompt: q('.bh-prompt'), keys: q('.bh-keys') });
 }
@@ -497,6 +622,7 @@ function hud(s, t) {
   if (E.prompt._t !== txt) {
     E.prompt._t = txt; E.prompt.innerHTML = txt ? `<kbd>E</kbd> ${esc(txt)}` : ''; E.prompt.classList.toggle('hidden', !txt || isTouch());
     if (E.act) { E.act.textContent = what ? (what.kind === 'fish' ? '🎣 Fish' : what.kind === 'stand' ? 'Stand' : '🛞 Wheel') : '·'; E.act.disabled = !what; }
+    if (E.wheelBtn) E.wheelBtn.textContent = B.guest ? '⚓ Off' : '🛞 Wheel';
   }
 }
 
@@ -508,7 +634,7 @@ function onHarbour(m) {
   const seen = new Set(), now = performance.now();
   for (const row of m.near || []) {
     const [id, type, out, x, y, z, hh, p, r, v, l, skipper] = row;
-    if (B.active && id === B.id) continue;
+    if (B.active && id === B.id) { if (B.guest && B.rb) follow(B.rb, row, now); continue; }
     seen.add(id);
     let b = remote.get(id);
     if (!b) { b = { id, type, x, y, z, h: hh, p, r, vx: 0, vz: 0, at: now, tx: x, tz: z, ty: y }; remote.set(id, b); }
@@ -516,6 +642,14 @@ function onHarbour(m) {
     Object.assign(b, { type, out: !!out, tx: x, ty: y, tz: z, th: hh, tp: p, tr: r, v, l, at: now, skipper, level: waterUnder(x, z)?.level });
   }
   for (const id of [...remote.keys()]) if (!seen.has(id)) remote.delete(id);
+  aboard.clear();
+  for (const [boat, pid, x, y, z, yaw] of m.aboard || []) aboard.set(pid, { boat, x, y, z, yaw });
+}
+/** Aboard as crew: the harbour's newest pose of the boat (its speed worked out between them, as for anyone's boat). */
+function follow(b, row, now) {
+  const [, , out, x, y, z, hh, p, r, v, l] = row, dts = Math.max(0.05, (now - b.at) / 1000), k = Math.min(1, dts / 0.4);
+  b.vx += ((x - b.tx) / dts - b.vx) * k; b.vz += ((z - b.tz) / dts - b.vz) * k; if (!out) b.vx = b.vz = 0;
+  Object.assign(b, { tx: x, ty: y, tz: z, th: hh, tp: p, tr: r, v, l, at: now });
 }
 function drawRemote(dt) {
   if (!remote.size && !Object.keys(rmesh).length) return;

@@ -117,6 +117,58 @@ test('the shallows ground it, the docks stop it, at anchor it stays put in a win
   assert.ok(free.x > 10, `adrift it goes with the wind (${free.x.toFixed(1)} m)`);
 });
 
+// a dock as the pages give it (client player/boating.js nearSolids): its middle, half its sizes, its turn
+const rect = (x, z, w, d, rot = 0) => ({ x, z, hw: w / 2 + 0.05, hd: d / 2 + 0.05, c: Math.cos(rot), n: Math.sin(rot) });
+const inRect = (r, x, z) => Math.abs((x - r.x) * r.c - (z - r.z) * r.n) <= r.hw && Math.abs((x - r.x) * r.n + (z - r.z) * r.c) <= r.hd;
+const docksEnv = (s, rects) => sea(s, () => 0, 30, { rects, solid: (x, z) => rects.some(r => inRect(r, x, z)) });
+const through = (s, rects) => hullPoints(s).some(p => rects.some(r => inRect(r, p[0], p[1])));
+
+test('out of a slip between two fingers with the wheel over: it slides along the finger and turns once clear — never wedged, never through a dock (2026-11-20: "the boat gets stuck a lot and won\'t move")', () => {
+  // a slip as the marinas have them: the float across the head (behind it), fingers 11 m long either side, 4.1 m apart
+  // inside (the Coastal Fisher is 2.8 m wide), bow out toward +z
+  const slip = [rect(0, -5.6, 30, 4), rect(-2.7, 0, 1.3, 11.1), rect(2.7, 0, 1.3, 11.1), rect(-8.1, 0, 1.3, 11.1), rect(8.1, 0, 1.3, 11.1)];
+  for (const steer of [-1, 1, -0.5, 0.5]) {
+    const s = newBoat('coastal', 0, 0, -0.5, 0);
+    let worst = false, out = -Infinity;
+    for (let k = 0; k < 10 / DT; k++) { stepBoat(s, { leverTo: 0.6, steer: k * DT < 0.5 ? 0 : steer }, docksEnv(s, slip), DT); worst ||= through(s, slip); out = Math.max(out, s.z - BOATS.coastal.L / 2); }
+    assert.ok(!worst, `steer ${steer}: never through a dock`);
+    assert.ok(out > 6, `steer ${steer}: its stern clear of the fingers (${out.toFixed(1)} m out), turning away (${s.heading.toFixed(2)})`);
+    assert.ok(Math.abs(s.heading) > 0.8, `steer ${steer}: and turned once clear (${s.heading.toFixed(2)})`);
+  }
+  // wedged across the slip, as Kim's boat was (turned 15° part-way out, its side on a finger): ahead gets it out
+  const w = newBoat('coastal', 0.35, 0, 1.2, 0.26);
+  run(w, 8, { leverTo: 1 }, docksEnv(w, slip));
+  assert.ok(w.z > 15 && !through(w, slip), `wedged: ahead frees it (z ${w.z.toFixed(1)})`);
+  // and the wheel the other way moves it out too; astern, it backs down to the float behind it (0.6 m of room there)
+  for (const [inp, room] of [[{ leverTo: 0.6, steer: -1 }, 3], [{ leverTo: -0.6 }, 0.4]]) {
+    const b = newBoat('coastal', 0.35, 0, 1.2, 0.26), x0 = b.x, z0 = b.z;
+    run(b, 4, inp, docksEnv(b, slip));
+    assert.ok(Math.hypot(b.x - x0, b.z - z0) > room && !through(b, slip), `wedged: ${JSON.stringify(inp)} moves it (${Math.hypot(b.x - x0, b.z - z0).toFixed(1)} m)`);
+  }
+});
+
+test('against a dock: straight in it stops (bump, then pinned while pushed) and backs off; at an angle it slides along; fast, it never jumps a thin wall', () => {
+  const pier = [rect(0, 20, 40, 2)];
+  const s = newBoat('coastal', 0, 0, 0, 0);
+  const evs = run(s, 10, { leverTo: 0.5 }, docksEnv(s, pier));
+  assert.ok(evs.includes('bump') && evs.includes('pinned'), 'bumped, then pinned against it with the lever forward');
+  assert.ok(!through(s, pier) && Math.abs(s.u) < 0.5, 'stopped at it');
+  run(s, 4, { leverTo: -0.6 }, docksEnv(s, pier));
+  assert.ok(s.z < 13, `astern: off it again (${s.z.toFixed(1)})`);
+  // at 40° to a long wall: it keeps going along it
+  const a = newBoat('coastal', -10, 0, 12, 0.7), wall = [rect(0, 20, 80, 0.2)];
+  run(a, 8, { leverTo: 0.5 }, docksEnv(a, wall));
+  assert.ok(!through(a, wall) && a.x > 6, `slid along the wall (x ${a.x.toFixed(1)})`);
+  // flat out at a 20 cm wall: stopped by it, not through it
+  const f = newBoat('coastal', 0, 0, -120, 0);
+  run(f, 14, { leverTo: 1 }, docksEnv(f, wall));
+  assert.ok(f.z < 20 && !through(f, wall), `not through the wall at speed (z ${f.z.toFixed(1)})`);
+  // put in a dock (a restart, the swell): eased out of it
+  const c = newBoat('coastal', 0, 0, 19, 0);
+  run(c, 2, {}, docksEnv(c, pier));
+  assert.ok(!through(c, pier), 'out of the dock it was put in');
+});
+
 test('the water plane fit; the boat\'s points and orientation agree with three.js', () => {
   const S = BOATS.coastal, hs = S.probes.map(([x, z]) => 1 + 0.1 * z - 0.05 * x);   // rising to the bow, falling to port
   const P = fitPlane(S, hs); assert.ok(Math.abs(P.h - 1) < 1e-9 && Math.abs(P.sf - 0.1) < 1e-9 && Math.abs(P.ss - 0.05) < 1e-9);

@@ -24,10 +24,10 @@ async function makeHost(o = {}) {
 const until = async (fn, ms = 4000) => { const t = Date.now(); while (Date.now() - t < ms) { const v = await fn(); if (v) return v; await new Promise(r => setTimeout(r, 20)); } throw new Error('timed out waiting'); };
 
 /** The kinds that are built (no work package still to come). */
-const BUILT = ['openclaw', 'hermes', 'openai-decisions', 'models', 'voice', 'twilio', 'browser', 'search'];
+const BUILT = ['openclaw', 'hermes', 'openai-decisions', 'typesafe-decisions', 'models', 'voice', 'twilio', 'browser', 'search'];
 
 test('the built-in manifests are valid, list every kind, and name the official interface each adapter uses (X12)', () => {
-  assert.deepEqual(BUILTIN_MANIFESTS.map(m => m.id), ['openclaw', 'hermes', 'codex', 'claude-code', 'opencode', 'antigravity', 'universal', 'models', 'openai-decisions', 'voice', 'twilio', 'browser', 'search', 'agentapi']);
+  assert.deepEqual(BUILTIN_MANIFESTS.map(m => m.id), ['openclaw', 'hermes', 'codex', 'claude-code', 'opencode', 'antigravity', 'universal', 'models', 'openai-decisions', 'typesafe-decisions', 'voice', 'twilio', 'browser', 'search', 'agentapi']);
   assert.deepEqual(BUILTIN_MANIFESTS.filter(m => m.system).map(m => m.id), ['agentapi'], 'only the connected-agent kind is made by the server');
   for (const m of BUILTIN_MANIFESTS) {
     assert.deepEqual(validateManifest(m), [], m.id);
@@ -101,7 +101,7 @@ test('one subscriber that throws never stops the others', () => {
 
 test('the registry lists every kind and says which adapters exist; only listed kinds (or allowed tests) are adopted', () => {
   const r = new Registry();
-  assert.equal(r.list().length, 14); assert.equal(r.list().every(m => m.implemented === false && (m.arrivesIn === undefined ? BUILT.includes(m.id) : /^WP2/.test(m.arrivesIn))), true);
+  assert.equal(r.list().length, 15); assert.equal(r.list().every(m => m.implemented === false && (m.arrivesIn === undefined ? BUILT.includes(m.id) : /^WP2/.test(m.arrivesIn))), true);
   const codex = BUILTIN_MANIFESTS.find(m => m.id === 'codex');
   const mock = { id: 'mock', label: 'Mock', test: true, transport: 'network', connectionKind: 'remote', official: 'None: the test double', fields: [], capabilities: { chat: true } };
   assert.deepEqual(r.adopt([codex, mock, { id: 'rogue', label: 'R', transport: 'network', connectionKind: 'remote', official: 'made up interface', fields: [], capabilities: {} }]), ['codex']);

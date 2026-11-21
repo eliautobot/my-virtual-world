@@ -25,7 +25,7 @@ You need Docker Engine with Docker Compose v2, or Docker Desktop.
    cd my-virtual-world
    docker compose up -d
    ```
-   The first start downloads the ready-made image (`ghcr.io/eliautobot/my-virtual-world:2`, for 64-bit PCs and ARM
+   The first start downloads the ready-made image (`ghcr.io/eliautobot/my-virtual-world:3`, for 64-bit PCs and ARM
    machines such as Apple Silicon and Raspberry Pi) and opens the world with the starting map. `docker compose ps`
    shows the app as `healthy` once it is ready, usually within half a minute.
 2. Find the one-time **setup code**. The server prints it when it starts:
@@ -69,7 +69,13 @@ docker compose up -d
 
 The world, the accounts, the licence and the key stay in their Docker volumes: updating replaces only the program.
 
-To stay on one version, pin it in `.env` (for example `MVW_IMAGE=ghcr.io/eliautobot/my-virtual-world:2.6.0`).
+To stay on one version, pin it in `.env` (for example `MVW_IMAGE=ghcr.io/eliautobot/my-virtual-world:3.0.0`).
+
+#### From 2.x to 3.0
+
+The same commands: `git pull` brings the compose.yaml that runs version 3, and `docker compose pull` downloads it. The
+world, the accounts, the licence and the key carry over; the first start adds two tables to the database (nothing is
+converted or removed). Without `git pull`, `docker compose pull` keeps you on the newest 2.x.
 
 #### Building the image yourself
 
@@ -82,7 +88,7 @@ image. To go back to the ready-made image, run `docker compose pull` and `docker
 Up to 2.5, `docker compose up -d` built the image on your machine. From 2.6 it downloads the ready-made one. Back up
 first, then run the five update commands above: `git pull` brings the new compose.yaml and `docker compose pull`
 downloads the image. Your data stays where it is. If you set `MVW_IMAGE` in `.env` before, remove that line (or set it
-to `ghcr.io/eliautobot/my-virtual-world:2`).
+to `ghcr.io/eliautobot/my-virtual-world:3`).
 
 ### Backups
 

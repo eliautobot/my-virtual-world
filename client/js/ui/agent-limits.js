@@ -12,7 +12,7 @@ export async function agentLimitsTab(d, body) {
   await settingsForm(d, top, {
     // (each section: its own short labels; settings the server doesn't have are left out)
     pick: v => {
-      const list = rows => (rows || []).map(([p, label]) => { const s = v.settings.find(x => x.path === p); return s && { ...s, label: label || s.label }; }).filter(Boolean);
+      const list = rows => (rows || []).map(([p, label, words]) => { const s = v.settings.find(x => x.path === p); return s && { ...s, label: label || s.label, ...(words && !s.valueLabels ? { valueLabels: words } : {}) }; }).filter(Boolean);
       return AGENT_LIMIT_SECTIONS.map(sec => [sec.title, sec.hint, list(sec.main), list(sec.advanced)]);
     },
     extra: () => '<p class="hint">Changes apply at once, to every agent. Each value stays within its range whatever is typed.</p>',

@@ -259,6 +259,19 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     capabilities: { decisions: true },
   },
   {
+    // Free Will's other decision service (2026-11-16): TypeSafe's System One models (Jev) answer the same questions with
+    // typed judgments and probabilities; the adapter (server/providers/typesafe-decisions.js) speaks System One and answers
+    // in the Decisions shape. byok as OpenAI Decisions: it only ranks the options the world offers.
+    id: 'typesafe-decisions', label: 'TypeSafe (Jev)', transport: 'network', connectionKind: 'remote', byok: true,
+    official: 'TypeSafe System One API, POST https://api.typesafe.ai/v1/systemone (documented)',
+    fields: [
+      f('model', 'Model', 'text', { default: 'jev-latest' }),
+      f('priceInPerMTok', 'Price per million input tokens (US$)', 'number', { default: 0, min: 0, max: 1000 }),
+      f('apiKey', 'API key', 'secret', { required: true }),
+    ],
+    capabilities: { decisions: true },
+  },
+  {
     // A voice service (docs/features/CHAT.md §9): speaks an agent's answers and hears its owner (dictation, read aloud, voice
     // mode). The adapter is server/providers/voice.js; the server's voice (server/voice/) decides who uses which. Not an
     // agent's brain: it is never linked to an agent as its connection. byok: a member may add one with their own key

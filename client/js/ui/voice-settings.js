@@ -11,11 +11,14 @@
 import { auth } from '../core/auth.js';
 import { getJSON, post } from '../core/net.js';
 import { esc } from '../core/util.js';
-import { can, options, forget, speak, unlock, Player, browserSay, voicesReady, VoiceFail } from './voice.js';
+import { can, options, forget, speak, unlock, Player, browserSay, voicesReady, VoiceFail, forgetPauses } from './voice.js';
+import { PATIENCE } from './voice-core.js';
 
 const LANGS = [['', 'Automatic'], ['en', 'English'], ['en-US', 'English (US)'], ['en-GB', 'English (UK)'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'],
   ['pt', 'Portuguese'], ['pt-BR', 'Portuguese (Brazil)'], ['nl', 'Dutch'], ['pl', 'Polish'], ['ru', 'Russian'], ['uk', 'Ukrainian'], ['tr', 'Turkish'], ['ar', 'Arabic'], ['he', 'Hebrew'],
   ['hi', 'Hindi'], ['ja', 'Japanese'], ['ko', 'Korean'], ['zh', 'Chinese'], ['sv', 'Swedish'], ['el', 'Greek'], ['id', 'Indonesian'], ['vi', 'Vietnamese']];
+// (live voice: how long a pause before it answers — client/js/ui/voice-core.js PATIENCE)
+const PATIENCE_WORDS = { quick: 'Quick', normal: 'Normal', relaxed: 'Relaxed', patient: 'Patient — take your time' };
 const player = new Player();
 /** How loud a preview playing here is now (0: none) — the Agent Studio shows it at the agent's throat. */
 export const previewLevel = () => (player.busy ? Math.max(0.04, player.level()) : 0);
@@ -107,6 +110,9 @@ export async function voiceTab(d, body, app) {
       <label>Who listens<span class="row"><select class="input vs-listen">${serviceOptions(o, 'listen', li.connection, `Automatic — ${platformOf(o, 'listen') ? `the world's (${platformOf(o, 'listen').label})` : 'the browser'}`)}</select></span></label>
       <label>The language you speak<span class="row"><select class="input vs-lang">${LANGS.map(([v, t]) => `<option value="${v}"${(li.language || '') === v ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></span></label>
       ${can.recognize() ? '' : '<p class="hint warn">This browser has no speech recognition of its own: choose a voice service to dictate and talk here (Chrome, Edge and Safari have one).</p>'}
+      <label>A pause before it answers (🎧 voice mode, the companions' voice)<span class="row"><select class="input vs-patience">${Object.entries(PATIENCE).map(([k, ms]) => `<option value="${k}"${(li.patience || 'normal') === k ? ' selected' : ''}>${esc(PATIENCE_WORDS[k] || k)} — about ${(ms / 1000).toFixed(1).replace(/\.0$/, '')} s</option>`).join('')}</select></span></label>
+      <label class="check"><input type="checkbox" class="vs-smart"${li.smart === false ? '' : ' checked'}> Wait longer when I stop mid-thought ("and…", "um…", a comma) — the words of each pause are heard as I go (a little more use of the voice service)</label>
+      <label class="check"><input type="checkbox" class="vs-learn"${li.learn === false ? '' : ' checked'}> Learn how long I pause while I talk (kept on this device) <button type="button" class="btn small vs-forget">Forget it</button></label>
       <div class="tier-head">🔊 Speaking — your agents' voice</div>
       <p class="hint">For 🔊 read aloud and 🎧 voice mode. An agent with a voice of its own (Agent Studio → Brain → Its voice) speaks with it; the others with this. Now: <b>${esc(describe(o.speak, 'speak'))}</b>${o.speak.reason && o.speak.reason !== 'choice' ? ` (${esc(REASON[o.speak.reason] || o.speak.reason)})` : ''}.</p>
       <label>Who speaks<span class="row"><select class="input vs-speak">${serviceOptions(o, 'speak', sp.connection, `Automatic — ${platformOf(o, 'speak') ? `the world's (${platformOf(o, 'speak').label})` : 'the browser\'s own voice'}`)}</select></span></label>
@@ -171,6 +177,10 @@ export async function voiceTab(d, body, app) {
     };
     q('.vs-listen').onchange = e => save({ listen: { connection: toChoice(e.target.value) } }, 'Listening saved');
     q('.vs-lang').onchange = e => save({ listen: { language: e.target.value } }, 'Language saved');
+    q('.vs-patience').onchange = e => save({ listen: { patience: e.target.value } }, 'Saved: it waits that long before it answers');
+    q('.vs-smart').onchange = e => save({ listen: { smart: e.target.checked } }, e.target.checked ? 'It waits longer when you stop mid-thought' : 'It answers after the pause, whatever the words');
+    q('.vs-learn').onchange = e => save({ listen: { learn: e.target.checked } }, e.target.checked ? 'It learns how long you pause' : 'It no longer learns your pauses');
+    q('.vs-forget').onclick = () => { forgetPauses(); app?.toast?.('What it learned of your pauses on this device is forgotten', 'good'); };
     q('.vs-speak').onchange = e => save({ speak: { connection: toChoice(e.target.value), voice: '' } }, 'Speaking saved');
     q('.vs-unique').onchange = e => save({ speak: { unique: e.target.checked } }, e.target.checked ? 'Every agent speaks with its own voice' : 'Your agents speak with your voice');
     const sp = o.prefs.speak;
@@ -275,7 +285,12 @@ export async function agentVoiceSection(C, el) {
       <label>Voice service<select class="input sv-svc">${serviceOptions(o, 'speak', cur, 'Its owner\'s default (Settings → Voice)')}</select></label>
       <label>Speed <b class="sv-speed-v">${(v.speed || 1).toFixed(2).replace(/0$/, '')}×</b><input type="range" class="sv-speed" min="0.5" max="2" step="0.05" value="${v.speed || 1}" aria-label="Speed"></label>
       ${can.synth() ? '<label>The browser\'s voice (when the browser speaks)<select class="input sv-bvoice"><option>Loading…</option></select></label>' : ''}
+      <label>Who hears ${esc(C.name)} talking in the city<select class="input sv-aud">
+        <option value=""${!v.audience ? ' selected' : ''}>The world's default</option>
+        <option value="public"${v.audience === 'public' ? ' selected' : ''}>Everyone near ${esc(C.name)}</option>
+        <option value="owner"${v.audience === 'owner' ? ' selected' : ''}>Only me (and those I share ${esc(C.name)} with to manage)</option></select></label>
     </div>
+    <p class="hint">In the city its voice comes from where it stands: louder near, from its side, echoing indoors, muffled through a floor. Its speech bubble shows either way.</p>
     <div class="row"><button type="button" class="btn small sv-try">▶ Hear ${esc(C.name)}</button><span class="hint sv-out" aria-live="polite"></span></div>`;
   const q = s => el.querySelector(s);
   const save = async (patch, msg) => {
@@ -283,6 +298,7 @@ export async function agentVoiceSection(C, el) {
     if (r) { forget(); agentVoiceSection(C, el); }
   };
   q('.sv-svc').onchange = e => save({ connection: toChoice(e.target.value), voice: '' }, 'Its voice service saved');
+  q('.sv-aud').onchange = e => save({ audience: e.target.value }, e.target.value === 'owner' ? `Only you hear ${C.name} in the city now` : e.target.value === 'public' ? `Everyone near hears ${C.name} now` : 'The world\'s default it is');
   if (svcId) {
     const s = q('.sv-vsel'), chosen = (v.voices || {})[svcId] && !(v.auto || {})[svcId] ? v.voices[svcId] : (v.connection === svcId ? v.voice : '');
     const picked = now.chosen ? '' : now.voice || '';

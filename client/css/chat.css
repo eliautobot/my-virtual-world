@@ -38,6 +38,13 @@
 .cw-grip:is(.nw, .ne, .sw, .se) { width: 12px; height: 12px; }
 .cw-grip.nw { left: 0; top: 0; cursor: nwse-resize; }
 .cw-grip.se { right: 0; bottom: 0; cursor: nwse-resize; }
+/* (a finger needs more than 12 px: the edges and corners grow, and stay over the content they size) */
+@media (pointer: coarse) {
+  .cw-grip:is(.nw, .ne, .sw, .se) { width: 26px; height: 26px; }
+  .cw-grip:is(.n, .s) { height: 18px; }
+  .cw-grip:is(.e, .w) { width: 18px; }
+  .cw-grip.se { border-bottom-right-radius: 14px; }
+}
 .cw-grip.ne { right: 0; top: 0; cursor: nesw-resize; }
 .cw-grip.sw { left: 0; bottom: 0; cursor: nesw-resize; }
 .cw-grip:is(.n, .s) { left: 12px; right: 12px; height: 5px; cursor: ns-resize; }
@@ -171,6 +178,31 @@
 .cw-ic { border: 0; background: transparent; color: var(--dim); cursor: pointer; width: 28px; height: 26px; border-radius: 7px; font-size: 14px; }
 .cw-ic:hover { background: var(--btn-hover); color: var(--text); }
 .cw-meta { font-size: 11.5px; color: var(--muted-2); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cw-mact .cw-meta { min-width: 0; }
+/* "👁 What it knew" (ui/chat-aware.js): a chip beside what the answer took, its panel under the answer */
+.cw-msg.aw-open .cw-mact { opacity: 1; }
+.cw-aw-b { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; padding: 2px 9px; min-height: 24px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line-3); background: transparent; color: var(--dim); font: inherit; font-size: 11.5px; white-space: nowrap; }
+.cw-aw-b:hover { background: var(--btn-hover); color: var(--text); }
+.cw-aw-b.on { color: var(--text); border-color: color-mix(in srgb, var(--cw-acc) 55%, transparent); background: color-mix(in srgb, var(--cw-acc) 13%, transparent); }
+.cw-aw-b:focus-visible { outline: 2px solid var(--cw-acc); outline-offset: 1px; }
+.cw-aw { margin-top: 6px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line-2); background: color-mix(in srgb, var(--text) 4%, transparent);
+  display: grid; gap: 5px; font-size: 12.5px; line-height: 1.45; color: var(--dim); min-width: 0; }
+.cw-aw[hidden] { display: none; }
+.cw-aw p { margin: 0; }
+.cw-aw b { color: var(--text); font-weight: 600; }
+.cw-aw-looked { list-style: none; margin: 3px 0 0; padding: 0; display: grid; gap: 3px; }
+.cw-aw details > summary { cursor: pointer; list-style: none; overflow-wrap: anywhere; }
+.cw-aw details > summary::-webkit-details-marker { display: none; }
+.cw-aw details > summary::before { content: '▸ '; color: var(--muted-2); }
+.cw-aw details[open] > summary::before { content: '▾ '; }
+.cw-aw details > summary:focus-visible { outline: 2px solid var(--cw-acc); outline-offset: 1px; border-radius: 4px; }
+.cw-aw-gist { color: var(--dim); }
+.cw-aw-text > summary { color: var(--text); }
+.cw-aw-tok { color: var(--muted-2); margin-left: 4px; font-variant-numeric: tabular-nums; }
+.cw-aw-pre { margin: 6px 0 2px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line-2); background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text);
+  font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; user-select: text; -webkit-user-select: text; }
+.cw-aw-pre:focus-visible { outline: 2px solid var(--cw-acc); outline-offset: 1px; }
 .cw-msg.user.editing { width: min(100%, 620px); max-width: none; }
 .cw-edit-in { width: 100%; min-height: 70px; resize: vertical; border-radius: 14px; padding: 10px 12px; font: inherit; line-height: 1.5; }
 .cw-edit-acts { display: flex; gap: 6px; justify-content: flex-end; }
@@ -277,6 +309,10 @@
 .cw-tool { border: 1px solid transparent; background: transparent; color: var(--dim); border-radius: 999px; padding: 5px 10px; cursor: pointer; font-size: 13px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .cw-tool:hover { background: var(--btn-hover); color: var(--text); }
 .cw-tool.on { color: var(--cw-acc); }
+/* 📷 Share my view (ui/share-view.js): the label goes where the composer is narrow */
+.cw-shot { display: inline-flex; align-items: center; gap: 5px; }
+.cw-shot[aria-busy="true"] { opacity: .55; cursor: progress; }
+@container cw (max-width: 560px) { .cw-shot .cw-tool-lb { display: none; } .cw-shot { padding: 5px 8px; } }
 .cw-attach { font-size: 18px; line-height: 1; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line-3); }
 .cw-send { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--primary); color: var(--on-primary); font-size: 18px; font-weight: 700; cursor: pointer; flex: none; }
 .cw-send:disabled { opacity: .35; cursor: default; }
@@ -341,7 +377,8 @@
 }
 /* ---- a phone: the window is the whole screen below the top bar */
 @media (max-width: 699px) {
-  .chat-back.modal-back .chatwin { width: 100vw; height: calc(100dvh - var(--topbar-height, 56px)); border-radius: 0; border-left: 0; border-right: 0; border-bottom: 0; }
+  .chat-back.modal-back:not(.floating) .chatwin { width: 100vw; height: calc(100dvh - var(--topbar-height, 56px)); border-radius: 0; border-left: 0; border-right: 0; border-bottom: 0; }
+  .chat-back.floating .chatwin { border-radius: 14px; }
   .cw-foot { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
   .cw-md { font-size: 15.5px; }
   .cw-in { font-size: 16px; }   /* (16 px: a phone does not zoom in on it) */
@@ -428,6 +465,8 @@
 .cw-vm-state { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; min-width: 0; color: rgb(var(--vm-blue)); border-color: rgba(var(--vm-blue), .35);
   background: rgba(var(--vm-blue), .08); overflow: hidden; }
 .cw-vm-state.hidden { display: none; }
+/* (a pause in the person's turn: how near it is to answering fills the status from the left; talking again empties it) */
+.cw-vm-state.waiting { background-image: linear-gradient(90deg, rgba(var(--vm-blue), .22) calc(var(--wait, 0) * 100%), transparent 0); }
 .cw-vm-state b { font-weight: 650; white-space: nowrap; }
 .cw-vm-state small { color: var(--dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cw-vm-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: rgb(var(--vm-blue)); transform: scale(calc(1 + var(--lv, 0) * .8)); }
@@ -459,6 +498,11 @@
 .cw-modeline::before, .cw-modeline::after { content: ''; flex: 1; height: 1px; background: color-mix(in srgb, var(--cm) 45%, var(--line)); }
 .cw-modeline > span { color: color-mix(in srgb, var(--cm) 70%, var(--text)); white-space: nowrap; }
 .cw-modeline.work { --cm: #818cf8; } .cw-modeline.life { --cm: #f59e0b; }
+/* an outing with its owner (server/companions/outings.js): where it began and where it was back to its own day */
+.cw-modeline.outing.out { --cm: #22c55e; } .cw-modeline.outing.back { --cm: #94a3b8; }
+.cw-modeline.outing > span { font-weight: 600; }
+/* a line said to a group (the companions' voice): who it was said to, over it */
+.cw-msg.user .cw-to { font-size: 11px; color: var(--dim); margin-bottom: -3px; }
 /* (a narrow window: the mode it is in by name, the other by its icon) */
 @container cw (max-width: 520px) { .cw-cmode .cw-tool:not(.on) .cw-tool-lb { display: none; } .cw-cmode .cw-tool { padding: 3px 7px; } }
 /* (the window as it opens, 460 px: one row — the effort by its 💡 alone, the model's name shorter; smaller still, the row wraps) */

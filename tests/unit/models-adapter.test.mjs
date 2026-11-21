@@ -146,3 +146,24 @@ test('a conversation (a thought that uses tools): the turns in order after the s
   }
   assert.equal(reqs.length, n, 'nothing was sent');
 });
+
+test('a picture in the results turn (an agent\'s eyes): one user turn after the tool request, in each provider\'s own shape', async () => {
+  const DATA = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(300, 1)]).toString('base64');
+  const turns = [
+    { role: 'user', text: 'What colour is the tree?' },
+    { role: 'assistant', text: '{"use":[{"tool":"see"}]}' },
+    { role: 'user', text: 'RESULTS:\n- see: the picture is attached', parts: [{ type: 'image', mime: 'image/jpeg', name: 'what-you-see.jpg', data: DATA, eyes: true }] },
+  ];
+  for (const provider of ['openai', 'openrouter', 'google', 'anthropic']) {
+    reply = provider === 'anthropic' ? () => ({ status: 200, body: { model: 'c', stop_reason: 'end_turn', content: [{ type: 'text', text: 'Green.' }], usage: { input_tokens: 5, output_tokens: 2 } } }) : ok('Green.');
+    const r = await adapter.complete({ config: { provider, model: 'm' }, secrets: { apiKey: 'k' }, system: 'S', turns, maxTurns: 200, maxTokens: 100 });
+    assert.equal(r.text, 'Green.', provider);
+    const msgs = reqs.at(-1).body.messages.filter(m => m.role !== 'system');
+    assert.deepEqual(msgs.map(m => m.role), ['user', 'assistant', 'user'], `${provider}: the roles take turns`);
+    const last = msgs.at(-1).content;
+    assert.ok(Array.isArray(last), provider);
+    assert.deepEqual(last.at(-1), { type: 'text', text: 'RESULTS:\n- see: the picture is attached' }, `${provider}: the results' words with it`);
+    assert.deepEqual(last[0], provider === 'anthropic' ? { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: DATA } } : { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${DATA}` } }, provider);
+    assert.doesNotMatch(JSON.stringify(reqs.at(-1).body), /"eyes"|what-you-see/, `${provider}: nothing of ours beyond the picture`);
+  }
+});

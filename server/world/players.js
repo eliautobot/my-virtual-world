@@ -22,9 +22,16 @@ import { OutdoorGround } from '../../shared/city-edge.js';
 import { buildingPads } from '../../shared/island-build.js';
 import { moduleDecks, deckUnder } from '../../shared/world-modules.js';
 import { RNG } from '../../shared/rng.js';
+import { FOOD_BY_ID } from '../../shared/food.js';
 
 export const NEAR = 60, FAR = 250, CHAT_RANGE = 20, CHAT_MAX = 280, CHAT_KEEP_MS = 10 * 60000;
 const TRAVEL_MS = 10000;      // "travel here" from the map: once every 10 s
+// a player's meal (2026-11-18, the product owner: "once I sit down, a button to order … the plate should appear in front of the player"):
+// food bought sitting at a table is served there — its courses over the meal's time — and is gone when they get up
+const MEAL_BASE_MS = 4 * 60000, MEAL_FOOD_MS = 3 * 60000, MEAL_DRINK_MS = 60000, MEAL_MAX_MS = 14 * 60000;
+const MEAL_ITEMS = 4;           // dishes and drinks served at once at most (the rest is bought, not drawn)
+const MEAL_WAIT_MS = 10 * 60000;   // food bought standing at the counter: served if they sit down there within this
+const MEAL_MOVE_M = 1.5;        // m: walked this far from their seat, the meal is over
 const GRACE_MS = 5000;          // a reload within this is not a leave (the character waits, then fades)
 const SAVE_MS = 10000;
 const MOVES_PER_S = 30;         // anything faster is dropped
@@ -46,6 +53,8 @@ export class Players {
     this.onLeave = null;          // (player, visible) after its last connection closed (and the grace period passed)
     this.onOnlineChange = null;   // the online list changed (join, leave, status, name)
     this.onUse = null;            // (player) began using something where it stands (PF_USING): server/sim/agents.js playerTook
+    this.onSay = null;            // (player, text) said in proximity chat: server/senses/ (the AI agents near them heard it)
+    this.onJump = null;           // (player, why) moved across the map at once — 'travel', 'home', 'warp': its companions come along (server/companions/)
     this.q = {
       get: this.db.prepare('SELECT * FROM players WHERE world_id = ? AND account_id = ?'),
       put: this.db.prepare(`INSERT INTO players (world_id, account_id, x, y, z, ctx, yaw, look_json, cam_json, needs_json, updated)
@@ -91,6 +100,17 @@ export class Players {
       conns: new Set(), lastAt: this.now(), movesAt: [], lastCorr: 0, goneTimer: null, dirty: !r, fresh: !r, chatAt: [], joinedAt: this.now(),
     };
   }
+  /** Where account id's player was last saved (a valid place: { x, z, ctx, yaw }), or null — none saved, or that place
+   *  is no longer one to stand on. Its character is not loaded (after a restart, before it comes back). */
+  savedAt(id) {
+    try {
+      const r = this.q.get.get(this.w, id);
+      if (!r || !this.nav.ok(r.x, r.z, r.ctx, this.upOf(r.x, r.y, r.z, r.ctx))) return null;
+      return { x: r.x, z: r.z, ctx: r.ctx, yaw: r.yaw || 0 };
+    } catch { return null; }
+  }
+  /** It was moved across the map at once (why: 'travel', 'home', 'warp'): told to whoever goes with it. */
+  jumped(p, why) { try { this.onJump?.(p, why); } catch (e) { this.log?.warn?.('[players] after a jump:', e.message); } }
   save(p) {
     if (this.closed) return;
     this.q.put.run({ w: this.w, id: p.id, x: p.x, y: p.y, z: p.z, ctx: p.ctx, yaw: p.yaw, look: JSON.stringify(p.look),
@@ -147,11 +167,30 @@ export class Players {
       p.goneTimer = setTimeout(() => this.remove(p), 500); p.goneTimer.unref?.(); return;
     }
     if (p.aircraftId) this.fleet?.forgetAccount?.(p.id);   // a pilot gone: the aircraft stays where it landed, or goes home
-    if (p.boatId) this.harbour?.forgetAccount?.(p.id);   // a skipper gone: the boat back to its slip
+    if (p.boatId) {   // aboard a boat (its skipper, or crew): it waits out there for them a while; they are saved beside its slip
+      const at = this.harbour?.forgetAccount?.(p.id, { keep: true });
+      if (at) { p.x = at.x; p.y = Number.isFinite(at.y) ? at.y : p.y; p.z = at.z; p.ctx = -1; p.dirty = true; }
+      p.boatId = null;
+    }
     if (p.dirty) { try { this.save(p); } catch { /* logged on the next save */ } }
     this.byId.delete(p.id);   // every browser that saw it gets PF_OUT on the next tick, and the character fades
     this.onLeave?.(p, this.statusOf(p.id) === 'online');
     this.onOnlineChange?.();
+  }
+  /** Whether p is in a vehicle, an aircraft or a boat now — an "aboard" no boat backs any more let go first (a boat gone
+   *  home without them: 2026-11-20, the product owner swimming where his boat had been, told "Leave the vehicle first"). */
+  riding(p) {
+    if (p.boatId) { try { this.harbour?.heal?.(p); } catch { /* the harbour's own */ } }
+    return !!(p.vehicleId || p.aircraftId || p.boatId);
+  }
+  /** Where an account is to be found next time (a boat that went home without them: beside its slip). Online: there
+   *  now; else its saved place. */
+  placeSaved(id, at) {
+    if (id == null || !at || ![at.x, at.z].every(Number.isFinite)) return;
+    const p = this.byId.get(id);
+    if (p) { if (!p.boatId) { p.x = at.x; p.y = Number.isFinite(at.y) ? at.y : p.y; p.z = at.z; p.ctx = -1; p.ver++; p.dirty = true; } return; }
+    const r = this.q.get.get(this.w, id);
+    if (r) this.q.put.run({ w: this.w, id, x: at.x, y: Number.isFinite(at.y) ? at.y : r.y, z: at.z, ctx: -1, yaw: r.yaw, look: r.look_json, cam: r.cam_json, needs: r.needs_json, t: this.now() });
   }
   /** A deleted account: its player leaves at once and its saved state goes. */
   forgetAccount(id) {
@@ -211,7 +250,7 @@ export class Players {
   move(ws, m) {
     const p = ws.pid !== null && ws.pid !== undefined ? this.byId.get(ws.pid) : null;
     if (!p) return;
-    if (p.vehicleId || p.aircraftId || p.boatId) return;   // confirmed driver moves come only from the vehicle solver (a pilot's from the aircraft, a skipper's from the boat), never pmove flags/poses
+    if (this.riding(p)) return;   // confirmed driver moves come only from the vehicle solver (a pilot's from the aircraft, a skipper's from the boat), never pmove flags/poses
     const now = this.now();
     p.movesAt = p.movesAt.filter(t => now - t < 1000);
     if (p.movesAt.length >= MOVES_PER_S) return;
@@ -253,7 +292,7 @@ export class Players {
   warp(ws, m) {
     const p = this.byId.get(ws.pid);
     if (!p) return;
-    if (p.vehicleId || p.aircraftId || p.boatId) return this.correct(p, ws, this.now(), 'exit_vehicle_first');
+    if (this.riding(p)) return this.correct(p, ws, this.now(), 'exit_vehicle_first');
     const x = num(m.x), z = num(m.z), ctx = Number.isInteger(m.ctx) ? m.ctx : -1;
     const v = this.nav.ok(x, z, ctx) ? { x, z, ctx } : Number.isFinite(x) && Number.isFinite(z) ? this.nav.nearestValid(x, z, ctx) : null;
     if (!v) return this.correct(p, ws, this.now(), 'blocked');
@@ -261,6 +300,7 @@ export class Players {
     if (Number.isFinite(num(m.yaw))) p.yaw = num(m.yaw);
     p.seq = (m.seq | 0) & 65535; p.lastAt = this.now(); p.ver++; p.dirty = true;
     if (v.x !== x || v.z !== z || v.ctx !== ctx) this.send(ws, { t: 'pcorr', x: p.x, y: p.y, z: p.z, ctx: p.ctx, yaw: p.yaw, seq: p.seq, why: 'nearest' });
+    this.jumped(p, 'warp');
   }
   /** Where "Go home" takes account id: inside a flat it bought or rents, else outside a building on a lot it holds
    *  (lotsOf, set by the server: the lots an account holds), else the spawn point. { x, z, ctx, where }. */
@@ -288,12 +328,13 @@ export class Players {
     const p = this.byId.get(ws.pid), now = this.now();
     if (!p || now - (p.homeAt || 0) < 1500) return;   // one trip home a second and a half is plenty
     p.homeAt = now;
-    if (p.vehicleId || p.aircraftId || p.boatId) return this.toAccount(p.id, { t: 'pmoved', x: p.x, y: p.y, z: p.z, ctx: p.ctx, yaw: p.yaw, seq: p.seq, text: 'Leave the vehicle first' });
+    if (this.riding(p)) return this.toAccount(p.id, { t: 'pmoved', x: p.x, y: p.y, z: p.z, ctx: p.ctx, yaw: p.yaw, seq: p.seq, text: 'Leave the vehicle first' });
     const h = this.homeFor(p.id);
     p.x = h.x; p.z = h.z; p.ctx = h.ctx; p.y = this.groundY(h.x, h.z, h.ctx);
     p.lastAt = this.now(); p.ver++; p.dirty = true;
     this.toAccount(p.id, { t: 'pmoved', x: p.x, y: p.y, z: p.z, ctx: p.ctx, yaw: p.yaw, seq: p.seq, home: true,
       text: h.where ? `🏠 Home: ${h.where}` : "🏠 You have no home yet, so you're at the starting point" });
+    this.jumped(p, 'home');
   }
   /** The map (ui/worldmap.js): where this account's home is — { t: 'phomeat', x, z, ctx, where } (where: null when it has
    *  none and the starting point stands in). */
@@ -311,7 +352,7 @@ export class Players {
     const x = num(m.x), z = num(m.z);
     const no = text => this.toAccount(p.id, { t: 'pmoved', x: p.x, y: p.y, z: p.z, ctx: p.ctx, yaw: p.yaw, seq: p.seq, travel: true, text });
     if (!Number.isFinite(x) || !Number.isFinite(z)) return;
-    if (p.vehicleId || p.aircraftId || p.boatId) return no('Leave the vehicle first');
+    if (this.riding(p)) return no('Leave the vehicle first');
     if (now - (p.travelAt || 0) < TRAVEL_MS) return no(`You can travel again in ${Math.ceil((TRAVEL_MS - (now - p.travelAt)) / 1000)} s`);
     const v = this.nav.openGround(x, z);
     if (!v) return no('There is nowhere to stand there');
@@ -319,6 +360,7 @@ export class Players {
     p.x = v.x; p.z = v.z; p.ctx = -1; p.y = this.groundY(v.x, v.z, -1);
     p.lastAt = now; p.ver++; p.dirty = true;
     this.toAccount(p.id, { t: 'pmoved', x: p.x, y: p.y, z: p.z, ctx: p.ctx, yaw: p.yaw, seq: p.seq, home: true, travel: true, text: '📍 You travelled there' });
+    this.jumped(p, 'travel');
   }
   setLook(ws, m) {
     const p = this.byId.get(ws.pid);
@@ -333,6 +375,21 @@ export class Players {
     if (!Number.isFinite(dist) || !Number.isFinite(pitch)) return;
     p.cam = { dist: Math.round(Math.min(60, Math.max(2, dist)) * 100) / 100, pitch: Math.round(Math.min(1.5, Math.max(0.1, pitch)) * 1000) / 1000 };
     p.dirty = true;
+  }
+  /**
+   * The live pages of account `id` showing the world within r metres of (x, z): where each looks (its view, else its
+   * player's place) — the pages that have that part of the world drawn (an agent's eyes: server/senses/eye.js).
+   */
+  pagesNear(id, x, z, r) {
+    const p = this.byId.get(id);
+    if (!p || !Number.isFinite(x) || !Number.isFinite(z)) return [];
+    const out = [];
+    for (const ws of p.conns) {
+      if (ws.readyState !== 1) continue;
+      const c = ws.view || p;
+      if (Math.hypot(c.x - x, c.z - z) <= r) out.push(ws);
+    }
+    return out;
   }
   /** Where a browser is looking (its camera's target): the centre of its area of interest. */
   view(ws, m) {
@@ -364,9 +421,49 @@ export class Players {
     }
   }
   // ---------------------------------------------------------------- the stream (area of interest)
+  // ---------------------------------------------------------------- a meal at their seat
+  /**
+   * Food account `id` bought where it is (server/economy/routes.js buy): sitting there, served in front of it now — every
+   * page drawing it sees the plate (t: 'pmeal'); standing (at the counter), served when it sits down there soon. Items:
+   * the purchase's lines ({ id, n }); only food and drinks (shared/food.js) are served; ctx: the floor it was bought on (the
+   * place's own: a seat outside its door is not at its tables). → 'served' | 'waiting' | null.
+   */
+  serveMeal(id, items, ctx) {
+    const p = this.byId.get(id), now = this.now();
+    const ids = [];
+    for (const l of Array.isArray(items) ? items : []) if (FOOD_BY_ID[l?.id] && !ids.includes(l.id)) ids.push(l.id);
+    if (!p || !ids.length || !Number.isInteger(ctx) || ctx < 0) return null;
+    if ((p.flags & PF_USING) && p.ctx === ctx) { this.setMeal(p, ids.slice(0, MEAL_ITEMS), now); return 'served'; }
+    p.mealWaiting = { ids: ids.slice(0, MEAL_ITEMS), ctx, at: now };
+    return 'waiting';
+  }
+  setMeal(p, ids, now) {
+    if (ids) {
+      const foods = ids.filter(i => !FOOD_BY_ID[i].v).length, drinks = ids.length - foods;
+      const dur = Math.min(MEAL_MAX_MS, MEAL_BASE_MS + foods * MEAL_FOOD_MS + drinks * MEAL_DRINK_MS);
+      p.meal = { ids, ns: ids.map(i => FOOD_BY_ID[i].n), at: now, dur, x: p.x, z: p.z, ctx: p.ctx };
+    } else p.meal = null;
+    p.mealWaiting = null;
+    p.mealVer = (p.mealVer || 0) + 1;
+  }
+  /** What player p has in front of it now (its meal at its seat), for the senses: food ids, or null. */
+  mealOf(p) { return p?.meal ? { ids: p.meal.ids, at: p.meal.at, dur: p.meal.dur } : null; }
+  /** The meals' state, looked at every tick: over when they got up or walked off, or its time is up; one bought standing
+   *  served when they sit down where they bought it. */
+  meals(now) {
+    for (const p of this.byId.values()) {
+      const m = p.meal;
+      if (m && (!(p.flags & PF_USING) || p.ctx !== m.ctx || Math.hypot(p.x - m.x, p.z - m.z) > MEAL_MOVE_M || now - m.at > m.dur)) this.setMeal(p, null, now);
+      const w = p.mealWaiting;
+      if (w && now - w.at > MEAL_WAIT_MS) p.mealWaiting = null;
+      else if (w && (p.flags & PF_USING) && p.ctx === w.ctx) this.setMeal(p, w.ids, now);
+    }
+  }
+  mealMsg(p, now) { const m = p.meal; return { t: 'pmeal', pid: p.id, items: m ? m.ns : [], el: m ? Math.max(0, now - m.at) : 0, dur: m ? m.dur : 0 }; }
   /** Called 10 times a second: each browser gets the players in its area of interest that changed. */
   tick(clients) {
     const t0 = performance.now(), n = ++this.tickN, now = this.now();
+    this.meals(now);
     for (const ws of clients) {
       if (ws.readyState !== 1 || !ws.P || !this.perms.allowed(ws.P, 'world.view')) continue;
       const me = ws.pid !== null && ws.pid !== undefined ? this.byId.get(ws.pid) : null;
@@ -389,11 +486,14 @@ export class Players {
           if (!e || e.look !== p.lookVer) {
             this.send(ws, { t: 'pinfo', pid: p.id, name: p.name, app: p.look, you: p.id === ws.pid });
           }
+          // (its meal at its seat: what is in front of it, to every page drawing it — when it changes, and when it comes in view)
+          const mv = p.mealVer || 0;
+          if (e ? (e.meal ?? 0) !== mv : !!p.meal) this.send(ws, this.mealMsg(p, now));
           const due = !e || e.ver !== p.ver && (tier === 0 || n - e.at >= 5) || (e && e.tier !== tier);
           if (due) {
             out.push({ pid: p.id, x: p.x, y: p.y, z: p.z, yaw: p.yaw, ctx: p.ctx, clip: p.clip, flags: p.flags | (p.id === ws.pid ? PF_YOU : 0), seq: p.seq });
-            ws.aoi.set(p.id, { ver: p.ver, at: n, tier, look: p.lookVer });
-          } else if (e && e.look !== p.lookVer) e.look = p.lookVer;
+            ws.aoi.set(p.id, { ver: p.ver, at: n, tier, look: p.lookVer, meal: mv });
+          } else if (e) { if (e.look !== p.lookVer) e.look = p.lookVer; e.meal = mv; }
         }
       }
       if (out.length) {
@@ -430,6 +530,7 @@ export class Players {
     this.chatLog.push({ at: now, pid: p.id, name: p.name, text, x: p.x, z: p.z, ctx: p.ctx, heard });
     while (this.chatLog.length && now - this.chatLog[0].at > CHAT_KEEP_MS) this.chatLog.shift();
     this.stats.chats++;
+    try { this.onSay?.(p, text); } catch { /* the AI agents near them hear it another time */ }   // (server/senses/: agents near it heard it)
   }
   // ---------------------------------------------------------------- online status and the online list
   statusOf(id) {

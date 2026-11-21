@@ -5,7 +5,9 @@
 // with a free spot, with their name, the travel time and the price of a visit — because "a café" made agents stay home
 // and spend nothing in the bake-off (FREE-WILL.md §11.1).
 import { ctxB, ctxF, ctxOf } from '../../shared/constants.js';
+import { takeHomeNamed } from '../../shared/items.js';
 import { isOpen } from '../sim/agents.js';
+import { LOGGED_AS, didPlan, samePlace } from '../agent-life/activity.js';
 
 /** Free-time kinds that happen at a venue, and the venue kind they use (index.venues). */
 export const VENUE_OF = Object.freeze({ cafe: 'cafe', bar: 'restaurant', shop: 'shop', gym: 'gym', park: 'park', arcade: 'arcade', lounge_bar: 'lounge_bar', club: 'club' });
@@ -55,10 +57,10 @@ export function nearestVenues(brain, a, vkind, at, econ, n = PER_KIND, slotUses 
   return out;
 }
 
-/** "about 12 min away" in world minutes, from the router's own estimate (walking, the subway, lifts). */
+/** "about 12 min away" in world minutes, from the router's own estimate (walking, the subway, lifts); NaN: no way there. */
 function minutesTo(brain, at, v) {
   const s = brain.router.estimate(at.ctx, at.x, at.z, { ctx: ctxOf(v.b, v.f), x: v.x, z: v.z });
-  return Math.max(1, Math.round(s * brain.clock.dayScale / 60));
+  return Number.isFinite(s) ? Math.max(1, Math.round(s * brain.clock.dayScale / 60)) : NaN;
 }
 
 /** Plain kinds the routine tries and may find impossible (nobody to talk to, a full lounge): offered only when they
@@ -107,7 +109,90 @@ export function describeVenue(kind, o) {
   if (o.price) extra.push(`about ${vcText(o.price)}`);
   else if (kind === 'park') extra.push('free');
   if (o.rating) extra.push(`rated ${(o.rating / 100).toFixed(1)}/5`);
-  return `${bits[0]} (${extra.join(', ')})`;
+  return `${bits[0]} (${extra.join(', ')})${o.plan ? planNote(o.plan) : ''}`;
+}
+const planNote = text => ` — in your plans: ${String(text).replace(/[\u0000-\u001f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100)}`;
+
+// ------------------------------------------------------------------------------------------- its plans
+/**
+ * Its plans in its options (2026-11-17, the product owner, after Sam said he'd grab groceries after work and never went):
+ * an option that would do one of its open plans for today says so ("Go shopping at Store 21 (about 9 min away) — in your
+ * plans: Groceries at Store 21 after work"), and a place a plan names is offered even when it isn't among the nearest —
+ * when it is open, has room, can be paid for, can be reached and is something the routine offers now. An option does a
+ * plan when the line it would write in the activity log would close it (server/agent-life/activity.js didPlan: the same
+ * test as for closing it). At a shop for a plan that names what the shop sells (its groceries), that is what it buys
+ * there (o.buy). Only free time and meals have places to offer. planned: [{ text, check }] (server/agent-life/ contextFor).
+ */
+export function withPlans(type, brain, a, at, econ, options, planned) {
+  if (!planned?.length || (type !== 'leisure' && type !== 'meal')) return options;
+  const out = [...options];
+  const lineOf = o => ({ kind: type === 'meal' ? 'meal' : LOGGED_AS[o.kind] || o.kind, place: o.way === 'home' || o.kind === 'home' ? 'Home' : o.name || null });
+  for (const p of planned) {
+    if (!p?.check) continue;
+    for (const name of p.check.places) {
+      if (out.some(o => o.name && samePlace(o.name, name))) continue;
+      for (const o of planVenues(type, brain, a, at, econ, name)) if (didPlan(p.check, [lineOf(o)]) && !out.some(x => x.id === o.id)) out.push(o);
+    }
+    for (const o of out) {
+      if (o.plan || !didPlan(p.check, [lineOf(o)])) continue;
+      o.plan = p.text;
+      const buy = o.kind === 'shop' ? takeHomeNamed(p.text) : [];
+      if (buy.length) o.buy = buy;
+      o.label = o.venue ? describeVenue(o.kind, o) : `${o.label}${planNote(p.text)}`;
+    }
+  }
+  // (too many now: what isn't in its plans goes first, the routine's least likely first)
+  while (out.length > MAX_OPTIONS) {
+    let k = -1;
+    for (let j = 0; j < out.length; j++) if (!out[j].plan && (k < 0 || out[j].w <= out[k].w)) k = j;
+    if (k < 0) break;
+    out.splice(k, 1);
+  }
+  return out;
+}
+/** The venues called `name` that a choice of this type could go to now, as options (unmarked). */
+function planVenues(type, brain, a, at, econ, name) {
+  const out = [];
+  if (type === 'meal') {
+    for (const vkind of ['cafe', 'restaurant']) {
+      if (!isOpen(vkind, at.h) || (econ && !econ.canSpend(a, vkind, true))) continue;
+      for (const v of named(brain, a, at, vkind, name, ['eat'])) {
+        const o = { id: `${vkind}@${v.b}.${v.f}`, kind: vkind, w: 1, b: v.b, f: v.f, venue: true, prefix: `${MEAL(at.h)} at`, name: brain.placeName(v.b, v.f), minutes: v.minutes, way: 'venue', vkind };
+        priced(o, econ, vkind === 'cafe' ? 'cafe_lunch' : 'meal');
+        o.label = describeVenue(vkind, o);
+        out.push(o);
+      }
+    }
+    return out;
+  }
+  for (const [kind, w] of brain.leisureOptions(a, at.h, at.day, at.needs)) {
+    const vkind = VENUE_OF[kind];
+    if (!vkind || (econ && !econ.canSpend(a, vkind))) continue;
+    for (const v of named(brain, a, at, vkind, name, NEEDS_SLOT[vkind])) {
+      const o = { id: `${kind}@${v.b}.${v.f}`, kind, w, b: v.b, f: v.f, venue: true, name: brain.placeName(v.b, v.f), minutes: v.minutes };
+      priced(o, econ, VISIT_ITEM[vkind]);
+      o.label = describeVenue(kind, o);
+      out.push(o);
+    }
+  }
+  return out;
+}
+/** index.venues entries of vkind called `name`, standing, with a free spot (uses) and a way there: [{ ...v, minutes }]. */
+function named(brain, a, at, vkind, name, uses) {
+  const out = [];
+  for (const v of brain.index.venues[vkind] || []) {
+    const B = brain.W.buildings[v.b];
+    if (!B || B.gone || !samePlace(brain.placeName(v.b, v.f), name)) continue;
+    if (uses && !brain.freeSlots(v.b, v.f, uses, a.i).length) continue;
+    const minutes = minutesTo(brain, at, v);
+    if (Number.isFinite(minutes)) out.push({ ...v, minutes });
+  }
+  return out;
+}
+function priced(o, econ, item) {
+  if (!econ || !item) return;
+  const p = econ.price(o.b, o.f, item); if (Number.isFinite(p)) o.price = p;
+  const r = econ.rating(o.b, o.f); if (Number.isFinite(r)) o.rating = r;
 }
 
 /**
@@ -217,12 +302,13 @@ function afterTaskOptions(brain, a) {
   return out;
 }
 
-/** The menu for a choice of the given type (FREE-WILL.md §2.3); see buildOptions for free time. */
-export function buildChoice(type, brain, a, at, econ, P) {
+/** The menu for a choice of the given type (FREE-WILL.md §2.3); see buildOptions for free time. planned: its open plans
+ *  for today that its body does (withPlans). */
+export function buildChoice(type, brain, a, at, econ, P, planned = null) {
   switch (type) {
-    case 'leisure': return buildOptions(brain, a, at, econ);
+    case 'leisure': return withPlans(type, brain, a, at, econ, buildOptions(brain, a, at, econ), planned);
     case 'task': return taskOptions(brain, a, P);
-    case 'meal': return mealOptions(brain, a, at, econ);
+    case 'meal': return withPlans(type, brain, a, at, econ, mealOptions(brain, a, at, econ), planned);
     case 'morning': return morningOptions(brain, a, at);
     case 'shift': return shiftOptions(brain, a, at);
     case 'rest': return restOptions(brain, a, at, econ);

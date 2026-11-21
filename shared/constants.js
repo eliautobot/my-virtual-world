@@ -15,6 +15,8 @@ export const MAX_FLOORS = 48;
 export const SIDEWALK = 4.5;          // sidewalk width (curb -> lot line)
 export const WALK_BAND = 2.75;        // sidewalk walking centre-line distance from the curb
 export const WALL_T = 0.25;           // exterior wall thickness
+export const EYES_M = 30;             // an agent's eyes: a picture from where it stands only this close to the character of
+                                      // whoever it talks with (server/senses/eye.js, client/js/ui/see-for-agent.js)
 export const ctxOf = (bIdx, floor) => bIdx * 64 + floor;
 export const ctxB = ctx => (ctx < 0 ? -1 : (ctx >> 6));
 export const ctxF = ctx => (ctx < 0 ? 0 : (ctx & 63));

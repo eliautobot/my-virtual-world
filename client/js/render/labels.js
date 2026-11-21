@@ -13,9 +13,11 @@ import * as THREE from 'three';
 import { S, bus } from '../core/state.js';
 import { esc } from '../core/util.js';
 import { USES, USE_LIST } from '/shared/catalog.js';
+import { seatedTagY } from './car-occupants.js';
 
 const _v = new THREE.Vector3(), P = { x: 0, y: 0 };
 const HEAD = 2.02, SHOULDER = 1.42, SIDE = 0.34;   // (metres: over the head; the shoulder, and how far beside its middle, in first person)
+const OVER = 0.27, BELOW = -0.33;                  // (metres from the top of a head in a car seat: its tag over it; in first person, at the shoulder)
 const BUBBLE_W = 260;                              // (the bubble's widest, app.css .bubble)
 const MAXL = 64, LIM = [1e9, 1e9, 1e9, 380, 60];
 const READ_MS = 4000;                              // (a bubble scrolled this long ago, or under the pointer, stays: being read)
@@ -120,7 +122,8 @@ export class Labels {
     const push = (i, pri) => {
       if (i < 0 || seen.has(i) || A.last[i] !== fr) return;
       seen.add(i);
-      const d = this.project(A.rx[i], A.ry[i] + (fp ? SHOULDER : HEAD), A.rz[i]);
+      const inCar = A.carF[i] === fr ? seatedTagY(app, 'r' + i, fp ? BELOW : OVER) : null;   // (in a car's seat: render/car-occupants.js)
+      const d = this.project(A.rx[i], inCar ?? A.ry[i] + (fp ? SHOULDER : HEAD), A.rz[i]);
       if (d < 0 || d > LIM[pri]) return;
       cand.push({ i, pri, d, x: P.x, y: P.y });
     };
@@ -153,7 +156,8 @@ export class Labels {
       const friends = app.social ? app.social.friendIds : null;
       for (const r of R.drawn) {
         if (nt >= MAXL) break;
-        const X = r.extra, say = R.says.get(r.pid), d = this.project(X.x, X.y + (fp ? SHOULDER : HEAD), X.z);
+        const X = r.extra, say = R.says.get(r.pid), inCar = r.driving ? seatedTagY(app, 'p' + r.pid, fp ? BELOW : OVER) : null;
+        const d = this.project(X.x, inCar ?? X.y + (fp ? SHOULDER : HEAD), X.z);
         if (d < 0 || d > 420) continue;
         const at = fp ? this.beside(P.x, P.y, d, say ? BUBBLE_W : 30 + r.name.length * 7.5) : { x: P.x, y: P.y, side: 0 }, side = at.side;
         const friend = !!(friends && friends.has(r.pid));

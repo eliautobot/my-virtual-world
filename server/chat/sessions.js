@@ -10,6 +10,7 @@ export class Sessions {
     this.q = {
       // (a talk in the city — kind 'talk', server/agent-talk/ — is never in the chat window's lists)
       list: this.db.prepare('SELECT * FROM chat_sessions WHERE world_id = ? AND account_id = ? AND agent_id = ? AND deleted IS NULL AND kind IS NULL ORDER BY updated DESC, id DESC'),
+      current: this.db.prepare('SELECT * FROM chat_sessions WHERE world_id = ? AND account_id = ? AND agent_id = ? AND deleted IS NULL AND kind IS NULL ORDER BY updated DESC, id DESC LIMIT 1'),
       get: this.db.prepare('SELECT * FROM chat_sessions WHERE world_id = ? AND id = ? AND account_id = ? AND deleted IS NULL'),
       ins: this.db.prepare('INSERT INTO chat_sessions (world_id, agent_id, account_id, native_key, label, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)'),
       insTalk: this.db.prepare("INSERT INTO chat_sessions (world_id, agent_id, account_id, native_key, label, created, updated, kind) VALUES (?, ?, ?, ?, ?, ?, ?, 'talk')"),
@@ -37,6 +38,11 @@ export class Sessions {
       model: r.model ?? null, effort: r.effort ?? null, pinned: !!r.pinned, projectId: r.project_id ?? null, mode: r.mode ?? null, kind: r.kind ?? null } : null;
   }
   list(accountId, agentId) { return this.q.list.all(this.w, accountId, agentId).map(r => this.view(r)); }
+  /** The account's current chat with the agent, or null (none yet): the one last written in — pinned ones are kept at the
+   *  top of the list, not opened for that. The one rule every way of talking with an agent follows (a chat window opening
+   *  it, the companions' voice, E face to face — client/js/ui/chat.js current — and an outing's dividers, server/companions/
+   *  outings.js): one conversation, which only the person's New chat starts again. */
+  current(accountId, agentId) { return this.view(this.q.current.get(this.w, accountId, agentId)); }
   /** Every live session of this account, whatever the agent: pinned first, then the most recent (the window's list). */
   recent(accountId, limit = 200, agentId = null) {
     const n = Math.max(1, Math.min(500, limit));

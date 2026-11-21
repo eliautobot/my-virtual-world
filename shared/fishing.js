@@ -166,6 +166,9 @@ export const FISHING = registerPlay({
     return { seed, dock: ctx.dock, clock: ctx.clock || tripClock(course), plan: generateTrip(course, seed, sites), kit: ctx.kit || {} };
   },
   init: (course, data, ctx) => ({ kit: ctx?.kit || {}, hooks: 0, lastHook: -1e9, hooked: null, caught: [], fished: {}, released: 0, revealed: [], lost: {}, used: {} }),
+  // (its page reloaded mid-trip: what it had caught, the bait it has left, the grounds it found — server/play/play.js current)
+  resume: state => ({ caught: (state?.caught || []).map(c => ({ n: c.n, species: c.species || null, find: c.find || null, u: c.u ?? null, cm: c.cm ?? null, kg: c.kg || 0, size: c.size || null, slots: c.slots || 1, ground: c.ground || null, lure: c.lure || null, kept: !!c.kept, released: !!c.released, legend: !!c.legend })),
+    lures: Object.fromEntries(Object.entries(state?.kit?.lures || {}).map(([id, n]) => [id, Math.max(0, n - (state.used?.[id] || 0))])), revealed: [...(state?.revealed || [])] }),
   act,
   verify,
   xp,

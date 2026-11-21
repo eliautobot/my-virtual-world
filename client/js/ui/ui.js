@@ -639,14 +639,23 @@ function updateAgentInfo() {
   // the name takes you there: inside the building, at the floor (and, for a home, the flat marked)
   const link = (b, f, u, t, title) => (b >= 0 && bld(b) ? `<a data-go="${b}:${Math.max(0, f | 0)}:${u ?? -1}" title="${esc(title)}">${esc(t)}</a>` : esc(t));
   const po = info.post;
-  E.ag.kv.innerHTML = po ? `
+  E.ag.kv.innerHTML = workRows(info.work) + (po ? `
     <span class="k">Work</span><span>🛎️ On duty 24/7 at ${link(po.b, po.f, -1, po.place || '', 'Go inside, to the floor where it is on post')}</span>
     ${hm ? `<span class="k">Home</span><span>${link(hm.b, hm.f, hm.u >= 0 ? hm.u : -1, `${hm.place || hm.name}${hm.u >= 0 ? `, flat ${hm.u + 1}` : ''}`, hm.u >= 0 ? 'Go inside and see their flat' : 'Go inside, to their floor')}</span>` : ''}
     <span class="k">Routine</span><span class="dim">Paused while on duty</span>` : `
     ${j.kind !== 'free' && j.title && !info.vip ? `<span class="k">Job</span><span>${esc(j.title)}</span>` : ''}
     ${j.b >= 0 ? `<span class="k">Works at</span><span>${link(j.b, j.f, -1, j.place || '', 'Go inside, to the floor where they work')}${j.start != null ? ` <span class="dim">${formatClock(j.start)}–${formatClock(j.end)}</span>` : ''}</span>` : `<span class="k">Work</span><span class="dim">Between jobs</span>`}
     ${hm ? `<span class="k">Home</span><span>${link(hm.b, hm.f, hm.u >= 0 ? hm.u : -1, `${hm.place || hm.name}${hm.u >= 0 ? `, flat ${hm.u + 1}` : ''}`, hm.u >= 0 ? 'Go inside and see their flat' : 'Go inside, to their floor')}</span>` : '<span class="k">Home</span><span class="dim">Looking for a place</span>'}
-    ${sc.wake != null ? `<span class="k">Routine</span><span>Up ${formatClock(sc.wake)} · lunch ${formatClock(sc.lunch)} · bed ${formatClock(sc.bed)}</span>` : ''}`;
+    ${sc.wake != null ? `<span class="k">Routine</span><span>Up ${formatClock(sc.wake)} · lunch ${formatClock(sc.lunch)} · bed ${formatClock(sc.bed)}</span>` : ''}`);
+}
+/** Its work now (server/workplace/presence.js): where it stands on its shift — on duty, on the way, late, away and why —
+ *  and its co-workers on shift, each with theirs. Nothing when it has no workplace or isn't on shift. */
+function workRows(w) {
+  if (!w || !w.onShift) return '';
+  const chip = x => `<span class="wk-st st-${esc(x.state)}">${esc(x.text)}</span>`;
+  const team = (w.team || []).slice(0, 8);
+  return `<span class="k">At work</span><span>${esc(w.role)} · ${esc(w.place)}<br>${chip(w)}</span>
+    ${team.length ? `<span class="k">Co-workers</span><span class="wk-team">${team.map(x => `<span class="wk-mate" title="${esc(`${x.name} (${x.role}): ${x.text}`)}"><b>${esc(x.name)}</b> <small>${esc(x.role)}</small> ${chip(x)}</span>`).join('')}${w.teamSize > team.length ? `<small class="dim">and ${w.teamSize - team.length} more</small>` : ''}</span>` : ''}`;
 }
 /** Talk (the selection card's button, T): the chat window on one's own agent, the talk bar on someone else's (ui/talk-bar.js:
  *  its answers in its bubble), and a resident who isn't an AI agent is said so in one line (ui/chat.js openPerson). Out
@@ -1169,6 +1178,9 @@ function bindKeys() {
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // (Enter or Space on a button, a link or a disclosure in a window over the world — a chat, the Agent Studio, a dialog —
+    // presses it, as anywhere on the web: the world's keys, and a window's "the world waits" below, never take it from it)
+    if ((e.key === 'Enter' || e.key === ' ') && t?.closest?.('.chatwin, .modal-back, [role="dialog"]') && t.closest('button, summary, a[href], [role="button"]')) return;
     for (const fn of app.hooks.key) if (fn(e)) { e.preventDefault(); return; }
     if (S.hold) return;   // (a game holds the view: its own keys only, the world's wait until it is left: core/state.js holdView)
     switch (e.key) {

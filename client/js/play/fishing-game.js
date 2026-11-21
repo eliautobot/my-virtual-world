@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import { bus } from '../core/state.js';
 import { h, esc, isTouch } from '../core/util.js';
 import { getJSON, post } from '../core/net.js';
+import { auth } from '../core/auth.js';
 import { formatScore, fmtVc } from '/shared/play.js';
 import { CLIP } from '../render/anim.js';
 import { PLAYER_APP } from '../render/agents.js';
@@ -50,10 +51,22 @@ export function init(a) {
   app.hooks.key.unshift(onKey);
   window.addEventListener('keyup', e => { keys.delete(e.code); if (e.code === 'Space') up(); });
   window.addEventListener('blur', () => { keys.clear(); if (A?.held) up(); });
-  bus.on('boating', ev => { E.btn.classList.toggle('hidden', !ev.on); if (!ev.on) { stand(); if (trip) finish('Back ashore'); closePick(); } });
+  bus.on('boating', ev => { E.btn.classList.toggle('hidden', !ev.on); if (!ev.on) { stand(); if (trip) finish('Back ashore'); closePick(); } else if (!trip) resumeTrip(); });
   bus.on('boat-fish', ev => { if (ev.on) sitDown(); else stand(); });
+  // (everyone fishing the same trip — the companions aboard, the other players: their tallies, live — server/play/
+  //  fishing-crew.js tellCrew)
+  bus.on('msg:fish_crew', m => {
+    if (!trip || m.run !== trip.root) return;
+    const me = auth.account?.id;
+    trip.crew = Array.isArray(m.crew) ? m.crew : [];
+    trip.people = Array.isArray(m.players) ? m.players.filter(x => x.account !== me) : [];
+    crewUi();
+  });
+  // (fishing together: aboard someone's boat, their trip on — joined, a run of your own along on it; their trip's end is yours)
+  bus.on('msg:fish_join', m => { if (app.boating?.guest && (!trip || trip.root !== m.run)) start(m.course, m.run, m.skipper); });
+  bus.on('msg:fish_end', m => { if (trip && m.run === trip.id) ended(m); });
   bus.on('frame', (dt, now) => frame(Math.min(0.1, dt), now / 1000));
-  app.fishing = { get trip() { return trip; }, get state() { return A?.st || null; }, open: openPick, start, finish: () => finish(null), get nav() { return nav; }, debug: { auto: false, fast: false, showCatch: c => showCatch(c) },
+  app.fishing = { get trip() { return trip; }, get state() { return A?.st || null; }, open: openPick, start: (c, join = null) => start(c, join), finish: () => finish(null), get nav() { return nav; }, debug: { auto: false, fast: false, showCatch: c => showCatch(c) },
     // (for the lab checks: the camera's shot now, how the catch is held, the fish's depth in the water, the line's strain)
     get look() { return { shot: A?.cine?.kind || null, pinned: !!app.cam?.pinOn, style: A?.style || null, depth: A?.depth ?? null, strain: A?.F?.strain ?? null, held: A?.hp ? [A.hp.x, A.hp.y, A.hp.z] : null, glam: !!A?.glam, mode: A?.F?.mode || null, steer: !E.steer.classList.contains('hidden'), badge: E.gauge.querySelector('.fg-mode')?.textContent || null, rank: trip?.L?.rank || null }; } };
   if (TEST) Object.assign(app.fishing.debug, { auto: true, fast: true });
@@ -64,7 +77,7 @@ function build(root) {
   E.btn = root.appendChild(h('<button type="button" class="btn fg-open hidden" title="Fishing trips (T)">🎣 Trips <kbd>T</kbd></button>'));
   E.btn.onclick = () => (E.pick.classList.contains('hidden') ? openPick() : closePick());
   E.hud = root.appendChild(h(`<div id="fishhud" class="hidden"><div class="fh-top"><b class="fh-name"></b><button type="button" class="btn small fh-chart" title="The chart: the grounds, set a course (C)">🗺️ <kbd>C</kbd></button><button type="button" class="btn small fh-end" title="End the trip: the catch is weighed in">🏁 End</button></div>
-    <div class="fh-clock"></div><div class="fh-bounties"></div><div class="fh-cool"></div></div>`));
+    <div class="fh-clock"></div><div class="fh-bounties"></div><div class="fh-cool"></div><div class="fh-crew hidden"></div></div>`));
   E.hud.querySelector('.fh-end').onclick = () => finish(null);
   E.hud.querySelector('.fh-chart').onclick = () => nav?.toggleChart();
   E.ctl = root.appendChild(h(`<div id="fishctl" class="hidden">
@@ -103,7 +116,7 @@ function build(root) {
   E.pick.querySelector('.rp-x').onclick = closePick;
   E.pick.addEventListener('click', e => { const s = e.target.closest('[data-start]'); if (s) start(s.dataset.start); const b = e.target.closest('[data-board]'); if (b) app.profile?.board('fishing', b.dataset.board); if (e.target.closest('[data-gear]')) { closePick(); app.fishStore?.open('tackle'); } if (e.target.closest('[data-dex]')) { closePick(); app.fishdex?.open(); } });
   E.res = root.appendChild(h('<div id="fishres" class="panel hidden" role="dialog" aria-label="Trip result"></div>'));
-  E.res.addEventListener('click', e => { const t = e.target.closest('button'); if (!t) return; if (t.dataset.again) { E.res.classList.add('hidden'); start(t.dataset.again); } else if (t.dataset.board) app.profile?.board('fishing', t.dataset.board); else if (t.dataset.dex !== undefined) { E.res.classList.add('hidden'); app.fishdex?.open(t.dataset.dex || null); } else E.res.classList.add('hidden'); });
+  E.res.addEventListener('click', e => { const t = e.target.closest('button'); if (!t) return; if (t.dataset.claim) { claim(t); return; } if (t.dataset.again) { E.res.classList.add('hidden'); start(t.dataset.again); } else if (t.dataset.board) app.profile?.board('fishing', t.dataset.board); else if (t.dataset.dex !== undefined) { E.res.classList.add('hidden'); app.fishdex?.open(t.dataset.dex || null); } else E.res.classList.add('hidden'); });
 }
 function onKey(e) {
   if (!app.boating?.active) return false;
@@ -137,6 +150,11 @@ async function openPick() {
   body.innerHTML = '<p class="hint">Loading…</p>';
   try { await load(); } catch (err) { body.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
   const m = cat.modules.find(x => x.id === 'fishing'), water = waterHere(), mine = prog?.modules?.fishing || { best: {}, unlocked: [] };
+  const G = app.boating.guest;
+  if (G) {   // (aboard someone's boat: their trip is the one — you fish on it)
+    body.innerHTML = `<p class="hint">You're aboard ${esc(G.name)}'s boat: ${esc(G.name)} picks the trip and you fish on it with them${trip ? ` — <b>${esc(trip.course.label)}</b> is under way` : ' — none started yet'}. Your catch is your own.</p><div class="rr-acts"><button type="button" class="btn small" data-gear="1">🎣 Gear &amp; skills</button><button type="button" class="btn small" data-dex="1">📖 Fishdex</button></div>`;
+    return;
+  }
   const row = c0 => {
     const c = { ...TRIP_BY_ID[c0.id], ...c0 };   // (the catalog's course, with the trip's water, minutes and reach)
     const b = mine.best[c.id], open = mine.unlocked.includes(c.id) || !c.after, after = c.after ? m.courses.find(x => x.id === c.after) : null;
@@ -151,27 +169,64 @@ async function openPick() {
   body.innerHTML = `<p class="hint">${water === 'lake' ? 'Lake trips from this dock.' : 'Sea trips from this marina.'} The trip runs until dusk; walk to a fishing spot (F, then a ring on the deck) and cast. Stepping off at the dock weighs your catch in.</p><div class="rr-acts"><button type="button" class="btn small" data-gear="1">🎣 Gear &amp; skills</button><button type="button" class="btn small" data-dex="1">📖 Fishdex</button></div>${m.courses.filter(c => TRIP_BY_ID[c.id]?.water === water).map(row).join('')}`;
 }
 function closePick() { E.pick.classList.add('hidden'); }
-async function start(courseId) {
+async function start(courseId, join = null, skipper = null) {
   if (!app.boating?.active) return;
+  if (app.boating.guest && !join) { app.toast(`${app.boating.guest.name} picks the trip — you fish on it with them`, '', 3000); return; }
   closePick();
   if (trip) await finish(null, true);
   let r;
-  try { r = await post('/api/play/start', { module: 'fishing', course: courseId, where: app.boating.module }); }
+  try {
+    // (fishing together: a run of your own along on the skipper's — the same grounds and clock: server/play/fishing-crew.js joinTrip)
+    r = join ? await post('/api/fishing/join', { run: join }) : await post('/api/play/start', { module: 'fishing', course: courseId, where: app.boating.module });
+    if (join && !r.ok) { if (r.why !== 'already') app.toast(r.text || 'Could not join the trip', 'bad', 3500); return; }
+  }
   catch (err) { app.toast(err.message, 'bad', 4000); return; }
+  await setUp(r, courseId, { join, skipper });
+}
+/** The trip on this page: from a start's (or a join's) answer — or, resumed, the run the server has under way (its catch
+ *  so far, the bait left, the grounds found). */
+async function setUp(r, courseId, { join = null, skipper = null, resumed = false } = {}) {
   if (!cat) await load().catch(() => {});
   const m = cat?.modules.find(x => x.id === 'fishing'), c = { ...TRIP_BY_ID[courseId], ...(m?.courses.find(x => x.id === courseId) || {}), minutes: r.data.plan.minutes };
-  const water = r.data.plan.water, kit = r.data.kit || {};
-  trip = { id: r.run, m, course: c, data: r.data, plan: r.data.plan, water, L: kitFor(kit, water), t0: performance.now(), caught: [], lures: { ...(kit.lures || {}) }, lure: null, best: r.best };
+  const water = r.data.plan.water, kit = r.data.kit || {}, S0 = resumed ? r.state || {} : {};
+  const caught = (S0.caught || []).map(k => ({ ...k, name: k.find ? findOf(k.find)?.name || k.find : speciesOf(k.species)?.name || k.species, vc: k.find ? 0 : valueOf(speciesOf(k.species), k.kg, k.u) }));
+  // (root: the session's — the skipper's trip; t0: a trip joined, or taken up again, part-way through runs on its own clock)
+  trip = { id: r.run, root: r.root || r.along || r.run, m, course: c, data: r.data, plan: r.data.plan, water, L: kitFor(kit, water), t0: performance.now() - (Number(r.elapsed) || 0), caught, lures: { ...(S0.lures || kit.lures || {}) }, lure: null, best: r.best, crew: [], people: [], skipper: join || (resumed && app.boating.guest) ? skipper || app.boating.guest?.name || null : null };
   trip.lure = luresFor(water).find(l => trip.lures[l.id] > 0)?.id || 'spinner';
   getJSON('/api/fishing/dex').then(d => { if (trip?.id === r.run) trip.dex = d; }).catch(() => {});   // (the catch card: new to your Fishdex, over the record)
   fx ||= new FishingFx(app.stage, { uw: app.terrain?.uw }); nav ||= new TripNav(app, () => fx);
   nav.begin(trip);
+  for (const id of S0.revealed || []) { try { nav.reveal(id, 'resume'); } catch { /* found again on the chart */ } }
   E.hud.classList.remove('hidden');
   E.hud.querySelector('.fh-name').textContent = `🎣 ${c.label}`;
-  hudTrip(true); lureUi();
-  const g = trip.plan.grounds.filter(x => !x.hidden).length;
-  app.toast(`${c.label}: ${g} fishing ground${g === 1 ? '' : 's'} to find before dusk${app.boating.fishing ? ' — cast away!' : (matchMedia('(pointer: coarse)').matches ? ' — 🚶 Walk to a fishing spot and cast' : ' — walk to a fishing spot (F) and cast')}`, 'good', 4500);
+  hudTrip(true); lureUi(); crewUi();
+  const g = trip.plan.grounds.filter(x => !x.hidden).length, kept = caught.filter(k => k.kept).length;
+  const walk = matchMedia('(pointer: coarse)').matches ? ' — 🚶 Walk to a fishing spot and cast' : ' — walk to a fishing spot (F) and cast';   // (a phone: no F key)
+  app.toast(resumed ? `🎣 Back on your trip: ${c.label} — ${kept} kept so far` : `${join ? `Fishing with ${trip.skipper || 'the skipper'} — ` : ''}${c.label}: ${g} fishing ground${g === 1 ? '' : 's'} to find before dusk${app.boating.fishing ? ' — cast away!' : join ? ' — walk to a fishing spot (a ring on the deck) and cast' : walk}`, 'good', 4500);
   bus.emit('fish-trip', { on: true, course: c.id });
+}
+/** On a boat with no trip on this page (a reload, the server's restart): the fishing trip the server has under way for
+ *  its player, taken up again where it was (2026-11-20, the product owner: "fix what happens when reloading the page … and fishing game
+ *  if active"). */
+async function resumeTrip() {
+  if (resumeTrip.busy) return;
+  resumeTrip.busy = true;
+  try {
+    let r = null;
+    try { r = (await getJSON('/api/play/current?module=fishing')).current; } catch { r = null; }
+    if (!r || trip || !app.boating?.active) return;
+    await setUp(r, r.course, { resumed: true });
+  } finally { resumeTrip.busy = false; }
+}
+/** The skipper ended the trip you were fishing on (fishing together): yours ended with it, weighed in by the server. */
+function ended(m) {
+  const t = trip; trip = null;
+  if (A && A.st !== 'ready') toReady();
+  nav?.end();
+  E.hud.classList.add('hidden');
+  bus.emit('fish-trip', { on: false });
+  prog = null; app.profile?.refresh?.(); app.inventory?.refresh?.(); app.fishdex?.refresh?.();
+  result(t, m.result || { ok: false, why: 'The trip ended' }, `${m.by || 'The skipper'} ended the trip`);
 }
 /** The trip's end: the server weighs the catch in (quiet: just end it, no card). */
 async function finish(why, quiet = false) {
@@ -186,6 +241,30 @@ async function finish(why, quiet = false) {
   catch (err) { if (!quiet) app.toast(err.message, 'bad', 4000); return; }
   prog = null; app.profile?.refresh?.(); app.inventory?.refresh?.(); app.fishdex?.refresh?.();
   if (!quiet) result(t, res, why);
+}
+/** The crew's trips, finished with yours (one session): each one's stars, fish, best, experience — and, you with your
+ *  companions only, whose catch it is now. */
+function crewResults(S) {
+  if (!S?.crew?.length && !S?.people?.length) return '';
+  const best = b => (b ? ` · best ${esc(speciesOf(b.what)?.name || b.what)} ${b.kg < 10 ? b.kg.toFixed(2) : b.kg.toFixed(1)} kg` : '');
+  // (the other players first, then the companions — someone else's with whose they are)
+  const one = (c, who) => `<div class="rr-crow"><b>${esc(c.name)}</b>${who ? ` <small class="dim">${esc(who)}</small>` : ''} <span class="rr-cst">${'★'.repeat(c.stars || 0)}${'☆'.repeat(3 - (c.stars || 0))}</span>
+    <small>${c.fish} fish${c.finds ? ` · ${c.finds} finds` : ''}${best(c.best)} · worth ${fmtVc(c.value || 0)} · +${c.xp} XP${c.levelUp ? ` · 🎣 level ${c.level}!` : ''}</small></div>`;
+  const rows = [...(S.people || []).map(p => one(p, 'player')), ...(S.crew || []).map(c => one(c, c.mine === false && c.ownerName ? `${c.ownerName}'s companion` : ''))].join('');
+  const n = (S.crew || []).filter(c => c.mine !== false).reduce((a, c) => a + (c.items || 0), 0);
+  const choice = S.choice ? `<div class="rr-claim"><p>Your companions' catch: ${n} ${n === 1 ? 'thing' : 'things'} in their own inventories.</p>
+    <div class="rr-acts"><button type="button" class="btn" data-claim="keep" data-run="${esc(S.run)}">They keep their catch</button><button type="button" class="btn primary" data-claim="take" data-run="${esc(S.run)}">🧊 Take everyone's catch</button></div></div>` : '';
+  return `<div class="rr-crew"><div class="rr-chead">🎣 The crew${S.players > 1 ? ` <small class="dim">· ${S.players} players fished together</small>` : ''}</div>${rows}${choice}</div>`;
+}
+async function claim(btn) {
+  const box = btn.closest('.rr-claim'), take = btn.dataset.claim === 'take';
+  for (const b of box.querySelectorAll('button')) b.disabled = true;
+  let r;
+  try { r = await post('/api/fishing/session/claim', { run: btn.dataset.run, take }); } catch (err) { r = { ok: false, text: err.message }; }
+  if (!r?.ok) { box.innerHTML = `<p class="rr-bad">${esc(r?.text || 'That did not work')}</p>`; return; }
+  box.innerHTML = take ? `<p>🧊 ${r.moved} ${r.moved === 1 ? 'thing' : 'things'} from your companions into your inventory (I)${r.value ? ` — worth ${fmtVc(r.value)}` : ''}${r.full ? ' — your inventory is full: the rest stays theirs' : ''}${r.notYours ? ` · ${r.notYours} stay with agents that aren't yours` : ''}.</p>`
+    : '<p>Your companions keep their catch — they sell it at the dock store when they get off.</p>';
+  if (take) app.inventory?.refresh?.();
 }
 function result(t, x, why) {
   const m = t.m, c = t.course, kept = t.caught.filter(k => k.kept), sum = kept.reduce((a, k) => a + (k.vc || 0), 0);
@@ -207,8 +286,9 @@ function result(t, x, why) {
     ${x.unlocked?.length && m ? `<p class="rr-open">🔓 ${x.unlocked.map(id => esc(m.courses.find(o => o.id === id)?.label || id)).join(', ')} opened</p>` : ''}
     ${x.dex?.fresh?.length ? `<p class="rr-open">📖 New to your Fishdex: ${x.dex.fresh.map(id => esc(speciesOf(id)?.name || id)).join(', ')} <small class="dim">(${x.dex.count} of ${x.dex.of})</small></p>` : ''}
     ${x.dex?.records?.length ? `<p class="rr-open">🥇 World record${x.dex.records.length > 1 ? 's' : ''}: ${x.dex.records.map(rc => `${esc(speciesOf(rc.species)?.name || rc.species)} ${rc.kg < 10 ? rc.kg.toFixed(2) : rc.kg.toFixed(1)} kg`).join(', ')}</p>` : ''}
+    ${crewResults(x.session)}
     ${x.catch?.stowed ? `<p class="hint">🧊 ${x.catch.stowed} ${x.catch.stowed === 1 ? 'thing' : 'things'} into your inventory (I)${x.catch.bounty ? ` · bounties paid ${fmtVc(x.catch.bounty)}` : ''}${x.catch.full ? ' — your inventory was full: some had to go back' : ''}. Any dock store buys fish; or keep them to give or trade.</p>` : kept.length ? '<p class="hint">🐟 Any dock store buys your catch.</p>' : ''}
-    <div class="rr-acts">${app.boating?.active ? `<button type="button" class="btn primary" data-again="${c.id}">↻ Go again</button>` : ''}<button type="button" class="btn" data-board="${c.id}">🏆 Leaderboard</button><button type="button" class="btn" data-dex="${esc(x.dex?.fresh?.[0] || '')}">📖 Fishdex</button><button type="button" class="btn" data-close="1">Close</button></div>`;
+    <div class="rr-acts">${app.boating?.active && !app.boating.guest ? `<button type="button" class="btn primary" data-again="${c.id}">↻ Go again</button>` : ''}<button type="button" class="btn" data-board="${c.id}">🏆 Leaderboard</button><button type="button" class="btn" data-dex="${esc(x.dex?.fresh?.[0] || '')}">📖 Fishdex</button><button type="button" class="btn" data-close="1">Close</button></div>`;
   E.res.classList.remove('hidden');
 }
 let hudAt = 0;
@@ -223,6 +303,21 @@ function hudTrip(force = false) {
   E.hud.querySelector('.fh-bounties').innerHTML = trip.plan.bounties.map(b => `<div class="${met.has(b.id) ? 'done' : ''}">${met.has(b.id) ? '✅' : '○'} ${esc(b.label)} <small>+${b.reward}</small></div>`).join('');
   const used = trip.caught.filter(c => c.kept).reduce((a, c) => a + (c.slots || 1), 0);
   E.hud.querySelector('.fh-cool').textContent = `🧊 ${used}/${trip.L.boat.cooler} · ${trip.caught.filter(c => c.kept).length} kept · ${rankOf(trip.L.level).icon} ${trip.L.rank || 'Novice'} · Lv ${trip.L.level || 1}${trip.L.assist > 0.05 ? ' · 🔰 line guard' : ''}`;
+}
+
+/** The crew's tallies under the trip's (2026-11-19, the product owner: companions "get scored … a true unified experience"): you, then
+ *  each companion aboard — fish landed, kept, kilos, worth. */
+function crewUi() {
+  const el = E.hud?.querySelector('.fh-crew');
+  if (!el) return;
+  const crew = trip?.crew || [], people = trip?.people || [];
+  el.classList.toggle('hidden', !crew.length && !people.length);
+  if (!crew.length && !people.length) { el.innerHTML = ''; return; }
+  const mine = trip.caught.filter(c => c.kept && c.species), kg = mine.reduce((a, c) => a + (c.kg || 0), 0), vc = mine.reduce((a, c) => a + (c.vc || 0), 0);
+  const row = (name, n, k, v, x = '') => `<div class="fh-crow"><b>${esc(name)}</b><span>🐟 ${n}</span><span>${k.toFixed(k < 10 ? 2 : 1)} kg</span><span>${fmtVc(Math.round(v))}</span>${x}</div>`;
+  // (each companion's lure — its own choice, its decision model's: server/play/fishing-tactics.js — or 💭 while it thinks)
+  const lure = c => (c.thinking ? '<small title="Deciding how to fish">💭</small>' : c.lure && LURE_BY_ID[c.lure] ? `<small title="${esc(LURE_BY_ID[c.lure].name)}">${LURE_BY_ID[c.lure].icon}</small>` : '');
+  el.innerHTML = `<div class="fh-chead">🎣 The crew</div>${row('You', mine.length, kg, vc * 100, trip.lure && LURE_BY_ID[trip.lure] ? `<small>${LURE_BY_ID[trip.lure].icon}</small>` : '')}${people.map(p => row(p.name, p.kept, p.kg, p.value, '<small title="Player">👤</small>')).join('')}${crew.map(c => row(c.name, c.kept, c.kg, c.value, c.fishing ? lure(c) : '<small class="dim">rod away</small>')).join('')}`;
 }
 
 // ------------------------------------------------------------------ the lure

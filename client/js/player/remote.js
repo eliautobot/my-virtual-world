@@ -11,6 +11,8 @@ import { CLIP, CLIP_DUR, CLIP_STRIDE } from '../render/anim.js';
 import { PLAYER_APP } from '../render/agents.js';
 import { angDiff } from '../core/util.js';
 import { remoteJump } from './jump-pose.js';
+import { onMeal, servedNow, meals } from './meals.js';
+import { isEating } from '../render/char-props.js';
 
 const DELAY = 120;          // ms behind the stream
 const HOLD = 250;           // ms a player may run past its last state before it stops
@@ -112,13 +114,25 @@ export class Remote {
       X.yaw = Number.isFinite(X.yaw) ? X.yaw + angDiff(X.yaw, s.yaw) * Math.min(1, dt * 14) : s.yaw;
       X.clip = clip; X.ph = ph; X.pclip = r.pclip; X.pph = r.pph; X.w = Math.max(0, 1 - (now - r.fadeT) / 0.22);
       X.flags = s.ctx >= 0 ? 4 : 0;
+      // (their meal at their seat: the plate in front of them — its course now —, eaten as their own page shows it)
+      const sv = (s.flags & PF_USING) ? servedNow(r.pid) : null;
+      X.food = sv ? sv.item : 0; X.food2 = sv ? sv.side : 0;
+      X.raw = sv && isEating(clip) ? CLIP.sit_eat : clip; X.item = sv && isEating(clip) ? sv.item : 0;
       r.observing = (s.flags & PF_OBSERVING) !== 0; r.ctx = s.ctx; r.fade = fade;
-      // who is visible: outside always; inside only on the floor this page looks at
+      // who is visible: outside always; inside only on the floor this page looks at. Driving: drawn at the wheel of their
+      // car instead (render/car-occupants.js, by this same state), their tag over them there
+      r.driving = !own && (s.flags & PF_DRIVING) !== 0;
       const vis = !own && !(s.flags & PF_DRIVING) && (s.ctx < 0 || (fb === s.ctx >> 6 && ff === (s.ctx & 63)));
+      const seat = r.driving ? this.app.carOccupants?.placed.get('p' + r.pid) : null;
+      if (seat) { X.x = seat.x; X.y = seat.y; X.z = seat.z; }
+      // (aboard a boat — at its helm, or one of its crew —: where they stand on its deck as this page draws the boat now, so
+      //  they ride it rather than trail it: player/boating.js aboardAt)
+      const deck = !own && !r.driving ? this.app.boating?.aboardAt?.(r.pid) : null;
+      if (deck) { X.x = deck.x; X.y = deck.y - (1 - fade) * 0.9; X.z = deck.z; X.yaw = deck.yaw; }
       const k = extra.indexOf(X);
       if (vis && k < 0) extra.push(X);
       else if (!vis && k >= 0) extra.splice(k, 1);
-      if (vis) this.drawn.push(r);
+      if (vis || seat) this.drawn.push(r);
     }
     for (const [pid, s] of this.says) if (now > s.until) this.says.delete(pid);
   }
@@ -133,6 +147,7 @@ export function init(app) {
   const R = app.remote = new Remote(app);
   bus.on('players:frame', buf => R.onFrame(buf));
   bus.on('msg:pinfo', m => R.onInfo(m));
+  bus.on('msg:pmeal', m => onMeal(m));   // (a player's meal at their seat: ./meals.js)
   const onYou = m => {
     R.me = { pid: m.pid, x: m.x, y: m.y, z: m.z, ctx: m.ctx, yaw: m.yaw, look: m.look, cam: m.cam, fresh: !!m.fresh };
     bus.emit('player:you', R.me);
@@ -140,6 +155,6 @@ export function init(app) {
   bus.on('msg:you', onYou);
   if (app.net.playerYou) onYou(app.net.playerYou);
   bus.on('msg:chat', m => { if (m.agent !== undefined || typeof m.text !== 'string') return; R.say(m.pid, m.text); bus.emit('player:chat', m); });   // (agent chat — a run's frames, a progress card — names its agent: not a player speaking)
-  bus.on('net', up => { if (!up) R.reset(); });
+  bus.on('net', up => { if (!up) { R.reset(); meals.clear(); } });
   bus.on('frame', dt => R.update(dt));
 }

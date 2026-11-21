@@ -2,6 +2,49 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v3.0.0 (2026-11-20)
+
+A major release: your agents go out with you, play with you and know where they are, you can build your own
+characters, and the city's crowd is new.
+
+- **Companions**: your agents come with you — walking at your side at your pace, riding in your car's passenger seats,
+  waiting where you ask, going places, meeting up with your other agents. Say it in plain words ("follow me", "wait
+  here", "let's go to the café") or use the Companions bar. They sit down with you on a bench or at a table and eat
+  with you, talk with each other while together, and travel with you when you warp or go home.
+- **Fishing with companions**: they get on your boat and fish beside you — one trip for everyone aboard, every catch
+  counted. Boats out on the water stay where they were across a reload or a restart, with everyone aboard.
+- **Agents that play**: an agent can do what the world offers right where it is — the arcade's games, the tables for
+  two against you (air hockey, foosball, pool), a shift at work, an Order Up rush, flying with you, reading signs.
+- **Agent awareness**: an agent knows where it is, who is around and what is going on when you chat with it — as much as
+  you choose per agent in its Studio (off, only when it asks, when you're together, always). "What it knew" under each
+  answer shows exactly what it was told. Asked about something in front of it, it can look through its own eyes.
+- **Free Will in the moment**: a companion with Free Will acts on what happens around it and reads what your messages
+  mean; TypeSafe (Jev) can be its decision service.
+- **Group conversations**: talk with several of your agents at once; each one hears what the others said.
+- **Voices in the city**: agents' lines spoken in their own voices, heard nearby in 3D, muffled through walls; the
+  companions' voice dock (hold to talk, a wake word, or live) waits until you have finished talking.
+- **Trading with your agents**: one window to swap things and VC with your own agents — they decide for themselves, and
+  offer trades of their own.
+- **MVW Radio's newsroom and hosts**: the station announces what is new in the city — new buildings and businesses,
+  billboards and websites — without saying the same thing twice; the host works the same way whoever holds the job,
+  follows its owner's direction, and only those in the studio are on the air.
+- **Who is at work**: every workplace knows its staff and who is in — and why someone is late.
+- **Cars**: everyone sits in their seat — the driver at the wheel, companions as passengers, residents driving their own
+  cars.
+- **Build your own character**: the Agent Studio's Customize tab has a character builder — body, face, hair and outfit —
+  and the city bakes your character with every animation the ready-made ones have (in the Docker image too). One person
+  may build up to 20 new characters a day (Settings → General).
+- **A new crowd**: every resident is put together from a library of parts — bodies, heads, hair, beards, tops, bottoms
+  and shoes — so the city's people all look different, at levels of detail picked by their size on the screen, without
+  slowing the world down. New idle poses, seats that fit, steady eyes, natural blinks, and the selection outline around
+  the whole person.
+- **Lower AI costs in long chats**: conversations reuse the provider's prompt cache (OpenRouter, OpenAI, Anthropic).
+- **The Crowd Studio** (how the crowd looks and moves) is off unless you start the server with `MVW_CROWD_STUDIO=1`; see
+  docs/features/crowd.md.
+
+**Upgrading from 2.x**: automatic — the database gains two tables (agent awareness, group conversations) the first time
+3.0 starts; nothing is converted or removed. Back up first as always (docs/operations.md).
+
 ## v2.7.2 (2026-11-14)
 
 - **Fish that swim like fish**: a hooked fish now swims with a real body wave from head to tail, the way its kind does -
