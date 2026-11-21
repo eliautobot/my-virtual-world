@@ -715,7 +715,7 @@ export class Accounts {
       this.q.delAccount.run({ w: this.w, id: t.id });
     });
     this.audit?.log('account.delete', { actor: actorOf(actor), target: ref(t), ip, detail: { data, to: dest ? dest.login : null } });
-    this.emit({ account: t.id, session: null });
+    this.emit({ account: t.id, session: null, deleted: true });
   }
   /** Deletes the own account after the password (the owner must hand over ownership first). */
   async deleteSelf(P, password, ip = null) {
@@ -727,7 +727,7 @@ export class Accounts {
       this.q.delAccount.run({ w: this.w, id: acc.id });
     });
     this.audit?.log('account.delete', { actor: ref(acc), target: ref(acc), ip, detail: { self: true } });
-    this.emit({ account: acc.id, session: null });
+    this.emit({ account: acc.id, session: null, deleted: true });   // (deleted: what was its own in the world let go — companions)
   }
   /** The owner hands ownership to an active admin and becomes an admin (C76). */
   transferOwner(actor, id, ip = null) {

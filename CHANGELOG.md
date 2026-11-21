@@ -2,6 +2,13 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v3.0.1 (2026-11-20)
+
+- **Companions let go when there's nobody to follow**: an agent removed while it is out with you is let go at once
+  (out of your car or boat, its order ended), and deleting an account lets go of the companions with its player. Before,
+  such agents kept "following" and could count against a later account's companions ("You already have 3
+  companions"). Bodies left in that state are tidied up by the server on its own.
+
 ## v3.0.0 (2026-11-20)
 
 A major release: your agents go out with you, play with you and know where they are, you can build your own

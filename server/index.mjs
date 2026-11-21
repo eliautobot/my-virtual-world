@@ -990,6 +990,8 @@ function retireAgentBody(a) {
   const i = agents.resolver.resolveBody(a.bodyRef);
   if (i < 0) return false;
   const p = people[i], sa = sim.agents[i];
+  // (a companion of someone's: let go first — out of their car or boat, its order ended — never left following them)
+  try { companions?.release(i, 'agent_removed'); } catch (e) { log.warn?.(`[companions] ${e.message}`); }
   p.retired = 1; p.home = null; p.job = { kind: 'free', title: 'Retired', retired: 1 };
   if (sa) { sim.brain.release(sa); sim.brain.leaveJoin(sa); sim.brain.setAct(sa, null); sa.plan = null; sa.ver++; }
   const re = reassign(world, index, people, new RNG('retire:' + a.key));
@@ -1767,6 +1769,8 @@ addPostRoutes(router, posts, { agents });
 // command (its chat, its card, the Companions panel) or its own AI's choice; one order on its body, before its routine
 companions = new Companions({ sim: () => sim, players, vehicles: () => vehicles, agents, life: () => agentLife, world: () => agentWorldRef, freeWill: () => freeWill,
   setting: k => settings.get(k), notify: (id, m) => notifyAccount(id, m), send: sendToAccount, principalFor: id => ownerPrincipal(id), log }).attach();
+// an account deleted: its player's companions let go at once (a new account given the same number never finds them)
+accounts.onChange(ev => { if (ev?.deleted) { try { const n = companions?.releaseLeader(ev.account) || 0; if (n) log.info?.(`[companions] ${n} let go: their leader's account was deleted`); } catch (e) { log.warn?.(`[companions] ${e.message}`); } } });
 addCompanionRoutes(router, () => companions);
 // (a player moved across the map at once — the map's "Travel here", "Go home", an admin's warp —: its companions come along)
 players.onJump = (p, why) => companions?.travelled?.(p, why);

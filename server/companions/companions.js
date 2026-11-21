@@ -71,6 +71,9 @@ const SEAT_WHY = Object.freeze({
 });
 const listWords = l => (l.length < 2 ? l.join('') : `${l.slice(0, -1).join(', ')} and ${l[l.length - 1]}`);
 
+/** How often (ms) orders left on bodies that are nobody's companions any more are let go (Companions.sweep). */
+const SWEEP_MS = 30000;
+
 export class Companions {
   /**
    * @param {object} o
@@ -208,7 +211,8 @@ export class Companions {
   /** The live companion orders: [{ a (sim agent), o (its order) }]. */
   live() {
     const sim = this.sim, out = [], now = sim?.now() ?? 0;
-    for (const a of sim?.agents || []) { if (a?.order && (a.order.lead || a.order.spot || a.order.by || a.order.via) && a.p.vip) { const o = sim.brain.liveOrder(a, now); if (o) out.push({ a, o }); } }
+    // (a retired body — its agent removed — is nobody's companion, whatever order it was left with)
+    for (const a of sim?.agents || []) { if (a?.order && (a.order.lead || a.order.spot || a.order.by || a.order.via) && a.p.vip && !a.p.retired) { const o = sim.brain.liveOrder(a, now); if (o) out.push({ a, o }); } }
     return out;
   }
   /** The agents following account id's player. */
@@ -471,6 +475,40 @@ export class Companions {
     if (had) this.sim.brain.interruptSoon(A);
     void via;
     return this.done(i, confirmWords({ action: 'dismiss' }, a.name), { dismissed: had });
+  }
+  /** Body i is nobody's companion any more (its agent removed: server/index.mjs retireAgentBody) — its order ended, out of
+   *  any car or boat seat, nothing said. → whether it had one. */
+  release(i, why = 'released') {
+    const A = this.sim?.agents[i];
+    if (!A?.order) return false;
+    this.outOfCar(A);
+    this.remember(A, why);
+    this.sim.endOrder(i);
+    A.ride = null; A.fspot = null;
+    this.syncSeats();
+    this.ended.set(i, null);
+    this.autoTried.delete(i);
+    this.stats.released = (this.stats.released || 0) + 1;
+    return true;
+  }
+  /** Every companion following or waiting for account id's player let go (the account deleted: a new account given the
+   *  same number later must never find them with it). → how many. */
+  releaseLeader(id, why = 'leader_gone') {
+    let n = 0;
+    for (const { a, o } of this.live()) if (o.lead?.kind === 'player' && o.lead.id === id && this.release(a.i, why)) n++;
+    return n;
+  }
+  /** Orders left on bodies that are nobody's companions any more: an agent removed (no record), a body retired. Kept to
+   *  the sweep's own rate (tick). → how many let go. */
+  sweep() {
+    const sim = this.sim; let n = 0;
+    for (const a of sim?.agents || []) {
+      if (!a?.order || !a.p?.vip) continue;
+      const gone = a.p.retired || !this.agentRecOf(a.i);   // (an account deleted lets go at once: releaseLeader)
+      if (gone && this.release(a.i, 'released')) n++;
+    }
+    if (n) this.log?.info?.(`[companions] ${n} left without an agent or a leader let go`);
+    return n;
   }
   // ------------------------------------------------------------------------------------------------ sitting down
   /** Its leader in words: for the person commanding ("you" when it is their own player) and for its brain (a name). */
@@ -917,6 +955,8 @@ export class Companions {
       else if (now - l.at > 600) { l.vx = 0; l.vz = 0; }   // (standing still: its followers stop with it)
       this.gone.delete(p.id);
     }
+    // (now and then: orders left on bodies that are nobody's companions any more — sweep)
+    if (now - (this.sweptAt || 0) > SWEEP_MS) { this.sweptAt = now; try { this.sweep(); } catch (e) { sim.noteError(e); } }
     const live = this.live();
     for (const { a, o } of live) {
       try { this.watch(a, o, now, cfg); } catch (e) { sim.noteError(e); }
