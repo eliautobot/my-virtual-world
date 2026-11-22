@@ -2,6 +2,24 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v3.0.2 (2026-11-21)
+
+- **Companions, redone in the interface's own look**: one card instead of a bar, a pill and a voice pill — its head (how
+  many are with you, ＋ to take one along, fold it down to their faces), a row per companion with its state on its face,
+  and the voice row at its foot. The Companions window and each companion's menu open as proper panels (they had no
+  background before). On a computer the card stands on the map, one panel with it.
+- **Companions on a phone: a button instead of a card.** A **👥 button** with how many are out with you joins Play's
+  round buttons (in the city, above the chat button); a tap brings the card up from the bottom, a tap anywhere else puts
+  it away. A companion's ⋯ menu and the ＋ window open on top of it.
+- **Talk without opening it**: a small mic on the 👥 button's top edge — hold to talk (or tap to listen / pause with Wake
+  or Live), the same as the mic in the card.
+- **A light on the mic**: dark — off; light — ready; red, blinking — live, it hears you; amber — waiting for a name
+  (Wake); amber, blinking — thinking; green — a companion is speaking.
+- **A phone's top row** — the map and the Home / Look / Leave bar — sits a little lower, both at the same height, clear
+  of the selection's pull-down tab; on its side, the round buttons sit smaller in the bottom-right corner.
+- **The top bar on a laptop** keeps to one line (Agent Providers shows its 🧩 up to 1440 px wide; "Skip to…" no longer
+  wraps).
+
 ## v3.0.1 (2026-11-20)
 
 - **Companions let go when there's nobody to follow**: an agent removed while it is out with you is let go at once

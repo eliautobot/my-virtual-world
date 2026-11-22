@@ -6,6 +6,9 @@
 /* ---- the top bar's button */
 #topbar .provb { display: inline-flex; align-items: center; gap: 6px; position: relative; white-space: nowrap; font-weight: 600; }
 #topbar .provb .pv-ic { font-size: 15px; line-height: 1; }
+/* a laptop-wide top bar: the button as its 🧩 (its name is the tooltip), so the bar stays one line — "Skip to…" wrapped at
+   1280 px (2026-11-21) */
+@media (min-width: 761px) and (max-width: 1440px) { #topbar .provb .pv-l { display: none; } }
 #topbar .provb .pv-dot { position: absolute; top: 3px; left: 20px; width: 8px; height: 8px; border-radius: 50%; display: none; box-shadow: 0 0 0 2px var(--panel-strong); }
 #topbar .provb .pv-dot.ok, #topbar .provb .pv-dot.busy, #topbar .provb .pv-dot.wait, #topbar .provb .pv-dot.bad { display: block; }
 .pv-dot.ok, .ap-dot.ok { background: var(--good, #34d399); }

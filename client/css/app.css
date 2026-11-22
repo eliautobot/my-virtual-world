@@ -361,7 +361,7 @@ kbd { background: var(--line); border: 1px solid var(--line); border-bottom-widt
 .flatdlg .flat-sec { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
 .flatdlg .lib-add select, .flatdlg .lib-add input[type=number] { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--btn); color: inherit; font: inherit; max-width: 140px; }
 @media (max-width: 760px) { .lib-back { place-items: end center; } .libdlg { width: calc(100vw - 12px); margin-bottom: calc(6px + env(safe-area-inset-bottom)); } .libdlg .lib-btns .btn { flex: 1; min-height: 46px; } .libdlg .lib-acts .btn { min-height: 38px; } }
-#speed .skip { width: auto; padding: 4px 6px; font-size: 12px; margin-left: 2px; }
+#speed .skip { width: auto; padding: 4px 6px; font-size: 12px; margin-left: 2px; flex: none; white-space: nowrap; }   /* (one line: the search box gives way first) */
 #clock .sun { font-size: 15px; }
 .result .em { width: 26px; text-align: center; font-size: 17px; flex: none; }
 #roster .head .cnt { font-weight: 500; font-size: 12px; color: var(--good); }
@@ -460,7 +460,19 @@ body.play #floorw { display: none !important; }
 #pbtns .btn.on { background: var(--pbtn-on); }
 body.driving #pbtns .btn { width: 104px; height: 52px; border-radius: 14px; font-size: 13px; }
 body.driving #phud { max-width: calc(100vw - 30px); width: 580px; }
-@media (pointer: coarse) { #playbar { top: 58px; } }
+/* a phone's top row under the top bar — the radar on the left, the You bar on the right — sits one line lower than the
+   top bar's edge (--hud-y): clear of the selection's handle and Auto/Manual in the middle, both at the same height
+   (2026-11-21, the product owner: they touched the handle). Everything placed from the radar adds it too. */
+:root { --hud-y: 0px; }
+@media (pointer: coarse) { :root { --hud-y: 18px; } }
+@media (pointer: coarse) { #playbar { top: calc(var(--topbar-height, 44px) + 8px + var(--hud-y)); } }
+/* a phone on its side: the round buttons (E, jump, chat, 👥 Companions) smaller, from the bottom-right corner up, clear
+   of the You bar; the city's buttons in two columns */
+@media (pointer: coarse) and (max-height: 520px) {
+  #pbtns { bottom: 12px; gap: 8px; }
+  #pbtns .btn { width: 52px; height: 52px; font-size: 18px; }
+  body #floatbtns { flex-direction: row; align-items: flex-end; }   /* (over #floatbtns' own column, set further down) */
+}
 /* a phone: the radar sits in the top-left corner, so the play bar keeps to the right of it */
 @media (pointer: coarse) and (max-width: 760px) {
   #playbar { max-width: calc(100vw - 144px); padding: 5px; gap: 4px; }
@@ -1908,7 +1920,7 @@ body.fishing #boathud .bh-row, body.fishing #boathud .bh-top { display: none; } 
 .fd-card.hidden { display: none; } .fd-card h4 { margin: 0; font-size: 17px; } .fd-card h5 { margin: 6px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted, #9aa); } .fd-card p { margin: 0; }
 .fd-big img { width: 100%; aspect-ratio: 2 / 1; object-fit: contain; }
 .fd-facts { display: grid; gap: 3px; margin-top: 4px; } .fd-facts span:first-child { display: inline-block; min-width: 92px; color: var(--muted, #9aa); }
-@media (max-width: 760px) { #fishfinder { left: auto; right: 8px; bottom: auto; top: calc(var(--topbar-height, 44px) + 130px); width: 150px; } #fishfinder canvas { width: 150px; height: 72px; } #fishnav { top: calc(var(--topbar-height, 44px) + 8px); font-size: 12px; } }
+@media (max-width: 760px) { #fishfinder { left: auto; right: 8px; bottom: auto; top: calc(var(--topbar-height, 44px) + 130px + var(--hud-y, 0px)); width: 150px; } #fishfinder canvas { width: 150px; height: 72px; } #fishnav { top: calc(var(--topbar-height, 44px) + 8px + var(--hud-y, 0px)); font-size: 12px; } }
 /* ------------------------------------------------------------------ the boat and the fishing game on a phone
    (2026-11-14, the product owner: "way better layout on mobile for the fish game, right now it's a mess, too many
    overlaps, and odd sizes for things"). A portrait phone is laid out in bands, nothing on top of anything else:
@@ -1923,14 +1935,14 @@ body.fishing #boathud .bh-row, body.fishing #boathud .bh-top { display: none; } 
   body.boating #pbtns, body.boating.fishing #joy { display: none !important; }
   body.boating #toasts { top: calc(var(--topbar-height, 44px) + 300px); max-width: calc(100vw - 24px); }
   /* the top band */
-  #fishnav { top: calc(var(--topbar-height, 44px) + 62px); left: 132px; right: 8px; width: auto; margin: 0; font-size: 12px; padding: 4px 6px 4px 8px; gap: 6px; }
+  #fishnav { top: calc(var(--topbar-height, 44px) + 62px + var(--hud-y, 0px)); left: 132px; right: 8px; width: auto; margin: 0; font-size: 12px; padding: 4px 6px 4px 8px; gap: 6px; }
   #fishnav .fn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #fishnav .btn { padding: 3px 7px; font-size: 12px; }
-  #fishfinder { left: auto; right: 8px; bottom: auto; top: calc(var(--topbar-height, 44px) + 104px); width: 148px; }
+  #fishfinder { left: auto; right: 8px; bottom: auto; top: calc(var(--topbar-height, 44px) + 104px + var(--hud-y, 0px)); width: 148px; }
   #fishfinder canvas { width: 148px; height: 58px; }
-  .fg-open { top: calc(var(--topbar-height, 44px) + 194px); bottom: auto; right: 8px; padding: 5px 10px; font-size: 12px; }
+  .fg-open { top: calc(var(--topbar-height, 44px) + 194px + var(--hud-y, 0px)); bottom: auto; right: 8px; padding: 5px 10px; font-size: 12px; }
   .fg-open kbd { display: none; }
-  #fishhud { top: calc(var(--topbar-height, 44px) + 182px); bottom: auto; left: 8px; right: auto; width: min(196px, calc(50vw - 16px)); padding: 6px 8px; gap: 2px; font-size: 11px; border-radius: 10px; }
+  #fishhud { top: calc(var(--topbar-height, 44px) + 182px + var(--hud-y, 0px)); bottom: auto; left: 8px; right: auto; width: min(196px, calc(50vw - 16px)); padding: 6px 8px; gap: 2px; font-size: 11px; border-radius: 10px; }
   #fishhud .fh-top { flex-wrap: wrap; gap: 4px; } #fishhud .fh-top b { font-size: 12px; flex: 1 1 100%; }
   #fishhud .fh-top .btn { padding: 2px 6px; font-size: 11px; } #fishhud kbd { display: none; }
   #fishhud .fh-bounties div, #fishhud .fh-cool { font-size: 10.5px; line-height: 1.25; }
@@ -1964,7 +1976,7 @@ body.fishing #boathud .bh-row, body.fishing #boathud .bh-top { display: none; } 
   #fishsteer button { width: 78px; height: 78px; font-size: 28px; } #fishsteer kbd { display: none; }
   body.boating.fishing:has(#fishsteer:not(.hidden)) .bt-right { display: none; }
   #fishprompt { top: 34%; font-size: 30px; }
-  #fishcard { top: calc(var(--topbar-height, 44px) + 128px); }
+  #fishcard { top: calc(var(--topbar-height, 44px) + 128px + var(--hud-y, 0px)); }
   body:has(#fishcard:not(.hidden)) :is(#fishhud, #fishfinder, .fg-open, .radio-btn) { visibility: hidden; }   /* (the catch's card has the middle to itself) */
 }
 /* a short phone (an older or smaller one): the trip card keeps to its name, clock and catch (the bounties are on the chart) */
@@ -1978,10 +1990,10 @@ body.fishing #boathud .bh-row, body.fishing #boathud .bh-top { display: none; } 
   body.boating #pbtns, body.boating.fishing #joy { display: none !important; }
   body.boating #toasts { top: calc(var(--topbar-height, 44px) + 8px); }
   #fishnav { font-size: 12px; }
-  #fishfinder { left: auto; right: 8px; bottom: auto; top: calc(var(--topbar-height, 44px) + 58px); width: 150px; }
+  #fishfinder { left: auto; right: 8px; bottom: auto; top: calc(var(--topbar-height, 44px) + 58px + var(--hud-y, 0px)); width: 150px; }
   #fishfinder canvas { width: 150px; height: 54px; }
-  .fg-open { top: calc(var(--topbar-height, 44px) + 140px); bottom: auto; right: 8px; padding: 4px 10px; font-size: 12px; }
-  #fishhud { top: calc(var(--topbar-height, 44px) + 128px); bottom: auto; left: 8px; right: auto; width: 200px; padding: 5px 8px; gap: 2px; font-size: 11px; }
+  .fg-open { top: calc(var(--topbar-height, 44px) + 140px + var(--hud-y, 0px)); bottom: auto; right: 8px; padding: 4px 10px; font-size: 12px; }
+  #fishhud { top: calc(var(--topbar-height, 44px) + 128px + var(--hud-y, 0px)); bottom: auto; left: 8px; right: auto; width: 200px; padding: 5px 8px; gap: 2px; font-size: 11px; }
   #fishhud .fh-bounties { display: none; }
   #fishhud .fh-top b { font-size: 12px; } #fishhud .fh-top .btn { padding: 2px 6px; font-size: 11px; } #fishhud kbd { display: none; }
   #boathud { bottom: 4px; } .bh-row { padding: 4px 8px; } .bh-g { min-width: 54px; } .bh-g b { font-size: 16px; } .bh-keys { display: none; }
@@ -1999,11 +2011,11 @@ body.fishing #boathud .bh-row, body.fishing #boathud .bh-top { display: none; } 
   body.boating.fishing:has(#fishsteer:not(.hidden)) .bt-right { display: none; }
   body:has(#fishgauge:not(.hidden)) :is(#fishfinder, .fg-open) { display: none; }   /* (a fight on a phone on its side: the right edge is the reel's) */
   #fishprompt { top: 24%; font-size: 28px; } #fishbanner { top: 10%; } #fishbanner b { font-size: 32px; }
-  #fishcard { top: calc(var(--topbar-height, 44px) + 54px); max-height: calc(100vh - var(--topbar-height, 44px) - 62px); overflow-y: auto; }
+  #fishcard { top: calc(var(--topbar-height, 44px) + 54px + var(--hud-y, 0px)); max-height: calc(100vh - var(--topbar-height, 44px) - 62px); overflow-y: auto; }
   body:has(#fishcard:not(.hidden)) :is(#fishhud, #fishfinder, .fg-open, .radio-hud) { visibility: hidden; }
   /* (the radar sits in the corner under the top bar here too: the radio's bar beside it, not over it) */
   body.boating .radio-hud { left: calc(var(--dock-lb, 0px) + 132px); }
-  #fishnav { top: calc(var(--topbar-height, 44px) + 56px); left: auto; right: 170px; margin: 0; max-width: calc(100vw - 520px); }
+  #fishnav { top: calc(var(--topbar-height, 44px) + 56px + var(--hud-y, 0px)); left: auto; right: 170px; margin: 0; max-width: calc(100vw - 520px); }
 }
 /* ------------------------------------------------------------------ the inventory (ui/inventory.js, in the wallet) */
 .inv-who { flex-wrap: wrap; margin-bottom: 6px; }

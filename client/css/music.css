@@ -101,12 +101,12 @@
    and tucks away again (audio/radio.js openPanel) */
 .radio-btn { display: none; }
 @media (max-width: 760px) {
-  .radio-btn { display: flex; align-items: center; justify-content: center; position: fixed; left: 10px; top: calc(var(--topbar-height, 44px) + 128px); z-index: 5;
+  .radio-btn { display: flex; align-items: center; justify-content: center; position: fixed; left: 10px; top: calc(var(--topbar-height, 44px) + 128px + var(--hud-y, 0px)); z-index: 5;
     width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(14, 16, 24, 0.82); color: #fff; font-size: 20px; box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35); }
   .radio-btn.hidden { display: none; }
   .radio-btn:not(.on) { opacity: 0.6; }
   .radio-btn.open { background: rgba(40, 44, 60, 0.95); }
-  .radio-hud { top: calc(var(--topbar-height, 44px) + 124px); left: 62px; right: auto; max-width: calc(100vw - 74px); transform: translateX(calc(-100% - 70px)); opacity: 0;
+  .radio-hud { top: calc(var(--topbar-height, 44px) + 124px + var(--hud-y, 0px)); left: 62px; right: auto; max-width: calc(100vw - 74px); transform: translateX(calc(-100% - 70px)); opacity: 0;
     pointer-events: none; transition: transform 0.25s ease, opacity 0.25s ease; }
   .radio-hud.open { transform: none; opacity: 1; pointer-events: auto; }
   .radio-hud .rh-b { width: 36px; height: 36px; }

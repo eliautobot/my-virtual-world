@@ -81,7 +81,8 @@ try {
       return { dock: r(document.querySelector('#cv-dock')), party: r(document.querySelector('#party')), top: r(top), z: Number(getComputedStyle(document.querySelector('#cv-dock')).zIndex), vh: innerHeight, vw: innerWidth };
     });
     const over = (a, b) => a && b && a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
-    check(!over(geo.dock, geo.party), 'not over the Companions bar: ' + JSON.stringify([geo.dock, geo.party]));
+    const inside = (a, b) => a && b && a.l >= b.l - 1 && a.r <= b.r + 1 && a.t >= b.t - 1 && a.b <= b.b + 1;
+    check(inside(geo.dock, geo.party) || !over(geo.dock, geo.party), 'at the foot of the Companions card (or beside it, never over its rows): ' + JSON.stringify([geo.dock, geo.party]));
     check(!geo.top || geo.dock.t >= geo.top.b - 1, 'not over the top bar');
     check(geo.dock.b <= geo.vh && geo.dock.r <= geo.vw + 1 && geo.dock.l >= 0, 'on the screen');
     check(geo.z < 7, 'under the chat windows (z ' + geo.z + ')');

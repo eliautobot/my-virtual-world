@@ -45,11 +45,32 @@ const CSS = [
   '#cv-dock .cv-way{flex:none;padding:4px 9px;border-radius:999px;border:1px solid var(--line);background:transparent;color:inherit;font:inherit;font-size:11.5px;cursor:pointer}',
   '#cv-dock .cv-way:hover,#cv-dock .cv-way[aria-expanded="true"]{border-color:var(--gold,#e0a83a)}',
   '#cv-dock.cv-off .cv-mic{opacity:.8}',
-  '.cv-menu{position:fixed;z-index:6;width:250px;max-width:calc(100vw - 16px);padding:6px;display:flex;flex-direction:column;gap:2px}',
+  '.cv-menu{position:fixed;z-index:9;width:250px;max-width:calc(100vw - 16px);padding:6px;display:flex;flex-direction:column;gap:2px}',
   '.cv-menu button{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:6px 8px;border:0;border-radius:8px;background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}',
   '.cv-menu button:hover,.cv-menu button[aria-checked="true"]{background:var(--btn-hover,rgba(255,255,255,.08))}',
   '.cv-menu button b{font-size:12.5px}.cv-menu button small{font-size:11px;opacity:.72}',
-  '@media (prefers-reduced-motion:reduce){#cv-dock .cv-mic[aria-pressed="true"]{box-shadow:none}}',
+  // the lamp (on the button here and on the small mic by the 👥 button, js: glow → data-light): dark — off or paused;
+  // light — ready; red, blinking — live, it hears you; amber, steady — standing by for a name (Wake); amber, blinking —
+  // about to answer / thinking; green — speaking
+  '.cv-led{position:absolute;right:-2px;top:-2px;width:10px;height:10px;border-radius:50%;background:#64748b;pointer-events:none;',
+  'box-shadow:0 0 0 2px var(--panel-strong,#15171d)}',
+  '[data-light="off"] .cv-led,[data-light="paused"] .cv-led{background:#475569}[data-light="ready"] .cv-led{background:#cbd5e1}',
+  '[data-light="live"] .cv-led{background:#ef4444;box-shadow:0 0 0 2px var(--panel-strong,#15171d),0 0 8px #ef4444;animation:cv-blink 1s ease-in-out infinite}',
+  '[data-light="standby"] .cv-led{background:#f59e0b;box-shadow:0 0 0 2px var(--panel-strong,#15171d),0 0 6px #f59e0b}',
+  '[data-light="thinking"] .cv-led{background:#f59e0b;animation:cv-blink .7s ease-in-out infinite}',
+  '[data-light="speaking"] .cv-led{background:#22c55e;box-shadow:0 0 0 2px var(--panel-strong,#15171d),0 0 8px #22c55e;animation:cv-blink 1.2s ease-in-out infinite}',
+  '@keyframes cv-blink{50%{opacity:.35}}',
+  // the small mic on the 👥 button (a phone: js/ui/companions.js puts it there) — the same as the button here: hold to talk,
+  // or tap to listen / pause, whichever way to talk is chosen
+  // (on the button's top edge, in the middle — the product owner's choice, 2026-11-21)
+  '.cv-mini{position:absolute;left:50%;top:0;transform:translate(-50%,-58%);z-index:1;width:28px;height:28px;padding:0;border-radius:50%;',
+  'border:1px solid var(--line-2,var(--line));background:var(--panel-strong,#1b1d24);color:var(--text);font-size:12px;display:grid;place-items:center;',
+  'cursor:pointer;touch-action:none;-webkit-tap-highlight-color:transparent;box-shadow:0 2px 10px rgba(0,0,0,.45)}',
+  '.cv-mini.hidden{display:none}',
+  '.cv-mini .cv-led{width:8px;height:8px;right:-2px;top:-1px}',
+  '.cv-mini[aria-pressed="true"]{background:var(--gold,#e0a83a);border-color:var(--gold,#e0a83a);color:#1a1205;',
+  'box-shadow:0 0 0 calc(2px + var(--lv,0) * 6px) color-mix(in srgb,var(--gold,#e0a83a) 35%,transparent)}',
+  '@media (prefers-reduced-motion:reduce){#cv-dock .cv-mic[aria-pressed="true"],.cv-mini[aria-pressed="true"]{box-shadow:none}.cv-led{animation:none!important}}',
 ].join('');
 const WAYS = {
   off: ['Off', 'Your companions don\'t listen'],
@@ -104,27 +125,54 @@ function buildDock() {
   el.className = 'none';
   el.setAttribute('role', 'group'); el.setAttribute('aria-label', 'Talk with your companions');
   el.innerHTML = '<style>' + CSS + '</style>' +
-    '<button type="button" class="cv-mic" aria-label="Talk" aria-pressed="false"><span aria-hidden="true">&#127908;</span></button>' +
+    '<button type="button" class="cv-mic" aria-label="Talk" aria-pressed="false"><span aria-hidden="true">&#127908;</span><i class="cv-led" aria-hidden="true"></i></button>' +
     '<span class="cv-t"><span class="cv-who">companions</span><span class="cv-status" aria-live="polite">off</span></span>' +
     '<button type="button" class="cv-way" aria-haspopup="menu" aria-expanded="false" title="How you talk to your companions"></button>';
   el.querySelector('.cv-way').addEventListener('click', e => { e.stopPropagation(); menu(); });
   const mic = el.querySelector('.cv-mic');
-  mic.addEventListener('pointerdown', e => {
-    e.preventDefault();
-    unlock({ synth: true });
-    try { mic.setPointerCapture(e.pointerId); } catch { }
-    if (S.mode === 'off') { setMode('hold'); press(); }
-    else if (S.mode === 'hold') press();
-    else toggle();
-  });
-  mic.addEventListener('pointerup', e => { e.preventDefault(); if (S.mode === 'hold') release(); });
-  mic.addEventListener('pointercancel', () => { if (S.mode === 'hold') release(); });
+  bindMic(mic);
   keys();
   // (the Companions bar grows and shrinks as companions come and go, and its panel opens: the row follows it)
   const bar = () => document.getElementById('party');
   const watch = () => { const b = bar(); if (b && window.ResizeObserver && !S.ro) { S.ro = new ResizeObserver(place); S.ro.observe(b); } };
   watch(); setTimeout(watch, 1500);
   return { el, mic, status: el.querySelector('.cv-status'), who: el.querySelector('.cv-who'), way: el.querySelector('.cv-way') };
+}
+/** A talk button: hold to talk (Off: the first hold chooses Hold), or a tap to listen / pause (Wake, Live). */
+function bindMic(btn) {
+  btn.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation();
+    unlock({ synth: true });
+    try { btn.setPointerCapture(e.pointerId); } catch { }
+    if (S.mode === 'off') { setMode('hold'); press(); }
+    else if (S.mode === 'hold') press();
+    else toggle();
+  });
+  btn.addEventListener('pointerup', e => { e.preventDefault(); if (S.mode === 'hold') release(); });
+  btn.addEventListener('pointercancel', () => { if (S.mode === 'hold') release(); });
+  btn.addEventListener('click', e => e.stopPropagation());   // (not the 👥 button's tap under it)
+}
+/** The small mic for the 👥 button (a phone's Companions button: js/ui/companions.js) — a shortcut to the same talking,
+ *  with the same lamp. Hidden with nobody out with you. */
+export function miniMic() {
+  if (!S.mini) {
+    S.mini = document.createElement('button');
+    S.mini.type = 'button'; S.mini.className = 'cv-mini hidden';
+    S.mini.setAttribute('aria-pressed', 'false'); S.mini.setAttribute('aria-label', 'Talk to your companions');
+    S.mini.innerHTML = '<span aria-hidden="true">&#127908;</span><i class="cv-led" aria-hidden="true"></i>';
+    bindMic(S.mini);
+    if (S.dock) paint();
+  }
+  return S.mini;
+}
+/** What the lamp shows: speaking, thinking (an answer coming, or the pause before it), live (it hears you), standby
+ *  (Wake, listening for a name), ready, paused, off. */
+function lightOf() {
+  if (S.player?.busy || (S.queue && !S.queue.idle)) return 'speaking';
+  if (S.busy || S.turns.size || S.dock.mic.classList.contains('waiting')) return 'thinking';
+  if (S.dock.mic.getAttribute('aria-pressed') === 'true') return S.mode === 'wake' && !S.waking ? 'standby' : 'live';
+  if (S.mode === 'off') return 'off';
+  return S.paused || S.hidden ? 'paused' : 'ready';
 }
 /** The ways to talk, to choose from. */
 function menu() {
@@ -150,11 +198,19 @@ function closeMenu() {
 function setStatus(t) { if (S.dock) { S.dock.status.textContent = t; S.status = t; } }
 function hint(t) { if (S.dock && t) setStatus(t); }
 
-/** Beside the Companions bar, never over it or its cards: above it where it sits low on the screen (a computer's), under
- *  it where it sits high (a phone's, under the top bar). */
+/** At the foot of the Companions card (ui/companions.js: its .party-voice), one panel with it — or, with no card shown,
+ *  where the card would be: above it where it sits low on the screen (a computer's), under it where it sits high (a
+ *  phone's, under the top bar). */
 function place() {
   if (!S.dock) return;
-  const el = S.dock.el, bar = document.getElementById('party');
+  const el = S.dock.el, bar = document.getElementById('party'), slot = bar?.querySelector('.party-voice');
+  if (slot && (getComputedStyle(bar).display !== 'none' || bar.classList.contains('as-sheet'))) {   // (a phone's sheet, put away: the row stays in it)
+    if (el.parentElement !== slot) { slot.appendChild(el); if (S.menu) closeMenu(); }
+    el.classList.add('in-party'); el.style.left = el.style.top = el.style.bottom = '';
+    return;
+  }
+  const home = document.getElementById('ui') || document.body;
+  if (el.parentElement !== home) { home.appendChild(el); el.classList.remove('in-party'); }
   const r = bar && getComputedStyle(bar).display !== 'none' ? bar.getBoundingClientRect() : null;
   el.style.left = (r ? Math.max(8, Math.round(r.left)) : 12) + 'px';
   if (r && r.height > 0 && r.top < innerHeight / 2) { el.style.top = Math.round(r.bottom + 6) + 'px'; el.style.bottom = ''; }
@@ -175,6 +231,12 @@ function paint() {
   S.dock.mic.disabled = !S.companions.length;
   S.dock.mic.setAttribute('aria-label', S.mode === 'hold' || S.mode === 'off' ? 'Hold to talk' : 'Listen, or pause');
   S.dock.mic.title = S.mode === 'hold' || S.mode === 'off' ? 'Hold to talk (or V)' : 'Tap: listen or pause · while they talk: stop them · while you talk: done';
+  if (S.mini) {
+    S.mini.classList.toggle('hidden', !S.companions.length);
+    S.mini.disabled = !S.companions.length;
+    S.mini.setAttribute('aria-label', `${S.mode === 'hold' || S.mode === 'off' ? 'Hold to talk' : 'Listen, or pause'} — ${who || 'your companions'}`);
+    S.mini.title = `Talk to ${who || 'your companions'} · ${S.dock.mic.title}`;
+  }
   if (!S.busy) setStatus(S.mode === 'off' ? 'hold the button to talk' : S.paused ? 'tap to listen' : S.status && !/^hold the button/.test(S.status) ? S.status : 'ready');
   place();
 }
@@ -183,6 +245,14 @@ function glow() {
   if (!S.dock) return;
   const lv = S.ear?.T ? Math.min(1, S.ear.level() * 8) : S.mic?.recording ? Math.min(1, S.mic.level() * 8) : S.player?.busy ? Math.min(1, S.player.level() * 6) : 0;
   S.dock.mic.style.setProperty('--lv', lv.toFixed(3));
+  const light = lightOf();
+  if (S.dock.el.dataset.light !== light) S.dock.el.dataset.light = light;
+  if (S.mini) {
+    if (S.mini.dataset.light !== light) S.mini.dataset.light = light;
+    S.mini.style.setProperty('--lv', lv.toFixed(3));
+    const on = S.dock.mic.getAttribute('aria-pressed');
+    if (S.mini.getAttribute('aria-pressed') !== on) S.mini.setAttribute('aria-pressed', on);
+  }
 }
 
 function load() { try { const m = localStorage.getItem('mvw.cv.mode'); if (MODES.includes(m)) S.mode = m; } catch { } }

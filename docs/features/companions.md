@@ -19,8 +19,11 @@ because its own AI chose to. This works the same way in Player mode and in sim m
 | **Let go** | It goes back to its own day. | The same. |
 
 You can give these orders in four places:
-- The **party bar** on the left, above the map: a face for each companion with its status, and a menu on each face.
-- The bar's **panel**: add a companion, set a meet-up, or let everyone go.
+- The **Companions card** on the left, above the map (under the top bar on a phone): one panel with its head (how many
+  are with you, **＋** to take one along, a chevron to fold the list down to their faces), a row for each companion with
+  what it is doing, and the voice row at its foot (§6e). A row opens that companion's menu.
+- The **Companions window** (＋, or the card's head), beside the card: take another along, set a meet-up or send them
+  somewhere, or let everyone go.
 - The **card of your own agent** when you select it.
 - The agent's **chat**, by saying it: "follow me", "come here", "wait here", "let's go to the café", "meet Max at the
   park", "get in", "you're dismissed". The order is carried out at once and appears as a line in the chat. The
@@ -206,11 +209,11 @@ seat. This should also be the same for agents using cars to go places".
   seen by a second player; a resident driving its own car).
 
 ## 6e. Talking with your companions out loud (no chat window)
-- **One row by the Companions bar** (`client/js/ui/companion-voice.js`): the button, who is listening and what it is
+- **One row at the foot of the Companions card** (`client/js/ui/companion-voice.js`): the button, who is listening and what it is
   doing, and the way to talk (a menu): **Off**, **Hold to talk** (hold the button or V), **Wake word** ("hey Sam", "hey
   team", then speak — the browser's own recognition, so nothing is sent anywhere until a name is heard; Chrome, Edge,
   Safari) or **Live** (an open conversation that answers when you have finished — the patience, habit and words-so-far
-  of chat-and-voice.md "Live voice"). Above the bar on a computer, under it on a phone; under the chat windows; not
+  of chat-and-voice.md "Live voice"). Part of the card (beside it only when no card shows); under the chat windows; not
   there with nobody out with you. The way is kept on the device; a page that opens never starts listening by itself.
 - **Who answers**: the one named at the front ("Sam, …") or called at the end ("… what do you think, Lara?"), several
   named together ("Sam and Lara, …"), everyone ("everyone", "team", "guys", "you all") — at most 3, one after another,

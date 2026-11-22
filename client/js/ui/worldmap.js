@@ -532,8 +532,8 @@ body.wmap-open #gpshud, body.wmap-open #radar { display: none; }
   #wmap .wm-win { width: 100vw; height: calc(100dvh - var(--topbar-height, 44px)); border-radius: 0; border: 0; }   /* a phone: the screen under the top bar, as the Studio */
 }
 @media (max-width: 760px), (pointer: coarse) {
-  #radar { width: 112px; height: 112px; left: 10px; top: calc(var(--topbar-height, 44px) + 8px); bottom: auto; border-radius: 14px; }   /* the corner under the top bar */
-  #gpshud { top: 108px; left: 132px; right: 10px; transform: none; min-width: 0; padding: 6px 10px; }
+  #radar { width: 112px; height: 112px; left: 10px; top: calc(var(--topbar-height, 44px) + 8px + var(--hud-y, 0px)); bottom: auto; border-radius: 14px; }   /* the corner under the top bar */
+  #gpshud { top: calc(108px + var(--hud-y, 0px)); left: 132px; right: 10px; transform: none; min-width: 0; padding: 6px 10px; }
   #gpshud .gi { font-size: 22px; width: 24px; }
   #gpshud .gd { font-size: 15px; }
   #wmap .wm-card:not(.hidden) ~ .wm-legend, #wmap.card-open .wm-legend { display: none; }

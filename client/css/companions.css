@@ -1,56 +1,162 @@
 /* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
-/* Companions (js/ui/companions.js): the party bar on the left above the map — a head, each companion's face with what it
-   is doing — its panel, one companion's menu, and the row on an agent's own card. */
-#party { position: fixed; left: calc(var(--dock-lb, 0px) + 12px); bottom: 224px; z-index: 3; display: flex; flex-direction: column; align-items: flex-start;
-  gap: 6px; max-width: min(320px, calc(100vw - 24px)); pointer-events: none; transition: left .18s ease; }
+/* Companions (js/ui/companions.js): one card on the left above the map — its head (who is with you, ＋, fold), a row for
+   each companion, and the voice row at its foot (js/ui/companion-voice.js moves in) —, the Companions window beside it,
+   one companion's menu, and the row on an agent's own card. Panels in the interface's own look (app.css .panel): the
+   theme's surface, line, radius and shadow; small type; quiet hover rows rather than boxes in boxes.
+   (2026-11-20: rebuilt — the old panel and menus had no surface, and the bar, its pill and the voice pill took three.) */
+#party { position: fixed; left: calc(var(--dock-lb, 0px) + 12px); bottom: 224px; z-index: 3; width: 264px; max-width: calc(100vw - 24px);
+  display: flex; flex-direction: column; padding: 0; overflow: hidden; transition: left .18s ease; }
 #party.hidden { display: none; }
-#party > * { pointer-events: auto; }
-.party-head { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-0);
-  color: var(--text); font: inherit; font-size: 12px; cursor: pointer; box-shadow: var(--shadow); }
-.party-head small { opacity: .7; font-variant-numeric: tabular-nums; }
-.party-head:hover, .party-head.on { border-color: var(--gold); }
-.party-head:focus-visible, .party-face:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: 2px; }
-.party-faces { display: flex; flex-direction: column; gap: 5px; }
-.party-face { display: flex; align-items: center; gap: 8px; min-width: 168px; max-width: 280px; padding: 5px 10px 5px 5px; border-radius: 14px;
-  border: 1px solid var(--line); background: var(--bg-0); color: var(--text); font: inherit; cursor: pointer; text-align: left; box-shadow: var(--shadow); position: relative; }
-.party-face:hover { border-color: var(--gold); }
-.pf-av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; background: var(--btn-hover); flex: none; }
-.pf-ic { position: absolute; left: 25px; top: 23px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px;
-  background: var(--bg-0); border: 1px solid var(--line); }
-.pf-t { display: flex; flex-direction: column; min-width: 0; }
-.pf-t b { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pf-t small { font-size: 11px; opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.party-face.st-following { border-left: 3px solid var(--good, #3cb371); }
-.party-face.st-riding { border-left: 3px solid var(--gold); }
-.party-face.st-waiting, .party-face.st-away { border-left: 3px solid var(--line); }
-.party-face.st-meetup, .party-face.st-going { border-left: 3px solid var(--vw-accent, var(--gold)); }
-.party-face.own-choice { border-left-style: dashed; }   /* (agents who went together by their own choice) */
-.party-panel { width: min(320px, calc(100vw - 24px)); max-height: min(420px, calc(100vh - 320px)); overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
-.pp-sec { display: flex; flex-direction: column; gap: 6px; }
-.pp-sec + .pp-sec { border-top: 1px solid var(--line); padding-top: 8px; }
-.pp-sh { font-size: 12px; font-weight: 600; }
-.party-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
-.party-row b { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.party-pick { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; }
-.party-pick label, .party-here { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-.party-here { font-size: 11.5px; opacity: .85; }
-.party-place { display: flex; flex-direction: column; gap: 4px; }
-.party-place .input { width: 100%; }
-.party-menu { position: fixed; left: 0; top: 0; z-index: 5; width: 260px; max-width: calc(100vw - 16px); padding: 8px; display: flex; flex-direction: column; gap: 4px;
-  max-height: min(520px, calc(100vh - 16px)); overflow: auto; }
-.party-menu .btn.primary { align-self: flex-start; }
-.cp-card { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px; }
-.cp-st { font-size: 12px; opacity: .85; }
-.cp-card .row { display: flex; flex-wrap: wrap; gap: 4px; }
-body.play #party { bottom: 222px; }
-@media (pointer: coarse) {
-  #party { bottom: auto; top: 112px; }
-  body.play #party { top: 150px; }
-  .party-face { min-width: 0; padding-right: 6px; }
-  .party-face .pf-t small { display: none; }
-}
-@media (max-width: 760px) { .party-face .pf-t { max-width: 120px; } }
+#party.empty { width: auto; min-width: 0; }
 
+/* the head: what it is, how many are with you, take one along, fold the list */
+.party-top { display: flex; align-items: center; gap: 2px; padding: 4px; }
+.party-head { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 5px; border: 0; border-radius: 9px; background: none;
+  color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; }
+.party-head b { font-weight: 600; white-space: nowrap; }
+.party-head:hover, .party-head.on { background: var(--hover-1); }
+.party-ic { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 7px; background: var(--bar); font-size: 12px; }
+.party-count { margin-left: auto; padding: 1px 7px; border-radius: 999px; background: var(--bar); color: var(--dim); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#party.empty .party-count { margin-left: 4px; }
+.party-tool { width: 28px; height: 28px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--dim);
+  font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
+.party-tool:hover { background: var(--hover-1); color: var(--text); }
+.party-head:focus-visible, .party-tool:focus-visible, .party-face:focus-visible { outline: 2px solid var(--focus, var(--gold)); outline-offset: -2px; }
+/* folded: their faces in the head instead of the rows */
+.party-stack { display: inline-flex; margin-left: 2px; }
+.party-stack .cp-av { width: 20px; height: 20px; font-size: 11px; margin-left: -6px; box-shadow: 0 0 0 1.5px var(--panel-strong); }
+.party-stack .cp-av:first-child { margin-left: 0; }
+
+/* a companion's row: its face with what it is doing as a small badge, its name and words, the menu's dots on hover */
+.party-faces { display: flex; flex-direction: column; gap: 1px; padding: 0 4px 4px; max-height: min(40vh, 320px); overflow-y: auto; }
+.party-faces:empty { display: none; }
+.party-face { --st: var(--line-3); display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px; border: 0; border-radius: 9px; background: none;
+  color: var(--text); font: inherit; cursor: pointer; text-align: left; }
+.party-face:hover, .party-face.on { background: var(--hover-1); }
+.party-face.st-following { --st: var(--good); }
+.party-face.st-riding { --st: var(--gold); }
+.party-face.st-meetup, .party-face.st-going { --st: var(--accent2); }
+.party-face.st-waiting, .party-face.st-away { --st: var(--muted-2); }
+.cp-av { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 50%; font-size: 17px; background: var(--btn-hover); }
+.cp-av.sm { width: 24px; height: 24px; font-size: 13px; }
+.pf-who { position: relative; flex: none; display: grid; }
+.pf-who .cp-av { box-shadow: 0 0 0 2px var(--st); }
+.party-face.own-choice .pf-who .cp-av { box-shadow: 0 0 0 2px var(--panel-strong), 0 0 0 3.5px var(--st); }   /* (agents who went together by their own choice) */
+.pf-ic { position: absolute; right: -5px; bottom: -4px; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; font-size: 10px;
+  background: var(--panel-strong); box-shadow: 0 0 0 1.5px var(--st); }
+.pf-t { flex: 1; display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.pf-t b { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-t small { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-more { flex: none; color: var(--dim); font-size: 15px; letter-spacing: 1px; opacity: 0; transition: opacity .12s; }
+.party-face:hover .pf-more, .party-face.on .pf-more, .party-face:focus-visible .pf-more { opacity: 1; }
 /* a companion out with you while it should be at work (its shift: server/workplace/presence.js) */
-.party-face .pf-work { display: block; color: var(--gold, #e0a83a); font-weight: 600; }
-.party-face.on-shift .pf-av { box-shadow: 0 0 0 2px var(--gold, #e0a83a); }
+.party-face .pf-work { color: var(--gold); font-weight: 600; }
+.party-face.on-shift .pf-who .cp-av { box-shadow: 0 0 0 2px var(--gold); }
+
+/* the voice row at the card's foot (js/ui/companion-voice.js: #cv-dock moves in, its pill becomes a row) */
+.party-voice { border-top: 1px solid var(--line); padding: 4px; }
+.party-voice:empty, .party-voice:not(:has(#cv-dock:not(.none))) { display: none; }
+#party #cv-dock.in-party { position: relative; inset: auto; z-index: 3; width: 100%; max-width: none; box-sizing: border-box; gap: 8px; padding: 2px 2px 2px 2px;
+  border: 0; border-radius: 9px; background: none; box-shadow: none; }
+#party #cv-dock.in-party.none { display: none; }
+#party #cv-dock.in-party .cv-mic { width: 32px; height: 32px; font-size: 14px; }
+#party.folded .party-voice { border-top-color: var(--line); }
+
+/* the Companions window (＋): beside the card */
+.party-pop { position: fixed; z-index: 5; width: 300px; max-width: calc(100vw - 16px); max-height: min(560px, calc(100dvh - 80px)); overflow-y: auto; padding: 0;
+  display: flex; flex-direction: column; }
+.party-pop .pp-h, .party-menu .pp-h { display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 8px 10px 12px; border-bottom: 1px solid var(--line); }
+.party-pop .pp-h > div, .party-menu .pp-h > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.party-pop .pp-h b, .party-menu .pp-h b { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.party-pop .pp-h small, .party-menu .pp-h small { font-size: 11.5px; color: var(--dim); opacity: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.party-pop .pp-x, .party-menu .pp-x { width: 28px; height: 28px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: none;
+  color: var(--dim); font-size: 13px; opacity: 1; cursor: pointer; }
+.party-pop .pp-x:hover, .party-menu .pp-x:hover { background: var(--hover-1); color: var(--text); }
+.party-pop .pp-sec { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
+.party-pop .pp-sec + .pp-sec { border-top: 1px solid var(--line); }
+.party-pop .pp-sh, .party-menu .pp-sh { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--dim); }
+.party-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; min-height: 32px; }
+.party-row b { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.party-row .cp-av { width: 28px; height: 28px; font-size: 15px; }
+.party-row .btn.icon { width: 28px; height: 28px; }
+.pp-tip, .pp-empty { font-size: 11.5px; line-height: 1.4; color: var(--dim); }
+.party-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.pp-chip { position: relative; display: inline-flex; }
+.pp-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.pp-chip > span { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; border-radius: 999px; border: 1px solid var(--line); background: var(--btn);
+  font-size: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
+.pp-chip > span:hover { background: var(--btn-hover); }
+.pp-chip .cp-av { width: 22px; height: 22px; font-size: 12px; }
+.pp-chip input:checked + span { border-color: var(--hl-line); background: linear-gradient(180deg, var(--btn-on-a), var(--btn-on-b)); color: var(--strong); }
+.pp-chip input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+.party-place { display: flex; flex-direction: column; gap: 6px; }
+.party-place .input { width: 100%; box-sizing: border-box; }
+.party-here { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--dim); cursor: pointer; }
+.party-spot { display: flex; align-items: center; gap: 8px; padding: 5px 5px 5px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--wash); font-size: 12.5px; }
+.party-spot b { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-go { width: 100%; min-height: 34px; text-align: center; }
+.pp-foot { padding-top: 8px !important; padding-bottom: 10px !important; }
+.pp-letgo { align-self: flex-start; }
+
+/* one companion's menu: its face and what it is doing, then its orders in groups */
+.party-menu { position: fixed; left: 0; top: 0; z-index: 5; width: 252px; max-width: calc(100vw - 16px); max-height: min(520px, calc(100dvh - 16px)); overflow-y: auto;
+  padding: 0; display: flex; flex-direction: column; }
+.party-menu .pp-group { display: flex; flex-direction: column; gap: 1px; padding: 4px; }
+.party-menu .pp-group + .pp-group { border-top: 1px solid var(--line); }
+.party-menu .pp-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border: 0; border-radius: 8px; background: none; color: var(--text);
+  font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.party-menu .pp-item:hover, .party-menu .pp-item:focus-visible { background: var(--hover-1); outline: none; }
+.party-menu .pp-ii { width: 18px; flex: none; text-align: center; color: var(--dim); }
+.party-menu .pp-item.sub::after { content: '›'; margin-left: auto; color: var(--dim); font-size: 15px; line-height: 1; }
+.party-menu .pp-item.danger, .party-menu .pp-item.danger .pp-ii { color: var(--bad); }
+.party-menu .pp-item.danger:hover { background: var(--bad-soft); }
+.party-menu .pp-body { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 12px; }
+.party-menu .pp-body .pp-item { padding: 6px; }
+.party-menu .pp-back { align-self: flex-start; width: auto; padding: 3px 8px 3px 4px; border: 0; border-radius: 7px; background: none; color: var(--dim); font: inherit; font-size: 12px; opacity: 1; cursor: pointer; }
+.party-menu .pp-back:hover { background: var(--hover-1); color: var(--text); }
+
+/* the row on an agent's own card (the selection) */
+.cp-card { display: flex; flex-direction: column; gap: 7px; margin: 8px 0 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--wash); }
+.cp-st { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+.cp-lbl { flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--dim); }
+.cp-state { font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-state.dim { font-weight: 400; }
+.cp-btns { display: flex; flex-wrap: wrap; gap: 4px; }
+
+body.play #party { bottom: 222px; }   /* (with no map under it) */
+@media (max-width: 760px) { #party { width: min(232px, calc(100vw - 24px)); } }
+
+/* a computer: the card stands on the map — one panel with it, as wide as it (js/ui/companions.js layout() measures the
+   map: the city's minimap, or the radar while playing) */
+@media (pointer: fine) {
+  #party.panel.on-map { bottom: calc(12px + var(--map-h, 0px)); width: var(--map-w, 264px); max-width: none;
+    border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-color: transparent; }
+  body.party-on-map #minimap, body.party-on-map #radar { border-top-left-radius: 0; border-top-right-radius: 0; }
+  #party.on-map { container: party / inline-size; }   /* (its width is the map's: the head fits it) */
+}
+@container party (max-width: 230px) { .party-head b { display: none; } .party-head { gap: 6px; } }   /* the radar's width: 👥 and the count say it */
+
+/* a phone: no card on the screen — a 👥 button with how many are out with you joins the round buttons (Play) or sits
+   under the chat button (the city); a tap brings the card up from the bottom as a sheet, a tap anywhere else (or ✕ on
+   the button again) puts it away. (2026-11-21, the product owner: the card covered the map and, sideways, the joystick.) */
+.party-fabwrap { position: relative; display: flex; justify-content: center; }
+.party-fabwrap.hidden { display: none; }
+body.driving .party-fabwrap { display: none; }
+.party-fab { position: relative; }
+.party-fab .pfab-ic { font-size: 1.15em; line-height: 1; }
+.party-fab .pfab-n { position: absolute; right: -3px; top: -3px; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border-radius: 9px;
+  background: var(--good); color: #06120a; font: 700 11px/18px system-ui, sans-serif; text-align: center; box-shadow: 0 0 0 2px var(--panel-strong); pointer-events: none; }
+.party-fab .pfab-n:empty { display: none; }
+.party-fab.on { border-color: var(--hl-line); color: var(--strong); }
+body.driving .party-fab { display: none; }
+@media (pointer: coarse) {
+  #party.as-sheet, body.play #party.as-sheet { top: auto; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: auto; max-width: 520px;
+    margin-inline: auto; z-index: 6; box-shadow: 0 -10px 40px rgba(0, 0, 0, .45); transition: none; }
+  #party.as-sheet:not(.open) { display: none; }
+  #party.as-sheet .party-faces { max-height: min(40vh, 280px); }
+  .party-face { padding: 8px 6px; }
+  .pf-more { opacity: 1; }
+  .party-menu .pp-item { padding: 10px 8px; }
+  .party-menu, .party-pop { z-index: 8; }   /* (over the sheet they open from) */
+}
+@media (prefers-reduced-motion: reduce) { #party { transition: none; } }
