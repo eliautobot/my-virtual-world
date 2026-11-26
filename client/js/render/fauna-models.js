@@ -326,6 +326,7 @@ MODELS.goat = MODELS.sheep; MODELS.wolf = MODELS.deer; MODELS.tiger = MODELS.dee
 // (2026-11-12: the second set, Tripo models too)
 MODELS.whale = MODELS.dolphin; MODELS.marlin = MODELS.dolphin; MODELS.manta = MODELS.turtle; MODELS.jellyfish = MODELS.reeffish;
 MODELS.boar = MODELS.sheep; MODELS.bull = MODELS.cow; MODELS.bear = MODELS.sheep; MODELS.moose = MODELS.deer;
+MODELS.fox = MODELS.deer;   // (2026-11-24: the fox, a Tripo model too)
 
 const ANIM = /* glsl */`
 attribute float aPart;

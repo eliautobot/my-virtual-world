@@ -6,9 +6,13 @@
 // - signs inside buildings and parks (while their floor is drawn): the owner's design.
 // Every face can be tapped: the sign's panel (ui/sign-panel.js) opens, with "Open link". In player mode the sign in reach
 // (walking up to it, or looking at a big one) offers E: open its link.
+// A building's own signs open its place card too (docs/features/places.md): its reviews, and a message to its owner. Its
+// rating floats over each of its rooftop billboards — five stars, the average and how many reviews — once someone has
+// rated it, gently bobbing, drawn larger far away so it reads across the city; tapping the stars opens its reviews.
 import * as THREE from 'three';
 import { S, bus, bld } from '../core/state.js';
 import { auth } from '../core/auth.js';
+import { getJSON } from '../core/net.js';
 import { GU } from './scene.js';
 import { aspectOf } from '/shared/ads.js';
 import { AD_ASSETS, adAssetFaces, assetSlot, METRO_PANEL, metroSlot, stationHasAds, roofSignFace, roofSlot, INDOOR_SIGNS, isIndoorSign, indoorSignFaces, indoorSlot, signShape } from '/shared/signs.js';
@@ -25,6 +29,9 @@ const PLANE = new THREE.PlaneGeometry(1, 1);
 const rc = new THREE.Raycaster(), _v = new THREE.Vector3(), _c = new THREE.Vector2();
 let app = null, group = null, signs = [], dirty = { out: true, roof: true, indoor: true }, version = -1, frames = null, indoorRef = null;
 const roofHidden = new Set();
+const ratings = new Map();         // building index → { avg, n } (server/places/: the stars over its rooftop billboards)
+const badgeMats = new Map();       // "avg|n" → the stars' sprite material
+let badges = [];                   // [{ sprite, s (its sign), y, h, aspect, phase }]
 
 export function init(a) {
   app = a;
@@ -37,9 +44,72 @@ export function init(a) {
   bus.on('msg:lots', () => { dirty.roof = true; dirty.indoor = true; });
   bus.on('auth', () => { dirty.roof = true; dirty.indoor = true; });
   bus.on('frame', frame);
+  // the places' ratings: once at the start, then as each one changes
+  const loadRatings = () => getJSON('/api/places/ratings').then(r => { ratings.clear(); for (const [b, v] of Object.entries(r.ratings || {})) ratings.set(+b, v); dirty.roof = true; }).catch(() => {});
+  loadRatings();
+  bus.on('msg:place_rating', m => { if (m.n > 0) ratings.set(m.b, { avg: m.avg, n: m.n }); else ratings.delete(m.b); dirty.roof = true; });
+  bus.on('hello', loadRatings);   // (connected again: what changed while away)
   app.hooks.click.unshift(onClick);
   (app.playerTargets ||= []).push(playerTarget);
-  app.signs = { list: () => signs, open: openSign, preview };
+  app.signs = { list: () => signs, open: openSign, preview, openPlace, rating: b => ratings.get(b) || null };
+}
+
+// ------------------------------------------------------------------ a place's stars over its billboards
+/** The stars' picture: a dark pill with five stars filled to the average, the average and the count. */
+function badgeMat(r) {
+  const key = `${r.avg.toFixed(1)}|${r.n}`;
+  let m = badgeMats.get(key);
+  if (m) return m;
+  const H = 128, S5 = 64, pad = 30, gap = 6, font = '"Inter", "Segoe UI", system-ui, sans-serif';
+  const c = document.createElement('canvas'), x = c.getContext('2d');
+  const avg = r.avg.toFixed(1), cnt = `(${r.n > 999 ? `${(r.n / 1000).toFixed(1)}k` : r.n})`;
+  x.font = `800 66px ${font}`; const wA = x.measureText(avg).width;
+  x.font = `600 46px ${font}`; const wC = x.measureText(cnt).width;
+  const W = Math.ceil(pad + 5 * S5 + 4 * gap + 26 + wA + 14 + wC + pad);
+  c.width = W; c.height = H;
+  x.font = `800 66px ${font}`;
+  const pill = () => { x.beginPath(); x.roundRect(3, 3, W - 6, H - 6, (H - 6) / 2); };
+  pill(); x.fillStyle = 'rgba(16, 16, 18, 0.84)'; x.fill();
+  x.lineWidth = 4; x.strokeStyle = 'rgba(255, 204, 77, 0.7)'; x.stroke();
+  const star = (cx, cy, R) => { x.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? R * 0.45 : R; x.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } x.closePath(); };
+  for (let i = 0; i < 5; i++) {
+    const cx = pad + i * (S5 + gap) + S5 / 2, cy = H / 2 + 2, fill = Math.max(0, Math.min(1, r.avg - i));
+    star(cx, cy, S5 / 2); x.fillStyle = 'rgba(255, 255, 255, 0.2)'; x.fill();
+    if (fill > 0) { x.save(); x.beginPath(); x.rect(cx - S5 / 2, 0, S5 * fill, H); x.clip(); star(cx, cy, S5 / 2); x.fillStyle = '#ffcc4d'; x.fill(); x.restore(); }
+  }
+  let tx = pad + 5 * S5 + 4 * gap + 26;
+  x.textBaseline = 'middle'; x.fillStyle = '#ffffff'; x.fillText(avg, tx, H / 2 + 4);
+  tx += wA + 14; x.font = `600 46px ${font}`; x.fillStyle = 'rgba(255, 255, 255, 0.66)'; x.fillText(cnt, tx, H / 2 + 6);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  m = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false });
+  m.userData.aspect = W / H;
+  badgeMats.set(key, m);
+  // (old ratings' pictures no badge shows any more are given back)
+  if (badgeMats.size > 64) for (const [k, v] of badgeMats) { if (k !== key && !badges.some(bd => bd.sprite.material === v)) { v.map.dispose(); v.dispose(); badgeMats.delete(k); } }
+  return m;
+}
+/** The stars over roof sign s (its group g, its face F), when its building has been rated. */
+function addBadge(s, F) {
+  const r = ratings.get(s.b); if (!r || !(r.n > 0)) return;
+  const mat = badgeMat(r), h = Math.max(0.9, Math.min(1.8, F.w * 0.11)), sp = new THREE.Sprite(mat);
+  const y = F.h / 2 + 0.45 + h / 2;
+  sp.position.set(0, y, 0.05); sp.scale.set(h * mat.userData.aspect, h, 1); sp.renderOrder = 3;
+  sp.userData.badge = s;
+  s.g.add(sp);
+  badges.push({ sprite: sp, s, y, h, aspect: mat.userData.aspect, phase: (s.b * 0.73 + s.k * 1.9) % (Math.PI * 2) });
+}
+const _wp = new THREE.Vector3();
+/** Each frame: the stars bob a little, and grow with distance (to 3×) so a rating reads from across the city. */
+function animateBadges() {
+  if (!badges.length) return;
+  const cam = app.stage?.camera, t = performance.now() / 1000;
+  for (const bd of badges) {
+    if (!bd.s.g.visible) continue;
+    bd.sprite.position.y = bd.y + Math.sin(t * 1.7 + bd.phase) * 0.14;
+    let k = 1;
+    if (cam) { bd.sprite.getWorldPosition(_wp); const d = _wp.distanceTo(cam.position); k = Math.max(1, Math.min(3, d / 70)); bd.sprite.visible = d < 900; }
+    bd.sprite.scale.set(bd.h * k * bd.aspect, bd.h * k, 1);
+  }
 }
 
 // ------------------------------------------------------------------ what a face shows
@@ -107,12 +177,15 @@ function buildOutdoor() {
 function buildRoof() {
   dirty.roof = false;
   clear(['roof']);
+  badges = [];
   for (const B of S.world.buildings || []) {
     if (!B || B.gone || !B.roofSigns?.length) continue;
     B.roofSigns.forEach((sg, k) => {
       const F = roofSignFace(B, sg), g = new THREE.Group();
       g.position.set(F.x, F.y, F.z); g.rotation.y = F.yaw; group.add(g);
-      signs.push({ key: `r:${B.idx}:${k}`, kind: 'roof', b: B.idx, k, g, faces: [face({ x: 0, y: 0, z: 0.012, w: F.w, h: F.h, yaw: 0 }, g)], space: null, slot: roofSlot(B, k), shape: 'wide', cr: sg.cr || null, blocked: !!sg.blocked, mine: mine(B), reach: 'aim', label: `${B.name}'s rooftop billboard`, next: 0 });
+      const s = { key: `r:${B.idx}:${k}`, kind: 'roof', b: B.idx, k, g, faces: [face({ x: 0, y: 0, z: 0.012, w: F.w, h: F.h, yaw: 0 }, g)], space: null, slot: roofSlot(B, k), shape: 'wide', cr: sg.cr || null, blocked: !!sg.blocked, mine: mine(B), reach: 'aim', label: `${B.name}'s rooftop billboard`, next: 0 };
+      signs.push(s);
+      if (!sg.blocked) addBadge(s, F);
     });
   }
   version = -1;
@@ -162,6 +235,7 @@ function frame() {
   }
   const night = GU.uNight.value;
   for (const m of mats.values()) m.emissiveIntensity = m.userData.glow[0] + night * m.userData.glow[1];
+  animateBadges();
 }
 
 /**
@@ -176,13 +250,25 @@ function preview(lv, id, size) {
 }
 
 // ------------------------------------------------------------------ tapping and reaching a sign
-/** Opens the sign's own panel (its design and link). */
-function openSign(s) {
+/** Opens the sign's own panel (its design and link; a building's own sign, its place card too: tab). */
+function openSign(s, tab = null) {
   const edit = s.kind === 'roof' ? () => import('../ui/sign-design.js').then(m => m.editRoofSigns(app, s.b))
     : s.kind === 'indoor' ? () => import('../ui/sign-design.js').then(m => m.editIndoorSign(app, { b: s.b, f: s.f, id: s.id })) : null;
   // administrators may hide an owner's sign that breaks the rules (sign.hide), or show it again
   const hide = (s.kind === 'roof' || s.kind === 'indoor') && auth.can('world.edit') ? { blocked: s.blocked, op: s.kind === 'roof' ? { op: 'sign.hide', b: s.b, roof: s.k } : { op: 'sign.hide', b: s.b, f: s.f, id: s.id } } : null;
-  import('../ui/sign-panel.js').then(m => m.openSignPanel(app, { cr: s.shown, title: s.label, mine: s.mine, kind: s.kind, shape: s.shape, edit, hide })).catch(() => {});
+  const b = s.kind === 'roof' || s.kind === 'indoor' ? s.b : null;
+  import('../ui/sign-panel.js').then(m => m.openSignPanel(app, { cr: s.shown, title: s.label, mine: s.mine, kind: s.kind, shape: s.shape, edit, hide, b, tab })).catch(() => {});
+}
+/** A place's card (a notification about it, the stars over it): its rooftop billboard's panel, or the card alone. */
+function openPlace(b, tab = null) {
+  const B = bld(b); if (!B || B.gone) return;
+  import('../ui/sign-panel.js').then(m => {
+    const open = m.openPanelOn(b);
+    if (open) { if (tab) open.go(tab); return; }
+    const s = signs.find(x => x.kind === 'roof' && x.b === b) || signs.find(x => x.kind === 'indoor' && x.b === b);
+    if (s) openSign(s, tab);
+    else m.openSignPanel(app, { cr: null, title: B.name, mine: mine(B), kind: 'place', b, tab });
+  }).catch(() => {});
 }
 /** The link a sign leads to, opened in a new tab. */
 function visit(s) {
@@ -196,8 +282,11 @@ function onClick(e) {
   if (app.hooks.hover.some(fn => { try { return fn({ x: e.clientX, y: e.clientY }); } catch { return false; } })) return false;   // a tool is in use
   if (S.mode !== 'play' && (app.docks?.isOpen?.('l:outside') || app.docks?.isOpen?.('l:marketing'))) return false;   // decorating: the tools select it
   if (S.mode === 'furnish') return false;   // furnishing: the sign is selected to edit it
-  rc.ray.copy(app.cam.rayAt(e.clientX, e.clientY)); rc.far = 900;
+  rc.ray.copy(app.cam.rayAt(e.clientX, e.clientY)); rc.far = 900; rc.camera = app.stage.camera;
+  // (the stars over a billboard: its reviews)
+  const star = badges.length ? rc.intersectObjects(badges.filter(bd => bd.s.g.visible && bd.sprite.visible).map(bd => bd.sprite), false)[0] : null;
   const hit = rc.intersectObjects(signs.filter(s => s.g.visible).flatMap(s => s.faces), false)[0];
+  if (star && (!hit || star.distance <= hit.distance + 0.5)) { openSign(star.object.userData.badge, 'reviews'); return true; }
   if (!hit) return false;
   const bh = app.blds?.pick?.(rc.ray, S.focus?.b, app.inter?.cutY);
   const s = signs.find(x => x.faces.includes(hit.object));
@@ -229,6 +318,7 @@ function playerTarget(P) {
     if (s) best = { d: 1.9, s };
   }
   if (!best) return null;
-  const s = best.s, host = hostOf(s.shown?.website);
-  return { d: best.d, html: host ? `Open link <span class="dim">· ${host}</span>` : 'Look at the sign', act: () => (visit(s) || openSign(s)) };
+  const s = best.s, host = hostOf(s.shown?.website), r = (s.kind === 'roof' || s.kind === 'indoor') ? ratings.get(s.b) : null;
+  const stars = r ? ` <span class="dim">· ★ ${r.avg.toFixed(1)} (${r.n})</span>` : '';
+  return { d: best.d, html: host ? `Open link <span class="dim">· ${host}</span>${stars}` : `Look at the sign${stars}`, act: () => (visit(s) || openSign(s)) };
 }

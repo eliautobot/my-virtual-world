@@ -18,6 +18,78 @@ Holding the job is not the same as being on the air: only those **in the studio 
 work](work-presence.md)). One out with someone, late or on a break is off the air; those on it are told who is missing
 and why, and may say so; nobody in: music only.
 
+## The Radio Stations window: one home for MVW Radio (2026-11-25)
+
+The product owner: "we have two places to create radio stations, and they don't seem organized ... under the world
+modules ... a button that says radio stations ... from placing a radio station, adding the songs, and all the settings";
+"each radio station is like a playlist ... a music library, so the user or the agents can move, delete or apply songs
+to a playlist for a specific radio station"; "the agents should only be able to modify the songs playlist. They cannot
+create or delete their own radio station" (placing one stays the administrators').
+
+- **Where it opens** (`client/js/ui/radio-stations.js`): Edit → World modules → 📻 Radio Stations (and 📻 Stations on a
+  Radio Station's row); Settings → MVW Radio (a shortcut: the stations are no longer edited there); a studio's 📻 in the
+  world (⚙ Manage the station; 🎵 Its playlist for a host's owner); a studio selected in Furnish. The Radio Studio is no
+  longer in the Furnish list: a studio already placed is still moved and resized there.
+- **The stations**: the studios (each is a station) and the city stations (the world's first four, with no studio: kept
+  so the car radio plays in a world without a Radio Station; edited here, none new made). **＋ New station** picks a
+  Radio Station and a floor, closes the window and lets you place the studio (R turns its door); the window opens on the
+  new station as soon as it is on the air (a studio placed or removed goes on or off the air at once: index.mjs onPatches →
+  `syncStudios`).
+- **A station's tabs**: Overview (on the air now, its songs, its crew, every change to its songs with ↶ Undo), Playlist
+  (its songs: ⤒ ↑ ↓ ✕, ＋ Add from the library — search, genres, several at once —, ⬆ Upload a song to it: into the
+  library and onto the station at once for an administrator; the order shuffled or as listed; back to its genres),
+  Hosts (its desk's agents; a city station's chosen here; "Its hosts may change its songs"), On air (talk radio, how
+  often and how long its hosts talk, ads, the genres it plays without a playlist), Details (name, frequency, band, colour,
+  line; remove it — a studio's room goes too, Ctrl+Z puts it back).
+- **The Music Library**: every song of the city — search (title, artist, genre, station), genres, Used by (the stations
+  each is on), ▶ listen, pick several and add them to a station, upload; administrators approve or reject players' songs
+  and delete songs (it comes off every station: told which first).
+- **Radio settings**: the voice of the breaks.
+
+### A station's songs: who changes them (`server/radio/radio.js` editPlaylist)
+
+| | Administrator | A host's owner | A host (agent) | Anyone else |
+|---|---|---|---|---|
+| Place or remove a station; its details, hosts, talk, ads | ✅ | — | — | — |
+| Add, take off, move its songs | ✅ | ✅ | ✅ its own station, if it lets hosts | — |
+| A whole new order (`set`) | ✅ | ✅ | — | — |
+| Back to its genres (`mode`) | ✅ | — | — | — |
+| Undo a change | ✅ | ✅ | — | — |
+
+A change applies at once and is logged on the station (`cfg.playlistLog`, the newest `PLAYLIST_EDITS.keep` = 100: who —
+administrator, host's owner or host —, what, when). A host makes at most `PLAYLIST_EDITS.agentPerDay` (40) changes a day
+(the server's day; kept across restarts in state.json). A station playing its genres gets its own playlist with its
+first change, made of the songs it was playing, so nothing it played goes missing; undoing that first change brings its
+genres back. Only approved library songs; at most `MAX_PLAYLIST` (400).
+
+- **Its hosts' tools**: in their chats (the Mind, `server/mind/tools.js`: `playlist`, `find_songs`, `playlist_add`,
+  `playlist_remove`, `playlist_move` — at work and in their life alike, while they host a station that lets them);
+  connected agents through `POST /api/agent-api/act` (`action`: the same five) and the MCP tool `radio_station`
+  (`server/connector/body-tools.js`). The host's job tells them the songs are theirs to look after, off the air.
+- **API**: `GET /api/radio/manage` (the window: every station for an administrator, else those one of whose hosts you
+  own — each with `right`, `mode`, `songs`, `crew`, `log`); `POST /api/radio/playlist { station, op: add|remove|move|set|mode,
+  song | songs, at, to, mode }`; `POST /api/radio/playlist/undo { station, change }`. Station settings stay on
+  `POST /api/radio/admin` (administrators; `hostsEdit` added).
+- **Checks**: `tests/radio-playlist.test.mjs`; lab `tools-bin/radio-ui-check.mjs` (the window in a real browser, as an
+  administrator, a host's owner and a player with no station; a phone).
+
+## Who owns a station: its hosts (a product decision, 2026-11-25)
+
+A radio station is a **playable world module**, not a business or a lot to own. The product owner: "the reason for it not
+being considered a separate business or lot to own is because we currently don't have a way for the radio station to make
+money, therefore for the time being ownership is on the host owning their radio station that they host as being assigned
+to that position, not the building."
+
+- **A station is its hosts'.** Being posted at its broadcast desk (or given it in Settings → Radio) *is* owning it: an
+  owner who wants a station to be one agent's alone posts that agent as its only host and leaves the other seats empty.
+  Who sits there is the administrators' choice (on a self-hosted world, its owner's).
+- **The building stays the city's.** The Radio Station is a world module run by the administrators: its business record
+  is the municipality's, and the city pays its hosts' wages (`server/economy/households.js` payInfo). A station brings in
+  no money — its ads in the breaks are read, not sold — so a station owned as a business by an agent or a player would pay
+  the wages from its own wallet with nothing coming in, and fail. The same holds for the airport and the marinas.
+- **This may change** if a good way to make a station earn is built — say, business owners in the world paying for the ads
+  its hosts read. That is complex and not planned yet; until then, no transfer of a station's building or business.
+
 ## What it has on the air
 
 Every turn a host or the DJ has in a break (`radio.js turn()`), besides the world's news and who it is:

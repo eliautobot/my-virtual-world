@@ -42,6 +42,9 @@ export const STATIONS = Object.freeze([
 export const DEFAULT_STATIONS = STATIONS;
 export const stationById = (id, list = STATIONS) => list.find(s => s.id === id) || null;
 export const MAX_HOSTS = 3, MAX_STATIONS = 24, MAX_PLAYLIST = 400;
+/** Changing a station's songs (2026-11-25, server/radio/radio.js editPlaylist): a host agent's changes a day (each station
+ *  it hosts), and how many changes each station's log keeps (newest first, each one undoable by an administrator). */
+export const PLAYLIST_EDITS = Object.freeze({ agentPerDay: 40, keep: 100 });
 const PLAY_GENRES = new Set(['jazz', 'piano', 'bossa', 'lounge', 'soul', 'house', 'techno', 'trance', 'dubstep', 'reggaeton', 'hiphop', 'dance', 'pop', 'rock', 'other', 'score']);
 const txt = (v, n) => String(v ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, n);
 /** A station as administrators may set it (an Error when it can't be): { id, name, freq, band, color, line, families,
@@ -67,7 +70,7 @@ export function normalizeStation(o, prev = null) {
   const tm = b.talkMax === '' ? null : b.talkMax;
   if (tm != null && !(Number.isInteger(Number(tm)) && Number(tm) >= 0 && Number(tm) <= TALK_MAX)) return new Error(`At most 0 to ${TALK_MAX} breaks a day, or none set`);
   return { id: txt(b.id, 32) || null, name, freq: band === 'FM' ? fv.toFixed(1) : String(Math.round(fv)), band, color, line: txt(b.line, 80), families, genres, playlist,
-    order: b.order === 'order' ? 'order' : 'shuffle', talk: !!b.talk, talkEvery: b.talkEvery != null ? te : RADIO.identEvery, talkLength: b.talkLength ?? null, talkMax: tm == null ? null : Number(tm), hosts, ads, studio: b.studio && typeof b.studio === 'object' ? { b: b.studio.b | 0, f: b.studio.f | 0, room: txt(b.studio.room, 32) } : null };
+    order: b.order === 'order' ? 'order' : 'shuffle', talk: !!b.talk, talkEvery: b.talkEvery != null ? te : RADIO.identEvery, talkLength: b.talkLength ?? null, talkMax: tm == null ? null : Number(tm), hosts, ads, hostsEdit: b.hostsEdit !== false, own: !!b.own || playlist.length > 0, studio: b.studio && typeof b.studio === 'object' ? { b: b.studio.b | 0, f: b.studio.f | 0, room: txt(b.studio.room, 32) } : null };
 }
 
 /** The songs a station plays from the library's tracks: approved, of its families or genres, by id (the same order everywhere). */
@@ -76,7 +79,9 @@ export function normalizeStation(o, prev = null) {
 //  wrote a break, and a player who is no administrator heard nothing, because the songs read as unapproved)
 const playable = t => t && (t.status == null || t.status === 'approved') && t.seconds > 20;
 export function stationTracks(tracks, st) {
-  if (st.playlist?.length) {   // its own playlist: those songs (approved), in its order
+  // its own playlist: those songs (approved), in its order — an empty one plays nothing (2026-11-25, the product owner:
+  // "I would like to be able to clear out all the songs from a radio station ... start fresh")
+  if (st.own || st.playlist?.length) {
     const by = new Map(); for (const t of tracks) if (playable(t)) by.set(t.id, t);
     return st.playlist.map(id => by.get(id)).filter(Boolean);
   }
@@ -114,11 +119,22 @@ export function onAir(list, stationId, t, order = 'shuffle', every = RADIO.ident
     if (p < s.seconds) return { kind: 'song', track: s, at: p, left: s.seconds - p, round, i, next: ord[i + 1] || null };
     p -= s.seconds;
     if ((i + 1) % E === 0 || i === ord.length - 1) {
-      if (p < slot) return { kind: 'ident', n: hash(`${stationId}:${round}:${i}`) % 3, at: p, left: slot - p, round, i, next: ord[i + 1] || null };
+      // (the round's last slot: its next song is the next round's first — a host introduces it too)
+      if (p < slot) return { kind: 'ident', n: hash(`${stationId}:${round}:${i}`) % 3, at: p, left: slot - p, round, i, next: ord[i + 1] || roundOrder(list, stationId, round + 1, order)[0] || null };
       p -= slot;
     }
   }
   return null;
+}
+
+/** A song's title as a host says it on the air (2026-11-25): its version notes in brackets left out — "Sup (Radio Edit)" is
+ *  "Sup", "Time Capsule (Intro)" "Time Capsule" — and who it features kept apart ({ title, feat }). */
+const VERSION_NOTE = /\s*[([][^)\]]*\b(edit|mix|remix|version|remaster(ed)?|intro|outro|interlude|instrumental|vip|extended|original|live|mono|stereo|bonus)\b[^)\]]*[)\]]/gi;
+export function spokenSong(title) {
+  let t = String(title ?? '').replace(/\s+/g, ' ').trim(), feat = '';
+  t = t.replace(/\s*[([]\s*(?:feat\.?|ft\.?|featuring)\s+([^)\]]+)[)\]]/i, (_, w) => { feat = w.trim(); return ''; });
+  const bare = t.replace(VERSION_NOTE, '').replace(/\s+-\s+(?:.*\b(?:edit|mix|remix|version|remaster(?:ed)?)\b.*)$/i, '').trim();
+  return { title: bare || t, feat };
 }
 
 /** A host break's lines with their moments (s after the break starts: b.at): [{ host, text, audio, seconds, t0, t1 }];

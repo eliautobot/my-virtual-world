@@ -24,12 +24,14 @@ export const DUTIES = Object.freeze({
     'read the sponsor as a short ad when the news desk gives one',
     'do your work the way your owner wants it done (their direction), where that fits a live radio show',
     'your own tasks are yours to act on as you choose: one that can be done on the air, you may do in your line',
+    'the station\'s songs are yours to look after too: off the air, in your chats, you may add songs from the city\'s music library to its playlist, take some off or change their order (your playlist tools) — keep it right for your station and its listeners',
   ]),
   dj: Object.freeze([
     'look after the music: hand over to the songs with a word about them',
     'keep the listeners company with a word between songs, as yourself',
     'do your work the way your owner wants it done (their direction), where that fits a live radio show',
     'your own tasks are yours to act on as you choose: one that can be done on the air, you may do in your line',
+    'the station\'s songs are yours to look after: off the air, in your chats, you may add songs from the city\'s music library to its playlist, take some off or change their order (your playlist tools)',
   ]),
 });
 const DIRECTION_MAX = 1500;   // the owner's direction, as much as goes with every turn on the air

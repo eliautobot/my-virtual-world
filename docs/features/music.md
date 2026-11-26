@@ -10,6 +10,10 @@ is there, and a panel anyone can open to see what plays, ask for a song or add t
 
 ## The library
 
+The whole library is also shown in the **Radio Stations window**'s Music Library (`client/js/ui/radio-stations.js`,
+2026-11-25; [radio.md](radio.md)): every song with the stations it is on (Used by), listen, add several to a station,
+upload, and — administrators — review and delete (a deleted song comes off every station, told first).
+
 Each track has a title, an artist, a genre, its length, its loudness and who added it (server/music/music.js; the table
 `music_tracks`, schema 55; the files in `<data>/music/`, one MP3 each). Genres (shared/music.js `GENRES`) belong to a
 family that says where they play:
@@ -25,7 +29,8 @@ A track is **approved** (it plays), **pending** (waiting for an administrator's 
 uploader reads). Only approved tracks are listed to everyone and streamed to everyone; a pending one only to its
 uploader and administrators.
 
-**Adding a song** (the panel's Your songs, or `POST /api/music/upload`): a file of up to 25 MB, 30 seconds to 10 minutes,
+**Adding a song** (the panel's Your songs, or `POST /api/music/upload`; the panel keeps the chosen file itself — its file
+input is never `required`, as a repaint empties it and the browser would refuse the form; fixed 2026-11-25): a file of up to 25 MB, 30 seconds to 10 minutes,
 its title, artist, genre, whether it has explicit lyrics, and (players) the confirmation that it is theirs or they have
 the rights to share it in My Virtual World. An administrator's song goes straight into the library; a player's waits for
 review (at most 10 waiting each). With ffmpeg on the server, any common audio file (MP3, M4A, OGG, WAV, FLAC) is
@@ -42,6 +47,35 @@ added twice, and a later version's new songs come with the next start. `MVW_SOUN
 **Importing a set of songs** on the host (an owner's own music): `node tools/music-import.mjs <list.json>
 --data <data folder> [--as-is]` while the server is stopped (docs in the tool). The host backup (`tools/admin.mjs
 backup`) includes the songs.
+
+## Albums and artists: the library as a music player (2026-11-25)
+
+The product owner: "upload songs like in a folder and organize them as an album ... MVW Originals, so that should be an
+album ... organize them by artist, album ... almost like Spotify, YouTube Music ... the music library is like a music
+player, and the stations are the playlists"; "the cover art can be taken from ... the folder that gets uploaded".
+
+- **A song's album** (schema v62: `music_tracks.album`, `album_artist`, `track_no`, `year`): an album is the songs that
+  share an album name and an album artist (`shared/music.js albumKey`: however its capitals or spaces are written). Its
+  record (`music_albums`) keeps its cover and year. A song with no album is one of its artist's singles. The game's
+  soundtrack is the album «Soundtrack 1» by MVW Originals, numbered in `soundtrack.json`'s order (songs taken before
+  albums are put on it at the next start: `server/music/soundtrack.js`).
+- **Covers** (`POST /api/music/cover?key=`, a JPEG, PNG or WebP up to 3 MB, checked by its bytes; `GET /api/music/cover/<file>`):
+  an administrator's at once; a player's only for an album all of whose songs are theirs, waiting for review and approved
+  with the first of them. Kept in `<data>/music/covers/`.
+- **Uploading an album or a folder** (`client/js/ui/album-upload.js`): choose songs or a folder, or drop them. Each MP3's
+  own tags are read in the browser (`client/js/core/id3.js`: ID3v2.2–2.4 and v1 — title, artist, album artist, album,
+  number, year, genre, picture; the server's converter drops tags, and the official image has none); the cover is the
+  folder's (cover / folder / front / album / artwork, else its one image, else the largest), else a song's own picture,
+  made a JPEG of at most 1000 px. Everything is shown first — album, artist, year, genre, cover, each song's number and
+  title, which to leave out — then sent one song at a time, then the cover. A player's album waits for review whole: 20
+  songs at once, then four a minute, at most 40 waiting (the form waits and goes on by itself).
+- **The library** (`client/js/ui/music-library.js`, in the Radio Stations window): **Songs** (title, artist, album,
+  genre, length, plays, the stations it is on — sorted by any), **Albums** (covers; an album's page: its songs in order,
+  artist, year, length, add it to a station; administrators rename it or change its cover), **Artists** (their albums,
+  singles and most played; add them all to a station), **Genres**, **Review** (administrators: by album, approve or reject
+  an album at once). One search for songs, albums and artists. Pick songs: add them to a station; administrators edit
+  their album, artist, genre or year at once (`POST /api/music/tracks`) or rename an album (`POST /api/music/album`).
+- **Hosts** search albums and add a whole one to their station (`find_albums`, `playlist_add_album`; radio.md).
 
 ## The city's own music in the background
 
@@ -79,6 +113,32 @@ One for each Lounge Stage and DJ Stage (a building, a floor, the piece: `b:f:id`
 
 Everyone sees and hears the same: the deck's `now` is a song and the moment it started by the server's clock; the
 server sends every change to every page (WebSocket `music`, `music_lib`, `music_review`).
+
+## Who picks a stage's music: its performer (2026-11-25)
+
+The product owner: "if an agent is placed on the DJ booth ... the agent is allowed to use the music library as the
+source"; a regular resident at the DJ booth plays "the standard MVW album", the lounge "what currently plays"; "a user
+wants to request a song ... the agent can go to the music library, pick it out, and play it ... the stage music agents
+and the DJs are interactive as well".
+
+- **Who performs** (`music.js performing`): the band member or the DJ at the stage now; an AI agent among them leads. An
+  agent posted at a stage's seat (the ⋯ on it) is its musician or DJ, as one working its shifts there is
+  (`server/sim/agents.js postDuty`: the stage roles' uses, `shared/nightlife.js ROLE_USE`).
+- **What it plays** (`pool`): an AI agent's own set there (any song of the library; its first change starts from what the
+  stage plays: `editSet`), else the administrators' playlist, else — at the DJ booth — the club songs of the MVW
+  Originals album, else every approved song of the stage's family (the lounge, as before).
+- **Requests to an AI agent with a brain** (`agentDecides`): any song of the library, with a word for it (`note`, up to
+  `MUSIC.noteMax`); they wait in `asks` (not the queue). Its brain (`server/music/dj.js`, the Mind's `brainOf`) is asked
+  with what is on, its queue and the requests, and answers which to play (into the queue) and which to pass on with a
+  short reason the player reads (screened; a failed one becomes a kind default), and maybe a line to the room, said out
+  loud in its own voice (screened). Unanswered after `MUSIC.askWait` (10 min) a request plays. Without a brain, or with a
+  resident on stage: the queue as before (the stage's own music only).
+- **Its tools**: in its chats (`server/mind/tools.js`: `stage`, `find_songs`, `find_albums`, `stage_add`,
+  `stage_add_album`, `stage_remove`, `stage_play_request`, `stage_pass_request`); connected agents through the act route
+  and the MCP tool `stage_music`.
+- **The panel** says who picks the music; asking a deciding agent searches the whole library (songs, artists, albums) with
+  a word for them; its answers show (played, or passed and why). The deck carries `performer`, `asks`, `answers` (30 min)
+  and the agent's `set`.
 
 ## Hearing it
 

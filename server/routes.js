@@ -947,6 +947,7 @@ export function createApi(d) {
     // a driver's car radio: the station it plays, or null (off) — an agent riding with them hears it (server/senses/car-radio.js)
     radio_tune: { cap: 'players.move', handle: (conn, m) => d.radioTune?.(conn, m) },
     see: { cap: 'world.view', handle: (conn, m) => d.seeReply?.(conn, m) },   // (an agent's eyes: the page's answer, server/senses/eye.js)
+    fox: { cap: 'play.use', handle: (conn, m) => d.foxPlay?.(conn, m) },   // (playing with a fox: server/world/fox.js)
   });
   for (const [t, m] of Object.entries(ws)) if (!CAPS[m.cap]) throw new Error(`WebSocket message ${t}: unknown capability "${m.cap}"`);
   return { router, ws, me, health };

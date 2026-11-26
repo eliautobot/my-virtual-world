@@ -379,11 +379,12 @@ export class Mind {
       const ctx = this.contextOf(agent, kind);
       if (lifeDay === null) lifeDay = ctx.lifeDay;
       if (kind === 'problem') this.problemDay.set(`${agent.id}:${lifeDay}`, (this.problemDay.get(`${agent.id}:${lifeDay}`) || 0) + 1);
-      const money = this.moneyOf();
-      if (money && (kind === 'problem' || (kind === 'chat' && chat?.isOwner))) {
+      const money = this.moneyOf(), radio = kind === 'chat' && chat?.isOwner && this.radio?.hostedBy?.(agent.id)?.length ? this.radio : null;
+      const music = kind === 'chat' && chat?.isOwner && this.music?.stagesOf?.(agent.id)?.length ? this.music : null;
+      if ((money || radio || music) && (kind === 'problem' || (kind === 'chat' && chat?.isOwner))) {
         const i = this.life.byAgent.get(agent.id);
-        ctx.wallet = money.wallet(agent.id, this.sim.people[i]);
-        tools = toolbox({ agent, kind, ctx, money, wallet: ctx.wallet, people: this.sim.people, idem: `mind:${agent.id}:${t0}` });
+        if (money) ctx.wallet = money.wallet(agent.id, this.sim.people[i]);
+        tools = toolbox({ agent, kind, ctx, money, wallet: ctx.wallet, people: this.sim.people, idem: `mind:${agent.id}:${t0}`, radio, music });
         if (!tools.names.length) tools = null;
       }
       // (someone from another account: its PC is closed, but for its Public folder — offered when there is something in it)
@@ -1014,10 +1015,13 @@ export class Mind {
       try { togNow = maySense ? this.senses.together(agent, writer) : null; } catch { togNow = null; }
       const mode = W ? (MODES.includes(params.mode) ? params.mode : (togNow?.yes ? 'life' : W.brief.defaultMode)) : 'life';
       const money = ctx.now && mode === 'life' ? this.moneyOf() : null;
-      if (money) {
+      // (a radio host's tools — its station's songs — at work and in its life alike: server/mind/tools.js)
+      const radio = this.radio?.hostedBy?.(agent.id)?.length ? this.radio : null;
+      const music = this.music?.stagesOf?.(agent.id)?.length ? this.music : null;   // (the stage it plays at: its set, the guests' requests)
+      if (money || radio || music) {
         const i = this.life.byAgent.get(agent.id);
-        ctx.wallet = money.wallet(agent.id, this.sim.people[i]);
-        tools = toolbox({ agent, kind: 'chat', ctx, money, wallet: ctx.wallet, people: this.sim.people, idem: `chat:${agent.id}:${t0}` });
+        if (money) ctx.wallet = money.wallet(agent.id, this.sim.people[i]);
+        tools = toolbox({ agent, kind: 'chat', ctx, money, wallet: ctx.wallet, people: this.sim.people, idem: `chat:${agent.id}:${t0}`, radio, music });
         if (!tools.names.length) tools = null;
       }
       // its body as a companion (server/companions/): in Life, it may come along, wait, go somewhere, meet up or go back

@@ -42,12 +42,14 @@ export const MUSIC = Object.freeze({
   minSeconds: 30, maxSeconds: 600,          // a song's length
   maxUploadMB: 25,                          // one file
   queueMax: 20,                             // requests waiting at one stage
+  askWait: 600,                             // s a request waits for an AI agent DJ's answer before it plays anyway (2026-11-25)
+  noteMax: 140,                             // a word for the DJ with a request
   upcoming: 3,                              // the playlist's next songs shown
   loungeGap: 3,                             // s between the band's songs (applause, the next count-in)
   clubBlend: 8,                             // s the DJ blends one track into the next
   startDelay: 1.5,                          // s from choosing a song to its first note (everyone's browser loads it)
   grace: 20,                                // s a stage may look empty and the song goes on (its performer between one stretch at work and the next)
-  titleMax: 80, artistMax: 60, rightsMax: 300, reasonMax: 200,
+  titleMax: 80, artistMax: 60, albumMax: 80, rightsMax: 300, reasonMax: 200,
   lufs: -16,                                // every track's loudness in the library
 });
 
@@ -82,3 +84,9 @@ export function scoreNext(list, playing = null, lastOfMood = null, rnd = Math.ra
   if (!pool.length) pool = list;
   return pool.length ? pool[Math.floor(rnd() * pool.length) % pool.length] : null;
 }
+
+/** The game's own album (its soundtrack: server/music/soundtrack.js), what a resident DJ plays (server/music/music.js pool). */
+export const MVW_ALBUM = Object.freeze({ name: 'Original Soundtrack, Vol. 1', artist: 'MVW Originals', was: ['Soundtrack 1'] });   // (was: its names before, renamed at start)
+/** An album's key (2026-11-25, server/music/music.js albums): its artist and its name, as one string — the same album
+ *  however its capitals or spaces are written. */
+export const albumKey = (artist, name) => `${String(artist || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase()}\u0001${String(name || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase()}`;

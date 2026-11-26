@@ -46,7 +46,11 @@ import { WorkPlay } from './play/work-play.js';         // (agents working a shi
 import { addOrderUpAgentRoutes } from './play/routes.js';
 import { kitchenOf as ouKitchenOf } from '../shared/orderup/kitchens.js';
 import { addSignRoutes } from './signs-routes.js';
+import { addPlaceRoutes } from './places/routes.js';
+import { CodeVersion, VERSIONED } from './code-version.js';
+import { CrowdSplit } from './crowd-split.js';
 import { Music } from './music/music.js';
+import { DjBrain } from './music/dj.js';
 import { seedSoundtrack } from './music/soundtrack.js';
 import { addMusicRoutes } from './music/routes.js';
 import { Radio } from './radio/radio.js';
@@ -125,6 +129,7 @@ import { Housing, bedsOf, targetOf, DEFAULT_HOMES_FILLED } from './sim/housing.j
 import { Sim, realNow } from './sim/sim.js';
 import { setPlayerSpots } from './sim/agents.js';
 import { PF_USING } from '../shared/playerproto.js';
+import { CTX_OUT, CTX_UNDER } from '../shared/proto.js';
 import { evalPlan } from './sim/plan.js';
 import { Activity } from './activity.js';
 import { Store } from './store.js';
@@ -150,8 +155,10 @@ import { WorkRemarks } from './workplace/remarks.js';
 import { addWorkplaceRoutes } from './workplace/routes.js';
 import { Senses, EYES_M } from './senses/senses.js';
 import { addSensesRoutes } from './senses/routes.js';
+import { SpokenLog } from './senses/spoken.js';
 import { Moments } from './free-will/moments.js';
 import { createInteractions } from './interactions/index.js';
+import { animalsSource } from './interactions/sources/animals.js';
 import { addInteractionRoutes } from './interactions/routes.js';
 import { BuiltCharacters, addCharacterRoutes } from './characters/index.js';
 import { registerPlayActivities } from './senses/play-activities.js';
@@ -671,9 +678,11 @@ const app = {
     if (players) { try { players.worldChanged(); } catch (e) { log.error('[players] after an edit', e.message); } }   // move players out of new walls (C62)
     if (fleet && patches.some(p => p.k === 'wmods')) { try { fleet.sync(); } catch (e) { log.error('[aircraft] after an edit', e.message); } }   // airports placed, moved, removed
     if (harbour && patches.some(p => p.k === 'wmods')) { try { harbour.sync(); } catch (e) { log.error('[boats] after an edit', e.message); } }   // docks placed, moved, removed
+    if (radioSync && patches.some(p => p.k === 'lvl' || p.k === 'level' || p.k === 'bld')) { try { radioSync(); } catch (e) { log.error('[radio] after an edit', e.message); } }   // (a studio placed or removed: its station at once)
     if (patches.some(p => p.k === 'person' && people[p.i]?.vip)) { try { settleSoon(1500); } catch { /* (before the settling exists: its first run places them) */ } }   // an agent's home or work changed: settled again
   },
 };
+let radioSync = null;   // (MVW Radio's studios → stations, once it exists: server/radio/radio.js syncStudios)
 const editor = new Editor(app);
 // the city's residents follow its homes: they move in and away by themselves, a little at a time (server/sim/housing.js)
 const housing = new Housing({ world: () => world, sim: () => sim, editor, pct: () => Number(settings.get('world.homesFilled') ?? DEFAULT_HOMES_FILLED), log });
@@ -1064,6 +1073,8 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 const loopHost = !HOST || HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 const crowdBake = new CrowdBake({ root: ROOT, dataDir: DATA, url: () => `http://${loopHost.includes(':') ? `[${loopHost}]` : loopHost}:${server.address()?.port || PORT}`, log, onSwap: dir => useCrowdDir(dir) });
 const CROWD_STATIC = ['/assets/crowd/', crowdBake.activeDir() + path.sep, 'public, max-age=86400'];
+// (the crowd's library in two files: its folder set by splitCrowd, below, a second after start-up; nothing there until)
+const CROWD_SPLIT_STATIC = ['/assets/crowd-split/', path.join(os.tmpdir(), 'mvw-crowd-split-none') + path.sep, 'public, max-age=86400'];
 const STATIC = [
   ['/vendor/three/', path.join(ROOT, 'node_modules/three/'), 'public, max-age=86400'],
   // The official Rapier build, loaded by a driver's browser only while driving (decision A20).
@@ -1081,6 +1092,7 @@ const STATIC = [
   // characters made in the builder (server/characters/, tools/chars/custom-kind.mjs): named by their content, never changed
   ['/assets/chars/custom/', path.join(DATA, 'chars/'), 'public, max-age=31536000, immutable'],
   CROWD_STATIC,
+  CROWD_SPLIT_STATIC,
   ['/', path.join(ROOT, 'client/'), 'no-cache'],
 ];
 /** A built character's file sent compressed: the copies its bake wrote beside it (<file>.br, <file>.gz). */
@@ -1126,11 +1138,37 @@ function useCrowdDir(dir) {
   CROWD_STATIC[1] = dir + path.sep;
   const P = ASSET_PACKS.find(p => p.name === 'crowd');
   if (P) { P.dir = dir; P.pack = new AssetCompressor({ dir, cache: assetCacheFor(dir), log, label: 'crowd parts\'' }); P.pack.warm(); }
+  splitCrowd(dir);
+}
+// The crowd's library in two files, for the first view and for close by (server/crowd-split.js, shared/crowd-split.js):
+// made from the library served, kept beside its compressed copies, served at /assets/crowd-split/ and compressed the same
+// way; offered to browsers (the crowd's version.json: split) once all of it is made and compressed.
+const crowdSplitOut = dir => `${assetCacheFor(dir)}-split`;
+let crowdSplitter = null;
+function splitCrowd(dir) {
+  const out = crowdSplitOut(dir), S = crowdSplitter = new CrowdSplit({ src: dir, out, log });
+  CROWD_SPLIT_STATIC[1] = out + path.sep;
+  const i = ASSET_PACKS.findIndex(p => p.name === 'crowd-split');
+  if (i >= 0) ASSET_PACKS.splice(i, 1);   // (the previous library's: offered no more)
+  S.build().then(ok => {
+    if (!ok || S !== crowdSplitter) return;
+    const P = { name: 'crowd-split', dir: out, pack: new AssetCompressor({ dir: out, cache: `${out}-z`, log, label: 'crowd parts\' (split)' }) };
+    ASSET_PACKS.push(P);
+    return P.pack.warm();
+  }).catch(e => log.warn('[crowd] split failed:', e.message));
+}
+/** The split's version once every file of it has its compressed copy (Brotli), else null (the browser reads the library). */
+function crowdSplitReady() {
+  const P = ASSET_PACKS.find(p => p.name === 'crowd-split');
+  if (!P || !P.pack.ready.size) return null;
+  for (const have of P.pack.ready.values()) if (!have.br) return null;
+  return P.pack.version || null;
 }
 // one folder after another, the characters first (a phone's people), never on a request
 setTimeout(async () => { for (const p of ASSET_PACKS) await p.pack.warm(); }, 2000).unref();
 /** The compressed, versioned folder a served file belongs to, or null. */
 const assetPackOf = file => ASSET_PACKS.find(p => file.startsWith(p.dir + path.sep)) || null;
+setTimeout(() => splitCrowd(crowdBake.activeDir()), 1000).unref();
 function sendJSON(req, res, code, obj, pre = null, extra = null) {
   const body = pre ? pre.body : JSON.stringify(obj);
   const acceptGz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
@@ -1177,12 +1215,31 @@ function contentEtag(file, st, done) {
   }
   pending.then(done);
 }
-function serveStatic(req, res, pathname) {
+/** The page's code at its version (server/code-version.js): /v/<version>/js|css|shared/…, and index.html naming it. */
+const codeVersion = new CodeVersion({ client: path.join(ROOT, 'client'), shared: path.join(ROOT, 'shared') });
+const KEEP_YEAR = 'public, max-age=31536000, immutable';
+const INDEX_FILE = path.join(ROOT, 'client', 'index.html');
+let pageCache = null;   // { key, html, gz, etag }: index.html as sent, for its version and its own file
+function servePage(req, res, file, st, sec) {
+  const v = codeVersion.current(), key = `${v}|${st.size}|${Math.round(st.mtimeMs)}`;
+  if (!pageCache || pageCache.key !== key) {
+    const html = Buffer.from(CodeVersion.page(fs.readFileSync(file, 'utf8'), v));
+    pageCache = { key, html, gz: zlib.gzipSync(html), etag: `"p${crypto.createHash('sha1').update(html).digest('hex').slice(0, 20)}"` };
+  }
+  const h = { 'content-type': MIME['.html'], etag: pageCache.etag, 'cache-control': 'no-cache', vary: 'Accept-Encoding', ...sec };
+  if (req.headers['if-none-match'] === pageCache.etag) { res.writeHead(304, h); return res.end(); }
+  const gz = /\bgzip\b/.test(req.headers['accept-encoding'] || ''), body = gz ? pageCache.gz : pageCache.html;
+  res.writeHead(200, { ...h, ...(gz ? { 'content-encoding': 'gzip' } : {}), 'content-length': body.length });
+  res.end(req.method === 'HEAD' ? undefined : body);
+}
+/** keep: the cache rule for a file asked for at the code's current version (KEEP_YEAR), in place of its folder's. */
+function serveStatic(req, res, pathname, keep = null) {
   { // a compressed folder's version, for ?v= (server/asset-compress.js): /assets/chars, /assets/fauna, /assets/fish
-    const m = /^\/assets\/([a-z]+)\/version\.json$/.exec(pathname), P = m && ASSET_PACKS.find(p => p.name === m[1]);
+    const m = /^\/assets\/([a-z-]+)\/version\.json$/.exec(pathname), P = m && ASSET_PACKS.find(p => p.name === m[1]);
     if (P) {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache', ...SECURITY_HEADERS });
-      res.end(JSON.stringify({ v: P.pack.version }));
+      const split = P.name === 'crowd' ? crowdSplitReady() : null;   // (the crowd's library in two files, when ready)
+      res.end(JSON.stringify(split ? { v: P.pack.version, split } : { v: P.pack.version }));
       return true;
     }
   }
@@ -1191,6 +1248,7 @@ function serveStatic(req, res, pathname) {
   if (!CFG.crowdStudio && (pathname.startsWith('/dev/crowd-studio') || pathname.startsWith('/vendor/meshopt/'))) return false;
   for (let [prefix, dir, cache] of STATIC) {
     if (!pathname.startsWith(prefix)) continue;
+    if (keep) cache = keep;
     let rel;
     try { rel = decodeURIComponent(pathname.slice(prefix.length)); } catch {
       res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS }); res.end('Bad request');
@@ -1205,6 +1263,7 @@ function serveStatic(req, res, pathname) {
     const ext = path.extname(file).toLowerCase();
     const type = MIME[ext] || 'application/octet-stream';
     const sec = staticHeaders(pathname);
+    if (file === INDEX_FILE) { servePage(req, res, file, st, sec); return true; }
     // the characters', animals' and fish models' files: kept a year when asked for at their folder's version, sent
     // compressed (server/asset-compress.js)
     const AP = assetPackOf(file), built = builtPacked(file, req.headers['accept-encoding'] || ''), chars = !!AP || prefix === '/assets/chars/custom/';
@@ -1212,9 +1271,9 @@ function serveStatic(req, res, pathname) {
     const packed = AP ? AP.pack.pick(file, req.headers['accept-encoding'] || '') : built;
     contentEtag(file, st, etag0 => {
       const etag = packed ? etag0.replace(/"$/, `-${packed.encoding}"`) : etag0;
-      if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag, 'cache-control': cache, ...(chars ? { vary: 'Accept-Encoding' } : {}), ...sec }); return res.end(); }
+      if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag, 'cache-control': cache, ...(chars || keep ? { vary: 'Accept-Encoding' } : {}), ...sec }); return res.end(); }
       const text = /^(text|application\/json)/.test(type) || ext === '.svg' || ext === '.wasm';   // (the KTX2 transcoder: 527 KB, about half sent gzipped)
-      const h = { 'content-type': type, etag, 'cache-control': cache, ...(chars ? { vary: 'Accept-Encoding' } : {}), ...sec };
+      const h = { 'content-type': type, etag, 'cache-control': cache, ...(chars || keep ? { vary: 'Accept-Encoding' } : {}), ...sec };
       if (packed) {
         let size; try { size = fs.statSync(packed.path).size; } catch { size = -1; }
         if (size >= 0) {
@@ -1288,6 +1347,13 @@ const api = createApi({
   agentPublic: a => (agentTalk ? agentTalk.isPublic(a) : false),   // (the info dock's Public agents: anyone may talk with it)
   radioTune: (conn, m) => carRadio?.fromPage(conn, m),   // (a driver's car radio, for the agents riding with them: server/senses/car-radio.js)
   seeReply: (conn, m) => eyes.reply(conn, m),   // (an agent's eyes: one frame a page drew from where it stands: server/senses/eye.js)
+  // a player playing with a fox (pet, treat, fetch, chase: server/world/fox.js) — on foot, near it; the answer to the page
+  foxPlay: (conn, m) => {
+    const p = conn.pid != null ? players.byId.get(conn.pid) : null;
+    if (!p || !wildlife || typeof m.id !== 'string' || m.id.length > 80) return;
+    const r = p.ctx === -1 && !p.vehicleId ? wildlife.interact(m.id, m.k | 0, { id: p.id, x: p.x, z: p.z, name: p.name }, String(m.act || ''), { x: Number(m.x), z: Number(m.z) }) : { ok: false, why: 'on foot' };
+    send(conn, { t: 'foxr', act: String(m.act || '').slice(0, 12), ok: !!r.ok, why: r.why || null, trust: r.trust != null ? Math.round(r.trust * 10) / 10 : null });
+  },
   workOf: i => workPresence?.workOf(i) || null,   // (a person's work now and its co-workers on shift: server/workplace/presence.js)
 });
 const router = api.router, WS = api.ws;
@@ -1718,18 +1784,28 @@ function afterPlayFinish(account, r) {
 }
 // Pictures on signs (owners' rooftop billboards and signs inside, the Marketing tools' own content): server/signs-routes.js.
 addSignRoutes(router, { world: () => world, dataDir: DATA, readStream: (req, limit) => readStream(req, limit) });
+// Places (docs/features/places.md): a building's reviews, its rating over its billboards and private messages to its
+// owner, opened from the billboard (server/places/). An account deleted takes its reviews and messages with it.
+const places = addPlaceRoutes(router, { dbs, world: () => world, property, perms, notifications, send: sendToAccount, broadcast: o => broadcast(o), audit, log });
+accounts.onChange(ev => { if (ev?.deleted) { try { places.forgetAccount(ev.account); } catch (e) { log.warn?.(`[places] ${e.message}`); } } });
 // A machine game or a cabinet holds its whole machine while it is open: server/play/arcade-hold.js.
 addArcadeHoldRoutes(router, { sim: () => sim, world: () => world });
 // The city's music (docs/features/music.md): the library, each Lounge Stage's and DJ Stage's deck (what plays, the
 // requests, its playlist) and their routes (server/music/).
 const music = new Music({ dbs, dataDir: DATA, sim: () => sim, world: () => world, broadcast: o => broadcast(o), log,
-  nameOf: id => visitorNameQ.get(dbs.worldId, Number(id))?.display_name || '' });
+  nameOf: id => visitorNameQ.get(dbs.worldId, Number(id))?.display_name || '',
+  // (a stage's performer as an AI agent, and the agents posted at a stage — 2026-11-25: they choose its songs)
+  agentAt: i => { const p = sim?.people?.[i]; return p?.vip && p.agentId ? agents.byKey(p.agentId) : null; },
+  crewAt: (b, f, id) => { try { const out = []; for (const list of posts.seatsAt(b, f, id).values()) for (const h of list) if (h?.agent?.id != null) out.push(Number(h.agent.id)); return out; } catch { return []; } } });
+// an AI agent at a stage decides its requests with its own brain (server/music/dj.js)
+music.dj = new DjBrain({ music, agents, mind: () => mind, say: (i, text) => cityLine(i, text), log,
+  complete: (c, req) => host.call('models', 'complete', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: connections.mayReachLocal(c), ...req }, { timeoutMs: (req.timeoutMs || 30000) + 5000 }) });
 addMusicRoutes(router, { music, perms, audit, readStream: (req, limit) => readStream(req, limit) });
 // (the game's own soundtrack, each song once: server/music/soundtrack.js)
 if (CFG.soundtrack) { try { seedSoundtrack(music, { log }); } catch (e) { log.error('[music] the soundtrack could not be added', e.message); } }
 music.start();
 // MVW Radio's hosts (server/radio/): an agent per station, breaks from the world's news written by its brain.
-const radio = new Radio({ dataDir: DATA, music, agents, connections, dbs, world: () => world, life: () => agentLife, postsAt: (b, f, id) => posts.servingAt(b, f, id, { onDuty: true }), mind: () => mind, voice: () => voice, principalFor: id => ownerPrincipal(id), econ: () => economy?.econ || null, weather: () => weather,
+const radio = new Radio({ dataDir: DATA, music, agents, connections, dbs, world: () => world, life: () => agentLife, postsAt: (b, f, id) => posts.servingAt(b, f, id, { onDuty: true }), seatsAt: (b, f, id) => posts.seatsAt(b, f, id), mind: () => mind, voice: () => voice, principalFor: id => ownerPrincipal(id), econ: () => economy?.econ || null, weather: () => weather,
   // (the radio host's job, server/radio/host-job.js: its owner's direction for its work, in its Work brief)
   work: () => work,
   // (only those in the studio are on the air; who should be and isn't, and why: server/workplace/presence.js)
@@ -1739,7 +1815,12 @@ const radio = new Radio({ dataDir: DATA, music, agents, connections, dbs, world:
   property, whereOf: B => { const at = sim?.nav?.addressAt?.(B.x, B.z) || ''; let town = ''; try { const r = B.lot ? property.get(B.lot)?.region : null; town = r ? townName(r, world?.name) : ''; } catch { /* none */ } return [at, town].filter(Boolean).join(', '); },
   broadcast: o => broadcast(o), log,
   complete: (c, req) => host.call('models', 'complete', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: connections.mayReachLocal(c), ...req }, { timeoutMs: (req.timeoutMs || 40000) + 5000 }) });
-addRadioRoutes(router, { radio, agents, audit });
+addRadioRoutes(router, { radio, agents, perms, audit });
+radioSync = () => radio.syncStudios();   // (a studio placed or taken away: its station on or off the air at once)
+if (mind) mind.radio = radio;   // (a radio host's tools in its chats: its station's songs, server/mind/tools.js)
+if (agentWorldRef) agentWorldRef.radio = radio;
+if (mind) mind.music = music;   // (an agent at a stage: its set, the guests' requests — server/mind/tools.js)
+if (agentWorldRef) agentWorldRef.music = music;   // (and a connected agent's: server/agent-world.js playlist…)
 radio.breaksOff = !CFG.radio; radio.start({ every: CFG.radio ? 15000 : 3000 });   // (tests: no breaks, studios checked often)
 addWorldAdminRoutes(router, { world: () => world, people: () => people, lots: () => property.all(), worldId: dbs.worldId, audit,
   readStream: (req, limit) => readStream(req, limit),
@@ -1798,6 +1879,8 @@ posts.presence = () => workPresence;   // (a seat's ⋯: whether whoever works t
 senses = new Senses({ dbs, sim: () => sim, agents, life: () => agentLife, players, vehicles: () => vehicles, fleet: () => fleet, harbour: () => harbour,
   weather: () => weather, companions: () => companions, work: () => workPresence, wildlife: () => wildlife, setting: k => settings.get(k), log, ownerOf: a => a.ownerId ?? ownerPrincipal(null)?.account?.id ?? null,
   accountName: (q => id => { const r = q.get(dbs.worldId, Number(id)); return r ? r.display_name || r.login : null; })(dbs.db.prepare("SELECT display_name, login FROM accounts WHERE world_id = ? AND id = ?")) }).attach();
+// what AI agents said out loud and heard in person, kept for their owners (server/senses/spoken.js; Studio → Conversations)
+senses.spoken = new SpokenLog({ dbs, keepDays: () => settings.get('spoken.keepDays'), log }).start();
 addSensesRoutes(router, () => senses, { agents });
 players.onSay = (p, text) => senses?.heardPlayer(p, text);   // (proximity chat near an agent: it heard it)
 chat.senses = senses;   // (OpenClaw's and Hermes' agents: what they can tell, with their owner's message)
@@ -1849,6 +1932,8 @@ fishingCrew = new FishingCrew({ play, harbour: () => harbour, players, sim: () =
   say: (i, text) => { if (sim) sim.emit({ t: 'say', i, text: String(text).slice(0, 140), until: sim.now() + 8 }); },   // (a catch in its bubble: the world's words, not voiced)
   toAccount: sendToAccount, note: (id, kind, text, o) => senses?.note(id, kind, text, o), log }).attach();
 interactions.add(fishingCrew.source());
+// playing with the playful animals — the foxes: pet, treat, a stick, tag, bye — as a player does (server/world/fox.js)
+interactions.add(animalsSource({ wildlife: () => wildlife }));
 // an agent deciding a trade for itself (server/companions/agent-trades.js): its owner's proposal, a player's offer — its own
 // decision service (else its habit), its owner's rules for what it gives; agents connected from outside decide there
 const agentTrades = economy ? new AgentTrades({ economy: () => economy, agents, freeWill: () => freeWill, companions: () => companions, log,
@@ -2062,7 +2147,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
     if (shuttingDown) return sendJSON(req, res, 503, RESTARTING, null, RESTARTING_HEADERS);
     if (isConnectorPath(url.pathname)) return await handleConnector(req, res, url);
-    if ((req.method === 'GET' || req.method === 'HEAD') && serveStatic(req, res, url.pathname)) return;
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      // the page's code at a version (server/code-version.js): kept a year when it is the current one
+      const vm = VERSIONED.exec(url.pathname);
+      if (vm && serveStatic(req, res, vm[2], codeVersion.immutable(vm[1], vm[2]) ? KEEP_YEAR : null)) return;
+      if (serveStatic(req, res, url.pathname)) return;
+    }
     res.writeHead(404, { 'content-type': 'text/plain', ...SECURITY_HEADERS }); res.end('Not found');
   } catch (e) {
     log.error('[http] error', e.stack || e);
@@ -2229,11 +2319,28 @@ function loopStats() {
 let wildN = 0;
 function wildlifeTick(clients) {
   if (!wildlife || !world.terrain || !wildlife.species.length) return;
-  const viewers = [], threats = [];
+  const viewers = [], threats = [], people = [];
   for (const ws of clients) if (ws.view) viewers.push(ws.view);
-  for (const p of players.byId.values()) { viewers.push({ x: p.x, z: p.z }); if (p.ctx === -1 && !p.vehicleId) threats.push({ x: p.x, z: p.z, r: 0 }); }
+  for (const p of players.byId.values()) { viewers.push({ x: p.x, z: p.z }); if (p.ctx === -1 && !p.vehicleId) { threats.push({ x: p.x, z: p.z, r: 0 }); people.push({ id: p.id, x: p.x, z: p.z, name: p.name }); } }
+  // the AI agents' bodies on foot outdoors are people to the foxes too (server/world/fox.js; their acts:
+  // server/interactions/sources/animals.js) — not riding, not hidden in a car
+  if (agentLife?.byAgent?.size && sim) {
+    const t = sim.now();
+    for (const [id, i] of agentLife.byAgent) {
+      const a = sim.agents[i]; if (!a?.plan || a.ride || sim.people[i]?.retired) continue;
+      const e = evalPlan(a.plan, t); if ((e.s && (e.s.flags & 1)) || (e.ctx !== CTX_OUT && e.ctx !== CTX_UNDER)) continue;
+      people.push({ id: `agent:${id}`, x: e.x, z: e.z, name: agents.get(id)?.name || sim.people[i]?.name || '', agent: true });
+    }
+  }
   for (const c of vehicles?.all?.values() || []) if (Math.abs(c.v || 0) > 2) threats.push({ x: c.x, z: c.z, r: 6 });
-  wildlife.tick(0.1, viewers, threats, sim.hour());
+  wildlife.tick(0.1, viewers, threats, sim.hour(), people);
+  // a fox that changed its mind (server/world/fox.js) is sent at once to the pages near it, not with the next round
+  const up = wildlife.takeChanged();
+  if (up.length) for (const ws of clients) {
+    if (ws.readyState !== 1 || !ws.view || ws.bufferedAmount > 1e6) continue;
+    const herds = up.filter(u => Math.hypot(u.x - ws.view.x, u.z - ws.view.z) < 800).map(u => u.herd);
+    if (herds.length) ws.send(JSON.stringify({ t: 'faunaUp', wt: Math.round(wildlife.t * 100) / 100, herds }));
+  }
   if (++wildN % 20) return;
   for (const ws of clients) {
     if (ws.readyState !== 1 || !ws.view || ws.bufferedAmount > 1e6) continue;
@@ -2315,7 +2422,7 @@ function shutdown(sig) {
   try { kitchenPlay?.stop(); workPlay?.stop(); } catch (e) { log.error('[kitchen-play] shutdown', e.message); }
   try { flightCrew?.stop(); } catch (e) { log.error('[flight-crew] shutdown', e.message); }
   try { workRemarks?.stop(); workPresence?.stop(); } catch (e) { log.error('[work] shutdown', e.message); }
-  try { senses?.stop(); } catch (e) { log.error('[senses] shutdown', e.message); }
+  try { senses?.stop(); senses?.spoken?.stop(); } catch (e) { log.error('[senses] shutdown', e.message); }
   try { moments?.stop(); } catch (e) { log.error('[moments] shutdown', e.message); }
   try { carRadio?.stop(); } catch { /* gone */ }
   try { mind?.stop(); } catch (e) { log.error('[mind] shutdown', e.message); }

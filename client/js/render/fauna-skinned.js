@@ -13,9 +13,15 @@
 // tools/animals/bird_animal.py). Forward +x, up +y, metres at size 1.
 import * as THREE from 'three';
 import { GU } from './scene.js';
+import { ACTS as ACT_CLIPS } from '/shared/fauna-acts.js';
 
 const CLIP_OF_MODE = { 0: 'rest', 1: 'walk', 2: 'run', 3: 'trot', 4: 'fly', 5: 'glide', 6: 'swim' };
-const CLIP_NAMES = ['rest', 'walk', 'run', 'trot', 'fly', 'glide', 'swim'];
+// (slots 7..: an animal's own acts — the fox's play, 2026-11-24, shared/fauna-acts.js; a species without one plays its
+// rest clip there)
+export { ACT_CLIPS };
+const CLIP_NAMES = ['rest', 'walk', 'run', 'trot', 'fly', 'glide', 'swim', ...ACT_CLIPS];
+export const ACT_SLOT0 = 7;
+const NSLOT = CLIP_NAMES.length;
 
 // The folders' versions (server/asset-compress.js: /assets/fauna/version.json, /assets/fish/version.json): every file of a
 // model asked for at its folder's version, which the browser may keep a year (2026-11-14: each visit downloaded the
@@ -64,7 +70,7 @@ attribute vec4 aSkin, aWeight, aAnim, aPrev;
 attribute vec3 aBody, aHair, aLegs;
 uniform sampler2D uBones;
 uniform float uTime;
-uniform vec4 uClips[7];   // per clip: first row, frames, fps, 0 (rest, walk, run, trot, fly, glide, swim)
+uniform vec4 uClips[${NSLOT}];   // per clip: first row, frames, fps, 0 (rest, walk, run, trot, fly, glide, swim, then the acts)
 varying vec3 vBody, vHair, vLegs;
 mat4 boneAt(int b, int row) {
   vec4 r0 = texelFetch(uBones, ivec2(b * 3, row), 0), r1 = texelFetch(uBones, ivec2(b * 3 + 1, row), 0), r2 = texelFetch(uBones, ivec2(b * 3 + 2, row), 0);
@@ -74,7 +80,7 @@ mat4 skinAt(int row) {
   return boneAt(int(aSkin.x), row) * aWeight.x + boneAt(int(aSkin.y), row) * aWeight.y + boneAt(int(aSkin.z), row) * aWeight.z + boneAt(int(aSkin.w), row) * aWeight.w;
 }
 mat4 clipSkin(float mode, float rate, float off) {
-  vec4 C = uClips[clamp(int(mode + 0.5), 0, 6)];
+  vec4 C = uClips[clamp(int(mode + 0.5), 0, ${NSLOT - 1})];
   float f = fract(uTime * rate + off) * C.y, f0 = floor(f);
   int a = int(C.x + f0), b = int(C.x + mod(f0 + 1.0, C.y));
   return skinAt(a) * (1.0 - (f - f0)) + skinAt(b) * (f - f0);
@@ -118,7 +124,7 @@ function material(A) {
         diffuseColor.rgb = min(c, vec3(1.0));
       }`);
   };
-  m.customProgramCacheKey = () => 'fauna-skinned-1';   // (the same source for every species: see above)
+  m.customProgramCacheKey = () => 'fauna-skinned-2';   // (the same source for every species: see above)
   return m;
 }
 

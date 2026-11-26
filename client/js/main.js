@@ -20,6 +20,7 @@ import { aboInit, aboPrefetch, dressPrefetch } from './render/abo-models.js';
 import { compileStandIns } from './render/warm.js';
 import { Doors } from './render/doors.js';
 import { Agents } from './render/agents.js';
+import { crowdPrefetch } from './render/characters.js';
 import { SignAtlas } from './render/qb.js';
 import { watchIcons } from './core/icons.js';
 import { hourAt, dayAt, floorAt } from '/shared/constants.js';
@@ -33,6 +34,34 @@ function progress(p, msg, phase) {
   else if (msg) { const m = document.getElementById('load-msg'); if (m) m.textContent = msg; }
 }
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
+
+// The optional UI / feature modules, started after the core (a failure in one never blocks the world), in this order.
+const MODS = ['./core/sync.js', './core/agents.js', './core/prefs.js', './core/theme.js', './render/traffic.js', './render/weather.js', './audio/mixer.js', './audio/engine.js', './audio/ambience.js', './audio/footsteps.js', './audio/vehicle-sound.js', './audio/radio.js', './audio/voices.js', './core/music.js', './audio/nightlife-music.js', './audio/score.js', './render/venue-motion.js', './render/kitchen-fx.js', './render/labels.js', './ui/docks.js', './ui/ui.js', './render/promo-aircraft.js', './render/ferries.js', './render/airport.js', './render/radio-station.js', './render/docks.js', './render/sea-probe.js', './render/resident-cars.js', './render/car-occupants.js', './render/boats.js', './render/fountains.js', './ui/perfhud.js', './ui/chat.js', './ui/talk-bar.js', './ui/notify.js', './ui/account.js', './ui/editors.js', './ui/place-tool.js', './ui/world-menu.js', './ui/walls-tool.js', './ui/modules-tool.js', './ui/station-panel.js', './render/studio-signs.js', './ui/home.js', './ui/activity.js', './ui/customizer.js', './ui/profile.js', './ui/property.js', './ui/economy.js', './ui/inventory.js', './ui/free-will.js', './ui/mind.js', './ui/agent-studio.js', './ui/sel-feeds.js', './ui/work.js', './ui/roads.js', './ui/lot-tools.js', './ui/ferry-tools.js', './ui/world-modules.js', './ui/terrain-tools.js', './ui/coast-tools.js', './ui/decor-tools.js', './ui/marketing.js', './render/signs.js', './player/vehicles.js', './player/flight.js', './player/boating.js', './render/boat-crew.js', './play/airport-game.js', './play/fishing-game.js', './audio/aircraft-sound.js', './player/player.js', './player/remote.js', './ui/worldmap.js', './ui/social.js', './ui/licence.js', './ui/updates.js', './ui/agent-providers.js', './ui/guide.js', './render/pc-screens.js', './play/machine-play.js', './play/order-up.js', './play/arcade.js', './ui/post-menu.js', './ui/companions.js', './ui/companion-trade.js', './ui/companion-voice.js', './ui/see-for-agent.js', './ui/music-panel.js', './ui/radio-stations.js'];
+// What isn't in the first picture, started only once the world is on screen (2026-11-24): the animals — their 43
+// species files and their shaders held the loading screen 1 s on a phone's return visit, 5 s on its first, for herds far
+// out in the countryside; the server sends each browser its herds every 2 s, so none is missed by starting later.
+const LATER = ['./render/wildlife.js'];
+// Each module's download (begun by importMods, all at once: the browser fetches them side by side) and, once the world
+// stands, its start-up (initMod, one after another in the order given). app.bootTimes keeps how long each took, ms:
+// { mod: [arrived, init] } — arrived: from the page's start; init: its own start-up (kept for measuring the start-up).
+const modLoads = new Map();
+function importMods(list) {
+  for (const mod of list) {
+    if (modLoads.has(mod)) continue;
+    modLoads.set(mod, import(mod).then(m => ({ m, at: performance.now() }), err => ({ err, at: performance.now() })));
+  }
+}
+const quietFail = err => /Failed to fetch|Importing a module script failed|error loading dynamically/i.test(String(err && err.message));
+async function initMod(mod) {
+  importMods([mod]);
+  const r = await modLoads.get(mod);
+  const t = (app.bootTimes ??= {})[mod] = [Math.round(r.at), 0];
+  if (r.err) { if (!quietFail(r.err)) console.error('[mvw] module', mod, r.err); return; }
+  const t0 = performance.now();
+  try { if (r.m.init) await r.m.init(app); }
+  catch (err) { if (!quietFail(err)) console.error('[mvw] module', mod, err); }
+  t[1] = Math.round(performance.now() - t0);
+}
 
 export const app = { S, bus, Q, THREE, auth };
 window.__mvw = app;
@@ -58,8 +87,14 @@ app.applyFocus = applyFocus;
 async function boot() {
   const canvas = document.getElementById('gl');
   if (!canvas.getContext('webgl2')) { progress(0, 'This browser does not support WebGL2.', 'error'); return; }
+  // The feature modules start downloading now, all together, while the account, the world and the city are readied —
+  // they used to be fetched one after another once the city stood (2026-11-24: "Waking the city" was 12 of a phone's
+  // 20 seconds). Their code only defines things when it arrives; each is started (init) in MODS order further down.
+  importMods(MODS);
   progress(0.05, 'Checking your account…', 'account');
   await auth.refresh();
+  // the residents' library (render/characters.js): the largest download, begun as soon as this visitor may watch
+  if (!auth.me?.caps || auth.me.caps['world.view']) crowdPrefetch();
   // a website link (#register, #signin): its dialog at once, over the loading screen; the city keeps loading behind it
   // (when guests may not watch, signInToWatch below takes the link instead)
   if (/^#(?:.*&)?(?:register|signin)(?:[=&]|$)/.test(location.hash) && !auth.account && auth.me?.caps?.['world.view']) import('./ui/account.js').then(m => m.openEntryEarly()).catch(() => {});
@@ -155,11 +190,9 @@ async function boot() {
   await new Promise(res => { if (net.synced) res(); else { const off = bus.on('synced', () => { off(); res(); }); setTimeout(res, 5000); } });
   // optional UI / feature modules (loaded after the core so a failure there never blocks the world)
   progress(0.8, 'Waking the city…', 'waking');
-  const MODS = ['./core/sync.js', './core/agents.js', './core/prefs.js', './core/theme.js', './render/traffic.js', './render/weather.js', './render/wildlife.js', './audio/mixer.js', './audio/engine.js', './audio/ambience.js', './audio/footsteps.js', './audio/vehicle-sound.js', './audio/radio.js', './audio/voices.js', './core/music.js', './audio/nightlife-music.js', './audio/score.js', './render/venue-motion.js', './render/kitchen-fx.js', './render/labels.js', './ui/docks.js', './ui/ui.js', './render/promo-aircraft.js', './render/ferries.js', './render/airport.js', './render/radio-station.js', './render/docks.js', './render/sea-probe.js', './render/resident-cars.js', './render/car-occupants.js', './render/boats.js', './render/fountains.js', './ui/perfhud.js', './ui/chat.js', './ui/talk-bar.js', './ui/notify.js', './ui/account.js', './ui/editors.js', './ui/place-tool.js', './ui/world-menu.js', './ui/walls-tool.js', './ui/modules-tool.js', './ui/station-panel.js', './render/studio-signs.js', './ui/home.js', './ui/activity.js', './ui/customizer.js', './ui/profile.js', './ui/property.js', './ui/economy.js', './ui/inventory.js', './ui/free-will.js', './ui/mind.js', './ui/agent-studio.js', './ui/sel-feeds.js', './ui/work.js', './ui/roads.js', './ui/lot-tools.js', './ui/ferry-tools.js', './ui/world-modules.js', './ui/terrain-tools.js', './ui/coast-tools.js', './ui/decor-tools.js', './ui/marketing.js', './render/signs.js', './player/vehicles.js', './player/flight.js', './player/boating.js', './render/boat-crew.js', './play/airport-game.js', './play/fishing-game.js', './audio/aircraft-sound.js', './player/player.js', './player/remote.js', './ui/worldmap.js', './ui/social.js', './ui/licence.js', './ui/updates.js', './ui/agent-providers.js', './ui/guide.js', './render/pc-screens.js', './play/machine-play.js', './play/order-up.js', './play/arcade.js', './ui/post-menu.js', './ui/companions.js', './ui/companion-trade.js', './ui/companion-voice.js', './ui/see-for-agent.js', './ui/music-panel.js'];
   for (const [mi, mod] of MODS.entries()) {
     progress(0.8 + 0.12 * mi / MODS.length);
-    try { const m = await import(mod); if (m.init) await m.init(app); }
-    catch (err) { if (!/Failed to fetch|Importing a module script failed|error loading dynamically/i.test(String(err && err.message))) console.error('[mvw] module', mod, err); }
+    await initMod(mod);
   }
   // The world and its people arrive with the live stream's first patches, which is before these modules load, so the
   // 'world' event has already fired by now. Emit both once here (after the modules exist) so the dock lists, the
@@ -225,6 +258,9 @@ async function boot() {
   // scene's environment map) is made first: a material compiled without it is a different shader from the one it draws with.
   stage.update(hourOverride ?? (net.clock ? hourAt(net.clock, net.simNow()) : 12), cam.target, cam.dist, performance.now() / 1000);
   progress(0.93, 'Lighting up the world…', 'lighting');
+  // the residents' models that have arrived go up now, behind the loading screen, and are compiled with the rest below
+  // (render/characters.js settle) — not one a frame once the world shows
+  await agents.chars.settle();
   const warm = app.terrain?.warmGroup?.(); if (warm) stage.scene.add(warm);   // tiles' shaders too (render/terrain.js)
   const chWarm = agents.chars.warmGroup?.(); if (chWarm) stage.scene.add(chWarm);   // and the characters', who arrive later
   // and what the first floor looked into is drawn with, people's shadows and what they hold, food on tables (stand-ins:
@@ -283,5 +319,7 @@ async function boot() {
   app.ready = true;
   aboPrefetch(S.world, 1500, () => dressPrefetch(S.world, DRESS.q));   // (the Amazon models the world's pieces use, then the dressing's, readied in the background: render/abo-models.js)
   bus.emit('ready');   // (a link from a notification opens what it is about: ui/notify.js)
+  // then what waited for the world to show (LATER), one after another, a frame apart from the first
+  requestAnimationFrame(async () => { importMods(LATER); for (const mod of LATER) await initMod(mod); app.lateReady = true; });
 }
 boot().catch(err => { console.error('[mvw] boot failed', err); progress(0, 'Failed to start: ' + (err && err.message || err), 'error'); });

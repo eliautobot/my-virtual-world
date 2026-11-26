@@ -67,6 +67,25 @@ export const BODY_TOOLS = [
     run: (c, a) => ({ ...c.world.look(c.slot, { brief: a.brief === true }), note: UNTRUSTED }),
   },
   {
+    name: 'stage_music', title: 'My stage\'s music',
+    description: 'For an agent at a Lounge Stage or a DJ booth: your set there and the guests\' song requests. action: "stage" (your set, numbered, what is on, the requests waiting — each with its k), "stage_add" (song: an id from radio_station find_songs, or songs: [ids]), "stage_remove" (n: a number from stage, or song: its id), "stage_play_request" (request: its k — it goes into your queue), "stage_pass_request" (request: its k; why: a short friendly reason the guest reads). A request you never answer plays after ten minutes.',
+    inputSchema: obj({
+      action: { type: 'string', enum: ['stage', 'stage_add', 'stage_remove', 'stage_play_request', 'stage_pass_request'] },
+      song: s('A song id', 40), songs: { type: 'array', items: { type: 'string', maxLength: 40 }, maxItems: 60 }, n: int('A song number from stage', 1, 300), request: s('A request\'s k from stage', 20), why: s('For stage_pass_request: why, for the guest', 140),
+    }, ['action']), annotations: WRITE,
+    run: (c, a) => c.world.act(c.slot, a),
+  },
+  {
+    name: 'radio_station', title: 'My radio station\'s songs',
+    description: 'For a radio host: the songs of the station you host (its playlist), and changing them. action: "playlist" (its songs, numbered, with ids), "find_songs" (text: words of a title, artist, album or genre — songs in the music library), "find_albums" (text: an album or an artist), "playlist_add" (song: an id from find_songs), "playlist_add_album" (album: an id from find_albums — every song of it), "playlist_remove" (n: a number from playlist, or song: its id), "playlist_move" (n or song; to: the place, 1 is first). station: its name, if you host more than one. Only songs of the stations you host; placing or removing a station is for administrators. Each change is logged for your owner and the administrators.',
+    inputSchema: obj({
+      action: { type: 'string', enum: ['playlist', 'find_songs', 'find_albums', 'playlist_add', 'playlist_add_album', 'playlist_remove', 'playlist_move'] },
+      station: s('Which station (its name), if you host more than one', 60), text: s('For find_songs, find_albums: words to look for', 80), song: s('A song id (find_songs, playlist)', 40), album: s('For playlist_add_album: an album id from find_albums', 200),
+      n: int('A song number from playlist', 1, 400), to: int('For playlist_move: its new place (1 is first)', 1, 400),
+    }, ['action']), annotations: WRITE,
+    run: (c, a) => c.world.act(c.slot, a),
+  },
+  {
     name: 'act', title: 'Do something',
     description: 'Your body\'s actions. action: "do" (activity: park, cafe, gym, shop, jog, dance, home or work; minutes), "go" (place: a name from look, or home / work; minutes), "meet" (name; minutes), "things_to_do" (what you can do right where you are: sit down, use something near — a bench, a cabinet, the piano —, a meal, shopping, the gym; each with an id), "use" (thing: an id from things_to_do — your body does it for real; minutes), "stop" (end your order), "come_along" (go with your owner as their companion — walk with them, ride in their car; place: where you go together, optional), "wait" (wait here, or at place, for your owner), "go_with" (name: another of your owner\'s agents — join their group), "let_go" (stop being a companion: back to your own day), "say" (text out loud, to: a name near you), "plan" (text; kind: must or want), "plan_done" (id; dropped: true if you dropped it), "remember" (text; long: true to keep it).',
     inputSchema: obj({

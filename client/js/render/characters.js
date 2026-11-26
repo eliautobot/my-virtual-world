@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { packAppearance, defaultChar, isCustomChar } from '/shared/appearance.js';
 import { RIG_BATCHES, RIG_BODIES, normalizeRigSettings, rigBatchForKind } from '/shared/rigProfiles.js';
+import { crowdSplit } from '/shared/crowd-split.js';
 import { normalizeTuning, allowedParts, nextAllowed, pushOf, applyRig, FACE, TALK_CLIPS, SMILE_CLIPS, plantClips, IDLES, withClipFix } from '/shared/crowd-tuning.js';
 import { CLIP_NAMES } from './anim.js';
 import { TRIPO_CLIPS, T, OLD_TO_TRIPO, TRIPO_FALLBACK, TRIPO_EXACT } from './charClips.js';
@@ -277,19 +278,71 @@ function loadBase(kind) {
 
 // The crowd's library, one file each body: its animation (one texture every part samples), then each part's levels.
 const crowdPacks = {};
-let crowdVer = null;
-const crowdV = () => (crowdVer ??= fetch('/assets/crowd/version.json', { cache: 'no-cache' }).then(r => (r.ok ? r.json() : {})).then(j => j.v || '').catch(() => ''));
+// (its version, and — split: once the server has the library in two files, shared/crowd-split.js — theirs)
+let crowdInfoAsk = null;
+const crowdInfo = () => (crowdInfoAsk ??= fetch('/assets/crowd/version.json', { cache: 'no-cache' }).then(r => (r.ok ? r.json() : {})).catch(() => ({})));
+const crowdV = () => crowdInfo().then(j => j.v || '');
+const crowdSplitV = () => crowdInfo().then(j => (CROWD && !keepSource && typeof j.split === 'string' && j.split) || null);
 /** The manifest of body `sex` ('f', 'm'): counts and dresses as soon as it is here (its parts' recipes need them). */
 const crowdManifests = {};
 function crowdManifest(sex) {
   return (crowdManifests[sex] ??= crowdV().then(v => fetch(`/assets/crowd/${sex === 'f' ? 'female' : 'male'}.json${v ? `?v=${v}` : ''}`)).then(r => { if (!r.ok) throw new Error('crowd ' + r.status); return r.json(); }));
 }
+/** The library's bytes of body `sex`: received in the loader worker when there is one (off the main thread), asked for
+ *  once — by crowdPrefetch at the start of the page, or by the first resident drawn. */
+const crowdBins = {};
+async function bytesOf(url) {
+  const done = await viaWorker({ op: 'bytes', url: new URL(url, location.href).href });
+  if (done) return done.buf;
+  return fetch(url).then(r => { if (!r.ok) throw new Error(`${url.split('?')[0]} ${r.status}`); return r.arrayBuffer(); });
+}
+function crowdBin(sex) {
+  return (crowdBins[sex] ??= crowdV().then(v => bytesOf(`/assets/crowd/${sex === 'f' ? 'female' : 'male'}.bin${v ? `?v=${v}` : ''}`)));
+}
+/** The library in two files (shared/crowd-split.js): 'far' — everyone drawn from a distance, both bodies' first —
+ *  then 'near', each part's finest level, asked for once both bodies' far files are here. */
+const crowdHalves = {};
+function crowdHalf(sex, half) {
+  const key = sex + half;
+  if (crowdHalves[key]) return crowdHalves[key];
+  const url = v => `/assets/crowd-split/${sex === 'f' ? 'female' : 'male'}.${half}.bin?v=${v}`;
+  return (crowdHalves[key] = crowdSplitV().then(async v => {
+    if (!v) throw new Error('no split library');
+    if (half === 'near') await Promise.all(['f', 'm'].map(x => crowdHalf(x, 'far').catch(() => null)));
+    return bytesOf(url(v));
+  }));
+}
+/** Both bodies' libraries asked for at once, as the page starts (render: main.js) — they used to be asked for only once
+ *  the residents were placed, and the second only when the first had arrived (2026-11-24: a phone's residents appeared
+ *  6 s after the world). Only the bytes: they are made into models when a resident is first drawn (loadCrowd). */
+export function crowdPrefetch() {
+  if (!CROWD || keepSource) return;
+  crowdTuning();
+  crowdSplitV().then(split => {
+    for (const sex of ['f', 'm']) {
+      crowdManifest(sex).catch(() => {});
+      if (split) { crowdHalf(sex, 'far').catch(() => {}); crowdHalf(sex, 'near').catch(() => {}); }
+      else crowdBin(sex).catch(() => {});
+    }
+  });
+}
 function loadCrowd(sex) {
   return (crowdPacks[sex] ??= (async () => {
-    const v = await crowdV(), man = await crowdManifest(sex);
-    const bin = await fetch(`/assets/crowd/${sex === 'f' ? 'female' : 'male'}.bin${v ? `?v=${v}` : ''}`).then(r => { if (!r.ok) throw new Error('crowd bin ' + r.status); return r.arrayBuffer(); });
-    const view = e => { const C = { float32: Float32Array, uint8: Uint8Array, uint16: Uint16Array, uint32: Uint32Array }[e.type]; return new C(bin, e.off, e.len / C.BYTES_PER_ELEMENT); };
-    const geom = L => {
+    const man = await crowdManifest(sex);
+    // its bytes: the far file when the server has the library split (shared/crowd-split.js) — everyone drawn from it at
+    // once, each part's finest level put in place when the near file comes (refine, below) — else the whole library
+    let far = null, split = null, bin = null;
+    if (await crowdSplitV()) {
+      try { far = await crowdHalf(sex, 'far'); split = crowdSplit(man); }
+      catch (err) { console.warn('the crowd\'s split library failed to load; reading the whole one', err); far = split = null; }
+    }
+    if (!far) bin = await crowdBin(sex);
+    const TYPES = { float32: Float32Array, uint8: Uint8Array, uint16: Uint16Array, uint32: Uint32Array };
+    const viewIn = (buf, off, e) => { const C = TYPES[e.type]; return new C(buf, off, e.len / C.BYTES_PER_ELEMENT); };
+    const placed = e => { const at = split.at.get(e.off); if (!at) throw new Error('a crowd section missing from the split'); return at; };
+    const view = split ? e => { const at = placed(e); if (at.near) throw new Error('a crowd section only in the near file'); return viewIn(far, at.off, e); } : e => viewIn(bin, e.off, e);
+    const isNear = Lv => !!split && placed(Lv.pos).near;
+    const geomWith = view => L => {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(view(L.pos), 3));
       g.setAttribute('normal', new THREE.BufferAttribute(view(L.nrm), 3));
@@ -305,6 +358,19 @@ function loadCrowd(sex) {
       g.userData.tris = L.tris;
       return g;
     };
+    const geom = geomWith(view);
+    // (the near file's sections, once it is here: every section viewed in whichever of the two files holds it)
+    const nearGeom = split ? crowdHalf(sex, 'near').then(near => geomWith(e => { const at = placed(e); return viewIn(at.near ? near : far, at.off, e); })) : null;
+    /** A part's levels: in the far file now, a level only in the near one drawn as the next coarser until it comes —
+     *  { lods, refine: a promise of all its own levels (null: nothing to wait for) }. */
+    const levels = list => {
+      const lods = list.map(Lv => (isNear(Lv) ? null : geom(Lv)));
+      for (let i = lods.length - 1; i >= 0; i--) if (!lods[i]) lods[i] = lods[i + 1] || null;
+      const own = list.map((Lv, i) => (isNear(Lv) ? null : lods[i]));
+      const refine = nearGeom && own.some(g => !g) ? nearGeom.then(ng => list.map((Lv, i) => own[i] || ng(Lv))) : null;
+      refine?.catch(() => {});   // (the near file failed: drawn from the far one; told once, by the model's initKind)
+      return { lods, refine };
+    };
     const a = man.anim, anim = rigAnim(view(a.data), a, man, await crowdTuning(), sex);   // (the body's posture: the tuning's)
     const tex = new THREE.DataTexture(anim.data, a.w, a.h, THREE.RGBAFormat, THREE.HalfFloatType);
     tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
@@ -316,8 +382,8 @@ function loadCrowd(sex) {
     // (the tints' references, linear: a part's vertex of key k is drawn × the resident's colour ÷ this)
     const tint = [new THREE.Vector3(1, 1, 1), ...man.keys.map(k => new THREE.Vector3(...man.tints[k]))];
     const shared = { man, tex, anim, off, len, clip: packClips(off, len), grips, tint, feet: man.feet || null };
-    const kinds = { [`crowd_${sex}`]: { ...shared, lods: man.parts.body[0].lods.map(geom) } };
-    for (const cat of CROWD_PARTS) (man.parts[cat] || []).forEach((p, n) => { kinds[`crowd_${sex}|${cat}|${n}`] = { ...shared, lods: p.lods.map(geom), part: cat }; });
+    const kinds = { [`crowd_${sex}`]: { ...shared, ...levels(man.parts.body[0].lods) } };
+    for (const cat of CROWD_PARTS) (man.parts[cat] || []).forEach((p, n) => { kinds[`crowd_${sex}|${cat}|${n}`] = { ...shared, ...levels(p.lods), part: cat }; });
     return kinds;
   })());
 }
@@ -343,8 +409,8 @@ function loadCrowdClose(sex) {
       g.setIndex(new THREE.BufferAttribute(view(L.idx), 1)); g.userData.tris = L.tris;
       return g;
     };
-    const { lods, part, ...rest } = shared, kinds = {};
-    void lods; void part;
+    const { lods, part, refine, ...rest } = shared, kinds = {};
+    void lods; void part; void refine;
     for (const cat of ['body', ...CROWD_PARTS]) (man.parts[cat] || []).forEach((p, n) => { if (p.close) kinds[`crowd_${sex}|${cat}|${n}|c`] = { ...rest, lods: [geom(p.close)], ...(cat === 'body' ? {} : { part: cat }) }; });
     return kinds;
   })());
@@ -740,39 +806,71 @@ export class Characters {
       const promise = new Promise(resolve => complete.set(k, resolve));
       pending.set(k, promise); todo.push(k); return promise;
     };
+    const start = k => {
+      active++;
+      // (its maps go up one at a time, then the model itself appears as a step of its own: its first draw sends its
+      // mesh to the GPU, kept out of a frame that also uploads a map — stepUploads paces them all; the page's own
+      // player's go first, unpaced: queue below)
+      loadKind(KINDS[k], this.mapSize, this.normalSize).then(d => this.upload(d, this.hurry.has(k))).then(d => (!this.renderer ? this.initKind(k, d) : new Promise((res, rej) => this.queueUpload(() => {
+        try { this.initKind(k, d); res(d); } catch (err) { rej(err); }
+      }, this.hurry.has(k))))).then(() => {
+        this.loadedCount = (this.loadedCount || 0) + 1;
+        complete.get(k)(this.kinds[k]);
+      }).catch(err => {
+        failed = this.loadError = err; complete.get(k)(null);
+        console.error('character assets failed to load', KINDS[k], err);
+      }).finally(() => {
+        active--; pump();
+        if (!active && !todo.length && !initialDone) {
+          initialDone = true; if (!failed) this.loaded = true; readyResolve();
+        }
+      });
+    };
     const pump = () => {
       while (active < concurrency && todo.length) {
         todo.sort((a, b) => this.near[b] - this.near[a] || this.demand[b] - this.demand[a] || a - b);   // (on screen first, then the most worn)
-        const k = todo.shift(); active++;
-        // (its maps go up one at a time, then the model itself appears as a step of its own: its first draw sends its
-        // mesh to the GPU, kept out of a frame that also uploads a map — stepUploads paces them all)
-        loadKind(KINDS[k], this.mapSize, this.normalSize).then(d => this.upload(d)).then(d => (!this.renderer ? this.initKind(k, d) : new Promise((res, rej) => this.uploads.push(() => {
-          try { this.initKind(k, d); res(d); } catch (err) { rej(err); }
-        })))).then(() => {
-          this.loadedCount = (this.loadedCount || 0) + 1;
-          complete.get(k)(this.kinds[k]);
-        }).catch(err => {
-          failed = this.loadError = err; complete.get(k)(null);
-          console.error('character assets failed to load', KINDS[k], err);
-        }).finally(() => {
-          active--; pump();
-          if (!active && !todo.length && !initialDone) {
-            initialDone = true; if (!failed) this.loaded = true; readyResolve();
-          }
-        });
+        start(todo.shift());
       }
     };
-    this.ensureKind = name => {
+    // now: a model that starts at once, beside the ones on their way, and goes up to the GPU before theirs (the page's own
+    // player's body: setAppearance first)
+    this.hurry = new Set();
+    this.ensureKind = (name, now = false) => {
       const k = typeof name === 'number' ? name : kindIndex(name);
       if (k < 2 || k >= KINDS.length) return Promise.resolve(null);
       this.fit(k);
-      const promise = queue(k); pump(); return promise;
+      if (now) this.hurry.add(k);
+      const promise = queue(k), j = now ? todo.indexOf(k) : -1;
+      if (j >= 0) { todo.splice(j, 1); start(k); }
+      pump(); return promise;
     };
     if (warmAll) KINDS.forEach((kind, k) => {
       if (wanted(kind)) queue(k);
     });
     pump();
     if (!active && !todo.length) { initialDone = this.loaded = true; readyResolve(); }
+    this.loading = () => active > 0 || todo.length > 0;
+  }
+  /**
+   * At load, behind the loading screen (render: main.js, before the shaders are compiled): the models that have arrived
+   * go up now, all of them, rather than one a frame once the world shows — where the pacing (stepUploads) waits for calm
+   * frames, and a phone's first frames are anything but (2026-11-24: its residents appeared 6 s after the world, their
+   * library there for 7 s already). The models still arriving are waited for while they keep coming (each within
+   * `quietMs` of the last), up to `budgetMs` in all; what comes later goes up paced, as before.
+   */
+  async settle({ budgetMs = 2500, quietMs = 300 } = {}) {
+    const t0 = performance.now();
+    let last = t0;
+    for (;;) {
+      const now = performance.now();
+      // (models going up now; a model's finer detail swapped in, refineKind, waits for the paced uploads)
+      const now2 = this.uploads.filter(f => !f.refine);
+      if (now2.length) { this.uploads = this.uploads.filter(f => f.refine); for (const f of now2) f(); last = now; }
+      else if (!this.loading() || now - last > quietMs) break;
+      if (now - t0 > budgetMs) break;
+      await new Promise(r => setTimeout(r, 0));   // (the loads waiting on those uploads move on: pump)
+    }
+    this.lastUpload = performance.now();
   }
   /** The arm calibration (rig.json: the ready-made Tripo models' arms, set in the rig tool) a model is drawn with: none
    *  for a character made in the builder or the crowd's (2026-11-19: on the builder's bodies it pushed what lies near the
@@ -860,14 +958,23 @@ export class Characters {
     m.customProgramCacheKey = () => `mvw-tripo-${vc ? 'vcol' : tx ? 'textured' : 'painted'}-${depth ? 'd' : withMap ? 'n' : 'p'}${depth ? '' : LIGHT.on}${cover ? '-cover' : ''}`;
     return m;
   }
-  upload(d) {
+  upload(d, hurry = false) {
     const pending = this.renderer ? [d.colorMap, d.normalMap, d.tex].filter(t => t && !this.uploaded.has(t)) : [];
     if (!pending.length) return d;
-    return new Promise(resolve => pending.forEach((t, i) => this.uploads.push(() => {
+    let left = pending.length;
+    return new Promise(resolve => pending.forEach(t => this.queueUpload(() => {
       try { this.renderer.initTexture(t); } catch (err) { console.error('character texture upload failed', err); }
       this.uploaded.add(t);
-      if (i === pending.length - 1) resolve(d);
-    })));
+      if (--left === 0) resolve(d);
+    }, hurry)));
+  }
+  /** One step for the GPU (stepUploads): hurry — the page's own player's body — before the others and not held back by
+   *  the pacing (2026-11-25: its model was here in 5 s, then waited ~90 s behind the crowd's parts' uploads). */
+  queueUpload(f, hurry = false) {
+    if (!hurry) { this.uploads.push(f); return; }
+    f.hurry = true;
+    const i = this.uploads.findIndex(x => !x.hurry);
+    if (i < 0) this.uploads.push(f); else this.uploads.splice(i, 0, f);
   }
   /**
    * Stand-ins for the characters' shaders — the clothed body (colour map, and normal map when they load one) and its
@@ -910,9 +1017,28 @@ export class Characters {
       return this.makeLod(k, j, L, base, mats);
     });
     this.kinds[k] = { d, mats, lods };
+    // (a crowd part drawn from the split library's far file: its finest level put in place when the near file comes)
+    if (d.refine) d.refine.then(full => { const up = () => this.refineKind(k, full); up.refine = true; this.uploads.push(up); }).catch(err => {
+      if (!this.refineFailed) { this.refineFailed = true; console.warn('the crowd\'s close-by detail failed to load', err); }
+    });
     // (a character built in the Agent Studio: its face moves as the tuning says, the crowd shown or not)
     if (isCustomChar(kind) && !this.crowdOn && !this.tuningAsked) { this.tuningAsked = true; crowdTuning().then(t => this.useTuning(t)); }
     if (!isCrowdPart(kind)) this.props.initKind(k, d, this.rigFor(kind, d));
+  }
+  /** Crowd model k's own levels, all of them (`full`), in place of the stand-ins it was drawn with: each detail whose
+   *  model changes takes the new one's buffers into the geometry it has (its instances' stay; the stand-in's buffers,
+   *  shared with the coarser detail, are left alone — nothing sent to the GPU again), one model a step (stepUploads). */
+  refineKind(k, full) {
+    const kd = this.kinds[k]; if (!kd || kd.d.lods === full) return;
+    kd.d.lods = full; kd.refined = true;
+    for (const l of kd.lods) {
+      const base = full[Math.min(l.L, full.length - 1)], g = l.g;
+      if (g.index === base.index) continue;
+      g.setIndex(base.index);
+      for (const name of Object.keys(g.attributes)) if (!g.attributes[name].isInstancedBufferAttribute && !base.attributes[name]) g.deleteAttribute(name);
+      for (const [name, attr] of Object.entries(base.attributes)) g.setAttribute(name, attr);
+      for (const m of this.masks) if (m?.userData.src === g) m.userData.src = null;   // (its outline's copy made again: outlineDraw)
+    }
   }
   makeLod(k, j, L, base, mats) {
     const g = new THREE.InstancedBufferGeometry();
@@ -985,8 +1111,9 @@ export class Characters {
   }
   setShadows(on) { this.shadows = on; this.kinds.forEach((kd, k) => { if (kd) for (const l of kd.lods) l.mesh.castShadow = on && l.L < 2 && castsShadow(KINDS[k]); }); this.props.setShadows(on); }
   /** crowd: a resident the crowd may draw (render/agents.js: not an agent shown as one, not a player) — with CROWD, it is
-   *  drawn from the crowd's parts unless its look is a character built in the Agent Studio. */
-  setAppearance(i, app, crowd = false) {
+   *  drawn from the crowd's parts unless its look is a character built in the Agent Studio. first: a player's own body
+   *  (render/agents.js: 2 the page's own player, 1 the others) — its model loaded before anyone else's. */
+  setAppearance(i, app, crowd = false, first = 0) {
     if (i >= this.cap) this.grow(i + 1);
     packAppearance(app, this.appData, (i >> 7) * 4096 + (i & 127) * 32);
     this.crowdOf[i] = undefined;
@@ -1003,7 +1130,12 @@ export class Characters {
     this.kindOf[i] = ck >= 2 ? ck : KINDS.indexOf(defaultChar(app || {}));
     this.fit(this.kindOf[i]);
     if (this.demand) this.demand[this.kindOf[i]]++;
-    if (this.ensureKind) this.ensureKind(this.kindOf[i]);
+    // a player's own body first (2026-11-25, the product owner: "when i go into player mode, the player character turns into
+    // a different body ... it should maintain the players same body"): it waited behind the crowd's parts on screen —
+    // 97 s in a city of 400, nobody and then another man's model drawn as them meanwhile. The page's own player's starts at
+    // once (beside the ones on their way: ensureKind now), the other players' next in the queue
+    if (first && this.near) this.near[this.kindOf[i]] = Math.max(this.near[this.kindOf[i]], first * 1e9);
+    if (this.ensureKind) this.ensureKind(this.kindOf[i], first === 2);
     this.appTex.needsUpdate = true;
   }
   /** A crowd resident's part models (KINDS indices) at each level of detail ({ 0: […], 1: […], 2: […] }: further away,
@@ -1115,6 +1247,7 @@ export class Characters {
    *  wait before the next doubles (from 2 up to 40 frames); uploads that pass unnoticed bring it back down (to none). */
   stepUploads() {
     if (!this.uploads.length) { this.cool = 0; return; }
+    if (this.uploads[0].hurry) { this.uploads.shift()(); this.lastUpload = performance.now(); return; }   // (the own player's body: at once)
     const now = performance.now(), gap = now - (this.lastBegin ?? now); this.lastBegin = now;
     if (gap > 0 && gap < 250 && !(this.watch > 0)) this.typGap = this.typGap ? this.typGap + (gap - this.typGap) * 0.1 : gap;   // (the device's own pace, not an upload's)
     const late = gap > Math.max(24, (this.typGap || 16) * 1.6);

@@ -1876,7 +1876,10 @@ export class Brain {
     const st = this.slotBegin(a, P, r.b, r.f, r.id, r.k);
     if (!st) { this.lookAround(a, P, this.wm(2)); return true; }
     const hs = this.slotHold(a, P, st, this.wm(60));
-    this.act(a, 'post', st.s.use, P, { ...this.slotInfo(st), ...hs, place: this.placeName(r.b, r.f), label: 'On duty', icon: '🛎' });
+    // (posted at a stage: the musician or the DJ there, as one working its shifts is — shared/nightlife.js ROLE_USE; its
+    //  music plays and, an AI agent, it picks the songs: server/music/music.js — 2026-11-25)
+    const role = roleAt(this.W, r.b, r.f, r.id, r.k), use = (role === 'dj' || role === 'musician') ? ROLE_USE[role] : st.s.use;
+    this.act(a, 'post', use, P, { ...this.slotInfo(st), ...hs, place: this.placeName(r.b, r.f), label: role === 'dj' ? 'On the decks' : role === 'musician' ? 'On stage' : 'On duty', icon: role === 'dj' ? '🎧' : role === 'musician' ? '🎵' : '🛎' });
     return true;
   }
   /**

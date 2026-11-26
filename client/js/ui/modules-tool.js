@@ -72,7 +72,9 @@ function floor() {
   return L ? { B, b, f, L, y: floorAt(B, f) } : null;
 }
 /** The kinds this player may place on this floor (allowed here, and theirs to place). */
-function kindsHere(Fl) { return Object.values(INTERIOR_KINDS).filter(K => (K.who !== 'admin' || isAdmin()) && !K.allowed(Fl.B, Fl.f, Fl.L)); }
+// (a Radio Studio is not furniture: it is placed from the Radio Stations window's ＋ New station, 2026-11-25 —
+//  ui/radio-stations.js; one already placed is still selected, moved and resized here)
+function kindsHere(Fl) { return Object.values(INTERIOR_KINDS).filter(K => K.kind !== 'studio' && (K.who !== 'admin' || isAdmin()) && !K.allowed(Fl.B, Fl.f, Fl.L)); }
 function paint() {
   if (!E.box) return;
   const Fl = S.mode === 'furnish' ? floor() : null, kinds = Fl ? kindsHere(Fl) : [], mods = Fl ? modsOf(Fl.L) : [];
@@ -239,7 +241,7 @@ function onKey(e) {
 }
 function action(a) {
   const Fl = floor(), m = Fl && T.sel && modsOf(Fl.L).find(x => x.id === T.sel); if (!m) return;
-  if (a === 'station') { const st = (app.radio?.all || []).find(x => x.studio && x.studio.b === Fl.b && x.studio.f === Fl.f && x.studio.room === m.id); if (st) import('./station-panel.js').then(M => M.openStation(app, st.id)); else app.toast?.('Its station goes on the air in a few seconds', 'info', 2400); return; }   // (its own window: ui/station-panel.js)
+  if (a === 'station') { const st = (app.radio?.all || []).find(x => x.studio && x.studio.b === Fl.b && x.studio.f === Fl.f && x.studio.room === m.id); if (st) app.radioStations?.open({ station: st.id }); else app.toast?.('Its station goes on the air in a few seconds', 'info', 2400); return; }   // (its own window: ui/station-panel.js)
   if (a === 'turn') send({ op: 'imod.set', b: Fl.b, f: Fl.f, id: m.id, mod: { face: (m.face + 1) % 4 } }, 'Turned: its door is on the next side.');
   if (a === 'relay' && confirm(`Lay ${m.name} out again as it comes? Your own arrangement of it is lost. (Ctrl+Z puts it back.)`)) send({ op: 'imod.set', b: Fl.b, f: Fl.f, id: m.id, reset: true, mod: {} }, 'Laid out again. Ctrl+Z puts your arrangement back.');
   if (a === 'name') { const n = prompt('Its name', m.name || ''); if (n != null && n.trim()) send({ op: 'imod.set', b: Fl.b, f: Fl.f, id: m.id, mod: { name: n.trim() } }, 'Renamed.'); }

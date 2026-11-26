@@ -1,0 +1,49 @@
+{
+ "id": "fox",
+ "name": "Red foxes",
+ "tier": "shared",
+ "model": "fox",
+ "asset": "/assets/fauna/fox/fox.json",
+ "behaviour": "play",
+ "habitats": [
+  "forest",
+  "meadow",
+  "field"
+ ],
+ "hours": [
+  0,
+  24
+ ],
+ "weather": [
+  "clear",
+  "partly",
+  "overcast",
+  "rain",
+  "fog"
+ ],
+ "group": [
+  1,
+  2
+ ],
+ "perKm2": 1.6,
+ "habitatWeight": {
+  "forest": 1,
+  "meadow": 0.7,
+  "field": 0.35
+ },
+ "size": 1.12,
+ "colors": [
+  "#c8602a"
+ ],
+ "coats": [
+  {
+   "name": "natural",
+   "body": "#c8602a",
+   "hair": "#c8602a",
+   "legs": "#c8602a"
+  }
+ ],
+ "speed": 1.2,
+ "run": 8,
+ "flee": 0
+}

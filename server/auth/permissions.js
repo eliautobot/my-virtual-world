@@ -43,6 +43,8 @@ export const CAPS = Object.freeze({
   'players.spawn': cap('admin', 'Set where new players appear (the spawn point)', ID),
   // Play modules (docs/features/play-modules.md): the minigames, their runs and badges, and players' profiles.
   'play.use': cap('member', 'Play the modules (minigames such as the airport\'s ring courses), earn levels and badges, see players\' profiles', ID),
+  // Places (docs/features/places.md): a building's billboard opens its reviews and a way to write to its owner.
+  'places.review': cap('member', 'Rate and review other people\'s places, leave their owners private messages, and read the messages left for your own', ID),
   // The city's music (docs/features/music.md): the lounge's band and the club's DJ play the library's songs.
   'music.request': cap('member', 'Ask for songs at a lounge\'s stage and a club\'s DJ', ID),
   'music.upload': cap('member', 'Add your own songs to the city\'s music (an administrator approves them before they play)', ID),

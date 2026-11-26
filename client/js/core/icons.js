@@ -376,6 +376,9 @@ export const ICONS = {
   bird: ['M3.5 14c3 0 5.5-2 7-5 1-2 2.6-3 4.5-3 2.4 0 3.5 1.6 3.5 2.5l2 .8-2 .7c0 4-3 8-9 8-3 0-5-1.5-6-4zM9 13.5c2 0 4-1 5.5-3M10 18.5l-1.5 3M13 18.3l.5 3', dots([15.6, 8.4, 0.7])],
   lotus: ['M12 5c2 2.5 2.5 6 0 10-2.5-4-2-7.5 0-10zM12 15c-3.5-.5-6-3-6.5-7 3 .5 5.5 2.5 6.5 7zM12 15c3.5-.5 6-3 6.5-7-3 .5-5.5 2.5-6.5 7zM12 15c-4 .5-7-1-8.5-4M12 15c4 .5 7-1 8.5-4M4 18.5h16'],
   heart: ['M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.6 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z'],
+  // (2026-11-24, the playful fox: render/fox-play.js — its head, pointed ears and muzzle; the stick it fetches)
+  fox: ['M3.5 3.5L8.5 9h7l5-5.5.5 7.5c0 3.5-2.5 6.5-5.5 8.5L12 21.5l-3.5-2C5.5 17.5 3 14.5 3 11zM9 15.5l3 2.6 3-2.6', dots([9, 12.5, 0.9], [15, 12.5, 0.9], [12, 17.6, 0.8])],
+  stick: ['M4.2 18.2l13-9.4a2.2 2.2 0 0 1 2.6 3.6l-13 9.4a2.2 2.2 0 0 1-2.6-3.6zM11.5 13.2L10 8.5M14.5 11l2.5-3.5'],
   shark: ['M2.5 14c4-3 10-4 15-2l3.5-3v9l-3.5-2.5c-5 1.5-11 1-15-1.5zM9 11.3L11.5 6l2.5 5.5M7 12.6v2.4M8.4 12.4v2.6M8.5 16.2l1 2.4', dots([5, 13.4, 0.7])],
   dragon: ['M3.5 20c3-1 4-4 4-7s2-6 6-6c3 0 5 2 5.5 4l2 1-2 1.5c-.5 1.5-2 2.5-4 2.5h-3c-1.5 0-2.5 1-2.5 2.5V20M13 7l1-3.5 2 3M10 9.5L7.5 7', dots([16.4, 10.4, 0.7])],
   canoe: ['M2.5 13.5c3 3 6 4 9.5 4s6.5-1 9.5-4zM2.5 13.5l1-2M21.5 13.5l-1-2M14 4.5l-5 14M9 18.5l-1 3'],
@@ -422,7 +425,7 @@ export const EMOJI = {
   '🧀': 'cheese', '🍎': 'apple', '🥛': 'milk', '🥚': 'egg', '🍅': 'tomato', '🥕': 'carrot', '🍌': 'banana', '🧃': 'juice', '🍰': 'cake',
   '🥬': 'leaf', '👕': 'shirt', '🍝': 'utensils', '🧠': 'brain', '🖊': 'pencil', '📧': 'mail', '📃': 'doc',
   '📬': 'mailbox', '🍸': 'cocktail', '🧁': 'cupcake', '🥣': 'bowl', '🍕': 'pizza', '🌮': 'taco', '🍜': 'noodles', '🍣': 'sushi', '🍛': 'curry', '🥙': 'flatbread', '🐟': 'fish', '🥩': 'steak', '🥗': 'salad', '🍨': 'icecream', '🍺': 'beer', '🥤': 'soda', '🍳': 'pan', '🟤': 'beanbag', '🟫': 'rug', '🧺': 'picnic',
-  '🎣': 'rod', '🪝': 'hook', '🪱': 'worm', '🦐': 'shrimp', '🔪': 'knife', '🦑': 'squid', '🌀': 'spiral', '🎏': 'lure', '🥄': 'spoon', '🪼': 'jellyfish', '🐠': 'fish',
+  '🎣': 'rod', '🪝': 'hook', '🪱': 'worm', '🦐': 'shrimp', '🔪': 'knife', '🦑': 'squid', '🌀': 'spiral', '🎏': 'lure', '🥄': 'spoon', '🪼': 'jellyfish', '🐠': 'fish', '🦊': 'fox', '🪵': 'stick', '🤚': 'hand', '🍖': 'steak',
   '🍞': 'bread', '📡': 'sonar', '⚓': 'anchor', '🫧': 'bubbles', '💪': 'arm', '🍀': 'clover', '🪨': 'rock', '🪸': 'coral', '📉': 'chart-down', '🐦': 'bird', '🌑': 'moon',
   '🪷': 'lotus', '🫶': 'heart', '🦈': 'shark', '🐉': 'dragon', '🛶': 'canoe', '⛈': 'storm', '🥾': 'boot', '👟': 'boot', '🛞': 'tyre', '🥫': 'can', '🍾': 'bottle',
   // (Order Up: its skills, badges and cuisines; a post's work hours)
@@ -430,7 +433,7 @@ export const EMOJI = {
   '📗': 'book-open', '📘': 'book-open', '📙': 'book-open', '🍲': 'bowl',
 };
 /** Symbols the interface uses as typography, not icons: arrows in prose ("Settings → Shop"), bullets, the 3D signs' logo glyph. */
-export const KEEP = ['→', '←', '↔', '⇄', '•', '·', '…', '◆'];
+export const KEEP = ['→', '←', '↔', '⇄', '•', '·', '…', '◆', '♥', '♡'];   // (♥♡: a fox's trust, render/fox-play.js)
 
 const TONES = { good: 1, bad: 1, gold: 1, dim: 1 };
 /** SVG markup for an icon (empty for an unknown name). */

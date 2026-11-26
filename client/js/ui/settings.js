@@ -81,7 +81,7 @@ export function open(a, want = 'display') {
     ({
       display: displayTab, sound: soundTab, player: playerTab, account: accountTab, settings: generalTab,
       users: usersTab, invites: invitesTab, permissions: permissionsTab, audit: auditTab,
-      connections: connectionsTab, agents: (d2, b) => agentSlotsTab(d2, b, app), voice: voiceTab, data: dataTab, residents: residentsTab(app), promo: promoTab, economy: econAdminTab, freewill: freeWillAndMindTab, limits: agentLimitsTab, radio: radioTab, licence: licenceTab, about: aboutTab,
+      connections: connectionsTab, agents: (d2, b) => agentSlotsTab(d2, b, app), voice: voiceTab, data: dataTab, residents: residentsTab(app), promo: promoTab, economy: econAdminTab, freewill: freeWillAndMindTab, limits: agentLimitsTab, radio: (d2, b) => radioTab(d2, b, { app }), licence: licenceTab, about: aboutTab,
     })[k](d, body);
   };
   d.q('.st-tabs').onclick = e => { const b = e.target.closest('.tab'); if (b) show(b.dataset.tab); };

@@ -48,6 +48,7 @@ export function init(a) {
   bus.on('msg:radio', m => {
     if (m.stations) setStations(m.stations);
     if (m.brk) R.breaks.set(m.brk.key, m.brk);
+    if (m.drop) R.breaks.delete(m.drop);   // (a break that no longer fits its station's songs: made again — server/radio/radio.js fits)
     paint();
   });
   a.radio = {
@@ -210,6 +211,8 @@ function hostBreak(st, t) {
   if (brk) return;
   for (const b of R.breaks.values()) {
     if (b.station !== st.id || b.played) continue;
+    // (written to introduce another song than the one now playing — the station's songs changed since: not this one's)
+    if (b.next && cur?.kind === 'song' && cur.track?.id && cur.track.id !== b.next) continue;
     const into = t - b.at, L = breakLines(b);
     if (into < -0.2 || into > breakSeconds(b) - 1) continue;
     const i = L.findIndex(l => into < l.t1); if (i < 0) continue;

@@ -45,6 +45,10 @@ can do — an item, a venue or a module added later is available to them the day
     as barista, chef, server, cashier or trainer played as a game, paid by the jobs core: `server/play/work-play.js`),
     `airport` (into its owner's aircraft with them; a ring course flown by its autopilot, its aircraft seen by everyone:
     `server/play/flight-crew.js`, `shared/autopilot.js`). A module added later brings its own source the same way.
+  - `animals` — playing with a playful animal near it outdoors, as a player does with E (the foxes: pet, a treat, a
+    stick to fetch, tag, bye — `server/interactions/sources/animals.js`, docs/features/foxes.md): the act goes to the
+    same `Wildlife.interact` a player's does; the fox comes over to it, a companion walks up or turns to watch. To the
+    animals an agent's body is a person like a player (noticed, followed, trusted, sent off with bye).
   - `places` — the nearest open places with room, by the routine's own rules (`server/free-will/options.js`): their
     name, how far, about what a visit costs. An agent on its own goes there (the Brain's order: a visit, or `meal`: one
     meal there). Not offered to a companion: going off alone is leaving its owner (they, or it in its chat, let it go

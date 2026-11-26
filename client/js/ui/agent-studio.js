@@ -3,8 +3,8 @@
 // and interactive"). One window per agent for its owner (or an account it is shared with to manage): the agent itself
 // on a stage — its own 3D character, turning, whose head, heart, hands and feet open its Brain, Personality, Money and
 // Free Will — beside every part of it as a tab of its own colour: Overview, Brain, Voice, Awareness, Work, Visitors, Phone,
-// Free Will, Personality, Plans, Memories, People, Places, Money, Activity and Settings. The tabs live in studio-mind.js,
-// studio-life.js, studio-world.js, studio-work.js, studio-visitors.js, studio-phone.js, studio-awareness.js and
+// Free Will, Personality, Plans, Memories, People, Conversations, Places, Money, Activity and Settings. The tabs live in
+// studio-mind.js, studio-life.js, studio-world.js, studio-work.js, studio-visitors.js, studio-conversations.js, studio-phone.js, studio-awareness.js and
 // voice-settings.js; this file holds the window, the stage and the Overview. The server decides who may see and change
 // what (every part answers 404 to anyone else); this only asks and shows what it answers.
 import { S, bus, select } from '../core/state.js';
@@ -31,6 +31,7 @@ import { phoneTab, leavePhone } from './studio-phone.js';
 import { pcTab, leavePc } from './studio-pc.js';
 import { experienceTab } from './studio-experience.js';
 import { awarenessTab } from './studio-awareness.js';
+import { conversationsTab, loadSpoken } from './studio-conversations.js';
 
 let app = null, cur = null, marker = null;
 
@@ -53,6 +54,7 @@ export const TABS = [
   { id: 'plans', label: 'Plans', icon: '📋', color: '#fb923c', pose: ['phone_look', 'phone'], run: plansTab, need: 'agents.profile' },
   { id: 'memories', label: 'Memories', icon: '📖', color: '#e0a96d', pose: ['idle_hold', 'cup'], run: memoriesTab, need: 'agents.profile' },
   { id: 'people', label: 'People', icon: '👥', color: '#facc15', pose: ['talk'], run: peopleTab, need: 'agents.profile' },
+  { id: 'conversations', label: 'Conversations', icon: '💬', color: '#5eead4', pose: ['talk'], run: conversationsTab, need: 'agents.profile' },   // (what it said and heard in person, 2026-11-25)
   { id: 'place', label: 'Places', icon: '🏠', color: '#f87171', pose: ['walk'], run: placeTab, body: true },
   { id: 'money', label: 'Money', icon: '👛', color: '#4ade80', zone: 'hands', pose: ['idle', 'bag'], run: moneyTab },
   { id: 'activity', label: 'Activity', icon: '📜', color: '#60a5fa', pose: ['walk_phone', 'phone'], run: activityTab, need: 'agents.profile' },
@@ -172,6 +174,7 @@ export async function open(id, want = 'overview', { swap = false } = {}) {
     recent: () => (C.i >= 0 ? getJSON(`/api/people/recent?i=${C.i}`) : Promise.resolve(null)),
     work: () => loadWork(id),
     talks: () => loadTalks(id),
+    spoken: () => loadSpoken(id),   // (its conversations in person: ui/studio-conversations.js)
     post: () => getJSON(`/api/agent-posts/spots?agent=${id}`),
     job: () => getJSON(`/api/agent-posts/work?agent=${id}`),   // (its workplace: its owner's pick or its own; ui/studio-world.js placeTab)
     shows: () => getJSON(`/api/radio/shows?agent=${id}`),   // (the shows it was on the air in, 30 days: ui/studio-world.js placeTab)

@@ -176,3 +176,29 @@ Only a page has the world drawn, so the server asks one (`server/senses/eye.js`,
   Hermes get it as one more picture with the message (inline, nothing on disk).
 - Checks: `tests/unit/eyes.test.mjs`, `tests/eyes-http.test.mjs`, `tests/unit/inline-attachments.test.mjs`,
   `tools/eyes-ui-check.mjs` (a real browser: the picture from the agent's own eyes, the page's own view untouched).
+
+## 10. Its conversations in person (Studio → Conversations)
+
+The product owner, 2026-11-25: "add a record of what agents say out loud to each other in person, like a conversation
+history. Add it in the agent's studio." An agent's speech bubbles are seen and gone; what it says and hears in person is
+now kept for its owner (`server/senses/spoken.js`, schema v61 `spoken_lines` + `spoken_ears`).
+
+- **What is kept:** every line an AI agent says out loud (the simulation's `say`: its Mind's speech, Free Will's remarks,
+  a companion's words, a catch announced…) when someone is within earshot, and every line it hears in person — another
+  agent, a resident, a player's proximity chat. Earshot is the diary's own: `HEAR_M` (12 m), the same space (§1). A line
+  said to nobody is not a conversation and is not kept. Each line once, with who said it, where (a floor, a vehicle, a
+  street corner) and who else was near (up to 8); and one row per AI agent it concerns (said or heard).
+- **Not here:** talks through the talk bar are private and stay in Visitors (`server/agent-talk/`); messages between agents
+  at a distance stay in People (`server/agent-social/`).
+- **The tab** (`client/js/ui/studio-conversations.js`): conversations newest first by day — one place without a pause of
+  5 minutes (`SPOKEN.gapMs`), at most 150 lines (`SPOKEN.maxLines`: a whole shift side by side goes on as the next) — each with its place, time, length and who was there; opened, the transcript oldest first,
+  its own lines marked. Search (words, people, places) filters what is loaded; Older conversations reads the next page
+  (whole conversations only); its owner may clear its history (the lines others heard stay theirs).
+- **Kept** `spoken.keepDays` days (Settings, 1–365, 30 by default), tidied hourly. Its owner and accounts it is shared with
+  to manage (`agents.profile`); anyone else 404.
+- **API:** `GET /api/agent-spoken?agent=<id>[&before=<line id>]` → `{ conversations: [{ id, place, started, ended, with,
+  said, heard, lines: [{ id, at, said, speaker: { kind, id, name }, text, near }] }], next, keepDays, total }`;
+  `POST /api/agent-spoken/clear { agent }` → `{ cleared }`.
+- **Checks:** `tests/spoken.test.mjs` (kept once per agent concerned, grouping, pages, tidy, clear; the senses' earshot,
+  nobody near, proximity chat; HTTP owner-only), `tests/dbschema.test.mjs` (v61); lab `tools-bin/talklog-check.mjs`
+  (the tab in a real browser, on a phone too).

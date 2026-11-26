@@ -95,7 +95,8 @@ export class Agents {
     B.forEach((b, i) => { if (b && !b.gone && b.type === 'park') this.parkB[i] = 1; });
   }
   // (a resident not shown as an agent, and not a player: one the crowd may draw — render/characters.js CROWD)
-  setAppearance(i, arr) { if (i < PLAYER_APP) this.ensure(i + 1); this.chars.setAppearance(i, Array.isArray(arr) ? arrToApp(arr) : arr, i < PLAYER_APP && !S.people?.[i]?.v); }
+  // (a player — the page's own at PLAYER_APP, the others after it: player/remote.js — its own model before anyone else's)
+  setAppearance(i, arr) { if (i < PLAYER_APP) this.ensure(i + 1); this.chars.setAppearance(i, Array.isArray(arr) ? arrToApp(arr) : arr, i < PLAYER_APP && !S.people?.[i]?.v, i === PLAYER_APP ? 2 : i > PLAYER_APP ? 1 : 0); }
   /** Lab checks: person i drawn at (x, y, z) on floor ctx, facing yaw, playing clip (anim.js CLIP) at phase ph (0..1;
    *  null: as time goes), whatever their plan says; pose(i, null) lets them go. */
   pose(i, o) { if (o) this.forced.set(i, o); else this.forced.delete(i); }

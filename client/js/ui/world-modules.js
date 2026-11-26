@@ -30,12 +30,15 @@ export function init(a) {
   if (!slot) return;
   slot.appendChild(h(`<div class="wmods">
     <p class="hint">Big play modules that take up world space. Only administrators place them; players find them in the world and play them. Each is joined to the nearest road.</p>
+    <div class="wm-radio hidden"><button type="button" class="btn primary sm wm-rs">📻 Radio Stations</button><span class="hint">Its stations, their songs and the music library, in one place</span></div>
     <div class="wm-kinds"></div>
     <div class="row wm-place hidden"><button type="button" class="btn sm wm-l" title="Turn left (Shift+R)">⟲</button> <button type="button" class="btn sm wm-r" title="Turn right (R)">⟳</button> <button type="button" class="btn sm wm-x">✕ Cancel</button></div>
     <p class="hint wm-stat"></p>
     <h5 class="wm-h hidden">Placed</h5><div class="wm-list"></div></div>`));
   const q = s => slot.querySelector(s);
-  E = { kinds: q('.wm-kinds'), place: q('.wm-place'), stat: q('.wm-stat'), list: q('.wm-list'), head: q('.wm-h') };
+  E = { kinds: q('.wm-kinds'), place: q('.wm-place'), stat: q('.wm-stat'), list: q('.wm-list'), head: q('.wm-h'), radio: q('.wm-radio') };
+  // (MVW Radio's one home, 2026-11-25: its stations — studios in a Radio Station — their songs and the library: ui/radio-stations.js)
+  q('.wm-rs').onclick = () => app.radioStations?.open();
   E.kinds.innerHTML = Object.values(WORLD_KINDS).map(K => `<div class="wm-card"><div><b>${K.icon} ${esc(K.label)}</b> <span class="dim">${esc(K.size)}</span></div>
     <p class="hint">${esc(K.blurb)}</p><button type="button" class="btn primary sm" data-kind="${K.kind}">Place ${esc(K.label.toLowerCase())}</button></div>`).join('');
   E.kinds.onclick = e => { const b = e.target.closest('[data-kind]'); if (b) start(b.dataset.kind); };
@@ -52,13 +55,15 @@ function say(t, bad = false) { E.stat.textContent = t; E.stat.classList.toggle('
 function list() {
   const L = modulesOf(S.world);
   E.head.classList.toggle('hidden', !L.length);
+  E.radio.classList.toggle('hidden', !can());
   E.list.innerHTML = L.map(m => `<div class="ditem" data-m="${esc(m.id)}">${WORLD_KINDS[m.kind]?.icon || '🌍'} ${esc(m.name)}
-    <span class="row"><button type="button" class="btn sm" data-go="1">👁 Go to</button>${can() ? ' <button type="button" class="btn sm" data-move="1">✥ Move</button> <button type="button" class="btn sm" data-road="1" title="Lay its access road again: square out of its entrance, round to the nearest road">🛣 Road</button> <button type="button" class="btn sm" data-rename="1">✏️ Rename</button> <button type="button" class="btn sm danger" data-del="1">Remove</button>' : ''}</span></div>`).join('');
+    <span class="row"><button type="button" class="btn sm" data-go="1">👁 Go to</button>${m.kind === 'radio' && can() ? ' <button type="button" class="btn sm" data-rs="1" title="Its stations, their songs and the music library">📻 Stations</button>' : ''}${can() ? ' <button type="button" class="btn sm" data-move="1">✥ Move</button> <button type="button" class="btn sm" data-road="1" title="Lay its access road again: square out of its entrance, round to the nearest road">🛣 Road</button> <button type="button" class="btn sm" data-rename="1">✏️ Rename</button> <button type="button" class="btn sm danger" data-del="1">Remove</button>' : ''}</span></div>`).join('');
 }
 async function onList(e) {
   const b = e.target.closest('button'), row = e.target.closest('[data-m]'); if (!b || !row) return;
   const m = modulesOf(S.world).find(x => x.id === row.dataset.m); if (!m) return;
   if (b.dataset.go) { app.cam?.flyTo?.(m.x, m.y, m.z, 900); return; }
+  if (b.dataset.rs) { app.radioStations?.open(); return; }
   if (b.dataset.move) { start(m.kind, m); return; }
   try {
     if (b.dataset.road) {

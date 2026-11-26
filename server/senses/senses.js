@@ -19,6 +19,7 @@ import { Sights, carSights, waterSights } from './sights.js';
 import { mealSeen, foodWords } from './meals.js';
 import { whereOf, sideOf, metres, clean, q, ctxB, spaceOf } from './where.js';
 import { cleanView, viewCaption } from './view.js';
+import { ACTS as FOX_ACTS } from '../../shared/fauna-acts.js';
 
 export const MODES = Object.freeze(['off', 'ask', 'together', 'always']);
 export const MODE_INFO = Object.freeze([
@@ -58,6 +59,9 @@ function actLine(act, now, w = null) {
   return `${label}${place && place !== 'Home' && place !== 'Out of town' && !label.includes(place) ? ` at «${place}»` : ''}`;
 }
 
+/** A fox's act in words (shared/fauna-acts.js: an agent near one sees what it is up to). */
+const FOX_DOING = { sit: 'sitting and watching', bow: 'play-bowing, tail up and wagging', pounce: 'pouncing', hop: 'hopping about excitedly', roll: 'rolling on its back',
+  stretch: 'stretching', dig: 'digging', liedown: 'lying down', sleep: 'curled up asleep', getup: 'getting up', wag: 'wagging its tail', shake: 'shaking itself', tilt: 'cocking its head, curious' };
 /** A wildlife catalogue's plain names (shared/world-config/species: "Wild horses", "Deer", "Wolves"): species id →
  *  { sp, one ("wild horse"), many ("wild horses") }. */
 const SPECIES_WORDS = new WeakMap();
@@ -127,6 +131,7 @@ export class Senses {
     this.radioWords = () => null; // station id → "«MVW 98.4» — Sara on the air" (server/radio/, set by the server)
     this.stats = { ticks: 0, tickMs: 0, tickMaxMs: 0, packs: 0, looks: 0, heard: 0 };
     this.timer = null; this.offs = [];
+    this.spoken = null;           // agents' conversations in person (./spoken.js: the lines kept for their owners), set by the server
   }
 
   // ------------------------------------------------------------------------------------------- its owner's choice
@@ -445,10 +450,14 @@ export class Senses {
     const wt = Number(v?.wt) || 0, info = speciesInfo(W), out = [];
     let hour = 12; try { hour = this.sim()?.hour?.() ?? 12; } catch { /* no clock */ }
     for (const H of v?.herds || []) {
-      let cx = 0, cz = 0, n = 0, near = Infinity, vx = 0, vz = 0, run = 0, walk = 0;
+      let cx = 0, cz = 0, n = 0, near = Infinity, vx = 0, vz = 0, run = 0, walk = 0, act = null;
       for (const m of H.m || []) {
         const [x0, z0, x1, z1, t0, t1, mode] = m, u = t1 > t0 ? Math.min(1, Math.max(0, (wt - t0) / (t1 - t0))) : 1;
-        const px = x0 + (x1 - x0) * u, pz = z0 + (z1 - z0) * u;
+        let px = x0 + (x1 - x0) * u, pz = z0 + (z1 - z0) * u;
+        // (a fox: going round in circles — (x0, z0) the middle, x1 the radius — or at one of its acts: server/world/fox.js)
+        if (mode === 3) { const a = z1 + (m[10] || 0) * (Math.min(wt, t1) - t0); px = x0 + Math.cos(a) * x1; pz = z0 + Math.sin(a) * x1; act ||= u < 1 ? 'tearing round in circles' : null; }
+        else if (m[9]) act ||= FOX_DOING[FOX_ACTS[m[9] - 1]] || null;
+        if (m[11]) act = 'carrying a stick in its mouth';
         cx += px; cz += pz; n++; near = Math.min(near, Math.hypot(px - x, pz - z));
         if (mode && u < 1) { vx += (x1 - x0) / (t1 - t0); vz += (z1 - z0) / (t1 - t0); if (mode === 2) run++; else walk++; }
       }
@@ -456,10 +465,11 @@ export class Senses {
       cx /= n; cz /= n;
       const sp = info.get(H.s), d = Math.hypot(cx - x, cz - z);
       let doing;
-      if (run || walk * 2 >= n) {
+      if (act) doing = act;
+      else if (run || walk * 2 >= n) {
         const sv = Math.hypot(vx, vz), rad = sv > 1e-6 && d > 1 ? ((cx - x) * vx + (cz - z) * vz) / (d * sv) : 0;
         doing = `${run ? 'running' : 'walking'}${rad > 0.5 ? ' away' : rad < -0.5 ? ' towards you' : ''}`;
-      } else doing = !sp?.sp || activeAt(sp.sp, hour) ? 'grazing' : 'resting';
+      } else doing = sp?.sp?.behaviour === 'play' ? 'nosing about' : !sp?.sp || activeAt(sp.sp, hour) ? 'grazing' : 'resting';
       const one = sp?.one || clean(H.s, 30).replace(/-/g, ' '), many = sp?.many || one;
       out.push({ id: H.id, species: H.s, count: n, what: n === 1 ? `${/^[aeiou]/i.test(one) ? 'an' : 'a'} ${one}` : `${n} ${many}`, x: cx, z: cz, d, doing });
     }
@@ -609,7 +619,9 @@ export class Senses {
     // (bounded: the oldest first, those long gone)
     for (const [k, at] of this.saw) { if (this.saw.size <= 1000 || t - at < SAW_MS) break; this.saw.delete(k); }
   }
-  /** A line said out loud by body ev.i (the simulation's 'say'): into the diaries of the AI agents that heard it. */
+  /** A line said out loud by body ev.i (the simulation's 'say'): into the diaries of the AI agents that heard it, and
+   *  into the conversation history (./spoken.js) of each AI agent it concerns — its speaker, when someone was near, and
+   *  every AI agent that heard it. */
   heard(ev) {
     const sim = this.sim();
     if (!sim || !ev || !Number.isInteger(ev.i) || !ev.text) return;
@@ -617,25 +629,64 @@ export class Senses {
     if (!sp?.plan || !who) return;
     const s = evalPlan(sp.plan, sim.now());
     if (s.s && (s.s.flags & F_HIDDEN)) return;
+    const ears = [], near = [];
+    let speaker = null;
     for (const { i, rec } of this.aiBodies()) {
-      if (i === ev.i) { this.note(rec.id, 'said', `You said: ${q(ev.text, 160)}`); continue; }
-      const m = evalPlan(sim.agents[i].plan, sim.now());
-      if (m.ctx !== s.ctx || Math.hypot(m.x - s.x, m.z - s.z) > HEAR_M || (m.ctx >= 0 && spaceOf(sim.world, m.x, m.z, m.ctx) !== spaceOf(sim.world, s.x, s.z, s.ctx))) continue;
+      if (i === ev.i) { this.note(rec.id, 'said', `You said: ${q(ev.text, 160)}`); speaker = rec; continue; }
+      if (!this.within(sim, i, s)) continue;
       this.note(rec.id, 'heard', `${clean(who.name, 40)}: ${q(ev.text, 160)}`);
       this.stats.heard++;
+      ears.push(rec.id); near.push({ kind: 'agent', id: rec.id, name: rec.name || sim.people[i]?.name || '' });
     }
+    if (!this.spoken || (!speaker && !ears.length)) return;
+    // (who else was there: the residents and players within earshot — a line said to nobody is no conversation)
+    const bodies = this.lifeOf?.()?.byAgent;
+    const aiBody = new Set(bodies ? [...bodies.values()] : []);
+    for (let i = 0; i < sim.agents.length && near.length < 12; i++) {
+      if (i === ev.i || aiBody.has(i) || !sim.people[i] || sim.people[i].retired || !sim.agents[i]?.plan) continue;
+      if (this.within(sim, i, s)) near.push({ kind: 'resident', id: i, name: sim.people[i].name || 'Someone' });
+    }
+    for (const p of this.players?.byId?.values() || []) if (near.length < 16 && this.withinP(sim, p, s)) near.push({ kind: 'player', id: p.id, name: clean(p.name, 40) || 'A player' });
+    if (speaker && near.length === 0) return;
+    this.spoken.record({ speaker: speaker ? { kind: 'agent', id: speaker.id, agent: speaker.id, name: speaker.name || who.name } : { kind: 'resident', id: ev.i, name: who.name },
+      text: ev.text, place: this.linePlace(ev.i), ears: speaker ? [speaker.id, ...ears] : ears, near });
   }
-  /** A player said something in proximity chat: the AI agents near them heard it. */
+  /** Where body i is, as a conversation's place (the same words while it stays: a floor, a vehicle, a street corner). */
+  linePlace(i) {
+    let w = null; try { w = whereOf(this.env(), i); } catch { w = null; }
+    if (!w) return '';
+    if (w.car || w.air || w.boat) return clean(w.short, 120);
+    if (w.b >= 0 && w.place) { const Bd = this.sim()?.world?.buildings?.[w.b]; return /^(lobby|hall|ground floor)$/i.test(w.place) && Bd?.name ? `the ${w.place.toLowerCase()} of ${q(Bd.name, 60)}` : q(w.place, 80); }
+    if (w.transit) return clean(w.short, 120);
+    return w.address ? `outside at ${q(w.address, 80)}` : 'outside';
+  }
+  /** Whether body i is within earshot of the point s (an evalPlan): the same space, HEAR_M or closer. */
+  within(sim, i, s) {
+    const m = evalPlan(sim.agents[i].plan, sim.now());
+    if (m.s && (m.s.flags & F_HIDDEN)) return false;
+    return !(m.ctx !== s.ctx || Math.hypot(m.x - s.x, m.z - s.z) > HEAR_M || (m.ctx >= 0 && spaceOf(sim.world, m.x, m.z, m.ctx) !== spaceOf(sim.world, s.x, s.z, s.ctx)));
+  }
+  /** Whether player p is within earshot of the point s. */
+  withinP(sim, p, s) {
+    return !(!p || p.ctx !== s.ctx || Math.hypot(p.x - s.x, p.z - s.z) > HEAR_M || (p.ctx >= 0 && spaceOf(sim.world, p.x, p.z, p.ctx) !== spaceOf(sim.world, s.x, s.z, s.ctx)));
+  }
+  /** A player said something in proximity chat: the AI agents near them heard it (their diaries, their conversations). */
   heardPlayer(p, text) {
     const sim = this.sim();
     if (!sim || !p || !text) return;
+    const ears = [], near = [];
+    let first = -1;
     for (const { i, rec } of this.aiBodies()) {
       const m = evalPlan(sim.agents[i].plan, sim.now());
       if (m.ctx !== p.ctx || Math.hypot(m.x - p.x, m.z - p.z) > HEAR_M || (m.ctx >= 0 && spaceOf(sim.world, m.x, m.z, m.ctx) !== spaceOf(sim.world, p.x, p.z, p.ctx))) continue;
       const own = this.ownerOf(rec) === p.id;
       this.note(rec.id, 'heard', `${clean(p.name, 40)}${own ? ' (your owner)' : ''}: ${q(text, 160)}`);
       this.stats.heard++;
+      ears.push(rec.id); near.push({ kind: 'agent', id: rec.id, name: rec.name || sim.people[i]?.name || '' });
+      if (first < 0) first = i;
     }
+    if (!this.spoken || !ears.length) return;
+    this.spoken.record({ speaker: { kind: 'player', id: p.id, name: clean(p.name, 40) || 'A player' }, text, place: this.linePlace(first), ears, near });
   }
   /** Something happened to a player (a catch landed, a rush done): the AI agents with them saw it. */
   noteNear(account, text, kind = 'activity', o = {}) {

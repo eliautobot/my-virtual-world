@@ -762,3 +762,24 @@
   .lk-modes { display: flex; } .lk-mode { flex: 1; }
   .bd-bar .btn { min-height: 38px; }
 }
+
+/* the Conversations tab (ui/studio-conversations.js): its conversations in person, by day, each a transcript to open */
+.cv-find { margin: 0 0 8px; }
+.cv-find .cv-q { width: 100%; }
+.cv-list { max-height: 520px; }
+.cv-day { list-style: none; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); padding: 8px 4px 2px; }
+.cv-day:first-child { padding-top: 0; }
+.cv-who { display: grid; grid-template-columns: 10px 1fr; align-items: start; gap: 3px 8px; width: 100%; padding: 7px 8px; }
+.cv-who > :not(.vt-car) { grid-column: 2; min-width: 0; }
+.cv-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.cv-top b { font-size: 13px; }
+.cv-with { display: flex; flex-wrap: wrap; gap: 4px; }
+.cv-w { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: color-mix(in srgb, var(--sc) 12%, transparent); border: 1px solid color-mix(in srgb, var(--sc) 30%, var(--line)); }
+.cv-w.dim { background: none; color: var(--dim); }
+.cv-peek { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-m b { display: flex; align-items: baseline; gap: 6px; }
+.cv-m time { font-weight: 400; font-size: 10.5px; color: var(--dim); }
+.cv-m.it b { color: var(--sct, var(--sc)); }
+.cv-more { margin-top: 8px; }
+.cv-keep { margin: 10px 0 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cv-c[hidden], .cv-day[hidden] { display: none; }

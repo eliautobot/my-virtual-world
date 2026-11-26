@@ -1,7 +1,8 @@
 // My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Awareness over HTTP (docs/features/awareness.md §6). An agent's awareness — its mode, and what it would be told right now
 // — and its diary: its owner, or an account it is shared with to manage (agents.mind, as its Mind). Anyone else gets 404.
-// The installation's overview (the diary's size, the tick's time): freewill.admin.
+// The installation's overview (the diary's size, the tick's time): freewill.admin. Its conversations in person
+// (./spoken.js): its owner or its managers (agents.profile).
 import { SensesError, MODE_INFO, tokensOf } from './senses.js';
 
 /**
@@ -52,6 +53,20 @@ export function addSensesRoutes(router, sensesOf, d) {
   router.add({ method: 'GET', path: '/api/awareness/diary', cap: 'agents.mind', handler: run(({ P, url }, S) => {
     const a = mine(P, idOf(url.searchParams.get('agent')));
     return { items: S.diary.read(a.id).reverse() };
+  }) });
+
+  // its conversations in person (./spoken.js; the Studio's Conversations tab): what it said out loud with someone near and
+  // what it heard, grouped, newest first; before: the page's `next`. Its owner may clear them (DELETE).
+  router.add({ method: 'GET', path: '/api/agent-spoken', cap: 'agents.profile', handler: run(({ P, url }, S) => {
+    const a = mine(P, idOf(url.searchParams.get('agent')));
+    if (!S.spoken) throw new SensesError(503, 'not_ready', 'Not ready yet');
+    const before = idOf(url.searchParams.get('before'));
+    return S.spoken.conversations(a.id, { before: Number.isInteger(before) ? before : null });
+  }) });
+  router.add({ method: 'POST', path: '/api/agent-spoken/clear', cap: 'agents.profile', handler: run(({ P, body }, S) => {
+    const a = mine(P, idOf(body?.agent));
+    if (!S.spoken) throw new SensesError(503, 'not_ready', 'Not ready yet');
+    return { cleared: S.spoken.forget(a.id) };
   }) });
 
   router.add({ method: 'GET', path: '/api/awareness/overview', cap: 'freewill.admin', handler: run((_, S) => S.view()) });

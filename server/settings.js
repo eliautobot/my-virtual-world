@@ -485,6 +485,10 @@ export const SETTINGS = Object.freeze([
     path: 'agentLife.activityDays', scope: 'install', tier: 2, type: 'days', default: 7, cap: 'agents.manage', min: 1, max: 90,
     choices: [1, 3, 7, 14, 30, 90], rangeText: 'Keep agents\' activity logs 1 to 90 days', label: 'Agents: keep their activity logs', saved: 'Activity log retention saved',
   },
+  {
+    path: 'spoken.keepDays', scope: 'install', tier: 2, type: 'days', default: 30, cap: 'agents.manage', min: 1, max: 365,
+    choices: [1, 7, 14, 30, 90, 365], rangeText: 'Keep agents\' conversations in person 1 to 365 days', label: 'Agents: keep their conversations in person (Studio → Conversations)', saved: 'Conversation history retention saved',
+  },
   // The agents' PC (docs/features/agent-pc.md §3): the storage each account gets (its agents' and teams' sizes added up and
   // shared), the largest file, how long the trash and old versions are kept. 0 MB for an agent: no limit.
   {

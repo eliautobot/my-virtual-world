@@ -127,3 +127,11 @@
 .mp.sp .sp-show { cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: 0 -4px; } .mp.sp .sp-show:hover, .mp.sp .sp-show.on { background: rgba(255,255,255,.06); }
 .mp.sp .sp-said { margin: 4px 0 2px; padding-left: 8px; border-left: 2px solid var(--sp, #4aa3ff); } .mp.sp .sp-said p { margin: 0 0 3px; } .mp.sp .sp-said b { opacity: .85; }   /* (an opened show: what each said) */
 .mp.sp .rad-st { border-left: 0 !important; padding: 0 !important; background: none !important; }
+
+/* who picks the music (2026-11-25): an AI agent on stage, or the resident band / DJ; the DJ's answers to requests */
+.mp-who-on { font-size: 12px; margin-top: 6px; }
+.mp-who-on.dim { color: var(--dim); }
+.mp-ans { font-size: 12.5px; margin: 4px 0; padding: 6px 8px; border-radius: 8px; background: var(--btn); }
+.mp-ans.ok { color: var(--good, #4ade80); } .mp-ans.no { color: var(--dim); }
+.mp-anss { margin: 4px 0 8px; }
+.mp-note-in { width: 100%; margin: 6px 0; }

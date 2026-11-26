@@ -478,6 +478,51 @@ export class AgentWorld {
 
   // ------------------------------------------------------------------------------------------------ hands
   /** One action: { action: 'do'|'go'|'meet'|'things_to_do'|'use'|'stop'|'say'|'plan'|'plan_done'|'remember', … }. */
+  /** The stage it plays at (act: stage, stage_add, stage_remove, stage_play_request, stage_pass_request). */
+  stageAct(a, b) {
+    const M = this.music, stages = M?.stagesOf?.(a.id) || [];
+    if (!stages.length) throw new AgentApiError(403, 'not_on_stage', 'You don\'t play at a stage (a Lounge Stage or a DJ booth)');
+    const d = stages[0];
+    const run = fn => { try { return fn(); } catch (e) { if (e && e.status && e.code) throw new AgentApiError(e.status, e.code, e.message); throw e; } };
+    switch (b.action) {
+      case 'stage': return M.stageWords(d, a.id);
+      case 'stage_add': return run(() => M.editSet(d.place, a.id, { op: 'add', songs: Array.isArray(b.songs) ? b.songs : [b.song] }));
+      case 'stage_remove': { const id = b.n ? M.setOf(d, a.id)[Number(b.n) - 1] : b.song; return run(() => M.editSet(d.place, a.id, { op: 'remove', song: id })); }
+      case 'stage_play_request': case 'stage_pass_request': return run(() => M.answerAsk(d.place, String(b.request || b.k || ''), { play: b.action === 'stage_play_request', why: String(b.why || '').slice(0, 140) }, a.id));
+    }
+    return null;
+  }
+  /** A host's own station's songs (act: playlist, find_songs, playlist_add, playlist_remove, playlist_move). */
+  playlistAct(a, b) {
+    const R = this.radio;
+    // (the library's search for an agent at a stage that hosts no station)
+    if ((b.action === 'find_songs' || b.action === 'find_albums') && !(R?.hostedBy(a.id)?.length) && this.music?.stagesOf?.(a.id)?.length) {
+      return b.action === 'find_songs' ? { songs: this.music.findSongs(b.text || b.words || '', 20).map(x => ({ id: x.id, title: x.title, artist: x.artist, ...(x.album ? { album: x.album } : {}), genre: x.genre, seconds: Math.round(x.seconds) })) }
+        : { albums: this.music.findAlbums(b.text || b.words || '', 12).map(A => ({ id: A.key, name: A.name, artist: A.artist, year: A.year, songs: A.songs })) };
+    }
+    if (!R) throw new AgentApiError(409, 'no_radio', 'There is no radio in this world');
+    const hosted = R.hostedBy(a.id);
+    if (!hosted.length) throw new AgentApiError(403, 'not_host', 'You don\'t host a radio station that lets its hosts change its songs');
+    const t = String(b.station || '').trim().toLowerCase();
+    const st = (t && hosted.find(x => x.name.toLowerCase() === t || `${x.freq} ${x.band}`.toLowerCase() === t || x.name.toLowerCase().includes(t))) || hosted[0];
+    const me = { agent: a.id, name: a.name };
+    const ids = () => R.playlistOf(st);
+    const songOf = () => { const n = Number(b.n); if (Number.isInteger(n) && n >= 1) { const id = ids()[n - 1]; if (!id) throw new AgentApiError(400, 'bad_n', 'n is a song number from playlist'); return id; } if (!b.song) throw new AgentApiError(400, 'bad_song', 'song (an id from find_songs or playlist) or n (a number from playlist)'); return String(b.song); };
+    const run = change => {
+      try { const r = R.editPlaylist(st.id, change, me); return { ok: true, station: st.name, songs: r.playlist.length, change: { op: r.change.op, titles: r.change.titles, ...(r.change.to != null ? { to: r.change.to + 1 } : {}) } }; }
+      catch (e) { if (e && e.status && e.code) throw new AgentApiError(e.status, e.code, e.message); throw e; }
+    };
+    switch (b.action) {
+      case 'playlist': { const v = R.playlistWords(st, 400), by = R.playlistOf(st); return { ...v, list: v.list.map((x, k) => ({ ...x, id: by[k] })), hosts: hosted.map(x => x.name), note: v.own ? undefined : 'It plays its genres from the library: your first change gives it its own playlist of these songs.' }; }
+      case 'find_songs': { const on = new Set(ids()); return { songs: R.findSongs(b.text || b.words || b.name || '', 20).map(x => ({ id: x.id, title: x.title, artist: x.artist, ...(x.album ? { album: x.album } : {}), genre: x.genre, seconds: Math.round(x.seconds), onStation: on.has(x.id) })) }; }
+      case 'find_albums': return { albums: R.findAlbums(b.text || b.words || b.name || '', 12).map(A => ({ id: A.key, name: A.name, artist: A.artist, year: A.year, songs: A.songs.length })) };
+      case 'playlist_add_album': { const A = R.findAlbums('', 1000).find(x => x.key === String(b.album || '')); if (!A) throw new AgentApiError(404, 'no_album', 'album is an id from find_albums'); const on = new Set(ids()), add = A.songs.filter(id => !on.has(id)); if (!add.length) throw new AgentApiError(409, 'already', 'That album is on the station already'); return run({ op: 'add', songs: add }); }
+      case 'playlist_add': return run({ op: 'add', song: String(b.song || '') });
+      case 'playlist_remove': return run({ op: 'remove', song: songOf() });
+      case 'playlist_move': { const to = Number(b.to); if (!Number.isInteger(to) || to < 1) throw new AgentApiError(400, 'bad_to', 'to is a place in the playlist (1 is first)'); return run({ op: 'move', song: songOf(), to: to - 1 }); }
+    }
+    return null;
+  }
   async act(slot, body) {
     const b = body && typeof body === 'object' ? body : {};
     this.rate(slot);
@@ -646,12 +691,18 @@ export class AgentWorld {
         const p = found.place;
         return S.invite(a.id, b.to, { venue: { b: p.venue.b, f: p.venue.f, kind: p.kind, name: p.name }, atWorld: at.world, stayMinutes: b.minutes, note: b.note });
       }
+      // the songs of the radio station it hosts (2026-11-25: hosts change their station's playlist; placing or removing a
+      // station stays its administrators'): server/radio/radio.js decides — a host of it, the station letting its hosts,
+      // a few dozen changes a day — and logs each change for its administrators and its owner, who can undo it
+      // the stage it plays at (a Lounge Stage, the DJ booth — 2026-11-25): its set and the guests' requests
+      case 'stage': case 'stage_add': case 'stage_remove': case 'stage_play_request': case 'stage_pass_request': return this.stageAct(a, b);
+      case 'playlist': case 'find_songs': case 'find_albums': case 'playlist_add': case 'playlist_add_album': case 'playlist_remove': case 'playlist_move': return this.playlistAct(a, b);
       case 'answer': return this.social().answer(a.id, Number(b.id), b.yes === true || b.yes === 'yes' || b.yes === 'true');
       case 'cancel': return this.social().cancel(a.id, Number(b.id));
       case 'unfriend': return this.social().unfriend(a.id, b.name, { by: 'agent' });
       case 'block': return this.social().block(a.id, b.name, true, { by: 'agent' });
       case 'unblock': return this.social().block(a.id, b.name, false, { by: 'agent' });
-      default: throw new AgentApiError(400, 'bad_action', 'action is one of: do, go, meet, stop, say, plan, plan_done, remember, about, plans, memories, conversation, friends, whereis, message, invite, answer, cancel, unfriend, block, unblock');
+      default: throw new AgentApiError(400, 'bad_action', 'action is one of: do, go, meet, stop, say, plan, plan_done, remember, about, plans, memories, conversation, friends, whereis, message, invite, answer, cancel, unfriend, block, unblock, playlist, find_songs, find_albums, playlist_add, playlist_add_album, playlist_remove, playlist_move, stage, stage_add, stage_remove, stage_play_request, stage_pass_request');
     }
   }
 }

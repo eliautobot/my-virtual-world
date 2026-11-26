@@ -26,6 +26,31 @@ const TOOLS = {
   // (a trade of its own — 2026-11-20, "companions should trade themselves too": its owner, or another agent of its owner's)
   offer_trade: { about: '{"tool":"offer_trade","to":"<my owner, or another agent of my owner\'s>","give":[{"item":"<a thing I HOLD>","n":1}],"want":[{"item":"<a thing THEY hold>","n":1}],"vc":0,"wantVc":0,"note":"why, in a few words"} — propose a trade (they see it and accept or decline; nothing changes hands until they do; give or want may be empty, vc/wantVc are VC)' },
 };
+// (the station it hosts — 2026-11-25, the product owner: "the agents should only be able to modify the songs playlist. They
+//  cannot create or delete their own radio station": its songs, from the music library; server/radio/radio.js editPlaylist
+//  decides — a host of it, the station letting its hosts, a few dozen changes a day — and logs each change for its
+//  administrators and its owner, who can undo it)
+const RADIO_TOOLS = {
+  playlist: { look: true, radio: true, about: '{"tool":"playlist"} — the songs on the radio station I host, numbered, in its order (add "station":"<name>" if I host more than one)' },
+  find_songs: { look: true, radio: true, about: '{"tool":"find_songs","words":"<title, artist or genre>"} — songs in the city\'s music library I could add to my station (S1, S2…)' },
+  playlist_add: { radio: true, about: '{"tool":"playlist_add","song":"S1"} — add a song "find_songs" listed to my station\'s playlist' },
+  find_albums: { look: true, radio: true, about: '{"tool":"find_albums","words":"<album or artist>"} — albums in the city\'s music library (A1, A2…)' },
+  playlist_add_album: { radio: true, about: '{"tool":"playlist_add_album","album":"A1"} — add a whole album "find_albums" listed to my station\'s playlist' },
+  playlist_remove: { radio: true, about: '{"tool":"playlist_remove","n":3} — take song number n (from "playlist") off my station\'s playlist' },
+  playlist_move: { radio: true, about: '{"tool":"playlist_move","n":3,"to":1} — move song number n of my station\'s playlist to place "to"' },
+};
+Object.assign(TOOLS, RADIO_TOOLS);
+// (the stage it plays at — a Lounge Stage or the DJ booth, 2026-11-25: "if an actual agent is placed on that position,
+//  they can pick and choose what songs to play"; and the guests' requests: server/music/music.js editSet, answerAsk)
+const STAGE_TOOLS = {
+  stage: { look: true, radio: true, about: '{"tool":"stage"} — the stage I play at: my set (numbered), what is on, the guests\' requests waiting (R1…)' },
+  stage_add: { radio: true, about: '{"tool":"stage_add","song":"S1"} — add a song "find_songs" listed to my set at the stage' },
+  stage_add_album: { radio: true, about: '{"tool":"stage_add_album","album":"A1"} — add a whole album "find_albums" listed to my set' },
+  stage_remove: { radio: true, about: '{"tool":"stage_remove","n":3} — take song number n (from "stage") out of my set' },
+  stage_play_request: { radio: true, about: '{"tool":"stage_play_request","r":"R1"} — play a guest\'s request (it goes into my queue)' },
+  stage_pass_request: { radio: true, about: '{"tool":"stage_pass_request","r":"R1","why":"a short friendly reason they read"} — pass on a guest\'s request' },
+};
+Object.assign(TOOLS, STAGE_TOOLS);
 const FOR = { problem: ['flats', 'rent_flat', 'ask_owner', 'offer_trade'], chat: ['flats', 'menu', 'rent_flat', 'buy', 'pay', 'give', 'give_owner', 'offer_trade'] };
 const vc = c => `${(c / 100).toFixed(c % 100 ? 2 : 0)} VC`;
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f«»]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -36,15 +61,24 @@ const q = (s, n = 80) => `«${clean(s, n)}»`;
  * o: { agent, kind: 'problem'|'chat', ctx (mind.js contextOf: places with b and f, peopleRefs), money (mind-money.js),
  *      wallet (money.wallet(...) at the start), people (sim.people), idem (a prefix unique to this thought) }
  */
-export function toolbox({ agent, kind, ctx, money, wallet, people, idem }) {
-  const allowed = new Set(wallet.rules.paused ? [] : wallet.rules.scopes);
-  const names = (FOR[kind] || []).filter(t => !TOOLS[t].scope || allowed.has(TOOLS[t].scope));
+export function toolbox({ agent, kind, ctx, money, wallet, people, idem, radio = null, music = null }) {
+  const allowed = new Set(!wallet || wallet.rules?.paused ? [] : wallet.rules?.scopes || []);
+  const names = (money ? FOR[kind] || [] : []).filter(t => !TOOLS[t].scope || allowed.has(TOOLS[t].scope));
+  // (a radio host's tools in its chats: only while it hosts a station that lets it change its songs)
+  const hosted = kind === 'chat' && radio?.hostedBy ? radio.hostedBy(agent.id) : [];
+  if (hosted.length) names.push(...Object.keys(RADIO_TOOLS));
+  const stages = kind === 'chat' && music?.stagesOf ? music.stagesOf(agent.id) : [];
+  if (stages.length) for (const t of ['find_songs', 'find_albums', ...Object.keys(STAGE_TOOLS)]) if (!names.includes(t)) names.push(t);
+  const lib = radio?.findSongs ? radio : music;   // (the library's search: the radio's, else the music's own)
+  let reqs = [];   // R1 → a request's key (what "stage" listed)
+  const songs = new Map(), albums = new Map();   // S1 → library song id (what find_songs listed); A1 → an album's songs (find_albums)
+  const stationOf = s => { const t = clean(s, 60).toLowerCase(); return (t && hosted.find(st => st.name.toLowerCase() === t || `${st.freq} ${st.band}`.toLowerCase() === t || st.name.toLowerCase().includes(t))) || hosted[0]; };
   const flats = new Map(), items = new Map();       // F1 → listing; I1 → { business, item, label, price }
   const used = [];
   let did = 0, n = 0;
   const placeByName = new Map((ctx.places || []).filter(p => Number.isInteger(p.b)).map(p => [p.name.toLowerCase(), p]));
   const place = s => placeByName.get(clean(s, 80).toLowerCase()) || null;
-  const owner = money.ownerOf(agent.id);
+  const owner = money ? money.ownerOf(agent.id) : null;
   const payee = s => {
     const t = clean(s, 60).toLowerCase();
     if (!t) return null;
@@ -68,7 +102,8 @@ export function toolbox({ agent, kind, ctx, money, wallet, people, idem }) {
     const tool = typeof u?.tool === 'string' ? u.tool : '';
     if (!names.includes(tool)) return { tool: clean(tool, 20) || '?', ok: false, text: 'not done: that is not something I may do now' };
     const T = TOOLS[tool];
-    if (!T.look && did >= MAX_DO) return { tool, ok: false, text: `not done: at most ${MAX_DO} money actions at a time` };
+    if (!T.look && !T.radio && did >= MAX_DO) return { tool, ok: false, text: `not done: at most ${MAX_DO} money actions at a time` };
+    if (T.radio) return radio1(tool, u);
     what = null;
     try {
       switch (tool) {
@@ -152,6 +187,101 @@ export function toolbox({ agent, kind, ctx, money, wallet, people, idem }) {
     }
     return { tool, ok: false, text: 'not done' };
   };
+
+  /** One of the radio host's tools (its station's songs). */
+  function radio1(tool, u) {
+    if (STAGE_TOOLS[tool]) return stage1(tool, u);
+    if ((tool === 'find_songs' || tool === 'find_albums') && !hosted.length) return find1(tool, u, null);
+    const st = stationOf(u.station);
+    if (!st) return { tool, ok: false, text: 'not done: I don\'t host a station that lets me change its songs' };
+    const me = { agent: agent.id, name: agent.name };
+    try {
+      if (tool === 'playlist') {
+        const v = radio.playlistWords(st);
+        return { tool, ok: true, text: `«${clean(v.station, 40)}» ${v.freq}: ${v.songs} songs${v.own ? '' : ' (it plays its genres from the library; my first change gives it its own playlist of these)'}: ${v.list.map(x => `${x.n}. ${q(x.title, 60)}${x.artist ? ` by ${clean(x.artist, 40)}` : ''}`).join('; ')}${v.songs > v.list.length ? ` … and ${v.songs - v.list.length} more` : ''}` };
+      }
+      if (tool === 'find_songs') {
+        const found = radio.findSongs(u.words, 12), on = new Set(radio.playlistOf(st));
+        if (!found.length) return { tool, ok: true, text: 'nothing in the library matches that' };
+        songs.clear();
+        return { tool, ok: true, text: found.map((t, k) => { songs.set(`S${k + 1}`, t.id); return `S${k + 1} ${q(t.title, 60)}${t.artist ? ` by ${clean(t.artist, 40)}` : ''}${t.album ? ` (on ${q(t.album, 50)})` : ''} (${t.genre})${on.has(t.id) ? ' — already on my station' : ''}`; }).join('; ') };
+      }
+      if (tool === 'find_albums') {
+        const found = radio.findAlbums(u.words, 8);
+        if (!found.length) return { tool, ok: true, text: 'no album in the library matches that' };
+        albums.clear();
+        return { tool, ok: true, text: found.map((A, k) => { albums.set(`A${k + 1}`, A); return `A${k + 1} ${q(A.name, 60)} by ${clean(A.artist, 40)}${A.year ? ` (${A.year})` : ''}, ${A.songs.length} songs`; }).join('; ') };
+      }
+      if (tool === 'playlist_add_album') {
+        const A = albums.get(clean(u.album, 8).toUpperCase());
+        if (!A) return { tool, ok: false, text: 'not done: use an album "find_albums" listed (A1…)' };
+        const on = new Set(radio.playlistOf(st)), add = A.songs.filter(id => !on.has(id));
+        if (!add.length) return { tool, ok: false, text: `not done: ${q(A.name, 60)} is on «${clean(st.name, 40)}» already` };
+        const r = radio.editPlaylist(st.id, { op: 'add', songs: add }, me);
+        return { tool, ok: true, text: `done: added ${r.change.songs.length} songs of ${q(A.name, 60)} to «${clean(st.name, 40)}» (${r.playlist.length} songs now)`, say: `Added the album ${q(A.name, 60)} to ${clean(st.name, 40)}'s playlist` };
+      }
+      const ids = radio.playlistOf(st), nth = v => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= ids.length ? ids[n - 1] : null; };
+      let r = null;
+      if (tool === 'playlist_add') {
+        const id = songs.get(clean(u.song, 8).toUpperCase());
+        if (!id) return { tool, ok: false, text: 'not done: use a song "find_songs" listed (S1…)' };
+        r = radio.editPlaylist(st.id, { op: 'add', song: id }, me);
+        return { tool, ok: true, text: `done: added ${q(r.change.titles[0], 60)} to «${clean(st.name, 40)}» (${r.playlist.length} songs now)`, say: `Added ${q(r.change.titles[0], 60)} to ${clean(st.name, 40)}'s playlist` };
+      }
+      if (tool === 'playlist_remove') {
+        const id = nth(u.n); if (!id) return { tool, ok: false, text: 'not done: n is a song number from "playlist"' };
+        r = radio.editPlaylist(st.id, { op: 'remove', song: id }, me);
+        return { tool, ok: true, text: `done: took ${q(r.change.titles[0], 60)} off «${clean(st.name, 40)}» (${r.playlist.length} songs now)`, say: `Took ${q(r.change.titles[0], 60)} off ${clean(st.name, 40)}'s playlist` };
+      }
+      if (tool === 'playlist_move') {
+        const id = nth(u.n), to = Number(u.to); if (!id || !Number.isInteger(to) || to < 1) return { tool, ok: false, text: 'not done: n and to are song numbers from "playlist"' };
+        r = radio.editPlaylist(st.id, { op: 'move', song: id, to: to - 1 }, me);
+        return { tool, ok: true, text: `done: ${q(r.change.titles[0], 60)} is number ${r.change.to + 1} on «${clean(st.name, 40)}» now`, say: `Moved ${q(r.change.titles[0], 60)} to number ${r.change.to + 1} on ${clean(st.name, 40)}` };
+      }
+    } catch (e) {
+      if (e && e.status && e.code) return { tool, ok: false, text: `not done: ${clean(e.message, 160)}` };
+      throw e;
+    }
+    return { tool, ok: false, text: 'not done' };
+  }
+
+  /** The library's search for an agent at a stage (no station of its own). */
+  function find1(tool, u) {
+    if (tool === 'find_albums') {
+      const found = lib.findAlbums(u.words, 8); if (!found.length) return { tool, ok: true, text: 'no album in the library matches that' };
+      albums.clear(); return { tool, ok: true, text: found.map((A, k) => { albums.set(`A${k + 1}`, A); return `A${k + 1} ${q(A.name, 60)} by ${clean(A.artist, 40)}${A.year ? ` (${A.year})` : ''}, ${A.songs.length} songs`; }).join('; ') };
+    }
+    const found = lib.findSongs(u.words, 12); if (!found.length) return { tool, ok: true, text: 'nothing in the library matches that' };
+    songs.clear(); return { tool, ok: true, text: found.map((t, k) => { songs.set(`S${k + 1}`, t.id); return `S${k + 1} ${q(t.title, 60)}${t.artist ? ` by ${clean(t.artist, 40)}` : ''}${t.album ? ` (on ${q(t.album, 50)})` : ''} (${t.genre})`; }).join('; ') };
+  }
+  /** One of the stage's tools. */
+  function stage1(tool, u) {
+    const want = clean(u.stage, 60).toLowerCase(), d = (want && stages.find(x => (music.stageWords(x, agent.id).venue || '').toLowerCase().includes(want))) || stages[0];
+    if (!d) return { tool, ok: false, text: 'not done: I don\'t play at a stage' };
+    try {
+      if (tool === 'stage') {
+        const v = music.stageWords(d, agent.id); reqs = v.requests.map(r => r.k);
+        return { tool, ok: true, text: `${v.stage}${v.venue ? ` at «${clean(v.venue, 50)}»` : ''}${v.performing ? ', I am on now' : ''}${v.now ? `; on now: «${clean(v.now, 60)}»` : ''}. My set (${v.songs} songs${v.own ? '' : ', what the stage plays until I change it'}): ${v.set.map(x => `${x.n}. ${q(x.title, 50)}${x.artist ? ` by ${clean(x.artist, 30)}` : ''}`).join('; ')}${v.songs > v.set.length ? ' …' : ''}. ${v.requests.length ? `Requests: ${v.requests.map(r => `${r.r} ${clean(r.by, 30)} asks for ${q(r.song, 50)}${r.note ? ` ("${clean(r.note, 100)}")` : ''}`).join('; ')}` : 'No requests waiting.'}` };
+      }
+      if (tool === 'stage_add' || tool === 'stage_add_album') {
+        const ids = tool === 'stage_add' ? [songs.get(clean(u.song, 8).toUpperCase())].filter(Boolean) : albums.get(clean(u.album, 8).toUpperCase())?.songs || [];
+        if (!ids.length) return { tool, ok: false, text: `not done: use ${tool === 'stage_add' ? 'a song "find_songs" listed (S1…)' : 'an album "find_albums" listed (A1…)'}` };
+        const r = music.editSet(d.place, agent.id, { op: 'add', songs: ids });
+        return { tool, ok: true, text: `done: added ${r.titles.length === 1 ? q(r.titles[0], 60) : `${r.titles.length} songs`} to my set (${r.songs} now)`, say: `Added ${r.titles.length === 1 ? q(r.titles[0], 60) : `${r.titles.length} songs`} to my set at the stage` };
+      }
+      if (tool === 'stage_remove') {
+        const id = music.setOf(d, agent.id)[Number(u.n) - 1]; if (!id) return { tool, ok: false, text: 'not done: n is a number from "stage"' };
+        const r = music.editSet(d.place, agent.id, { op: 'remove', song: id });
+        return { tool, ok: true, text: `done: took ${q(r.titles[0], 60)} out of my set (${r.songs} now)` };
+      }
+      if (tool === 'stage_play_request' || tool === 'stage_pass_request') {
+        const k = reqs[Number(String(u.r || '').replace(/^R/i, '')) - 1]; if (!k) return { tool, ok: false, text: 'not done: use a request "stage" listed (R1…)' };
+        const r = music.answerAsk(d.place, k, { play: tool === 'stage_play_request', why: clean(u.why, 140) }, agent.id);
+        return { tool, ok: true, text: r.played ? `done: ${q(r.song, 60)} for ${clean(r.by, 30)} is in my queue` : `done: passed on ${q(r.song, 60)} for ${clean(r.by, 30)}`, say: r.played ? `Played ${clean(r.by, 30)}'s request ${q(r.song, 60)}` : `Passed on ${clean(r.by, 30)}'s request` };
+      }
+    } catch (e) { if (e && e.status && e.code) return { tool, ok: false, text: `not done: ${clean(e.message, 160)}` }; throw e; }
+    return { tool, ok: false, text: 'not done' };
+  }
 
   return {
     names,

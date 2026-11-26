@@ -125,3 +125,33 @@ test('someone whose model is still loading is drawn as a loaded one of the same 
   assert.equal(c.standInFor(i('f05')), i('f02'), 'a woman as a woman');
   assert.equal(c.standInFor(i('m10')), i('m03'), 'a man as a man');
 });
+
+test('the page\'s own player\'s body first (2026-11-25: "the player character turns into a different body"): its model starts beside the ones on their way and goes up to the GPU before theirs, even while the pacing holds the others back', async () => {
+  const f = fixture(true), k = f.kinds.indexOf('m22');
+  // (the city's 44 queued, 4 on their way; the page's own player wears m22, near the end of the queue)
+  f.c.setAppearance(5, { char: 'm22', body: 0 }, false, 2);
+  f.c.skip = 50;   // (the pacing holding uploads back: frames came late)
+  let begins = 0;
+  for (; begins < 400 && !f.c.kinds[k]; begins++) { f.c.begin(); await tick(); }
+  assert.ok(f.c.kinds[k], 'its model is in');
+  const at = f.frames.findIndex(x => x.k === k);   // (initKind's k: the model's index)
+  assert.equal(at, 0, `the first model in (${f.frames.map(x => f.kinds[x.k]).slice(0, 5).join(', ')})`);
+  assert.equal(f.frames[at].uploadedBefore, 3, 'its maps and animation on the GPU before it');
+  assert.ok(begins <= 8, `within a few frames, not held by the pacing (${begins})`);
+  assert.ok(f.c.skip > 0, 'the others still paced');
+  // and the rest load as before
+  f.c.skip = 0;
+  for (let i = 0; i < 4000 && !f.c.loaded; i++) { f.c.begin(); await tick(); }
+  assert.equal(f.frames.length, 44, 'all 44 models still load');
+  assert.equal(new Set(f.frames.map(x => x.k)).size, 44, 'each once');
+  assert.equal(f.frames.filter(x => x.k === k).length, 1);
+});
+
+test('another player\'s body (render/player/remote.js): next in the queue, paced like the rest', async () => {
+  const f = fixture(false), K = f.kinds;
+  f.c.setAppearance(6, { char: 'f21', body: 1 }, false, 1);
+  assert.ok(f.c.near[K.indexOf('f21')] >= 1e9, 'ahead of everyone on screen');
+  assert.ok(!f.c.hurry.has(K.indexOf('f21')), 'not hurried past the pacing');
+  f.c.setAppearance(7, { char: 'f20', body: 1 });
+  assert.equal(f.c.near[K.indexOf('f20')], 0, 'a resident: as before');
+});

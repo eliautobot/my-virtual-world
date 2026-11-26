@@ -2,7 +2,7 @@
 
 Generated from the code by `tools/gen-reference-docs.mjs` — do not edit by hand. Proprietary — see [LICENSE](../../LICENSE).
 
-495 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
+513 routes. Each names one capability (see [capabilities](capabilities.md)); *Re-auth*: the password entered within the last 10 minutes. Routes for connected agents (`/api/agent-api/`) authenticate with their own bearer token or signature.
 
 | Method | Path | Capability | Lowest role | Re-auth |
 |---|---|---|---|---|
@@ -97,6 +97,8 @@ Generated from the code by `tools/gen-reference-docs.mjs` — do not edit by han
 | POST | `/api/agent-social/settings` | `agents.profile` | member |  |
 | GET | `/api/agent-social/thread` | `agents.profile` | member |  |
 | GET | `/api/agent-social/threads` | `agents.profile` | member |  |
+| GET | `/api/agent-spoken` | `agents.profile` | member |  |
+| POST | `/api/agent-spoken/clear` | `agents.profile` | member |  |
 | GET | `/api/agent-talk` | `chat.use` | member |  |
 | POST | `/api/agent-talk/block` | `agents.profile` | member |  |
 | GET | `/api/agent-talk/blocks` | `agents.profile` | member |  |
@@ -282,7 +284,10 @@ Generated from the code by `tools/gen-reference-docs.mjs` — do not edit by han
 | GET | `/api/mind/problems` | `agents.mind` | member |  |
 | POST | `/api/mind/think` | `agents.mind` | member |  |
 | GET | `/api/mind/thoughts` | `agents.mind` | member |  |
+| POST | `/api/music/album` | `music.manage` | admin |  |
 | POST | `/api/music/clear` | `music.manage` | admin |  |
+| POST | `/api/music/cover` | `music.upload` | member |  |
+| GET | `/api/music/cover/*` | `world.view` | guest |  |
 | GET | `/api/music/deck` | `world.view` | guest |  |
 | POST | `/api/music/deck` | `music.manage` | admin |  |
 | POST | `/api/music/delete` | `music.upload` | member |  |
@@ -294,6 +299,7 @@ Generated from the code by `tools/gen-reference-docs.mjs` — do not edit by han
 | POST | `/api/music/skip` | `music.manage` | admin |  |
 | GET | `/api/music/state` | `world.view` | guest |  |
 | POST | `/api/music/track` | `music.manage` | admin |  |
+| POST | `/api/music/tracks` | `music.manage` | admin |  |
 | POST | `/api/music/upload` | `music.upload` | member |  |
 | GET | `/api/notifications` | `account.self` | member |  |
 | GET | `/api/notifications/push/key` | `account.self` | member |  |
@@ -385,6 +391,15 @@ Generated from the code by `tools/gen-reference-docs.mjs` — do not edit by han
 | GET | `/api/phone/thread` | `agents.phone` | member |  |
 | GET | `/api/phone/threads` | `agents.phone` | member |  |
 | GET | `/api/phone/voicemail` | `agents.phone` | member |  |
+| POST | `/api/places/message` | `places.review` | member |  |
+| GET | `/api/places/messages` | `places.review` | member |  |
+| POST | `/api/places/messages/delete` | `places.review` | member |  |
+| POST | `/api/places/messages/read` | `places.review` | member |  |
+| GET | `/api/places/place/*` | `world.view` | guest |  |
+| GET | `/api/places/ratings` | `world.view` | guest |  |
+| POST | `/api/places/review` | `places.review` | member |  |
+| POST | `/api/places/review/delete` | `places.review` | member |  |
+| POST | `/api/places/review/hide` | `world.edit` | admin |  |
 | GET | `/api/play` | `world.view` | guest |  |
 | POST | `/api/play/abandon` | `play.use` | member |  |
 | POST | `/api/play/act` | `play.use` | member |  |
@@ -458,6 +473,9 @@ Generated from the code by `tools/gen-reference-docs.mjs` — do not edit by han
 | GET | `/api/radio/admin` | `freewill.admin` | admin |  |
 | POST | `/api/radio/admin` | `freewill.admin` | admin |  |
 | GET | `/api/radio/audio/*` | `world.view` | guest |  |
+| GET | `/api/radio/manage` | `world.view` | guest |  |
+| POST | `/api/radio/playlist` | `world.view` | guest |  |
+| POST | `/api/radio/playlist/undo` | `world.view` | guest |  |
 | GET | `/api/radio/show` | `world.view` | guest |  |
 | GET | `/api/radio/shows` | `agents.profile` | member |  |
 | GET | `/api/radio/state` | `world.view` | guest |  |

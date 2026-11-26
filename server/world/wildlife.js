@@ -15,8 +15,10 @@ import { validateSpecies, activeAt } from '../../shared/species.js';
 import { biome } from '../../shared/biome.js';
 import { gridPads } from '../../shared/island-build.js';
 import { Island } from '../../shared/terrain.js';
+import { Foxes, ACTS } from './fox.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+export { ACTS as FOX_ACTS } from './fox.js';
 export const REGION = 400;          // m: region size
 const WAKE = 650;                   // m from a viewer to a region's centre that keeps it awake
 const SLEEP_AFTER = 90;             // s without viewers before a region sleeps
@@ -58,6 +60,8 @@ export class Wildlife {
     this.regions = new Map();   // key → { key, cx, cz, herds, seen }
     this.t = 0; this.acc = 0; this.version = 0;
     this.stats = { regions: 0, herds: 0, animals: 0, tickMs: 0 };
+    this.foxes = new Foxes();   // the playful ones (behaviour 'play': server/world/fox.js)
+    this.people = [];
   }
   island() {
     const T = this.world.terrain; if (!T) return null;
@@ -96,8 +100,9 @@ export class Wildlife {
     return (this._haunts = { of: I, near, count: { falls: round.falls.length, lake: round.lake.length, river: [...grid.values()].reduce((s, L) => s + L.length, 0) } });
   }
   /** Advance by dt seconds. viewers: [{ x, z }] (players and browsers' cameras); threats: [{ x, z, r }] (people on foot,
-   *  moving cars) that startle herds within their species' flee distance (+ r). */
-  tick(dt, viewers, threats, hour) {
+   *  moving cars) that startle herds within their species' flee distance (+ r); people: [{ id, x, z, name, agent? }] the
+   *  players and the AI agents' bodies on foot (the foxes come to them). */
+  tick(dt, viewers, threats, hour, people = []) {
     const I = this.island(); if (!I || !this.species.length) return;
     this.t += dt; this.acc += dt;
     if (this.acc < TICK) return;
@@ -118,13 +123,81 @@ export class Wildlife {
     }
     for (const [k, R] of this.regions) if (now - R.seen > SLEEP_AFTER) { this.regions.delete(k); this.version++; }
     let herds = 0, animals = 0;
+    this.people = this.foxes.people(people, now); this.hour = hour;
+    const fctx = this.foxCtx(I, threats);
     for (const R of this.regions.values()) for (const H of R.herds) {
       herds++; animals += H.members.length;
       // (one that goes with another's group keeps to its place: the rooster stays by his hens when they move on or run)
       if (H.with) { const O = R.herds.find(h => h.id === H.with); if (O) { H.ax = O.ax; H.az = O.az; } }
-      this.step(I, H, now, threats, hour);
+      if (H.sp.behaviour === 'play') this.foxes.step(H, now, fctx);
+      else this.step(I, H, now, threats, hour);
     }
     this.stats = { regions: this.regions.size, herds, animals, tickMs: Math.round((performance.now() - t0) * 1000) / 1000 };
+  }
+  /** What a fox's mind needs of the world (server/world/fox.js): where it may stand, where the town is, the threats and
+   *  the people, the hour. */
+  foxCtx(I, threats = []) {
+    const town = (x, z) => I.cityDist(x, z) < I.p.plainMargin || I.inTown(x, z);
+    return { dry: (x, z) => dry(I, x, z), town, threats, people: this.people, hour: this.hour ?? 12 };
+  }
+  /** A player's or an agent's act on a fox (the 'fox' message, or an agent's through server/interactions/sources/
+   *  animals.js: pet, treat, fetch, chase, bye): herd id, member k, where they stand (p { id, x, z, agent? }), o { x, z }
+   *  where a stick lands. -> { ok, why?, trust? } */
+  interact(herdId, k, p, act, o = {}) {
+    const I = this.island(); if (!I) return { ok: false, why: 'no land' };
+    const R = this.regions.get(String(herdId).split(':')[0]), H = R?.herds.find(h => h.id === herdId);
+    if (!H || H.sp.behaviour !== 'play' || !Number.isInteger(k)) return { ok: false, why: 'no such fox' };
+    // (the fox knows where they are now, as the tick does)
+    if (!this.people.some(q => q.id === p.id)) this.people = [...this.people, { id: p.id, x: p.x, z: p.z, vx: 0, vz: 0, v: 0, name: p.name, agent: !!p.agent }];
+    const r = this.foxes.interact(H, k, p, act, o, this.t, this.foxCtx(I));
+    if (r.ok) this.version++;
+    return r;
+  }
+  /** Whether a playful animal may go to (x, z) — dry land outside town (where a stick may be thrown). */
+  landable(x, z) {
+    const I = this.island(); if (!I) return false;
+    const c = this.foxCtx(I); return c.dry(x, z) && !c.town(x, z);
+  }
+  /** The playful animals (behaviour 'play': the foxes) within r m of (x, z), nearest first, for someone pid (their
+   *  trust, whether it is busy with them): [{ id (herd), k, sp, x, z, d, act, carry, trust, withThem, asleep }]. */
+  playfulNear(x, z, r = 25, pid = null) {
+    const out = [], now = this.t, ci = Math.floor(x / REGION), cj = Math.floor(z / REGION);
+    for (let i = ci - 1; i <= ci + 1; i++) for (let j = cj - 1; j <= cj + 1; j++) {
+      const R = this.regions.get(`${i},${j}`); if (!R) continue;
+      for (const H of R.herds) {
+        if (H.sp.behaviour !== 'play' || Math.hypot(H.ax - x, H.az - z) > r + 250) continue;
+        H.members.forEach((m, k) => {
+          const p = this.at(m, now), d = Math.hypot(p.x - x, p.z - z); if (d > r) return;
+          const b = m.b, fid = `${H.id}:${k}`;
+          const withThem = pid != null && !!(b && (b.fetch?.pid === pid || m.to?.pid === pid || b.trail?.pid === pid || b.plan?.some(s => s.pid === pid || s.face === pid)));
+          out.push({ id: H.id, k, sp: H.sp, x: p.x, z: p.z, d, act: m.act || '', carry: !!m.carry, asleep: m.act === 'sleep' || m.act === 'liedown',
+            trust: pid != null ? this.foxes.trustOf(pid, fid, now) : 0, withThem });
+        });
+      }
+    }
+    return out.sort((p, q) => p.d - q.d);
+  }
+  /** The fox groups that changed since last asked, for the pages near them at once (not with the next 2 s round):
+   *  [{ x, z, herd }] in view()'s form. */
+  takeChanged() {
+    const D = this.foxes.dirty; if (!D.size) return [];
+    const out = [...D].map(H => ({ x: H.ax, z: H.az, herd: this.herdView(H) }));
+    D.clear();
+    return out;
+  }
+  /** A herd as the pages get it: { id, s (species), m: [[x, z, x1, z1, t0, t1, mode, yaw, col], …] }; a fox's members
+   *  also [.., act (ACTS index + 1, 0 none), arg (an orbit's turn rate), carry (1: the stick in its mouth)] with mode 3 an
+   *  orbit, and its group's stick k: [state (1 flying, 2 on the ground, 3 carried), x0, z0, x, z, t0, t1, carrier]. */
+  herdView(H) {
+    const r2 = v => Math.round(v * 100) / 100, fox = H.sp.behaviour === 'play';
+    const out = { id: H.id, s: H.sp.id, m: H.members.map(m => {
+      const a = [r2(m.x), r2(m.z), r2(m.x1), r2(m.z1), r2(m.t0), r2(m.t1), m.mode === 'walk' ? 1 : m.mode === 'run' ? 2 : m.mode === 'orbit' ? 3 : 0, r2(m.yaw), m.col];
+      if (fox) a.push(m.act ? ACTS.indexOf(m.act) + 1 : 0, Math.round((m.arg || 0) * 1000) / 1000, m.carry ? 1 : 0);
+      return a;
+    }) };
+    const S = H.fox?.stick;
+    if (fox && S) out.k = [S.state === 'flying' ? 1 : S.state === 'ground' ? 2 : 3, r2(S.x0), r2(S.z0), r2(S.x), r2(S.z), r2(S.t0), r2(S.t1), S.by];
+    return out;
   }
   /** A region's herds, from its habitats, the species' densities and the seed (the same every time it wakes). */
   wake(I, i, j, now) {
@@ -200,8 +273,8 @@ export class Wildlife {
     }
     return R;
   }
-  /** Where a member is now (on its segment). */
-  at(m, now) { const u = m.t1 > m.t0 ? Math.min(1, Math.max(0, (now - m.t0) / (m.t1 - m.t0))) : 1; return { x: m.x + (m.x1 - m.x) * u, z: m.z + (m.z1 - m.z) * u }; }
+  /** Where a member is now (on its segment; a fox may be going round a circle). */
+  at(m, now) { if (m.mode === 'orbit') return Foxes.at(m, now); const u = m.t1 > m.t0 ? Math.min(1, Math.max(0, (now - m.t0) / (m.t1 - m.t0))) : 1; return { x: m.x + (m.x1 - m.x) * u, z: m.z + (m.z1 - m.z) * u }; }
   /** Plans for a herd: take fright, or give members whose segment ended their next rest or walk. */
   step(I, H, now, threats, hour) {
     const sp = H.sp, awake = activeAt(sp, hour);
@@ -258,12 +331,12 @@ export class Wildlife {
   }
   /** The herds within SEND_R of (x, z), for one browser: { wt (s, wildlife clock), herds: [{ id, s (species), m: [[x, z, x1, z1, t0, t1, mode, yaw, col], …] }] }. */
   view(x, z) {
-    const herds = [], r = Math.ceil(SEND_R / REGION), ci = Math.floor(x / REGION), cj = Math.floor(z / REGION), r2 = v => Math.round(v * 100) / 100;
+    const herds = [], r = Math.ceil(SEND_R / REGION), ci = Math.floor(x / REGION), cj = Math.floor(z / REGION);
     for (let i = ci - r; i <= ci + r; i++) for (let j = cj - r; j <= cj + r; j++) {
       const R = this.regions.get(`${i},${j}`); if (!R) continue;
       for (const H of R.herds) {
         if (Math.hypot(H.ax - x, H.az - z) > SEND_R) continue;
-        herds.push({ id: H.id, s: H.sp.id, m: H.members.map(m => [r2(m.x), r2(m.z), r2(m.x1), r2(m.z1), r2(m.t0), r2(m.t1), m.mode === 'walk' ? 1 : m.mode === 'run' ? 2 : 0, r2(m.yaw), m.col]) });
+        herds.push(this.herdView(H));
       }
     }
     return { wt: Math.round(this.t * 100) / 100, herds };

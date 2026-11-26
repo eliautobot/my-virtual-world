@@ -4,7 +4,7 @@
 // voice speaks, breaks a day).
 import fs from 'node:fs';
 
-/** @param router @param d { radio, agents, audit? } */
+/** @param router @param d { radio, agents, perms, audit? } */
 export function addRadioRoutes(router, d) {
   const R = d.radio;
   const wrap = fn => async ctx => { try { return await fn(ctx); } catch (e) { if (e.status && e.code) return { status: e.status, json: { error: e.message, code: e.code } }; throw e; } };
@@ -25,6 +25,23 @@ export function addRadioRoutes(router, d) {
     const id = Number(url.searchParams.get('agent')), a = Number.isInteger(id) && id > 0 ? d.agents?.get(id) : null;
     if (!a || !P.account || !(d.agents.isOwner(P, a) || d.agents.canManage(P, a))) return { status: 404, json: { error: 'No such agent', code: 'not_found' } };
     return { json: { shows: R.showsOf(a.id) } };
+  }) });
+  // the Radio Stations window (2026-11-25, client/js/ui/radio-stations.js): every station for an administrator; for anyone
+  // else, the stations one of whose hosts they own — with its songs and its changes. A station's songs are changed by its
+  // administrators, its hosts' owners and (server/mind/tools.js, server/agent-world.js) its hosts themselves.
+  const whoOf = P => ({ admin: !!d.perms?.allowed(P, 'freewill.admin'), account: P.account ? Number(P.account.id) : null, name: P.account?.displayName || P.account?.login || '' });
+  router.add({ method: 'GET', path: '/api/radio/manage', cap: 'world.view', handler: wrap(async ({ P }) => ({ json: P.account ? R.manageView(whoOf(P)) : { admin: false, stations: [] } })) });
+  router.add({ method: 'POST', path: '/api/radio/playlist', cap: 'world.view', handler: wrap(async ({ P, body }) => {
+    if (!P.account) return { status: 401, json: { error: 'Sign in first', code: 'auth' } };
+    const b = body || {}, r = R.editPlaylist(String(b.station || ''), { op: b.op, song: b.song, songs: b.songs, at: b.at, to: b.to, mode: b.mode }, whoOf(P));
+    d.audit?.log('radio.playlist', { actor: { id: P.account.id, login: P.account.login ?? null }, detail: { station: r.station, op: r.change.op, songs: r.change.songs || null } });
+    return { json: r };
+  }) });
+  router.add({ method: 'POST', path: '/api/radio/playlist/undo', cap: 'world.view', handler: wrap(async ({ P, body }) => {
+    if (!P.account) return { status: 401, json: { error: 'Sign in first', code: 'auth' } };
+    const r = R.undoPlaylist(String(body?.station || ''), String(body?.change || ''), whoOf(P));
+    d.audit?.log('radio.playlist', { actor: { id: P.account.id, login: P.account.login ?? null }, detail: { station: r.station, op: 'undo', of: body?.change } });
+    return { json: r };
   }) });
   router.add({ method: 'GET', path: '/api/radio/admin', cap: 'freewill.admin', handler: wrap(async () => ({ json: R.adminView() })) });
   router.add({ method: 'POST', path: '/api/radio/admin', cap: 'freewill.admin', handler: wrap(async ({ P, body }) => {

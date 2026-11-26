@@ -106,6 +106,7 @@ Changed in Settings by an account holding the capability named; *install* settin
 | `voice.perMinute` | install | enum | 60 | `freewill.admin` | Voice: most requests one account makes in a minute — Voice mode speaks an answer in a few pieces and hears each turn: a conversation makes about 10 to 20 a minute. |
 | `voice.dailyUsd` | install | enum | 20 | `freewill.admin` | Voice: most the installation's voice may spend in a day, all accounts together (US$) — A safety limit; when it is reached everyone hears and speaks with the browser's own voice until midnight UTC. |
 | `agentLife.activityDays` | install | days | 7 | `agents.manage` | Agents: keep their activity logs |
+| `spoken.keepDays` | install | days | 30 | `agents.manage` | Agents: keep their conversations in person (Studio → Conversations) |
 | `pc.agentMB` | install | number | 200 | `agents.manage` | Agents' PC: storage for each agent (MB, shared by the account; 0 = no limit) |
 | `pc.teamMB` | install | number | 500 | `agents.manage` | Agents' PC: storage for each team (MB, shared by the account) |
 | `pc.fileMB` | install | number | 25 | `agents.manage` | Agents' PC: the largest file (MB) |

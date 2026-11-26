@@ -1,0 +1,302 @@
+{
+ "v": 1,
+ "model": "fox",
+ "rig": "mvw-quadruped-v2.1",
+ "source": "Tripo Studio (bee4e256-ad2e-4b20-9210-36876c89a627); rig fitted to the mesh (tools/animals/quad_rig.py); motion v2: gaits from its footfalls with planted feet pinned and strides matched to its speeds, a standing/grazing loop with feet pinned (tools/animals/gait2.py, rest2.py); its play clips keyed by hand on the rig (tools/animals/fox_play.py)",
+ "feet": {
+  "LF": [
+   13,
+   [
+    0.2217,
+    0.0,
+    -0.124
+   ]
+  ],
+  "RF": [
+   24,
+   [
+    0.2386,
+    0.0,
+    0.1083
+   ]
+  ],
+  "LH": [
+   18,
+   [
+    -0.214,
+    0.0,
+    -0.1386
+   ]
+  ],
+  "RH": [
+   29,
+   [
+    -0.1964,
+    0.0,
+    0.1686
+   ]
+  ]
+ },
+ "height": 0.648,
+ "bones": [
+  "hips",
+  "spine1",
+  "spine2",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "scap.L",
+  "shoulder.L",
+  "elbow.L",
+  "knee.L",
+  "ffet.L",
+  "fhoof.L",
+  "hip.L",
+  "stifle.L",
+  "hock.L",
+  "hfet.L",
+  "hhoof.L",
+  "scap.R",
+  "shoulder.R",
+  "elbow.R",
+  "knee.R",
+  "ffet.R",
+  "fhoof.R",
+  "hip.R",
+  "stifle.R",
+  "hock.R",
+  "hfet.R",
+  "hhoof.R",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "tail5"
+ ],
+ "lods": [
+  {
+   "verts": 9015,
+   "tris": 14000,
+   "pos": 0,
+   "nrm": 108180,
+   "uv": 216360,
+   "skin": 288480,
+   "weight": 324540,
+   "index": 360600,
+   "indexType": "u16",
+   "min": [
+    -0.6650000214576721,
+    0.0,
+    -0.17299999296665192
+   ],
+   "max": [
+    0.4178999960422516,
+    0.6482999920845032,
+    0.2004999965429306
+   ]
+  },
+  {
+   "verts": 3611,
+   "tris": 5000,
+   "pos": 444600,
+   "nrm": 487932,
+   "uv": 531264,
+   "skin": 560152,
+   "weight": 574596,
+   "index": 589040,
+   "indexType": "u16",
+   "min": [
+    -0.663100004196167,
+    0.0,
+    -0.1728000044822693
+   ],
+   "max": [
+    0.4178999960422516,
+    0.6482999920845032,
+    0.19859999418258667
+   ]
+  },
+  {
+   "verts": 1372,
+   "tris": 1496,
+   "pos": 619040,
+   "nrm": 635504,
+   "uv": 651968,
+   "skin": 662944,
+   "weight": 668432,
+   "index": 673920,
+   "indexType": "u16",
+   "min": [
+    -0.6503999829292297,
+    0.00039999998989515007,
+    -0.1728000044822693
+   ],
+   "max": [
+    0.4138000011444092,
+    0.6482999920845032,
+    0.19859999418258667
+   ]
+  }
+ ],
+ "lodDist": [
+  35,
+  90
+ ],
+ "anim": {
+  "offset": 682896,
+  "frames": 1092,
+  "bones": 35
+ },
+ "clips": {
+  "rest": {
+   "start": 0,
+   "frames": 240,
+   "fps": 15.0
+  },
+  "walk": {
+   "start": 240,
+   "frames": 48,
+   "fps": 92.253,
+   "stride": 0.5575
+  },
+  "trot": {
+   "start": 288,
+   "frames": 48,
+   "fps": 125.689,
+   "stride": 0.8865
+  },
+  "run": {
+   "start": 336,
+   "frames": 36,
+   "fps": 151.579,
+   "stride": 1.6964
+  },
+  "sit": {
+   "start": 372,
+   "frames": 90,
+   "fps": 15.0,
+   "loop": true,
+   "len": 6.0
+  },
+  "bow": {
+   "start": 462,
+   "frames": 48,
+   "fps": 20.0,
+   "loop": true,
+   "len": 2.4
+  },
+  "pounce": {
+   "start": 510,
+   "frames": 48,
+   "fps": 30.0,
+   "loop": false,
+   "len": 1.6
+  },
+  "hop": {
+   "start": 558,
+   "frames": 36,
+   "fps": 30.0,
+   "loop": true,
+   "len": 1.2
+  },
+  "roll": {
+   "start": 594,
+   "frames": 96,
+   "fps": 24.0,
+   "loop": false,
+   "len": 4.0
+  },
+  "stretch": {
+   "start": 690,
+   "frames": 60,
+   "fps": 20.0,
+   "loop": false,
+   "len": 3.0
+  },
+  "dig": {
+   "start": 750,
+   "frames": 40,
+   "fps": 20.0,
+   "loop": true,
+   "len": 2.0
+  },
+  "liedown": {
+   "start": 790,
+   "frames": 32,
+   "fps": 20.0,
+   "loop": false,
+   "len": 1.6
+  },
+  "sleep": {
+   "start": 822,
+   "frames": 96,
+   "fps": 12.0,
+   "loop": true,
+   "len": 8.0
+  },
+  "getup": {
+   "start": 918,
+   "frames": 32,
+   "fps": 20.0,
+   "loop": false,
+   "len": 1.6
+  },
+  "wag": {
+   "start": 950,
+   "frames": 40,
+   "fps": 20.0,
+   "loop": true,
+   "len": 2.0
+  },
+  "shake": {
+   "start": 990,
+   "frames": 42,
+   "fps": 30.0,
+   "loop": false,
+   "len": 1.4
+  },
+  "tilt": {
+   "start": 1032,
+   "frames": 60,
+   "fps": 20.0,
+   "loop": true,
+   "len": 3.0
+  }
+ },
+ "textures": {
+  "color": "fox-color.jpg",
+  "mask": "fox-mask.png"
+ },
+ "refLum": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "refLumLinear": {
+  "body": 1,
+  "hair": 1,
+  "points": 1
+ },
+ "coats": [
+  {
+   "name": "natural",
+   "body": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "hair": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "legs": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ]
+}

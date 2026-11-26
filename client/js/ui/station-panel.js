@@ -13,7 +13,6 @@ import { esc, h } from '../core/util.js';
 import { auth } from '../core/auth.js';
 import { CATALOG } from '/shared/catalog.js';
 import { stationTracks, onAir, talkOf } from '/shared/radio.js';
-import { radioTab } from './radio-admin.js';
 import { getJSON } from '../core/net.js';
 
 const LIFT = 1.3, _v = new THREE.Vector3();   // (above the seats' ⋯: ui/post-menu.js)
@@ -79,8 +78,16 @@ export function openStation(a, id) {
   document.body.appendChild(panel);
   paintHead(); paintNow(); paintShows();
   const body = panel.querySelector('.sp-body');
-  if (isAdmin()) radioTab(null, body, { only: id }).then(() => paintHead());
-  else body.innerHTML = '<p class="hint">Walk into the studio to hear it, or tune to it on the radio in a car, a boat or an aircraft (Shift+R changes the station).</p>';
+  // (its settings and its songs are in the Radio Stations window, ui/radio-stations.js: administrators, and its hosts' owners for its songs)
+  const listen = '<p class="hint">Walk into the studio to hear it, or tune to it on the radio in a car, a boat or an aircraft (Shift+R changes the station).</p>';
+  body.innerHTML = listen;
+  if (auth.account) getJSON('/api/radio/manage').then(v => {
+    const mine = v.stations?.find(x => x.id === id); if (!mine || !panel || openId !== id) return;
+    body.innerHTML = `${listen}<div class="row wrap" style="gap:6px"><button type="button" class="btn primary sp-manage">${mine.right === 'admin' ? '⚙ Manage the station' : '🎵 Its playlist'}</button><button type="button" class="btn sp-songs">🎵 Its songs</button></div>`;
+    body.querySelector('.sp-manage').onclick = () => { close(); app.radioStations?.open({ station: id, tab: mine.right === 'admin' ? 'overview' : 'playlist' }); };
+    body.querySelector('.sp-songs').onclick = () => { close(); app.radioStations?.open({ station: id, tab: 'playlist' }); };
+    if (mine.right !== 'admin') body.querySelector('.sp-songs').remove();
+  }, () => {});
 }
 function close() { panel?.remove(); panel = null; openId = null; }
 function paintHead() {

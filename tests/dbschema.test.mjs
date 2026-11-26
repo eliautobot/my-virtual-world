@@ -17,7 +17,7 @@ test('the current database goes back to schema 2 with nothing lost, takes an old
   const dir = tempDir('mvw-schema-');
   try {
     let s = openDb(dir);
-    assert.equal(SCHEMA_VERSION, 59);
+    assert.equal(SCHEMA_VERSION, 62);
     assert.ok(MIGRATION_INFO.slice(1).every(m => m.additive), 'every migration after the first only adds things');
     const now = Date.now();
     s.db.prepare(`INSERT INTO accounts (world_id, login, display_name, display_key, role, password_hash, password_changed, created, updated)
@@ -63,6 +63,15 @@ test('the current database goes back to schema 2 with nothing lost, takes an old
     s.db.prepare("INSERT INTO ou_cookbook (world_id, cook_id, item, n, best, first_at, best_at) VALUES (?, 1, 'latte', 3, 96, ?, ?)").run(s.worldId, now, now);
     s.db.prepare("INSERT INTO agent_awareness (world_id, agent_id, mode, updated) VALUES (?, 1, 'always', ?)").run(s.worldId, now);
     s.db.prepare("INSERT INTO group_turns (world_id, owner_id, group_key, speaker, speaker_id, speaker_name, text, at) VALUES (?, 1, '1,2', 'person', 1, 'Owner', 'Hello both', ?)").run(s.worldId, now);
+    s.db.prepare("INSERT INTO place_reviews (world_id, building, author_id, stars, text, created, updated) VALUES (?, 7, 1, 4, 'Great coffee', ?, ?)").run(s.worldId, now, now);
+    s.db.prepare("INSERT INTO place_messages (world_id, building, owner_id, author_id, text, created) VALUES (?, 7, 2, 1, 'Open on Sundays?', ?)").run(s.worldId, now);
+    s.db.prepare("INSERT INTO spoken_lines (world_id, at, speaker_kind, speaker_id, speaker_name, text, place, near_json) VALUES (?, ?, 'agent', '1', 'Milo', 'Nice to meet you', 'in «Café 21»', '[]')").run(s.worldId, now);
+    s.db.prepare('INSERT INTO spoken_ears (world_id, agent_id, line_id, said) VALUES (?, 1, 1, 1)').run(s.worldId);
+    s.db.prepare("UPDATE music_tracks SET album = 'Soundtrack 1', album_artist = 'MVW Originals', track_no = 1, year = 2026 WHERE id = 't1'").run();
+    s.db.prepare("INSERT INTO music_albums (world_id, key, name, artist, cover, cover_status, updated) VALUES (?, 'mvw originals\u0001soundtrack 1', 'Soundtrack 1', 'MVW Originals', 'c.jpg', 'approved', ?)").run(s.worldId, now);
+    assert.deepEqual(downgradeSchema(s.db, 61), { ok: true, from: 62, to: 61, changed: true }, 'what releases before albums need');
+    assert.deepEqual(downgradeSchema(s.db, 60), { ok: true, from: 61, to: 60, changed: true }, 'what releases before agents\' conversations in person need');
+    assert.deepEqual(downgradeSchema(s.db, 59), { ok: true, from: 60, to: 59, changed: true }, 'what releases before places\' reviews need');
     assert.deepEqual(downgradeSchema(s.db, 58), { ok: true, from: 59, to: 58, changed: true }, 'what releases before group conversations need');
     assert.deepEqual(downgradeSchema(s.db, 57), { ok: true, from: 58, to: 57, changed: true }, 'what releases before agents\' awareness need');
     assert.deepEqual(downgradeSchema(s.db, 56), { ok: true, from: 57, to: 56, changed: true }, 'what releases before the sound\'s new defaults need');
@@ -121,8 +130,12 @@ test('the current database goes back to schema 2 with nothing lost, takes an old
       VALUES ((SELECT value FROM meta WHERE key = 'world_id'), 'h1', 1, 'c', ?, ?, ?, NULL, 'old release')`).run(now, now, now);
     assert.equal(raw.prepare('SELECT needs_twofa FROM sessions').get().needs_twofa, 0, 'the added column has a default');
     raw.close();
-    s = openDb(dir);   // the newer release again: migrates 2 -> 59 over the tables that already exist
-    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 59);
+    s = openDb(dir);   // the newer release again: migrates 2 -> 62 over the tables that already exist
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 62);
+    assert.equal(s.db.prepare("SELECT album FROM music_tracks WHERE id = 't1'").get().album, 'Soundtrack 1', 'a song\'s album survived');
+    assert.equal(s.db.prepare('SELECT text FROM spoken_lines').get().text, 'Nice to meet you', 'a line said in person survived');
+    assert.equal(s.db.prepare('SELECT text FROM place_reviews').get().text, 'Great coffee', 'a place\'s review survived');
+    assert.equal(s.db.prepare('SELECT text FROM place_messages').get().text, 'Open on Sundays?', 'a message to an owner survived');
     assert.equal(s.db.prepare('SELECT text FROM group_turns').get().text, 'Hello both', 'a group\'s thread survived');
     assert.equal(s.db.prepare('SELECT best FROM ou_cookbook').get().best, 96, 'the Cookbook survived');
     assert.equal(s.db.prepare('SELECT mode FROM agent_awareness').get().mode, 'always', 'an agent\'s awareness survived');
@@ -168,8 +181,8 @@ test('a migration that changed existing data blocks the downgrade', () => {
     const r = downgradeSchema(s.db, 2, info);
     assert.equal(r.ok, false);
     assert.match(r.why, /migration 3 changed existing data/);
-    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 59, 'nothing changed');
-    assert.deepEqual(downgradeSchema(s.db, 59), { ok: true, from: 59, to: 59, changed: false });
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 62, 'nothing changed');
+    assert.deepEqual(downgradeSchema(s.db, 62), { ok: true, from: 62, to: 62, changed: false });
     s.db.exec('PRAGMA user_version = 99');
     assert.match(downgradeSchema(s.db, 2).why, /newer than this tool knows/);
     s.db.exec('PRAGMA user_version = 42');

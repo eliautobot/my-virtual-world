@@ -5,14 +5,15 @@
 //   id, name; tier 'ambient' (simulated in each browser from the seed and the clock) or 'shared' (on the server);
 //   model: bird | duck | butterfly | firefly | deer | rabbit | fish | cow | sheep | horse | reeffish | turtle | otter |
 //   alligator | beaver | dolphin | seagull | crab | goat | wolf | tiger | shark | whale | marlin | manta | jellyfish | boar |
-//   bull | bear | moose (goat on: drawn from their modelled assets; their built stand-ins borrow a near relative's shape); behaviour: flock | circle | soar | swim (round a lake, or up and down a
+//   bull | bear | moose | fox (goat on: drawn from their modelled assets; their built stand-ins borrow a near relative's shape); behaviour: flock | circle | soar | swim (round a lake, or up and down a
 //   river's slow stretch) | flutter | glow | graze | jump | school (under water, over its reef) | cruise (a slow glide near
 //   the sea floor; breathe: up to the surface every minute or so for a few breaths, as sea turtles) | pod (dolphins: a long loop offshore, surfacing in arcs, now and then a leap) | scuttle (crabs: short
 //   sideways dashes on the sand near the water) | patrol (sharks: alone on a wide, slow loop offshore a few metres
 //   down, the fin now and then cutting the surface; swimDepth [min, max] m sets how deep, leaps: now and then clear of
 //   the water, as a marlin) | roam (whales: a long slow loop, surfacing to breathe and sounding again) | drift
 //   (jellyfish: a bloom drifting near the surface, pulsing) | wade (flamingos: a flock in the shallows off a beach, 10-45 cm
-//   of sea, strolling and feeding);
+//   of sea, strolling and feeding) | play (foxes, shared tier only: a playful mind of its own instead of grazing and
+//   fleeing — it comes to people on foot, follows, plays, fetches, and can be petted and fed: server/world/fox.js);
 //   habitats: forest, meadow, field, beach, shore, rock, snow (the snowfields of the high mountains), lake, river (its
 //   slow, wide stretches: perKm2 per km² of its water), reef (the shallow sea floor), sea (open water 7–60 m deep);
 //   altitude [min, max] (m above the sea; optional: only the parts of its habitats this high, as the white tigers near
@@ -32,8 +33,8 @@
 //   sound: an ambient sound cue (optional);
 //   asset: a modelled animal's manifest (/assets/fauna/<id>/<name>.json, render/fauna-skinned.js; optional — the built
 //   model stands in when it can't load); coats: [{ name, body, hair, legs }] the colours it may wear (optional).
-export const MODELS = ['bird', 'duck', 'butterfly', 'firefly', 'deer', 'rabbit', 'fish', 'cow', 'sheep', 'horse', 'reeffish', 'turtle', 'otter', 'alligator', 'beaver', 'dolphin', 'seagull', 'crab', 'goat', 'wolf', 'tiger', 'shark', 'whale', 'marlin', 'manta', 'jellyfish', 'boar', 'bull', 'bear', 'moose'];
-export const BEHAVIOURS = ['flock', 'circle', 'soar', 'swim', 'flutter', 'glow', 'graze', 'jump', 'school', 'cruise', 'pod', 'scuttle', 'patrol', 'roam', 'drift', 'wade'];
+export const MODELS = ['bird', 'duck', 'butterfly', 'firefly', 'deer', 'rabbit', 'fish', 'cow', 'sheep', 'horse', 'reeffish', 'turtle', 'otter', 'alligator', 'beaver', 'dolphin', 'seagull', 'crab', 'goat', 'wolf', 'tiger', 'shark', 'whale', 'marlin', 'manta', 'jellyfish', 'boar', 'bull', 'bear', 'moose', 'fox'];
+export const BEHAVIOURS = ['flock', 'circle', 'soar', 'swim', 'flutter', 'glow', 'graze', 'jump', 'school', 'cruise', 'pod', 'scuttle', 'patrol', 'roam', 'drift', 'wade', 'play'];
 export const HABITATS = ['forest', 'meadow', 'field', 'beach', 'shore', 'rock', 'snow', 'lake', 'river', 'reef', 'sea'];
 export const HAUNTS = ['falls', 'river', 'lake', 'water'];
 const WEATHER = ['clear', 'partly', 'overcast', 'rain', 'storm', 'fog'];
@@ -70,6 +71,7 @@ export function validateSpecies(s) {
   if (s.joins !== undefined && (typeof s.joins !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(s.joins) || s.tier !== 'shared' || !num(s.joinChance, 0, 1))) out.push('joins: a shared species id, with joinChance 0..1');
   if (!num(s.speed, 0, 60)) out.push('speed (m/s)');
   if (s.behaviour === 'graze' && (!num(s.run, 0, 60) || !num(s.flee, 0, 500))) out.push('grazers need run and flee');
+  if (s.behaviour === 'play' && (s.tier !== 'shared' || !num(s.run, 0, 60))) out.push('play: the shared tier, with run (m/s)');
   // a modelled animal (render/fauna-skinned.js): its baked asset's manifest, and the coats it may wear
   if (s.asset !== undefined && (typeof s.asset !== 'string' || !/^\/assets\/fauna\/[a-z0-9-]+\/[a-z0-9-]+\.json$/.test(s.asset))) out.push('asset: /assets/fauna/<id>/<name>.json');
   const hex = c => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);

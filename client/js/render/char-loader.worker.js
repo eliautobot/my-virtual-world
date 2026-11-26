@@ -42,6 +42,12 @@ self.onmessage = async e => {
       }
       const anim = data ? data.buffer : null;
       self.postMessage({ id, man, bin, anim, applied, rigged }, anim ? [bin, anim] : [bin]);
+    } else if (op === 'bytes') {
+      // a file's bytes as they are (the crowd's library: render/characters.js crowdBin), received here so that tens of MB
+      // arriving never wait on a busy main thread (2026-11-24: on a phone's start-up the crowd's came at a fifth of the
+      // line's speed while the main thread built the city)
+      const buf = await fetch(url).then(ok).then(r => r.arrayBuffer());
+      self.postMessage({ id, buf }, [buf]);
     } else if (op === 'map') {
       const blob = await fetch(url).then(ok).then(r => r.blob());
       const bitmap = await createImageBitmap(blob, size < 2048 ? { ...MAP_OPTS, resizeWidth: size, resizeHeight: size, resizeQuality: 'high' } : MAP_OPTS);

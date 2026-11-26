@@ -65,7 +65,7 @@ test('the DJ joins the hosts on the air: its own brain, named as the DJ, it clos
   const kai = w.asked[3];
   assert.match(kai.system, /^You are Kai Dee \(the DJ\), live on the air/); assert.match(kai.system, /You are the station's DJ at the decks: your part is the music/);
   assert.match(kai.system, /Marco Lane is in the studio too but not on the mic/);
-  assert.match(kai.turns.at(-1).text, /you close the break as the DJ: a last word, then introduce the next song/);
+  assert.match(kai.turns.at(-1).text, /you close the break as the DJ: a last word, then hand over to the music your own way \(the next song is "Song \d+"/);
   assert.match(w.asked[0].system, /Kai Dee is the station's DJ at the decks: the hosts lead the talk/);
   // each knows the others by their part (their history: the talk carries it)
   assert.match(w.asked[0].user, /The DJ Kai Dee: getting to know/); assert.match(kai.user, /Your host Rosa Vega: getting to know/);

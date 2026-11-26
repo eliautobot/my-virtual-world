@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateSpecies } from '../shared/species.js';
+import { ACTS as ACT_CLIPS } from '../shared/fauna-acts.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SP = path.join(ROOT, 'shared/world-config/species');
@@ -67,7 +68,10 @@ for (const sp of species.filter(s => s.asset)) {
       : ['rest', ...({ flock: ['fly', 'glide'], soar: ['fly', 'glide'], circle: ['fly', 'glide'], swim: ['swim'], wade: ['walk'] }[sp.behaviour] || [])];
     for (const k of need) assert.ok(man.clips[k], `clip ${k}`);
     for (const [k, c] of Object.entries(man.clips)) {
-      assert.ok(['rest', 'walk', 'run', 'trot', 'fly', 'glide', 'swim'].includes(k), `a clip the game knows: ${k}`);
+      // (and an animal's own acts, slots 7..: the fox's play, render/fauna-skinned.js ACT_CLIPS — each with its length and
+      // whether it loops)
+      assert.ok(['rest', 'walk', 'run', 'trot', 'fly', 'glide', 'swim', ...ACT_CLIPS].includes(k), `a clip the game knows: ${k}`);
+      if (ACT_CLIPS.includes(k)) assert.ok(typeof c.loop === 'boolean' && Math.abs(c.len - c.frames / c.fps) < 0.01, `${k}: loop and length`);
       assert.ok(c.start >= 0 && c.frames > 1 && c.start + c.frames <= man.anim.frames, `${k} inside the matrix rows`);
       if (['walk', 'run', 'trot', 'swim'].includes(k)) assert.ok(c.stride > 0, `${k} has a stride`);
       if (['fly', 'glide'].includes(k)) assert.ok(c.hz > 0 && c.hz < 12, `${k} has a wingbeat rate`);

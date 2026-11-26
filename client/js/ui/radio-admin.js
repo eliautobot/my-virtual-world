@@ -21,7 +21,15 @@ const LENGTHS = [['short', 'Short (about 30 s)'], ['normal', 'Normal (about a mi
 // A studio's station is set from its studio (2026-10-27, the product owner: "all the settings for that radio station to be
 // through the Station module not on the settings ... as a separate window"): ui/station-panel.js shows radioTab(…, { only })
 // for it; Settings → Radio keeps the stations with no studio, the voice and the breaks a day, and names the studios'.
-export async function radioTab(d, body, { only = null } = {}) {
+export async function radioTab(d, body, { only = null, app = null } = {}) {
+  // (2026-11-25: MVW Radio has one home — the Radio Stations window, ui/radio-stations.js: its stations, their songs, the
+  //  music library and the voice. Settings keeps a way there.)
+  if (!only) {
+    body.innerHTML = `<p class="hint">MVW Radio's stations, their songs and playlists, the music library and the voice of the breaks are all in one place now: the Radio Stations window. It also opens from Edit → World modules (📻 Radio Stations) and from a studio's 📻 in the world.</p>
+      <button type="button" class="btn primary rad-open">📻 Open Radio Stations</button>`;
+    body.querySelector('.rad-open').onclick = () => (app || window.__mvw)?.radioStations?.open();
+    return;
+  }
   let V = null, editing = null;   // the admin view; the station being edited ({...} or 'new')
   const openOnly = () => { const st = V.stations.find(s => s.id === only); if (!st) return; editing = structuredClone(st); for (const fam of editing.families || []) for (const [g, G] of Object.entries(GENRES)) if (G.family === fam && !G.internal && !editing.genres.includes(g)) editing.genres.push(g); editing.families = []; };
   const when = t => t ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';

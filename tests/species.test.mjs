@@ -26,7 +26,7 @@ test('the schema refuses broken entries; hours wrap past midnight', () => {
   assert.ok(validateSpecies({ ...ok, behaviour: 'hunt' }).some(e => e.startsWith('behaviour')));
   assert.ok(validateSpecies({ ...ok, colors: ['red'] }).some(e => e.startsWith('colors')));
   assert.ok(validateSpecies({ ...ok, run: undefined }).length > 0, 'grazers need run and flee');
-  assert.ok(MODELS.length >= 18 && BEHAVIOURS.length === 16);   // (sea and lake life added 2026-10-03: reef fish, turtles, otters, alligators; beavers; 2026-10-04: dolphins (pod), gulls, crabs (scuttle); 2026-11-12: sharks (patrol), whales (roam), jellyfish (drift), flamingos (wade))
+  assert.ok(MODELS.length >= 18 && BEHAVIOURS.length === 17);   // (sea and lake life added 2026-10-03: reef fish, turtles, otters, alligators; beavers; 2026-10-04: dolphins (pod), gulls, crabs (scuttle); 2026-11-12: sharks (patrol), whales (roam), jellyfish (drift), flamingos (wade); 2026-11-24: foxes (play))
   // (2026-11-12: white tigers near the snowy peaks — a snow habitat and an altitude band)
   assert.ok(validateSpecies({ ...ok, habitats: ['snow', 'rock'], altitude: [400, 5000] }).length === 0);
   assert.ok(validateSpecies({ ...ok, altitude: [500, 400] }).some(e => e.startsWith('altitude')));

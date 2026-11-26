@@ -42,7 +42,7 @@ export function addMusicRoutes(router, d) {
   // ------------------------------------------------------------ requests
   router.add({ method: 'POST', path: '/api/music/request', cap: 'music.request', handler: wrap(async ({ P, body }) => {
     if (brake(`r${P.account.id}`)) return { status: 429, json: { error: 'Slow down a little', code: 'slow_down' } };
-    return { json: M.request(me(P), P.account.displayName, body?.place, body?.track) };
+    return { json: M.request(me(P), P.account.displayName, body?.place, body?.track, body?.note) };
   }) });
   router.add({ method: 'POST', path: '/api/music/request/cancel', cap: 'music.request', handler: wrap(async ({ P, body }) => {
     const admin = can(P, 'music.manage');
@@ -68,8 +68,9 @@ export function addMusicRoutes(router, d) {
   // a player's waits for an administrator's review.
   router.add({ method: 'POST', path: '/api/music/upload', cap: 'music.upload', raw: true, handler: wrap(async ({ P, req, url }) => {
     const admin = can(P, 'music.manage'), q = url.searchParams, uid = me(P);
-    if (!admin && brake(`u${uid}`, 60000, 5)) return { status: 429, json: { error: 'Too many songs at once; wait a minute', code: 'slow_down' } };
-    if (!admin && M.pendingOf(uid) >= 10) return { status: 409, json: { error: 'You have 10 songs waiting for review; wait until they are looked at', code: 'too_many_pending' } };
+    // (an album at a time — 2026-11-25: twenty songs at once, then four a minute; at most forty waiting for review)
+    if (!admin && brake(`u${uid}`, 15000, 20)) return { status: 429, json: { error: 'Too many songs at once; wait a minute', code: 'slow_down' } };
+    if (!admin && M.pendingOf(uid) >= 40) return { status: 409, json: { error: 'You have 40 songs waiting for review; wait until they are looked at', code: 'too_many_pending' } };
     if (!admin && q.get('rights') !== '1') return { status: 400, json: { error: 'Confirm the song is yours or you have the rights to share it', code: 'rights_required' } };
     const genre = q.get('genre');
     if (!GENRES[genre] || (GENRES[genre].internal && !admin)) return { status: 400, json: { error: 'Pick one of the genres', code: 'bad_genre' } };
@@ -95,6 +96,7 @@ export function addMusicRoutes(router, d) {
         fs.writeFileSync(dst, buf, { mode: 0o644 });
       }
       const t = M.add({ file, seconds, gain, title: q.get('title'), artist: q.get('artist') || P.account.displayName, genre, explicit: q.get('explicit') === '1',
+        album: q.get('album'), albumArtist: q.get('albumArtist'), trackNo: q.get('track') ? Number(q.get('track')) : null, year: q.get('year') ? Number(q.get('year')) : null,
         uploader: uid, rights: admin ? (q.get('rights') === '1' ? 'Added by an administrator' : '') : 'The uploader confirmed the song is theirs or they have the rights to share it',
         source: admin ? 'library' : 'upload', status: admin ? 'approved' : 'pending' });
       d.audit?.log('music.upload', { actor: { id: uid, login: P.account.login }, detail: { id: t.id, title: t.title, status: t.status } });
@@ -108,8 +110,41 @@ export function addMusicRoutes(router, d) {
   }) });
   router.add({ method: 'POST', path: '/api/music/track', cap: 'music.manage', handler: wrap(async ({ body }) => {
     const patch = {};
-    for (const k of ['title', 'artist', 'genre', 'explicit']) if (body && k in body) patch[k] = body[k];
+    for (const k of ['title', 'artist', 'genre', 'explicit', 'album', 'albumArtist', 'trackNo', 'year']) if (body && k in body) patch[k] = body[k];
     return { json: { track: M.pub(M.edit(body?.id, patch), true) } };
+  }) });
+  // several songs at once (an administrator: their album, its artist, a genre, a year — 2026-11-25)
+  router.add({ method: 'POST', path: '/api/music/tracks', cap: 'music.manage', handler: wrap(async ({ P, body }) => {
+    const patch = {};
+    for (const k of ['artist', 'genre', 'explicit', 'album', 'albumArtist', 'year']) if (body?.patch && k in body.patch) patch[k] = body.patch[k];
+    const out = M.editMany(body?.ids, patch);
+    d.audit?.log('music.edit', { actor: { id: me(P), login: P.account.login }, detail: { ids: out.map(t => t.id), patch } });
+    return { json: { tracks: out.map(t => M.pub(t, true)) } };
+  }) });
+  // an album: renamed (its songs with it), its artist or year (an administrator)
+  router.add({ method: 'POST', path: '/api/music/album', cap: 'music.manage', handler: wrap(async ({ body }) => {
+    const A = M.renameAlbum(body?.key, { ...(body?.name !== undefined ? { name: body.name } : {}), ...(body?.artist !== undefined ? { artist: body.artist } : {}), ...(body?.year !== undefined ? { year: body.year } : {}) });
+    return { json: { album: { key: A.key, name: A.name, artist: A.artist, year: A.year } } };
+  }) });
+  // an album's cover: the image as the body (JPEG, PNG or WebP, up to 3 MB); key in the query. An administrator's at once;
+  // a player's (an album of their own songs) waits for review with them.
+  router.add({ method: 'POST', path: '/api/music/cover', cap: 'music.upload', raw: true, handler: wrap(async ({ P, req, url }) => {
+    const admin = can(P, 'music.manage'), uid = me(P);
+    if (!admin && brake(`c${uid}`, 30000, 6)) return { status: 429, json: { error: 'Too many covers at once; wait a minute', code: 'slow_down' } };
+    const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase(), ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[type];
+    if (!ext) return { status: 415, json: { error: 'A cover is a JPEG, PNG or WebP image', code: 'unsupported_media_type' } };
+    let buf;
+    try { buf = await d.readStream(req, 3 * 1024 * 1024); } catch (e) { return { status: e.status || 400, json: { error: e.status === 413 ? 'A cover is at most 3 MB' : 'The upload failed', code: 'bad_image' } }; }
+    const magic = buf.subarray(0, 12), ok = ext === 'jpg' ? magic[0] === 0xff && magic[1] === 0xd8 : ext === 'png' ? magic.subarray(1, 4).toString() === 'PNG' : magic.subarray(0, 4).toString() === 'RIFF' && magic.subarray(8, 12).toString() === 'WEBP';
+    if (!ok || buf.length < 100) return { status: 400, json: { error: 'That file is not the image it says it is', code: 'bad_image' } };
+    const A = M.setCover(url.searchParams.get('key'), buf, ext, uid, admin);
+    d.audit?.log('music.cover', { actor: { id: uid, login: P.account.login }, detail: { album: A.name, artist: A.artist, status: A.coverStatus } });
+    return { json: { album: { key: A.key, cover: `/api/music/cover/${A.cover}`, coverStatus: A.coverStatus } } };
+  }) });
+  router.add({ method: 'GET', prefix: '/api/music/cover/', cap: 'world.view', handler: wrap(async ({ P, param }) => {
+    const f = M.coverFile(param, me(P), can(P, 'music.manage'));
+    if (!f) return { status: 404, json: { error: 'No such cover', code: 'not_found' } };
+    return { file: { path: f.path, size: f.size }, headers: { 'content-type': f.type, 'cache-control': 'private, max-age=86400' } };
   }) });
   router.add({ method: 'POST', path: '/api/music/review', cap: 'music.manage', handler: wrap(async ({ P, body }) => {
     const t = M.review(body?.id, body?.approve === true, body?.reason);

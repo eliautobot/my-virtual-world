@@ -131,7 +131,7 @@ test('decks and the library outlast a restart', () => {
     R.music.flush();
     const again = new Music({ dbs: R.dbs, dataDir: R.dir, sim: () => R.sim, world: () => R.world, log: { error() {} } });
     assert.equal(again.tracks.get(a.id).title, 'Velvet Hour');
-    assert.deepEqual(again.decks.get('0:1:7').settings, { requests: false, genre: 'jazz', playlist: null });
+    assert.deepEqual(again.decks.get('0:1:7').settings, { requests: false, genre: 'jazz', playlist: null, sets: {} });
     assert.equal(again.decks.get('0:1:9').queue[0].name, 'Ann');
   } finally { R.dbs.db.close(); fs.rmSync(R.dir, { recursive: true, force: true }); }
 });

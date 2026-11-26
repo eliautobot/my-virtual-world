@@ -2636,6 +2636,89 @@ const MIGRATIONS = [
    );
    CREATE INDEX IF NOT EXISTS group_turns_lookup ON group_turns (world_id, owner_id, group_key, id);`,
   },
+  // v60 (reviews and messages on a place's billboard, 2026-11-20 — docs/features/places.md, server/places/): what people
+  // think of a building — one review per account and building (1–5 stars, words optional), shown to everyone; and private
+  // messages to its owner, kept for the account that held it when they were sent (owner_id; NULL: the city's own place,
+  // read by its administrators). hidden: an administrator took a review down (the reason).
+  {
+    additive: true,
+    up: `CREATE TABLE IF NOT EXISTS place_reviews (
+     id INTEGER PRIMARY KEY,
+     world_id TEXT NOT NULL,
+     building INTEGER NOT NULL,
+     author_id INTEGER NOT NULL,
+     stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+     text TEXT NOT NULL DEFAULT '',
+     hidden TEXT,
+     created INTEGER NOT NULL,
+     updated INTEGER NOT NULL,
+     UNIQUE (world_id, building, author_id)
+   );
+   CREATE INDEX IF NOT EXISTS place_reviews_place ON place_reviews (world_id, building, updated);
+   CREATE TABLE IF NOT EXISTS place_messages (
+     id INTEGER PRIMARY KEY,
+     world_id TEXT NOT NULL,
+     building INTEGER NOT NULL,
+     owner_id INTEGER,
+     author_id INTEGER NOT NULL,
+     text TEXT NOT NULL,
+     created INTEGER NOT NULL,
+     read_at INTEGER
+   );
+   CREATE INDEX IF NOT EXISTS place_messages_owner ON place_messages (world_id, owner_id, building, id);`,
+  },
+  // v61 (agents' conversations in person, 2026-11-25 — server/senses/spoken.js, the Studio's Conversations tab): every line
+  // an AI agent said out loud with someone near, or heard in person, kept for its owner (spoken.keepDays). A line once
+  // (spoken_lines: who said it, where, who else was near), and once per AI agent it concerns (spoken_ears: said or heard).
+  {
+    additive: true,
+    up: `CREATE TABLE IF NOT EXISTS spoken_lines (
+     id INTEGER PRIMARY KEY,
+     world_id TEXT NOT NULL,
+     at INTEGER NOT NULL,
+     speaker_kind TEXT NOT NULL,
+     speaker_id TEXT,
+     speaker_name TEXT NOT NULL,
+     text TEXT NOT NULL,
+     place TEXT NOT NULL DEFAULT '',
+     near_json TEXT NOT NULL DEFAULT '[]'
+   );
+   CREATE INDEX IF NOT EXISTS spoken_lines_at ON spoken_lines (world_id, at);
+   CREATE TABLE IF NOT EXISTS spoken_ears (
+     world_id TEXT NOT NULL,
+     agent_id INTEGER NOT NULL,
+     line_id INTEGER NOT NULL,
+     said INTEGER NOT NULL DEFAULT 0,
+     PRIMARY KEY (world_id, agent_id, line_id)
+   );
+   CREATE INDEX IF NOT EXISTS spoken_ears_line ON spoken_ears (world_id, line_id);`,
+  },
+  // v62 (albums, 2026-11-25 — server/music/music.js; the product owner: "organize them as an album ... by artist, album
+  // ... almost like Spotify, YouTube Music"): a song's album, its album's artist, its number on the album and the year;
+  // and each album's own record (by artist and name: its cover image, from the folder uploaded or the songs' own
+  // picture, waiting for an administrator's review when a player's).
+  {
+    additive: true,
+    up: db => {
+      const cols = db.prepare('PRAGMA table_info(music_tracks)').all().map(c => c.name);
+      if (!cols.includes('album')) db.exec('ALTER TABLE music_tracks ADD COLUMN album TEXT');
+      if (!cols.includes('album_artist')) db.exec('ALTER TABLE music_tracks ADD COLUMN album_artist TEXT');
+      if (!cols.includes('track_no')) db.exec('ALTER TABLE music_tracks ADD COLUMN track_no INTEGER');
+      if (!cols.includes('year')) db.exec('ALTER TABLE music_tracks ADD COLUMN year INTEGER');
+      db.exec(`CREATE TABLE IF NOT EXISTS music_albums (
+       world_id TEXT NOT NULL,
+       key TEXT NOT NULL,
+       name TEXT NOT NULL,
+       artist TEXT NOT NULL,
+       year INTEGER,
+       cover TEXT,
+       cover_status TEXT,
+       cover_by INTEGER,
+       updated INTEGER NOT NULL,
+       PRIMARY KEY (world_id, key)
+     )`);
+    },
+  },
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 export const MIGRATION_INFO = Object.freeze(MIGRATIONS.map((m, i) => Object.freeze({ version: i + 1, additive: !!m.additive })));

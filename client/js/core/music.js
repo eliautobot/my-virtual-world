@@ -29,6 +29,7 @@ async function load() {
 function setLibrary(lib) {
   if (!lib) return;
   S.music.tracks = new Map((lib.tracks || []).map(t => [t.id, t]));
+  S.music.albums = new Map((lib.albums || []).map(a => [a.key, a]));   // (albums, 2026-11-25: their covers, years)
   S.music.version = lib.version || 0;
 }
 async function loadLibrary() {
@@ -44,7 +45,7 @@ async function fetchDeck(place) {
 }
 
 export function init(app) {
-  S.music = { tracks: new Map(), decks: new Map(), can: {}, version: 0, ready: false };
+  S.music = { tracks: new Map(), albums: new Map(), decks: new Map(), can: {}, version: 0, ready: false };
   bus.on('hello', () => load());
   bus.on('auth', () => load());
   bus.on('msg:music', m => {

@@ -61,8 +61,11 @@ export class AssetCompressor {
     for (const f of fs.readdirSync(this.cache)) if (!keep.has(f)) fs.rmSync(path.join(this.cache, f), { force: true });
     this.todo = todo;
   }
-  /** Compresses what is missing, one file at a time; resolves when all are done (a failure leaves that file plain). */
-  async warm() {
+  /** Compresses what is missing, one file at a time; resolves when all are done (a failure leaves that file plain). Asked
+   *  again while it runs (the start-up's round of every folder, and a folder made just then: the crowd's split), the same
+   *  run is answered — never two compressing the same files side by side. */
+  warm() { return (this.warming ??= this.compress().finally(() => { this.warming = null; })); }
+  async compress() {
     const t0 = Date.now(); let n = 0;
     for (const [file, out] of this.todo) {
       if (freeOn(this.cache) < this.minFree) { this.log.info?.(`[assets] not compressing the ${this.label} files: under 1 GB free where they would be kept`); break; }

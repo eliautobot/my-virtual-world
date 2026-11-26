@@ -105,7 +105,15 @@ function nowCard(d) {
   return `<div class="mp-now"><div class="mp-np"><b>${esc(t.title)}</b><small>${esc(t.artist)} · ${esc(GENRES[t.genre]?.name || t.genre)}${t.explicit ? ' · <span class="mp-e">E</span>' : ''}</small>
       ${n.name ? `<small class="mp-by">Asked for by ${esc(n.name)}</small>` : ''}</div>
     <div class="mp-prog"><span class="mp-t0">0:00</span><div class="mp-bar"><i></i></div><span class="mp-t1">${fmtTime(t.seconds)}</span></div>
-    <div class="mp-live">${esc(statusLine(d))}${can('manage') ? ' <button type="button" class="btn small" data-a="skip">⏭ Skip</button>' : ''}</div></div>`;
+    <div class="mp-live">${esc(statusLine(d))}${can('manage') ? ' <button type="button" class="btn small" data-a="skip">⏭ Skip</button>' : ''}</div>${performerLine(d)}</div>`;
+}
+/** Who chooses the music here (2026-11-25): an AI agent on stage picks its own set and answers requests; else the band
+ *  or the DJ plays the stage's music (the DJ booth: the game's own album). */
+function performerLine(d) {
+  const p = d.performer;
+  if (!p) return '';
+  return p.agent ? `<div class="mp-who-on">🎧 <b>${esc(p.name)}</b> ${d.family === 'club' ? 'is on the decks' : 'leads the band'} and picks the music${p.decides ? ': ask them for any song' : ''}.</div>`
+    : `<div class="mp-who-on dim">${d.family === 'club' ? '🎧 The resident DJ plays the MVW Originals album' : '🎵 The band plays the lounge\'s music'}.</div>`;
 }
 function tickNow() {
   const d = deck(), n = d?.now, t = n && track(n.id), bar = panel?.querySelector('.mp-bar i');
@@ -123,7 +131,9 @@ function tabNext(d) {
     return row(t, `<small class="mp-who">${esc(mine ? 'You' : q.name)}</small>${right}`, mine ? ' mine' : '');
   }).join('');
   const next = d.upcoming.map(id => row(track(id))).join('');
-  return `${d.queue.length ? `<h4>Requests</h4>${reqs}${can('manage') ? '<button type="button" class="btn small" data-a="clear">Clear the requests</button>' : ''}` : ''}
+  const asks = (d.asks || []).map(a => row(track(a.id), `<small class="mp-who">${esc(a.by === me() ? 'You' : a.name)} · waiting for ${esc(d.performer?.name || 'the DJ')}</small>${a.by === me() ? '<button type="button" class="btn small" data-a="cancel">Take back</button>' : ''}`, a.by === me() ? ' mine' : '')).join('');
+  const said = (d.answers || []).slice(-4).reverse().map(a => `<p class="mp-ans ${a.ok ? 'ok' : 'no'}">${a.ok ? '✓' : '✕'} ${esc(a.dj || 'The DJ')} ${a.ok ? 'is playing' : 'passed on'} <b>${esc(track(a.id)?.title || 'a song')}</b> for ${esc(a.by === me() ? 'you' : 'a guest')}${!a.ok && a.why ? `: “${esc(a.why)}”` : ''}</p>`).join('');
+  return `${asks ? `<h4>Asked of ${esc(d.performer?.name || 'the DJ')}</h4>${asks}` : ''}${said ? `<div class="mp-anss">${said}</div>` : ''}${d.queue.length ? `<h4>Requests</h4>${reqs}${can('manage') ? '<button type="button" class="btn small" data-a="clear">Clear the requests</button>' : ''}` : ''}
     <h4>${d.queue.length ? 'Then' : 'Up next'}</h4>${next || '<p class="mp-dim">Nothing yet.</p>'}`;
 }
 function stageSongs(d) {
@@ -140,6 +150,8 @@ function chips(d, list) {
     <div class="mp-chips" role="radiogroup" aria-label="Genre">${['', ...gs].map(g => `<button type="button" role="radio" aria-checked="${st.genre === g}" class="mp-chip${st.genre === g ? ' on' : ''}" data-a="genre" data-g="${g}">${esc(g ? GENRES[g]?.name || g : 'All')}</button>`).join('')}</div></div>`;
 }
 function tabRequest(d) {
+  const agent = d.performer?.agent && d.performer.decides && d.live;
+  if (agent) return tabAsk(d);
   const list = stageSongs(d);
   let note = '';
   if (!auth.account) note = '<p class="mp-note">Sign in to ask for a song.</p>';
@@ -151,6 +163,22 @@ function tabRequest(d) {
   return `${note}${mineQ ? `<p class="mp-note">Your request: <b>${esc(track(mineQ.id)?.title || '')}</b>, number ${d.queue.indexOf(mineQ) + 1} in line. Asking for another replaces it.</p>` : ''}
     ${chips(d, list)}<div class="mp-list">${items || '<p class="mp-dim">No songs match.</p>'}</div>`;
 }
+/** Asking the agent on stage for a song (2026-11-25: "the agent can go to the music library, pick it out, and play it"):
+ *  any song of the library — by title, artist or album —, with a word for them; it decides, and says why if it passes. */
+function tabAsk(d) {
+  const p = d.performer, mine = (d.asks || []).find(a => a.by === me()), ans = (d.answers || []).filter(a => a.by === me()).slice(-1)[0];
+  const ok = auth.account && can('request') && d.settings.requests;
+  const q = st.q.trim().toLowerCase();
+  const all = [...(S.music?.tracks?.values() || [])].filter(t => !t.status || t.status === 'approved');
+  const list = all.filter(t => (!st.genre || t.genre === st.genre) && (!q || `${t.title} ${t.artist} ${t.album || ''}`.toLowerCase().includes(q))).sort((a, b) => a.title.localeCompare(b.title)).slice(0, 80);
+  const items = list.map(t => `<div class="mp-row"><div class="mp-ti"><b>${esc(t.title)}</b><small>${esc(t.artist)}${t.album ? ` · ${esc(t.album)}` : ''} · ${esc(GENRES[t.genre]?.name || t.genre)} · ${fmtTime(t.seconds)}</small></div>${ok ? `<button type="button" class="btn small${mine?.id === t.id ? ' on' : ''}" data-a="askdj" data-id="${t.id}" ${d.now?.id === t.id || mine?.id === t.id ? 'disabled' : ''}>${mine?.id === t.id ? 'Asked' : 'Ask'}</button>` : ''}</div>`).join('');
+  return `<p class="mp-note">🎧 <b>${esc(p.name)}</b> picks the music tonight. Ask for any song of the city's library — they decide, and tell you if they pass.</p>
+    ${!auth.account ? '<p class="mp-note">Sign in to ask for a song.</p>' : !can('request') ? '<p class="mp-note">Your account may not ask for songs here.</p>' : !d.settings.requests ? '<p class="mp-note">Requests are off here right now.</p>' : ''}
+    ${mine ? `<p class="mp-note">You asked for <b>${esc(track(mine.id)?.title || '')}</b>${mine.note ? ` (“${esc(mine.note)}”)` : ''}: waiting for ${esc(p.name)}. <button type="button" class="btn small" data-a="cancel">Take back</button></p>` : ans ? `<p class="mp-ans ${ans.ok ? 'ok' : 'no'}">${ans.ok ? `✓ ${esc(ans.dj)} is playing your request` : `✕ ${esc(ans.dj)} passed${ans.why ? `: “${esc(ans.why)}”` : ''}`}</p>` : ''}
+    ${ok ? `<input class="input mp-note-in" maxlength="${MUSIC.noteMax || 140}" placeholder="A word for ${esc(p.name)} (optional): for a birthday, a shout-out…" value="${esc(st.note || '')}">` : ''}
+    <div class="mp-find"><input type="search" class="mp-q" placeholder="Search songs, artists, albums" value="${esc(st.q)}" aria-label="Search songs"></div>
+    <div class="mp-list">${items || '<p class="mp-dim">No songs match.</p>'}</div>`;
+}
 function tabMine() {
   if (!auth.account) return '<p class="mp-note">Sign in to add your own songs to the city.</p>';
   if (!can('upload')) return '<p class="mp-note">Your account may not add songs.</p>';
@@ -161,7 +189,7 @@ function tabMine() {
   const busy = !!st.up?.busy;
   return `<form class="mp-up" autocomplete="off">
       <h4>Add your song</h4>
-      <label class="mp-file"><input type="file" name="file" accept="${conv ? 'audio/*' : 'audio/mpeg,.mp3'}" required ${busy ? 'disabled' : ''}><span>${esc(st.up?.name || (conv ? 'Choose an audio file (MP3, M4A, OGG, WAV, FLAC)' : 'Choose an MP3 file'))}</span></label>
+      <label class="mp-file"><input type="file" name="file" accept="${conv ? 'audio/*' : 'audio/mpeg,.mp3'}" ${busy ? 'disabled' : ''}><span>${esc(st.up?.name || (conv ? 'Choose an audio file (MP3, M4A, OGG, WAV, FLAC)' : 'Choose an MP3 file'))}</span></label>
       <input name="title" placeholder="Title" maxlength="${MUSIC.titleMax}" required value="${esc(st.up?.title || '')}" ${busy ? 'disabled' : ''}>
       <input name="artist" placeholder="Artist" maxlength="${MUSIC.artistMax}" value="${esc(st.up?.artist ?? auth.account.displayName ?? '')}" ${busy ? 'disabled' : ''}>
       <select name="genre" aria-label="Genre" ${busy ? 'disabled' : ''}>${genres.map(g => `<option value="${g}"${(st.up?.genre || (fam === 'club' ? 'house' : 'jazz')) === g ? ' selected' : ''}>${esc(GENRES[g].name)}</option>`).join('')}</select>
@@ -204,6 +232,7 @@ function tabReview() {
 }
 function paint() {
   if (!panel) return;
+  { const ni = panel.querySelector('.mp-note-in'); if (ni) st.note = ni.value; }   // (a word for the DJ, kept as it is typed)
   const d = deck();
   const fam = d?.family || 'lounge', sd = Object.values(STAGES).find(x => x.family === fam);
   const admin = can('manage'), waiting = admin ? [...(S.music?.tracks?.values() || [])].filter(t => t.status === 'pending').length : 0;
@@ -218,12 +247,15 @@ function paint() {
   // keep what's being typed and where the list is scrolled
   const focus = document.activeElement && panel.contains(document.activeElement) ? document.activeElement : null;
   const fsel = focus?.classList.contains('mp-q') ? { s: focus.selectionStart, e: focus.selectionEnd } : null;
+  const ni = panel.querySelector('.mp-note-in'), nsel = focus === ni && ni ? { s: ni.selectionStart, e: ni.selectionEnd } : null;   // (a word for the DJ, being typed)
   const scroll = panel.querySelector('.mp-body')?.scrollTop || 0;
   if (panel.querySelector('form.mp-up')) keepForm();
   panel._h = html; panel.innerHTML = html;
   panel.querySelector('.mp-body').scrollTop = scroll;
   if (fsel) { const q = panel.querySelector('.mp-q'); q?.focus(); q?.setSelectionRange(fsel.s, fsel.e); }
-  if (st.up?.file) { /* (a chosen file can't be put back into an input: the form keeps it in st.up) */ }
+  if (nsel) { const n = panel.querySelector('.mp-note-in'); n?.focus(); n?.setSelectionRange(nsel.s, nsel.e); }
+  // (a chosen file can't be put back into an input: the form keeps it in st.up, and onSubmit checks for it — the file
+  // input is never `required`, or the browser would refuse the form once a repaint has emptied it: a player's report, 2026-11-24)
   tickNow();
 }
 function keepForm() {
@@ -248,6 +280,7 @@ function onClick(ev) {
   if (a === 'tab') { st.tab = b.dataset.t; st.pick = false; return paint(); }
   if (a === 'genre') { st.genre = b.dataset.g; return paint(); }
   if (!d) return;
+  if (a === 'askdj') { st.note = panel.querySelector('.mp-note-in')?.value || ''; const note = st.note; return act(() => post('/api/music/request', { place, track: b.dataset.id, note }), r => { st.note = ''; const ni = panel?.querySelector('.mp-note-in'); if (ni) ni.value = ''; return `🎵 Asked ${r?.dj || 'the DJ'} for ${track(b.dataset.id)?.title || 'it'}${r?.replaced ? ' (it replaces your last request)' : ''}`; }); }
   if (a === 'ask') return act(() => post('/api/music/request', { place, track: b.dataset.id }), r => `🎵 Asked for ${track(b.dataset.id)?.title || 'it'}: number ${r?.position || 1} in line${r?.replaced ? ' (it replaces your last request)' : ''}`);
   if (a === 'cancel') return act(() => post('/api/music/request/cancel', { place }), 'Request taken back');
   if (a === 'unq') return act(() => post('/api/music/request/cancel', { place, index: +b.dataset.k }));
@@ -278,8 +311,10 @@ function onChange(ev) {
   if (a === 'night') return act(() => post('/api/music/deck', { place, genre: t.value || null }));
   if (t.name === 'file' && t.files?.[0]) {
     keepForm();
-    const f = t.files[0];
-    st.up = { ...(st.up || {}), file: f, name: f.name, title: st.up?.title || f.name.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim() };
+    const f = t.files[0], auto = f.name.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
+    // (a title typed in stays; one filled in from the last file chosen gives way to this file's)
+    const typed = st.up?.title && st.up.title !== st.up.autoTitle;
+    st.up = { ...(st.up || {}), file: f, name: f.name, autoTitle: auto, title: typed ? st.up.title : auto };
     paint();
   }
 }
@@ -294,22 +329,34 @@ async function onSubmit(ev) {
   if (file.size > MUSIC.maxUploadMB * 1024 * 1024) { app.toast(`A song is at most ${MUSIC.maxUploadMB} MB`, 'bad', 3000); return; }
   st.up.busy = true; paint();
   try {
-    const q = new URLSearchParams({ title: st.up.title || '', artist: st.up.artist || '', genre: st.up.genre || 'jazz', explicit: st.up.explicit ? '1' : '0', rights: st.up.rights ? '1' : '0' });
-    if (!S.music?.can?.convert) {   // (the server keeps MP3s as they are: their length and loudness as this browser hears them)
-      const m = await measure(file).catch(() => null);
-      if (m) { q.set('seconds', m.seconds.toFixed(2)); q.set('gain', m.gain.toFixed(1)); }
-    }
-    const r = await fetch(`/api/music/upload?${q}`, { method: 'POST', headers: { 'content-type': file.type || 'audio/mpeg', ...(auth.csrf ? { 'x-csrf-token': auth.csrf } : {}) }, body: file });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `The upload failed (${r.status})`);
+    const j = await sendSong(file, st.up);
     app.toast(j.track?.status === 'approved' ? `🎵 ${j.track.title} is in the library` : `🎵 Thanks! ${j.track?.title || 'Your song'} waits for an administrator's review`, 'good', 3600);
-    st.up = null;
+    // a song sent: the form starts again for the next one (its artist and genre stay). The sent form goes first, or the
+    // repaint would keep its fields — the last song's title given to the next file (found by tools-bin/talklog-ui-stress.mjs)
+    st.up = { artist: st.up?.artist, genre: st.up?.genre };
+    panel?.querySelector('form.mp-up')?.remove();
     app.music.loadLibrary();
   } catch (e) {
     app.toast(String(e.message || e), 'bad', 3600);
     if (st.up) st.up.busy = false;
   }
   paint();
+}
+/** Sends a song to the library (the stage panel's Your songs, the Radio Stations window: ui/radio-stations.js):
+ *  meta { title, artist, genre, explicit, rights, album?, albumArtist?, track?, year? } → the server's answer { track };
+ *  throws with its message. */
+export async function sendSong(file, meta = {}) {
+  const q = new URLSearchParams({ title: meta.title || '', artist: meta.artist || '', genre: meta.genre || 'jazz', explicit: meta.explicit ? '1' : '0', rights: meta.rights ? '1' : '0' });
+  // (its album, 2026-11-25: an album or a folder uploaded — ui/album-upload.js)
+  if (meta.album) { q.set('album', meta.album); if (meta.albumArtist) q.set('albumArtist', meta.albumArtist); if (meta.track) q.set('track', String(meta.track)); if (meta.year) q.set('year', String(meta.year)); }
+  if (!S.music?.can?.convert) {   // (the server keeps MP3s as they are: their length and loudness as this browser hears them)
+    const m = await measure(file).catch(() => null);
+    if (m) { q.set('seconds', m.seconds.toFixed(2)); q.set('gain', m.gain.toFixed(1)); }
+  }
+  const r = await fetch(`/api/music/upload?${q}`, { method: 'POST', headers: { 'content-type': file.type || 'audio/mpeg', ...(auth.csrf ? { 'x-csrf-token': auth.csrf } : {}) }, body: file });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `The upload failed (${r.status})`);
+  return j;
 }
 /** A file's length and how much to turn it up or down to the library's loudness (a plain loudness measure). */
 async function measure(file) {

@@ -2,6 +2,40 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v3.1.0 (2026-11-25)
+
+Places you can rate, an album-based music library with AI DJs, a radio you manage in one window, a playful fox, and a
+record of what your agents say in person.
+
+- **Places: reviews, ratings and messages**: a building's billboard opens the place's card — its overview, its reviews
+  (1 to 5 stars, words optional, one per account) and, for its owner, private messages from visitors. Rated rooftop
+  billboards show their stars; owners are told of new reviews and messages.
+- **Conversations in the Agent Studio**: a new 💬 Conversations tab keeps what an agent said out loud and heard in person
+  — where, with whom — grouped into conversations. Kept 30 days by default (Settings: 1 to 365).
+- **A playful fox**: unlike the other animals it comes to look, follows you on a walk, plays when you stand still and
+  plays tag when you run. Press E to play with it: pet it, give it a treat, throw a stick (it brings it back) or chase
+  each other; it trusts you more the more you play.
+- **MVW Radio in one place**: World modules → 📻 Radio Stations opens one window for every station — its playlist (add
+  from the library, move, take off, undo), its hosts, when it talks, and its details — and the Music Library. A station
+  is a playlist; it can be cleared to no songs at all (then it plays nothing). A station's hosts may look after its songs
+  with their own tools (up to 40 changes a day), and their owners may too.
+- **Albums and artists**: the Music Library works like a music player — Songs, Albums, Artists and Genres. Upload a whole
+  folder as an album: titles, artist, track numbers and year are read from the files' tags, and the cover from the
+  folder's picture. The game's own music is now the album «Original Soundtrack, Vol. 1» by MVW Originals, with its cover.
+- **AI agents at the stage**: an agent posted at a DJ booth or a lounge stage picks the music from the library and answers
+  players' song requests (with a word for them); a resident DJ plays the MVW album.
+- **Radio hosts know their playlist**: a host is told its station's next song and the two after it ("(Radio Edit)" and
+  the like left out) and hands over to the music its own way — naming the song or not is its call. A break written
+  before the playlist changed is written again, so a song it names is the one that plays next.
+- **A faster start**: the world opens sooner, with its residents already there; the animals arrive a moment later.
+- Fixes: your own character keeps its body in Play mode (another body was shown while yours loaded, for over a minute in
+  a big city); the music panel's upload form sends again after the panel refreshes, and the next upload no longer keeps
+  the last song's title; the Radio Stations window fits a phone's screen.
+
+**Upgrading from 3.0**: automatic — the database gains five tables and four song columns (places' reviews and messages,
+conversations in person, albums) the first time 3.1 starts; nothing is converted or removed. Back up first as always
+(docs/operations.md).
+
 ## v3.0.2 (2026-11-21)
 
 - **Companions, redone in the interface's own look**: one card instead of a bar, a pill and a voice pill — its head (how

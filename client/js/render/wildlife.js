@@ -13,7 +13,8 @@ import { S, bus } from '../core/state.js';
 import { validateSpecies, activeAt } from '/shared/species.js';
 import { CHUNK_M } from '/shared/terrain.js';
 import { MODELS, faunaMaterial } from './fauna-models.js';
-import { loadSkinned, skinnedPack, coatsOf, motion } from './fauna-skinned.js';
+import { loadSkinned, skinnedPack, coatsOf, motion, ACT_CLIPS, ACT_SLOT0 } from './fauna-skinned.js';
+import * as FoxPlay from './fox-play.js';
 import { GU } from './scene.js';
 
 const RANGE = { low: 260, medium: 420, high: 600 };   // m around the camera's target
@@ -56,6 +57,18 @@ function feetSpan(man) {
   return [(f.LF[1][0] + f.RF[1][0]) / 2, (f.LH[1][0] + f.RH[1][0]) / 2];
 }
 
+/** A clip's own speed (m/s at scale sc): one stride a beat. */
+const clipSpeed = (c, sc) => (c?.stride && c.frames ? c.stride * sc * c.fps / c.frames : 0);
+/** The gait slot for a modelled animal going at speed (m/s, scale sc): walk (1), trot (3: where it has one) or run (2) —
+ *  the clip whose own speed is nearest (in proportion). */
+function gaitFor(pk, speed, sc) {
+  let best = 1, bd = Infinity;
+  for (const [slot, k] of [[1, 'walk'], [3, 'trot'], [2, 'run']]) {
+    const v = clipSpeed(pk.clips[k], sc); if (!(v > 0)) continue;
+    const dd = Math.abs(Math.log(Math.max(0.05, speed) / v)); if (dd < bd) { bd = dd; best = slot; }
+  }
+  return best;
+}
 const sstep = (a, b, v) => { const u = Math.min(1, Math.max(0, (v - a) / (b - a))); return u * u * (3 - 2 * u); };
 function hash(str, n = 0) {
   let h = 2166136261 ^ n;
@@ -90,7 +103,7 @@ export async function init(a) {
   };
   bus.on('frame', update);
   for (const ev of ['terrain', 'roads', 'world']) bus.on(ev, () => { GQ.clear(); seaCells.clear(); });   // (the ground changed: reshaped, roads, building pads)
-  bus.on('msg:fauna', m => {
+  const take = (m, all) => {
     const now = performance.now() / 1000;
     shared.off = m.wt - now; shared.seen = now;
     const keep = new Set();
@@ -98,10 +111,14 @@ export async function init(a) {
       const sp = spById.get(h.s); if (!sp) continue;
       keep.add(h.id); ensureModel(sp, 2);
       const was = shared.herds.get(h.id);
-      shared.herds.set(h.id, { id: h.id, sp, m: h.m, shown: was?.shown, r: h.m.map((_, i) => hash(h.id, i)), st: was?.st || [] });
+      shared.herds.set(h.id, { id: h.id, sp, m: h.m, k: h.k || null, shown: was?.shown, r: h.m.map((_, i) => hash(h.id, i)), st: was?.st || [], pos: was?.pos || [] });
     }
-    for (const id of [...shared.herds.keys()]) if (!keep.has(id)) shared.herds.delete(id);
-  });
+    if (all) for (const id of [...shared.herds.keys()]) if (!keep.has(id)) shared.herds.delete(id);
+  };
+  bus.on('msg:fauna', m => take(m, true));
+  // a fox that changed its mind, sent at once (server/world/fox.js): only its group, the others kept
+  bus.on('msg:faunaUp', m => take(m, false));
+  FoxPlay.init(app, shared);
 }
 
 /** A species drawn from its built model (render/fauna-models.js): one instanced draw. */
@@ -557,18 +574,33 @@ function update(dt, now) {
       const pk = packs.get(h.sp.id); if (!pk) continue;   // (its model hasn't arrived: not drawn yet)
       h.shown ??= now;
       const fade = Math.min(1, (now - h.shown) / 1500);
+      const fox = h.sp.behaviour === 'play';
       h.m.forEach((a, i) => {
-        if (pk.n >= pk.cap || (level === 'fewer' && i % 2)) return;
-        const u = a[5] > a[4] ? Math.min(1, Math.max(0, (wt - a[4]) / (a[5] - a[4]))) : 1, moving = a[6] && u < 1;
-        const x = a[0] + (a[2] - a[0]) * u, z = a[1] + (a[3] - a[1]) * u;
+        if (pk.n >= pk.cap || (level === 'fewer' && i % 2 && !fox)) return;
+        const u = a[5] > a[4] ? Math.min(1, Math.max(0, (wt - a[4]) / (a[5] - a[4]))) : 1;
+        let moving = a[6] && u < 1, x = a[0] + (a[2] - a[0]) * u, z = a[1] + (a[3] - a[1]) * u, yaw = a[7], speed = 0;
+        if (a[6] === 3) {
+          // a fox going round a circle (zoomies, chasing its brush): (a[0], a[1]) its middle, a[2] its radius, a[3] the
+          // angle it started at, a[10] its turn rate
+          const ang = a[3] + a[10] * (Math.min(wt, a[5]) - a[4]);
+          x = a[0] + Math.cos(ang) * a[2]; z = a[1] + Math.sin(ang) * a[2];
+          yaw = Math.atan2(-(a[2] * a[10] * Math.cos(ang)), -a[2] * a[10] * Math.sin(ang)); speed = Math.abs(a[2] * a[10]);
+        }
         if (Math.hypot(x - cam.x, z - cam.z) > 700) return;
         const sc = h.sp.size * fade * (0.85 + 0.3 * h.r[i]);
-        _q.setFromAxisAngle(_up, a[7]);
+        if (fox) {
+          // (a fox turns to face where it goes, or whom it plays with, instead of snapping round)
+          const st = h.st[i] ||= {}, dt_ = Math.min(0.1, dt);
+          st.yaw ??= yaw; let dy = yaw - st.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+          st.yaw += dy * (1 - Math.exp(-dt_ * (a[6] === 3 ? 30 : 9))); yaw = st.yaw;
+          (h.pos[i] ||= {}).x = x; h.pos[i].z = z; h.pos[i].yaw = yaw; h.pos[i].sc = sc; h.pos[i].act = a[9] || 0;
+        }
+        _q.setFromAxisAngle(_up, yaw);
         let gy = ground(x, z);
         if (pk.span && Math.hypot(x - cam.x, z - cam.z) < 200) {
           // on a slope a modelled animal leans with the ground along its length (its fore and hind feet on the ground,
           // not one pair in the hill and the other in the air)
-          const [xf, xh] = pk.span, cy = Math.cos(a[7]), sy = Math.sin(a[7]);
+          const [xf, xh] = pk.span, cy = Math.cos(yaw), sy = Math.sin(yaw);
           const gf = ground(x + cy * xf * sc, z - sy * xf * sc), gh = ground(x + cy * xh * sc, z - sy * xh * sc);
           const pitch = Math.atan2(gf - gh, (xf - xh) * sc);
           if (Math.abs(pitch) < 0.5) { gy = gh + (gf - gh) * (-xh / (xf - xh)); _q.multiply(_qp.setFromAxisAngle(_side, pitch)); }
@@ -578,10 +610,35 @@ function update(dt, now) {
           // the gait's rate from the animal's own speed along its plan, so the hooves keep pace with the ground (the
           // clips' strides are made for the species' speeds: the rate stays near the gait's own beat, and the bounds
           // only catch odd plans); kept continuous, and a change of gait cross-faded (render/fauna-skinned.js motion)
-          const mode = !moving ? 0 : a[6] === 2 ? 2 : 1, clip = pk.clips[mode === 2 ? 'run' : 'walk'];
-          const speed = a[5] > a[4] ? Math.hypot(a[2] - a[0], a[3] - a[1]) / (a[5] - a[4]) : 0;
-          const rate = mode === 2 ? Math.min(4.2, Math.max(1.4, speed / (clip.stride * sc))) : Math.min(2.0, Math.max(0.4, speed / (clip.stride * sc)));
-          const st = motion(h.st[i] ||= {}, mode, rate, GU.uTime.value, h.r[i]);
+          const act = fox && a[9] ? ACT_CLIPS[a[9] - 1] : null, ac = act && pk.clips[act];
+          if (fox) h.pos[i].y = gy;
+          if (ac) {
+            // a fox's act (render/fauna-skinned.js slots 7..): its clip from the start of the act, so a pounce lands
+            // when the server's segment ends; cross-faded from what it was doing
+            const st = h.st[i], slot = ACT_SLOT0 + a[9] - 1, rate = ac.fps / ac.frames, uT = GU.uTime.value;
+            if (!st.init || st.mode !== slot || st.actT0 !== a[4]) {
+              if (st.init) st.prev = [st.off, st.rate, st.mode, uT];
+              Object.assign(st, { init: true, mode: slot, rate, off: (((wt - a[4]) * rate - uT * rate) % 1 + 1) % 1, actT0: a[4] });
+            }
+            if (st.prev && uT - st.prev[3] > 1) st.prev = null;
+            if (pk.skinned.put(_m, a[8], st.off, st.rate, st.mode, Math.hypot(x - cam.x, z - cam.z), st.prev, true)) pk.n++;
+            return;
+          }
+          if (a[6] !== 3) speed = a[5] > a[4] ? Math.hypot(a[2] - a[0], a[3] - a[1]) / (a[5] - a[4]) : 0;
+          let mode = !moving ? 0 : a[6] === 2 || a[6] === 3 ? 2 : 1, rate;
+          if (fox && moving) {
+            // a fox's gait from how fast it really goes (walk, trot, gallop: the clips baked at its walk, trot and run
+            // speeds — tools/animals/fox_bake.py), each played at the pace that carries it one stride a beat, kept near
+            // the clip's own beat (2026-11-24: one gallop for every speed looked like a gallop in slow motion, sliding)
+            mode = gaitFor(pk, speed, sc);
+            const clip = pk.clips[SLOT_CLIP[mode]], own = clipSpeed(clip, sc), beat = clip.fps / clip.frames;
+            rate = Math.min(beat * 1.6, Math.max(beat * 0.55, speed / (clip.stride * sc)));
+            if (own <= 0) rate = beat;
+          } else {
+            const clip = pk.clips[mode === 2 ? 'run' : 'walk'];
+            rate = mode === 2 ? Math.min(4.2, Math.max(1.4, speed / (clip.stride * sc))) : Math.min(2.0, Math.max(0.4, speed / (clip.stride * sc)));
+          }
+          const st = motion(h.st[i] ||= {}, mode, rate, GU.uTime.value, h.r[i]); st.actT0 = null;
           if (pk.skinned.put(_m, a[8], st.off, st.rate, st.mode, Math.hypot(x - cam.x, z - cam.z), st.prev, true)) pk.n++;
           return;
         }

@@ -68,3 +68,19 @@ test('a folder of model folders (the wildlife, the fish): walked through, each m
     assert.notEqual(new AssetCompressor({ dir, cache, log: {} }).version, v1);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a folder asked to compress again while it does: the same run answers (never two side by side)', async () => {
+  const root = tempDir('mvw-charpack2-'), dir = path.join(root, 'crowd-split'), cache = path.join(root, 'cache');
+  fs.mkdirSync(dir);
+  for (const f of ['female.far.bin', 'female.near.bin']) fs.writeFileSync(path.join(dir, f), Buffer.alloc(300000, 3));
+  try {
+    const lines = [];
+    const A = new AssetCompressor({ dir, cache, log: { info: m => lines.push(m) }, label: 'split' });
+    const one = A.warm(), two = A.warm();
+    assert.equal(one, two, 'the same run');
+    await Promise.all([one, two]);
+    assert.equal(lines.filter(m => /compressed/.test(m)).length, 1, 'compressed once');
+    for (const f of ['female.far.bin', 'female.near.bin']) assert.equal(A.pick(path.join(dir, f), 'br').encoding, 'br');
+    assert.notEqual(A.warm(), one, 'a later ask: a new run (with nothing left to do)');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
